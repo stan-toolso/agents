@@ -42,6 +42,7 @@ import { repoBrowser, type RepoEntry, type RepoRef } from '../gitServer/browse.j
 import { gitServer } from '../gitServer/service.js';
 import type { GitBackup } from '../gitServer/backups.js';
 import { archiveSessionCascade, archiveWorksessionCascade, deleteProjectCascade, deleteSessionCascade, deleteWorksessionCascade, restoreWorksessionCascade } from '../projects/cleanup.js';
+import { importProjectArchive, MAX_IMPORT_BYTES } from '../exports/service.js';
 import { runner, type RunnerConfig } from '../runners/index.js';
 import { containerMonitor } from '../runners/monitor.js';
 import { runnerLifecycle } from '../runners/lifecycle.js';
@@ -84,6 +85,7 @@ import type { SessionCleanup } from '../sessions/types.js';
 import { terminalService } from '../terminals/service.js';
 import { worksessionPath, worksessionService } from '../worksessions/service.js';
 import { worksessionRepository } from '../worksessions/repository.js';
+import { worksessionDisk, type WorksessionDiskEntry } from '../worksessions/disk.js';
 import { worksessionLabel, type Worksession } from '../worksessions/types.js';
 import { resumableTaskSession, resumeTaskSession, startTaskSession } from '../tasks/launch.js';
 import { taskService } from '../tasks/service.js';
@@ -183,6 +185,8 @@ interface GqlTaskInput {
   reporter?: TaskPersonInput | null;
   attachments?: AttachmentInput[] | null;
   removeAttachmentIds?: string[] | null;
+  dependsOnIds?: string[] | null;
+  autoStartWhenUnblocked?: boolean | null;
 }
 const toTaskInput = (i: GqlTaskInput) => ({
   title: i.title ?? undefined,
@@ -199,7 +203,11 @@ const toTaskInput = (i: GqlTaskInput) => ({
   reporter: i.reporter,
   attachments: i.attachments ?? null,
   removeAttachmentIds: i.removeAttachmentIds ?? null,
+  dependsOn: i.dependsOnIds ?? undefined,
+  autoStartWhenUnblocked: i.autoStartWhenUnblocked ?? undefined,
 });
+/** Tâches d'identifiants donnés, dans leur ordre (chargeur groupé de la requête). */
+const tasksByIds = async (ctx: Ctx, ids: string[]) => (await Promise.all(ids.map((id) => loadersOf(ctx).task(id)))).filter((t): t is Task => Boolean(t));
 const actorOf = (user: User) => ({ type: 'human' as const, userId: user.id, name: user.name || user.email });
 const fromGqlPermission = (p: string): VaultPermission => p.toLowerCase() as VaultPermission;
 const fromGqlScope = (sc: string): VaultLinkScope => sc.toLowerCase() as VaultLinkScope;
@@ -396,6 +404,11 @@ export const resolvers = {
     pullRequests: (t: Task) => trackedPullRequestService.forTask(t.id),
     worksession: async (t: Task) => (await worksessionRepository.findByTask(t.id))[0] ?? null,
     attachments: (t: Task) => (t.attachmentCount ? taskService.attachments(t.id, null) : []),
+    dependsOn: (t: Task, _: unknown, ctx: Ctx) => tasksByIds(ctx, t.dependsOnIds),
+    blockedBy: (t: Task, _: unknown, ctx: Ctx) => tasksByIds(ctx, t.blockedByIds),
+    blocked: (t: Task) => t.blockedByIds.length > 0,
+    dependents: (t: Task, _: unknown, ctx: Ctx) => tasksByIds(ctx, t.dependentIds),
+    autoStartBy: (t: Task, _: unknown, ctx: Ctx) => userOrNull(ctx, t.autoStartById),
   },
 
   TaskComment: {
@@ -421,7 +434,7 @@ export const resolvers = {
   },
 
   PullRequest: {
-    forgeName: (pr: PullRequest) => (config.forgejo.url && pr.url.startsWith(`${config.forgejo.url}/`) ? 'Forgejo' : 'GitHub'),
+    forgeName: (pr: PullRequest) => (pr.forge === 'gitlab' ? 'GitLab' : config.forgejo.url && pr.url.startsWith(`${config.forgejo.url}/`) ? 'Forgejo' : 'GitHub'),
     worksession: async (pr: PullRequest) => (pr.isCrossRepository ? null : (await worksessionService.listByProject(pr.projectId)).find((w) => w.branch === pr.headRefName) ?? null),
     tasks: async (pr: PullRequest) => (pr.isCrossRepository ? [] : (await taskService.list({ projectId: pr.projectId, limit: 1000 })).filter((t) => t.branch === pr.headRefName)),
   },
@@ -636,6 +649,12 @@ export const resolvers = {
     terminals: async (w: Worksession, _: unknown, ctx: Ctx) => (await terminalService.listByProject(w.projectId, requireUser(ctx).id)).filter((t) => t.worksessionId === w.id),
   },
 
+  WorksessionDiskEntry: {
+    activeSessions: (e: WorksessionDiskEntry) => e.activity?.activeSessions ?? 0,
+    busySessions: (e: WorksessionDiskEntry) => e.activity?.busySessions ?? 0,
+    deps: (e: WorksessionDiskEntry) => (e.deps ? e.deps.replace('-', '_').toUpperCase() : null),
+  },
+
   PermissionRule: {
     rule: (r: PermissionRule) => formatRule(r),
     createdBySession: (r: PermissionRule) => (r.createdBySessionId ? sessionService.get(r.createdBySessionId) : null),
@@ -668,6 +687,7 @@ export const resolvers = {
     terminals: (project: Project, _: unknown, ctx: Ctx) => terminalService.listByProject(project.id, requireUser(ctx).id),
     worksessions: (project: Project) => worksessionService.listByProject(project.id),
     archivedWorksessions: (project: Project) => worksessionService.listByProject(project.id, { archived: 'only' }),
+    worksessionDisk: (project: Project, args: { refresh?: boolean | null }, ctx: Ctx) => worksessionDisk.report(project.id, { refresh: Boolean(args.refresh), actorId: ctx.user?.id ?? null }),
     vaultItems: (project: Project, _: unknown, ctx: Ctx) => vaultService.projectRows(project.id, requireUser(ctx).id),
     agents: (project: Project) => (isPersonalProject(project) ? [] : agentService.listByProject(project.id)),
     apiKeys: async (project: Project, _: unknown, ctx: Ctx) => ((await roleFor(ctx, project.id)) === 'admin' ? apiKeyService.list(project.id) : []),
@@ -1537,6 +1557,13 @@ export const resolvers = {
       await personalService.assertNotPersonal(args.id, 'Supprimer');
       return deleteProjectCascade(args.id, { deleteHostedRepo: Boolean(args.deleteHostedRepo) });
     },
+    importProjectArchive: async (_: unknown, args: { projectId: string; archive: string; context?: boolean | null; tasks?: boolean | null; settings?: boolean | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'admin');
+      const archive = Buffer.from(args.archive, 'base64');
+      if (!archive.length) throw new AppError('Archive vide');
+      if (archive.length > MAX_IMPORT_BYTES) throw new AppError(`Archive trop volumineuse (${Math.round(MAX_IMPORT_BYTES / 1024 / 1024)} Mo au plus)`);
+      return importProjectArchive(args.projectId, archive, { context: args.context !== false, tasks: args.tasks !== false, settings: Boolean(args.settings) });
+    },
     createSession: async (
       _: unknown,
       { input }: { input: CreateSessionInput & { autoStart?: boolean | null } },
@@ -1654,7 +1681,7 @@ export const resolvers = {
     markAllNotificationsRead: async (_: unknown, __: unknown, ctx: Ctx) => notificationService.markAllRead({ projectIds: await accessibleProjectIds(ctx), admin: requireUser(ctx).isAdmin }),
     createTask: async (_: unknown, { input }: { input: GqlTaskInput & { projectId: string; title: string } }, ctx: Ctx) => {
       await requireProject(ctx, input.projectId, 'member');
-      return taskService.create(input.projectId, { ...toTaskInput(input), title: input.title }, HUMAN);
+      return taskService.create(input.projectId, { ...toTaskInput(input), title: input.title }, actorOf(requireUser(ctx)));
     },
     updateTask: async (_: unknown, { id, input }: { id: string; input: GqlTaskInput }, ctx: Ctx) => {
       await guardTask(ctx, id, 'member');
@@ -1761,6 +1788,22 @@ export const resolvers = {
     deleteWorksession: async (_: unknown, args: { id: string; deleteBranch?: boolean | null; deleteSessions?: boolean | null }, ctx: Ctx) => {
       await guardWorksession(ctx, args.id, 'member');
       return deleteWorksessionCascade(args.id, args.deleteBranch ?? false, { deleteSessions: args.deleteSessions ?? false });
+    },
+    cleanMergedWorksessions: async (_: unknown, args: { projectId: string; names?: string[] | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'member');
+      return worksessionDisk.cleanMerged(args.projectId, requireUser(ctx).id, args.names);
+    },
+    shareWorksessionDeps: async (_: unknown, args: { projectId: string; names?: string[] | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'member');
+      return worksessionDisk.shareDeps(args.projectId, args.names);
+    },
+    importOrphanWorksession: async (_: unknown, args: { projectId: string; name: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'member');
+      return worksessionDisk.importOrphan(args.projectId, args.name);
+    },
+    deleteOrphanWorksession: async (_: unknown, args: { projectId: string; name: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'admin');
+      return worksessionDisk.deleteOrphan(args.projectId, args.name);
     },
     // Coffre : les droits sont vérifiés par le service (use / read / manage) ; un projet propriétaire exige un administrateur.
     createVaultItem: async (_: unknown, args: { projectId?: string | null; input: VaultItemInput }, ctx: Ctx) => {

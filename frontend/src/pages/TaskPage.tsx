@@ -5,10 +5,10 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import PageLoading from '../components/PageLoading';
 import { PullRequestChip } from '../components/PullRequests';
 import { RegisterPullRequestModal, TrackedPullRequestActions, TrackedPullRequestIndicators, PullRequestStageBadge } from '../components/TrackedPullRequests';
-import { prRef, PULL_REQUESTS, type TrackedPullRequest } from '../graphql/pullRequests';
+import { forgeOfUrl, prRef, PULL_REQUESTS, type TrackedPullRequest } from '../graphql/pullRequests';
 import StatusBadge from '../components/StatusBadge';
 import TaskActions from '../components/TaskActions';
-import { isOverdue, Linkified, TaskPriorityBadge, TaskStatusBadge, TaskTags } from '../components/TaskBadges';
+import { isOverdue, Linkified, TaskBlockedBadge, TaskPriorityBadge, TaskRefList, TaskStatusBadge, TaskTags } from '../components/TaskBadges';
 import TaskThread from '../components/TaskThread';
 import type { LaunchTarget } from '../components/TaskLaunchModal';
 import TaskModal from '../components/TaskModal';
@@ -94,7 +94,7 @@ export default function TaskPage() {
       <div className="d-flex align-items-start justify-content-between gap-3 flex-wrap">
         <div>
           <h1 className="h3 mb-1">
-            {task.title} <TaskStatusBadge status={task.status} statusTag={task.statusTag} /> <TaskPriorityBadge priority={task.priority} />
+            {task.title} <TaskStatusBadge status={task.status} statusTag={task.statusTag} /> <TaskPriorityBadge priority={task.priority} /> <TaskBlockedBadge task={task} />
           </h1>
           <div className="small text-secondary">
             <Link to={`/projects/${task.project.id}`}>{task.project.name}</Link>
@@ -236,6 +236,28 @@ export default function TaskPage() {
                     </dd>
                   </>
                 )}
+                {task.dependsOn.length > 0 && (
+                  <>
+                    <dt className="col-4">Bloquée par</dt>
+                    <dd className="col-8">
+                      <TaskRefList tasks={task.dependsOn} />
+                      {task.autoStartWhenUnblocked && (
+                        <div className="text-secondary mt-1">
+                          <i className="bi bi-lightning-charge me-1" />
+                          Lancée automatiquement quand la dernière sera terminée{task.autoStartBy ? `, au nom de ${task.autoStartBy.name}` : ''}.
+                        </div>
+                      )}
+                    </dd>
+                  </>
+                )}
+                {task.dependents.length > 0 && (
+                  <>
+                    <dt className="col-4">Bloque</dt>
+                    <dd className="col-8">
+                      <TaskRefList tasks={task.dependents} />
+                    </dd>
+                  </>
+                )}
                 {task.customFields.map((f) => (
                   <div key={f.key} className="row mx-0 px-0">
                     <dt className="col-4 text-truncate" title={f.key}>
@@ -284,7 +306,7 @@ export default function TaskPage() {
                       <div key={pr.id} className="tracked-pr-item border rounded p-2">
                         <div className="d-flex align-items-center gap-2 flex-wrap">
                           {pr.number != null ? (
-                            <a href={pr.url} target="_blank" rel="noreferrer" className="text-reset text-decoration-none fw-semibold" title="Ouvrir sur GitHub">
+                            <a href={pr.url} target="_blank" rel="noreferrer" className="text-reset text-decoration-none fw-semibold" title={`Ouvrir sur ${forgeOfUrl(pr.url)}`}>
                               <span className="text-secondary">{prRef(pr)}</span> {pr.title}
                             </a>
                           ) : (

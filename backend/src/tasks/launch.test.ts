@@ -22,7 +22,7 @@ const tasks = vi.hoisted(() => ({
 }));
 
 vi.mock('../sessions/repository.js', () => ({ sessionRepository: repo }));
-vi.mock('../tasks/service.js', () => ({ taskService: tasks }));
+vi.mock('../tasks/service.js', () => ({ taskService: tasks, assertUnblocked: async () => undefined }));
 vi.mock('../projects/service.js', () => ({
   projectService: { get: async () => ({ id: 'p', name: 'Projet', gitUrl: null, defaultPermissionMode: state.projectMode }) },
   slugify: (s: string) => s,

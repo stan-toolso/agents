@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PullRequestChip } from '../components/PullRequests';
 import TaskAttachments from '../components/TaskAttachments';
-import { isOverdue, Linkified, TaskPriorityBadge, TaskStatusBadge, TaskTags } from '../components/TaskBadges';
+import { isOverdue, Linkified, TaskPriorityBadge, TaskRefList, TaskStatusBadge, TaskTags } from '../components/TaskBadges';
 import TaskThread from '../components/TaskThread';
 import TaskModal from '../components/TaskModal';
 import type { Task } from '../graphql/operations';
@@ -63,6 +63,31 @@ export default function TaskPanel({ taskId }: { taskId: string }) {
               </div>
             ))}
           </dl>
+        </>
+      )}
+      {(task.dependsOn.length > 0 || task.dependents.length > 0) && (
+        <>
+          <div className="git-subhead">Dépendances</div>
+          <div className="task-panel-text">
+            {task.dependsOn.length > 0 && (
+              <>
+                <div className="text-secondary">{task.blockedBy.length ? `Bloquée par (${task.blockedBy.length} à terminer)` : 'Dépend de (toutes terminées)'}</div>
+                <TaskRefList tasks={task.dependsOn} />
+                {task.autoStartWhenUnblocked && (
+                  <div className="text-secondary">
+                    <i className="bi bi-lightning-charge me-1" />
+                    Lancée automatiquement une fois débloquée
+                  </div>
+                )}
+              </>
+            )}
+            {task.dependents.length > 0 && (
+              <>
+                <div className={`text-secondary${task.dependsOn.length ? ' mt-1' : ''}`}>Bloque</div>
+                <TaskRefList tasks={task.dependents} />
+              </>
+            )}
+          </div>
         </>
       )}
       {(task.branch || task.pullRequest) && (

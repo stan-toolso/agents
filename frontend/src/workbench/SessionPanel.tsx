@@ -75,7 +75,7 @@ export default function SessionPanel({ sessionId }: { sessionId: string }) {
         {session.archivedAt && <span className="cc-yellow"> · archivée</span>}
         {session.context.tokens !== null && (
           <span className="session-panel-gauge">
-            <ContextGauge context={session.context} onClick={actions.openSettings} />
+            <ContextGauge context={session.context} cleanup={session.cleanup} onClick={actions.openContextSettings} />
           </span>
         )}
       </div>

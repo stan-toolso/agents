@@ -25,6 +25,11 @@ interface Row {
   reporter_email: string | null;
   comment_count: string | number | null;
   attachment_count: string | number | null;
+  depends_on_ids: string[] | null;
+  blocked_by_ids: string[] | null;
+  dependent_ids: string[] | null;
+  auto_start_when_unblocked: boolean | null;
+  auto_start_by_id: string | null;
   created_at: Date;
   updated_at: Date;
   completed_at: Date | null;
@@ -99,6 +104,11 @@ const toTask = (r: Row): Task => ({
   reporter: person(r.reporter_name, r.reporter_email),
   commentCount: Number(r.comment_count ?? 0),
   attachmentCount: Number(r.attachment_count ?? 0),
+  dependsOnIds: r.depends_on_ids ?? [],
+  blockedByIds: r.blocked_by_ids ?? [],
+  dependentIds: r.dependent_ids ?? [],
+  autoStartWhenUnblocked: Boolean(r.auto_start_when_unblocked),
+  autoStartById: r.auto_start_by_id ?? null,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
   completedAt: r.completed_at,
@@ -120,7 +130,11 @@ const toComment = (r: CommentRow): TaskComment => ({
 
 /** Colonnes d'une tâche avec le nombre de commentaires. */
 const SELECT = `SELECT t.*, (SELECT count(*) FROM task_comments c WHERE c.task_id = t.id) AS comment_count,
-  (SELECT array_agg(ts.session_id ORDER BY ts.in_charge_since DESC) FROM task_sessions ts WHERE ts.task_id = t.id AND ts.in_charge_since IS NOT NULL) AS session_ids, (SELECT count(*) FROM task_attachments a WHERE a.task_id = t.id AND a.comment_id IS NULL) AS attachment_count FROM tasks t`;
+  (SELECT array_agg(ts.session_id ORDER BY ts.in_charge_since DESC) FROM task_sessions ts WHERE ts.task_id = t.id AND ts.in_charge_since IS NOT NULL) AS session_ids, (SELECT count(*) FROM task_attachments a WHERE a.task_id = t.id AND a.comment_id IS NULL) AS attachment_count,
+  (SELECT array_agg(d.depends_on_task_id ORDER BY d.created_at, d.depends_on_task_id) FROM task_dependencies d WHERE d.task_id = t.id) AS depends_on_ids,
+  (SELECT array_agg(d.depends_on_task_id ORDER BY d.created_at, d.depends_on_task_id) FROM task_dependencies d JOIN tasks dt ON dt.id = d.depends_on_task_id
+    WHERE d.task_id = t.id AND dt.status <> 'done') AS blocked_by_ids,
+  (SELECT array_agg(d.task_id ORDER BY d.created_at, d.task_id) FROM task_dependencies d WHERE d.depends_on_task_id = t.id) AS dependent_ids FROM tasks t`;
 /** Tri : urgent d'abord, puis par date de création. */
 const ORDER = `ORDER BY CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, t.created_at ASC`;
 
@@ -162,6 +176,14 @@ async function releaseCharge(db: Queryable, taskId: string, sessionIds: string[]
   await db.query(`UPDATE task_sessions SET in_charge_since = NULL WHERE task_id = $1${sessionIds ? ' AND session_id = ANY($2::uuid[])' : ''}`, sessionIds ? [taskId, sessionIds] : [taskId]);
 }
 
+/** Remplace les dépendances de la tâche (identifiants déjà validés par le service : même projet, sans cycle). */
+async function setDependencies(db: Queryable, taskId: string, dependsOn: string[]): Promise<void> {
+  await db.query('DELETE FROM task_dependencies WHERE task_id = $1 AND NOT (depends_on_task_id = ANY($2::uuid[]))', [taskId, dependsOn]);
+  if (dependsOn.length) {
+    await db.query('INSERT INTO task_dependencies (task_id, depends_on_task_id) SELECT $1, unnest($2::uuid[]) ON CONFLICT DO NOTHING', [taskId, dependsOn]);
+  }
+}
+
 /** tasks.session_id = la plus récente des sessions en charge. */
 async function syncPrimarySession(db: Queryable, taskId: string): Promise<void> {
   await db.query('UPDATE tasks SET session_id = (SELECT session_id FROM task_sessions WHERE task_id = $1 AND in_charge_since IS NOT NULL ORDER BY in_charge_since DESC LIMIT 1) WHERE id = $1', [taskId]);
@@ -175,8 +197,8 @@ export const taskRepository = {
       await client.query('BEGIN');
       const { rows } = await client.query<{ id: string }>(
         `INSERT INTO tasks (project_id, title, description, status, priority, session_id, created_by_type, created_by_session_id, due_date, completed_at,
-                            custom_fields, assignee_name, assignee_email, reporter_name, reporter_email, status_tag, tags)
-         VALUES ($1, $2, $3, $4::task_status, $5, $6, $7, $8, $9, CASE WHEN $4::task_status = 'done' THEN now() ELSE NULL END, $10::jsonb, $11, $12, $13, $14, $15, $16::text[]) RETURNING id`,
+                            custom_fields, assignee_name, assignee_email, reporter_name, reporter_email, status_tag, tags, auto_start_when_unblocked, auto_start_by_id)
+         VALUES ($1, $2, $3, $4::task_status, $5, $6, $7, $8, $9, CASE WHEN $4::task_status = 'done' THEN now() ELSE NULL END, $10::jsonb, $11, $12, $13, $14, $15, $16::text[], $17, $18) RETURNING id`,
         [
           projectId,
           input.title,
@@ -192,8 +214,11 @@ export const taskRepository = {
           ...personColumns(input.reporter),
           input.statusTag ?? null,
           input.tags ?? [],
+          Boolean(input.autoStartWhenUnblocked),
+          input.autoStartWhenUnblocked ? (input.autoStartById ?? null) : null,
         ],
       );
+      if (input.dependsOn?.length) await setDependencies(client, rows[0].id, input.dependsOn);
       if (input.sessionId) await takeCharge(client, rows[0].id, input.sessionId);
       await linkSession(client, rows[0].id, actor.sessionId);
       await client.query('COMMIT');
@@ -293,6 +318,10 @@ export const taskRepository = {
       const [name, email] = personColumns(input.reporter);
       sets.push(`reporter_name = $${params.push(name)}`, `reporter_email = $${params.push(email)}`);
     }
+    if (input.autoStartWhenUnblocked != null) {
+      sets.push(`auto_start_when_unblocked = $${params.push(input.autoStartWhenUnblocked)}`);
+      sets.push(`auto_start_by_id = $${params.push(input.autoStartWhenUnblocked ? (input.autoStartById ?? null) : null)}`);
+    }
     if (input.status != null) {
       sets.push(`status = $${params.push(input.status)}`);
       sets.push(input.status === 'done' ? 'completed_at = COALESCE(completed_at, now())' : 'completed_at = NULL');
@@ -302,6 +331,7 @@ export const taskRepository = {
       await client.query('BEGIN');
       const { rowCount } = await client.query(`UPDATE tasks SET ${sets.join(', ')} WHERE id = $1`, params);
       if (rowCount) {
+        if (input.dependsOn != null) await setDependencies(client, id, input.dependsOn);
         if (input.sessionId === null) await releaseCharge(client, id, null);
         else if (input.sessionId) await takeCharge(client, id, input.sessionId);
         if (input.releaseSessionIds?.length) await releaseCharge(client, id, input.releaseSessionIds.filter((s) => s !== input.sessionId));
@@ -320,8 +350,34 @@ export const taskRepository = {
   /** Déplace une tâche dans un autre projet : ses sessions en charge et sa branche restent à l'ancien projet, elles sont retirées. */
   async move(id: string, projectId: string): Promise<Task | null> {
     const { rowCount } = await pool.query('UPDATE tasks SET project_id = $2, session_id = NULL, branch = NULL, updated_at = now() WHERE id = $1', [id, projectId]);
-    if (rowCount) await releaseCharge(pool, id, null);
+    if (rowCount) {
+      await releaseCharge(pool, id, null);
+      // Les dépendances ne franchissent pas les projets.
+      await pool.query('DELETE FROM task_dependencies WHERE task_id = $1 OR depends_on_task_id = $1', [id]);
+    }
     return rowCount ? this.findById(id) : null;
+  },
+
+  /** Toutes les dépendances entre tâches du projet (arêtes « task dépend de dependsOn »), pour la détection des cycles. */
+  async dependencyEdges(projectId: string): Promise<{ taskId: string; dependsOnId: string }[]> {
+    const { rows } = await pool.query<{ task_id: string; depends_on_task_id: string }>(
+      'SELECT d.task_id, d.depends_on_task_id FROM task_dependencies d JOIN tasks t ON t.id = d.task_id WHERE t.project_id = $1',
+      [projectId],
+    );
+    return rows.map((r) => ({ taskId: r.task_id, dependsOnId: r.depends_on_task_id }));
+  },
+
+  /**
+   * Consomme l'option « lancer automatiquement quand débloquée » d'une tâche encore à faire : un seul appelant l'obtient
+   * (deux dépendances terminées en même temps ne lancent pas deux sessions). Renvoie la personne qui l'avait armée
+   * (`armed` faux : option absente, déjà consommée ou tâche plus à faire).
+   */
+  async consumeAutoStart(id: string): Promise<{ armed: boolean; byId: string | null }> {
+    const { rows } = await pool.query<{ auto_start_by_id: string | null }>(
+      `UPDATE tasks SET auto_start_when_unblocked = false, updated_at = now() WHERE id = $1 AND auto_start_when_unblocked AND status = 'todo' RETURNING auto_start_by_id`,
+      [id],
+    );
+    return rows[0] ? { armed: true, byId: rows[0].auto_start_by_id } : { armed: false, byId: null };
   },
 
   /** Étiquettes distinctes des tâches des projets (les plus utilisées d'abord), pour les suggestions. */

@@ -102,7 +102,7 @@ describe('prepareContext', () => {
     service.isRunning.mockReturnValue(true);
     service.waitForIdle.mockResolvedValue(idle);
     expect(await cleanupService.prepareContext('s1')).toBeNull();
-    expect(service.end).toHaveBeenCalledWith('s1');
+    expect(service.end).toHaveBeenCalledWith('s1', { quiet: false });
     expect(repo.update).not.toHaveBeenCalled();
     expect(actions()).toEqual(['skipped']);
   });
@@ -165,7 +165,7 @@ describe('contextAction « fresh » (conversation neuve à chaque exécution pla
     service.isRunning.mockReturnValueOnce(true).mockReturnValue(false);
     service.waitForIdle.mockResolvedValue(makeSession({ status: 'completed' }));
     expect(await cleanupService.prepareContext('s1')).toBe('reset');
-    expect(service.end).toHaveBeenCalledWith('s1');
+    expect(service.end).toHaveBeenCalledWith('s1', { quiet: false });
     expect(repo.update).toHaveBeenCalledWith('s1', { externalId: null, contextTokens: null, resumeDigest: null });
   });
 });
@@ -210,5 +210,57 @@ describe('compactNow (bandeau de contexte)', () => {
     expect(actions()).toEqual(['compacting', 'compacted']);
     repo.findById.mockResolvedValue(makeSession({ provider: 'shell', contextTokens: 160_000 }));
     await expect(cleanupService.compactNow('s1')).rejects.toBeInstanceOf(AppError);
+  });
+});
+
+describe('afterTurn (limite de contexte choisie pour une session manuelle)', () => {
+  it('ne fait rien sans limite, même très au-delà du seuil de signalement', async () => {
+    repo.findById.mockResolvedValue(makeSession({ status: 'running', activity: 'idle', contextTokens: 400_000 }));
+    expect(await cleanupService.afterTurn('s1')).toBeNull();
+    repo.findById.mockResolvedValue(makeSession({ status: 'running', activity: 'idle', cleanup: { contextAction: 'fresh' }, contextTokens: 400_000 }));
+    expect(await cleanupService.afterTurn('s1')).toBeNull();
+    expect(service.sendMessage).not.toHaveBeenCalled();
+    expect(service.end).not.toHaveBeenCalled();
+    expect(repo.addEvent).not.toHaveBeenCalled();
+  });
+
+  it('ne fait rien sous la limite', async () => {
+    repo.findById.mockResolvedValue(makeSession({ status: 'running', activity: 'idle', cleanup: { contextAction: 'compact', contextMaxTokens: 100_000 }, contextTokens: 84_000 }));
+    expect(await cleanupService.afterTurn('s1')).toBeNull();
+    expect(service.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('au-delà de la limite « compact », compacte la conversation', async () => {
+    repo.findById.mockResolvedValue(makeSession({ id: 's2', status: 'running', activity: 'idle', cleanup: { contextAction: 'compact', contextMaxTokens: 100_000 }, contextTokens: 120_000 }));
+    service.waitForIdle.mockResolvedValue(makeSession({ id: 's2', contextTokens: 25_000 }));
+    expect(await cleanupService.afterTurn('s2')).toBe('compacted');
+    expect(service.sendMessage).toHaveBeenCalledWith('s2', '/compact');
+    expect(repo.addEvent.mock.calls[0][2]).toMatchObject({ action: 'compacting', threshold: 100_000, auto: true });
+  });
+
+  it('ne recompacte pas à chaque tour une conversation que la compaction ne fait pas passer sous la limite', async () => {
+    const over = (tokens: number) => makeSession({ id: 's3', status: 'running', activity: 'idle', cleanup: { contextAction: 'compact', contextMaxTokens: 20_000 }, contextTokens: tokens });
+    repo.findById.mockResolvedValue(over(60_000));
+    service.waitForIdle.mockResolvedValue(over(30_000));
+    expect(await cleanupService.afterTurn('s3')).toBe('compacted');
+    repo.findById.mockResolvedValue(over(32_000));
+    expect(await cleanupService.afterTurn('s3')).toBeNull();
+    repo.findById.mockResolvedValue(over(45_000));
+    expect(await cleanupService.afterTurn('s3')).toBe('compacted');
+    expect(service.sendMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('au-delà de la limite « reset », termine la session sans notification et garde un résumé', async () => {
+    const idle = makeSession({ id: 's4', status: 'running', activity: 'idle', cleanup: { contextAction: 'reset', contextMaxTokens: 100_000 }, contextTokens: 130_000 });
+    repo.findById.mockResolvedValue(idle);
+    repo.listEvents.mockResolvedValue([{ id: 'e1', type: 'instruction', payload: { text: 'Corrige le bug' } }]);
+    service.isRunning.mockReturnValueOnce(true).mockReturnValue(false);
+    service.waitForIdle.mockResolvedValue(makeSession({ id: 's4', status: 'completed' }));
+    expect(await cleanupService.afterTurn('s4')).toBe('reset');
+    expect(service.end).toHaveBeenCalledWith('s4', { quiet: true });
+    const patch = repo.update.mock.calls[0][1] as { externalId: null; resumeDigest: string | null };
+    expect(patch.externalId).toBeNull();
+    expect(patch.resumeDigest).toContain('Corrige le bug');
+    expect(repo.addEvent.mock.calls[0][2]).toMatchObject({ action: 'reset', summary: true, threshold: 100_000, auto: true });
   });
 });

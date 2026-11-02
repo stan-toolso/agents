@@ -1,3 +1,5 @@
+import type { SessionCleanup } from '../sessions/types.js';
+
 /** Modes d'autorisation proposés comme réglage par défaut d'un projet (voir le provider Claude). */
 export const projectPermissionModes = ['default', 'acceptEdits', 'bypassPermissions', 'plan'] as const;
 export type ProjectPermissionMode = (typeof projectPermissionModes)[number];
@@ -17,6 +19,11 @@ export interface Project {
   runnerConfig: Record<string, unknown>;
   /** Mode d'autorisation des nouvelles sessions qui n'en précisent pas (sessions de tâches notamment). */
   defaultPermissionMode: ProjectPermissionMode;
+  /**
+   * Limite de contexte des nouvelles sessions qui n'en choisissent pas (sessions de tâches, lancées par un agent) et
+   * présélectionnée au lancement : compacter ou repartir d'une conversation neuve au-delà d'un seuil. Null : aucune.
+   */
+  defaultContextCleanup: SessionCleanup | null;
   /** Consignes ajoutées à l'instruction de toute session qui réalise une tâche du projet, après le texte de la tâche (vide : aucune). */
   taskInstructions: string;
   /** Espace personnel : la personne à qui il appartient (jamais partagé) ; null pour un projet ordinaire. */
@@ -36,6 +43,7 @@ export interface CreateProjectInput {
   gitHosted?: boolean | null;
   runnerConfig?: Record<string, unknown> | null;
   defaultPermissionMode?: string | null;
+  defaultContextCleanup?: SessionCleanup | null;
   taskInstructions?: string | null;
   /** Espace personnel de cette personne (voir personal/service.ts). */
   personalOwnerId?: string | null;
@@ -54,5 +62,7 @@ export interface UpdateProjectInput {
   gitHosted?: boolean | null;
   runnerConfig?: Record<string, unknown> | null;
   defaultPermissionMode?: string | null;
+  /** Null (ou objet vide) : aucune limite. */
+  defaultContextCleanup?: SessionCleanup | null;
   taskInstructions?: string | null;
 }
