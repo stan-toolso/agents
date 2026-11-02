@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { INBOX_COUNTS } from '../graphql/operations';
+import { usePollingQuery } from '../lib/usePollingQuery';
 import { displayCombo } from '../lib/shortcuts';
 import { useShortcut } from '../lib/useShortcut';
 import NotificationBell from './NotificationBell';
@@ -11,6 +13,7 @@ const icons: Record<TabKind, string> = {
   projects: 'bi-folder2',
   sessions: 'bi-chat-dots',
   requests: 'bi-bell',
+  inbox: 'bi-inbox',
   project: 'bi-folder2-open',
   'project-form': 'bi-pencil',
   context: 'bi-journal-text',
@@ -177,11 +180,16 @@ export default function TabBar({ onToggleSidebar, sidebarOpen = false, sidebarCo
     stripRef.current?.querySelector<HTMLElement>('.wb-tab.active')?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
   }, [activeKey, tabs.length]);
 
+  // Sur mobile la sidebar est un tiroir fermé : le compteur « À traiter » se voit sur le bouton menu.
+  const { data: inboxData } = usePollingQuery<{ inboxCounts: { total: number } }>(INBOX_COUNTS, { pollInterval: 5000, skip: !onToggleSidebar });
+  const inboxTotal = inboxData?.inboxCounts.total ?? 0;
+
   return (
     <div className="wb-topbar">
       {onToggleSidebar && (
         <button type="button" className={`wb-burger${sidebarOpen ? ' open' : ''}${sidebarCollapsed ? ' collapsed' : ''}`} onClick={onToggleSidebar} aria-label="Menu" aria-expanded={sidebarOpen} title="Menu">
           <i className={`bi ${sidebarOpen ? 'bi-x-lg' : 'bi-list'}`} />
+          {inboxTotal > 0 && !sidebarOpen && <span className="wb-badge wb-burger-badge" title="Éléments à traiter">{inboxTotal}</span>}
         </button>
       )}
       <div className={`wb-tabbar-wrap${overflow.left ? ' can-left' : ''}${overflow.right ? ' can-right' : ''}`}>

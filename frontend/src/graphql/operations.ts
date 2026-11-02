@@ -349,6 +349,8 @@ export interface TaskComment {
 
 export interface Task {
   id: string;
+  /** Coût attribué à la tâche (unité d'affichage). */
+  costUsd: number;
   title: string;
   description: string;
   status: TaskStatus;
@@ -1513,6 +1515,7 @@ export const TASK_FIELDS = gql`
     }
     commentCount
     attachmentCount
+    costUsd
     attachments {
       id
       name
@@ -2473,5 +2476,66 @@ export const STOP_PREVIEW = gql`
 export const PREVIEW_ACCESS_URL = gql`
   mutation PreviewAccessUrl($worksessionId: ID!, $path: String) {
     previewAccessUrl(worksessionId: $worksessionId, path: $path)
+  }
+`;
+
+// ---- File « À traiter » -------------------------------------------------------------------------
+
+export interface InboxCounts {
+  requests: number;
+  idleSessions: number;
+  failedSessions: number;
+  interruptedSessions: number;
+  pullRequests: number;
+  total: number;
+}
+
+export interface Inbox {
+  generatedAt: string;
+  counts: InboxCounts;
+  requests: HumanRequest[];
+  sessions: Session[];
+  pullRequests: TrackedPullRequest[];
+}
+
+/** Compteurs seuls, sondés par la sidebar (badge de « À traiter »). */
+export const INBOX_COUNTS = gql`
+  query InboxCounts {
+    inboxCounts {
+      requests
+      idleSessions
+      failedSessions
+      interruptedSessions
+      pullRequests
+      total
+    }
+  }
+`;
+
+export const INBOX = gql`
+  ${SESSION_FIELDS}
+  ${REQUEST_FIELDS}
+  ${TRACKED_PULL_REQUEST_FIELDS}
+  query Inbox {
+    inbox {
+      generatedAt
+      counts {
+        requests
+        idleSessions
+        failedSessions
+        interruptedSessions
+        pullRequests
+        total
+      }
+      requests {
+        ...RequestFields
+      }
+      sessions {
+        ...SessionFields
+      }
+      pullRequests {
+        ...TrackedPullRequestFields
+      }
+    }
   }
 `;

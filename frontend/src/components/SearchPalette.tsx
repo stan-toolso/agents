@@ -39,6 +39,7 @@ const PAGES: { to: string; label: string; keywords: string; icon: string }[] = [
   { to: '/tasks', label: 'Tâches', keywords: 'tableau todo', icon: 'bi-check2-square' },
   { to: '/vault', label: 'Coffre', keywords: 'secrets identifiants ssh postgres api sites', icon: 'bi-shield-lock' },
   { to: '/shared', label: 'Pages partagées', keywords: 'html rapports', icon: 'bi-file-earmark-richtext' },
+  { to: '/inbox', label: 'À traiter', keywords: 'file validation demandes pull requests sessions attente', icon: 'bi-inbox' },
   { to: '/requests', label: 'Demandes', keywords: 'permissions questions attente', icon: 'bi-bell' },
   { to: '/settings', label: 'Paramètres', keywords: 'claude github serveur apparence thème', icon: 'bi-gear' },
   { to: '/users', label: 'Utilisateurs', keywords: 'admin administrateurs invitations', icon: 'bi-people' },

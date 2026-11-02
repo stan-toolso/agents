@@ -811,6 +811,14 @@ une question, le mode d'autorisation et le modèle, et un chat de l'espace perso
 (voir « Espace personnel et chats »). Sur mobile, le tableau des projets devient une
 liste de cartes. Sans projet, la page redevient le parcours d'accueil en trois étapes, sous la zone de chat.
 
+**À traiter** (`/inbox`, `frontend/src/pages/InboxPage.tsx`, entrée de la sidebar) : la file unifiée de ce qui attend une action
+humaine sur tous les projets — demandes en attente (réponse sur place via `RequestCard`), sessions en attente
+d'instructions, en erreur ou interrompues depuis 24 h (bouton « Reprendre »), pull requests ouvertes (la puce ouvre la fenêtre de
+revue et de fusion). Tri par urgence puis ancienneté, filtres par projet et par nature (`lib/inbox.ts`, pur et testé), rendu
+mobile en cartes. Backend : `backend/src/inbox/service.ts`, queries `inbox` (éléments, sondée toutes les 5 s par la page) et
+`inboxCounts` (une requête SQL, sondée par la sidebar pour le badge). Les tâches « à livrer » n'y sont pas encore (voir la tâche
+« Tâches terminées dont la branche n'est pas fusionnée »).
+
 Sur les pages d'un projet ou d'une session (projet, session, terminal, fichiers, tâches, contexte),
 un **panneau git** à droite (`frontend/src/workbench/GitPanel.tsx`) montre la branche courante et son
 avance/retard, les fichiers indexés et modifiés (clic : diff coloré ; boutons indexer, désindexer,
@@ -1011,6 +1019,14 @@ défaut), trie et choisit (bouton « Colonnes », avec flèches pour l'ordre), f
 (texte sans accents ni casse, listes pour statut, priorité, échéance, origine, projet) ; la disposition est mémorisée
 dans `localStorage` (`skipper.tasks.table.v1`). Le kanban reste disponible (filtres de la barre d'outils : priorité,
 responsable, rapporteur, étiquette), ainsi que « mes tâches ouvertes » et « voir les annulées » dans les deux vues.
+
+**Coût d'une tâche.** `Task.costUsd` et `Task.sessionCosts` (`backend/src/tasks/cost.ts`, chargeur `taskCost`) lisent `usage_ledger`,
+la même source que le tableau de bord. Règle de répartition : chaque tour facturé d'une session est partagé **à parts
+égales** entre les tâches auxquelles la session était reliée à la date du tour (`task_sessions.linked_at` ; la fin
+d'une prise en charge n'étant pas datée, une session libérée reste reliée) ; un tour antérieur à toute liaison n'est
+attribué à aucune tâche, donc le total des tâches ne dépasse jamais celui des sessions. Les champs passent par la
+conversion d'unité (`billing/display.ts`) : crédits dans une cellule facturée, jamais d'USD. Affichage : total et part
+de chaque session sur la page de la tâche, colonne « Coût » (masquée par défaut, triable) de la grille.
 
 **Sessions en charge.** Une tâche peut avoir **plusieurs sessions en charge** à la fois, et une session mener
 **plusieurs tâches** (`task_sessions.in_charge_since`, null pour un simple passage ; `tasks.session_id` reste la

@@ -235,7 +235,7 @@ export const PULL_REQUESTS_PROJECT = gql`
 `;
 
 /** Requêtes à rafraîchir après une action sur une PR suivie (page du projet, tâche, grille, tableau de bord). */
-export const TRACKED_PR_REFETCH = ['PullRequests', 'TaskPage', 'Tasks', 'Dashboard'];
+export const TRACKED_PR_REFETCH = ['PullRequests', 'TaskPage', 'Tasks', 'Dashboard', 'Inbox', 'InboxCounts'];
 
 /** Ordre d'affichage des étapes : ce qui attend une action d'abord. */
 export const STAGE_ORDER: PullRequestStage[] = ['TO_MERGE', 'DRAFT', 'PENDING', 'MERGED', 'CANCELLED'];
