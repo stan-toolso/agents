@@ -7,6 +7,7 @@ import { scheduleRepository } from '../schedules/repository.js';
 import type { SessionSchedule } from '../schedules/types.js';
 import { sessionRepository } from '../sessions/repository.js';
 import type { Session } from '../sessions/types.js';
+import { taskCosts, type TaskCost } from '../tasks/cost.js';
 import { taskRepository } from '../tasks/repository.js';
 import type { Task } from '../tasks/types.js';
 import { userRepository } from '../users/repository.js';
@@ -78,6 +79,8 @@ export function createLoaders() {
     session: createBatcher<string, Session>(async (ids) => byId(await sessionRepository.findByIds(ids))),
     worksession: createBatcher<string, Worksession>(async (ids) => byId(await worksessionRepository.findByIds(ids))),
     task: createBatcher<string, Task>(async (ids) => byId(await taskRepository.findByIds(ids))),
+    /** Coût attribué à une tâche (absente : aucun coût), voir `tasks/cost.ts`. */
+    taskCost: createBatcher<string, TaskCost>((ids) => taskCosts(ids)),
     pendingRequestCount: createBatcher<string, number>((ids) => requestRepository.countPendingBySessions(ids)),
     /** Planification d'une session (absente : la session n'est pas planifiée). */
     sessionSchedule: createBatcher<string, SessionSchedule>((ids) => scheduleRepository.findBySessions(ids)),
