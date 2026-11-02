@@ -73,6 +73,10 @@ Trois notions :
   (à faire, en cours, terminée, annulée). Créée et mise à jour par les humains (tableau dans
   l'application) comme par les agents (outils MCP). « Confier à un agent » lance une session avec la
   tâche comme consigne.
+- **Agent de projet** : membre du projet qui n'est pas une personne (Product Manager, Developer…), avec ses propres
+  comptes, ses instructions, ses déclencheurs et ses actions ; un utilisateur de genre « agent », propriétaire des
+  sessions qu'il joue. On le convoque en le mentionnant dans le fil d'une tâche, en lui parlant ou en lui confiant
+  une tâche. Voir « Agents de projet » plus bas.
 - **Workflow** : graphe d'un projet (déclencheur, appels de modèle, sessions, tâches, créations de tâche,
   conditions, fins) avec des branches oui / non et « en cas d'erreur », lancé à la main, par
   planification ou par une tâche créée. Un nœud **appel de modèle** (`callLlm`) appelle directement un
@@ -211,6 +215,11 @@ backend/
       inputs.ts                # variables d'un déclencheur, valeurs d'une exécution, planification cron
       conditions.ts / expressions.ts / taskFilter.ts  # conditions visuelles, formules, filtres de tâches
       service.ts / triggers.ts / scheduler.ts         # file d'exécutions, déclencheur « tâche créée », planification
+    agents/
+      types.ts / templates.ts  # agents de projet (PM, Developer, personnalisé) : profil, modèles de départ
+      repository.ts / service.ts # création (utilisateur agent + profil), gestionnaires, convocation (summon), actions planifiées, activité
+      triggers.ts              # déclencheurs : tâche créée, mention, fil suivi, tâche prête, PR fusionnée
+      prompt.ts / mcp.ts       # identité dans le prompt système ; serveur MCP agents (list, summon)
     tasks/
       service.ts               # tâches : création, mise à jour, personnes, champs, fil de discussion (messages, réponses, mentions, réactions), sessions en charge, résumé pour le prompt
       mentions.ts              # mentions @Nom / @e-mail / @session:<id> : candidats et résolution dans un texte
@@ -1199,6 +1208,74 @@ panneau git, d'onglet Modifications ni de planification). Dans la sidebar, sous 
 **Chats** ouvre la liste (et se replie) et montre les derniers chats avec leur état, un menu pour les arrêter
 ou les supprimer, et un lien vers les autres (requête `Sidebar`, champ `chats`). Un chat relancé reste un chat ; l'arrêt des
 sessions inactives le termine comme une session, un message le reprend.
+
+## Agents de projet
+
+Un **agent** est un membre du projet qui n'est pas une personne : un **Product Manager** qui cadre les demandes et
+anime les tâches, un **Developer** qui réalise les tâches qu'on lui confie et ouvre les pull requests, ou un agent
+personnalisé. Chaque agent a un **nom** (c'est son alias de mention), un avatar, des **instructions**, des réglages
+par défaut pour ses sessions, des **déclencheurs**, des **actions** nommées, et **ses propres comptes** : réglages
+Claude, OpenCode, GitHub, GitLab, coffre personnel, consommation.
+
+**Modèle** (`backend/src/agents/`, migration `054_agents.sql`). Un agent est un **utilisateur** (`users.kind =
+'agent'`) : il est membre de son projet (rôle membre) comme une personne, et tout ce qui est indexé par l'identifiant
+d'une personne vaut pour lui sans code particulier — ses sessions (`sessions.owner_id`), ses identifiants Claude
+(`user_settings`), ses comptes GitHub / GitLab, son coffre personnel (`owner_user_id`, portée des agents inchangée),
+sa consommation (`usage_ledger` par session), ses mentions (`@Nom`), la responsabilité d'une tâche. Il ne se connecte
+jamais (e-mail technique `agent-<id>@agents.skipper`, jamais invitable ni rapproché d'un compte Google), ne reçoit pas
+de notification (un agent mentionné est convoqué à la place), et n'apparaît pas dans les listes où l'on choisit une
+personne (administration des utilisateurs, partages du coffre). Son profil est dans `agent_profiles` (`kind`
+`product_manager` / `developer` / `custom`, `avatar`, `description`, `instructions`, `task_folder`, `defaults`,
+`context_folder`, `triggers`, `actions`, `enabled`, `archived_at`) ; ses **gestionnaires** dans `agent_managers`
+(un `owner`, des `manager` ; les administrateurs du projet gèrent toujours). Une session jouée par un agent porte en
+plus `sessions.requested_by_id` : la personne qui l'a demandée (le client qui parle à l'agent, la personne qui lui
+confie la tâche), à qui l'agent répond d'abord ; « Mes sessions » inclut celles qu'on a demandées. Le provider Claude
+ouvre le prompt système d'une telle session par l'identité et les instructions de l'agent (`agents/prompt.ts`),
+applique ses réglages par défaut (`defaults`, sous ceux demandés explicitement), signe ses messages de fil de son nom,
+et décrit à toute session du projet les agents qui existent et comment les convoquer. Chaque agent a un dossier
+`agents/<slug>` dans la bibliothèque de contexte : sa mémoire durable.
+
+**Convoquer un agent** (`agentService.summon`) : avec une tâche, sa session non archivée reliée à la tâche reçoit le
+message (relancée si elle était terminée) ; sinon une session s'ouvre pour lui sur la tâche — dans le **dossier de la
+tâche** (branche `task/…`, comme « Confier à un agent », la session précédente du dossier archivée) pour un agent
+`task_folder`, dans un **dossier à part** reliée à la tâche (sans en prendre la branche) sinon. Sans tâche, une
+nouvelle session dans son propre dossier, nommée d'après le message. Quatre façons de convoquer :
+
+- **mention** `@Nom` dans le fil d'une tâche (`agents/triggers.ts`) : sans session reliée, l'agent est convoqué avec le
+  message ; avec une session reliée, celle-ci reçoit le message comme une instruction (relancée au besoin) ;
+- **« Parler à … »** : zone de chat du tableau de bord (sélecteur « Mon assistant » ou un agent de ses projets),
+  bouton de l'onglet Agents et de la fiche (mutation `summonAgent`) ;
+- **« Confier à un agent »** avec un agent choisi (le Developer du projet par défaut ; `startTaskSession(agentId)`),
+  « Nouvelle session » en tant qu'un agent (`CreateSessionInput.agentId`), session planifiée d'un agent
+  (`CreateScheduledSessionInput.agentId`), nœud de workflow dont le propriétaire est l'agent (nom, e-mail ou
+  identifiant) ;
+- depuis une session (serveur MCP `agents` : `list` libre, `summon` soumis à autorisation ; `mcp__agents` pour le
+  pré-autoriser). Un agent convoqué par une session n'en est pas le sous-agent : c'est un collègue, qui répond dans le
+  fil de la tâche.
+
+**Déclencheurs** (`triggers`, écouteurs du service des tâches et des PR suivies, garde anti-boucle : rien de ce qu'une
+session d'agent fait ne déclenche les agents) : `taskCreated` (tâche créée par une personne ou l'API, filtrable par
+étiquette : le PM intervient pour la cadrer), `threadFollowed` (une réponse humaine dans un fil où l'agent est
+intervenu revient à sa session comme instruction, via `tasks/sessionFeed.ts`), `prMerged` (PR d'une tâche
+fusionnée), `taskReady` (tâche passée par une personne à l'étiquette d'état `taskReadyTag`, « prête » : le Developer
+démarre). **Actions** : instructions nommées jouées à la demande (menu « Actions ») ou à heures fixes (`cron` : une
+session planifiée dédiée dont l'agent est propriétaire, créée et tenue à jour par `syncActionSchedules`). Les modèles
+PM et Developer (`agents/templates.ts`) préremplissent instructions, déclencheurs et actions (« Faire le point »,
+« Préparer une release », « Corriger les retours de la PR », « Mettre la branche à jour ») ; le vocabulaire des
+étiquettes d'état (« à cadrer », « prête », « en dev », « à valider », « à livrer », « livrée ») vit dans les
+instructions.
+
+**Interface** : onglet **Agents** d'un projet (`pages/ProjectAgentsPage.tsx` : cartes, « Ajouter un agent » d'après un
+modèle, « Parler à », actions) et **fiche** (`pages/AgentPage.tsx`, `/projects/:id/agents/:agentId`) : Profil
+(formulaire des gestionnaires : identité, sessions, déclencheurs, instructions, actions, gestionnaires), **Comptes**
+(les sections de Paramètres rendues sous un client GraphQL qui agit pour le compte de l'agent : `?actAs=<id>` sur
+l'URL GraphQL, `AuthContext.actAs` réservé à ses gestionnaires, `settingsUser(ctx)` dans les résolveurs des réglages
+et du coffre personnel), Activité (sessions, tâches, coût). Partout ailleurs, une pastille : avatar de l'agent dans
+la sidebar et l'en-tête de session (« demandée par … »), messages du fil signés de son nom avec son avatar, membres
+du projet marqués « agent », mentions avec un robot. API : `type Agent`, `Project.agents`, `User.kind` / `User.agent`,
+`Session.agent` / `Session.requestedBy`, `TaskComment.agent`, `agent`, `agentTemplates`, `myAgents`, mutations
+`createAgent`, `updateAgent`, `setAgentEnabled`, `deleteAgent` (retrait : profil archivé, appartenance retirée,
+planifications des actions supprimées ; l'historique reste), `setAgentManagers`, `summonAgent`, `runAgentAction`.
 
 ## Sessions planifiées
 

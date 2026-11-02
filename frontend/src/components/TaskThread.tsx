@@ -1,3 +1,5 @@
+import AgentAvatar from './AgentAvatar';
+import { agentKindLabels } from '../graphql/agents';
 import { useMutation } from '@apollo/client';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Alert, Button, Form } from 'react-bootstrap';
@@ -40,7 +42,8 @@ export interface ThreadOpening {
 }
 
 /** Avatar d'un auteur : initiales d'une personne, robot pour une session d'agent. */
-function Avatar({ name, agent }: { name: string; agent: boolean }) {
+function Avatar({ name, agent, projectAgent }: { name: string; agent: boolean; projectAgent?: { name: string; avatar: { emoji: string | null; color: string | null } } | null }) {
+  if (projectAgent) return <AgentAvatar agent={projectAgent} size={28} className="tt-avatar tt-avatar-agent-named" title={`${projectAgent.name} (agent du projet)`} />;
   return agent ? (
     <span className="tt-avatar tt-avatar-agent" title="Session d'agent">
       <i className="bi bi-robot" />
@@ -252,7 +255,7 @@ function Composer({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => insert(m)}
               >
-                <i className={`bi ${m.kind === 'session' ? 'bi-robot' : 'bi-person'}`} />
+                <i className={`bi ${m.kind === 'session' || m.detail === 'agent' ? 'bi-robot' : 'bi-person'}`} />
                 <span className="tt-mention-label">{m.label}</span>
                 {m.detail && <span className="tt-mention-detail">{m.detail}</span>}
               </button>
@@ -314,7 +317,7 @@ function Message({
   const agent = c.authorType === 'agent';
   return (
     <div id={`comment-${c.id}`} className={`tt-msg${isReply ? ' tt-reply' : ''}${mentionsMe ? ' tt-mentions-me' : ''}`}>
-      <Avatar name={c.authorName} agent={agent} />
+      <Avatar name={c.authorName} agent={agent} projectAgent={c.agent} />
       <div className="tt-msg-main">
         <div className="tt-msg-head">
           {c.authorSession ? (
@@ -324,7 +327,7 @@ function Message({
           ) : (
             <span className="tt-author">{c.authorName}</span>
           )}
-          {agent && <span className="tt-badge-agent">agent</span>}
+          {agent && <span className="tt-badge-agent">{c.agent ? agentKindLabels[c.agent.kind] : 'agent'}</span>}
           <span className="tt-time" title={fmtFull(c.createdAt)}>
             {timeAgo(c.createdAt)}
             {edited && ' · modifié'}

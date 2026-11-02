@@ -2624,6 +2624,8 @@ input CreateSessionInput {
   config: JSON
   "Démarre la session immédiatement après création (défaut : true) ; sans effet sans consigne."
   autoStart: Boolean
+  "Agent de projet qui joue la session (propriétaire) ; l'utilisateur connecté en est le demandeur."
+  agentId: ID
 }
 
 type Mutation {
@@ -2772,7 +2774,7 @@ type Mutation {
   "Ses propres commentaires, ou administrateur du projet."
   deleteTaskComment(id: ID!): Boolean!
   "Confie la tâche à un agent, dans le dossier de la tâche (créé à sa première session, branche task/<slug> pour un projet git, repris ensuite : la session précédente de la tâche est archivée). prompt : consigne relue (sinon le texte de la tâche)."
-  startTaskSession(id: ID!, provider: String, config: JSON, prompt: String): Session!
+  startTaskSession(id: ID!, provider: String, config: JSON, prompt: String, agentId: ID): Session!
   "Reprend la tâche dans la conversation de sa session (Task.resumableSession) avec ce message, au lieu d’en lancer une nouvelle."
   resumeTaskSession(id: ID!, text: String!): Session!
   "Crée une clé d'API du projet (administrateurs) ; le secret n'est montré qu'une fois."
@@ -3011,6 +3013,8 @@ input CreateScheduledSessionInput {
   config: JSON
   "Lance une première exécution tout de suite."
   runNow: Boolean
+  "Agent de projet propriétaire de la session planifiée (ses comptes, son budget)."
+  agentId: ID
 }
 
 extend type Query {
@@ -3263,4 +3267,216 @@ type CostDisplay {
 
 extend type Query {
   costDisplay: CostDisplay!
+}
+
+# ---- Agents de projet ----------------------------------------------------------------------------
+
+"Rôle de départ d'un agent (préremplit instructions, déclencheurs et actions)."
+enum AgentKind {
+  PRODUCT_MANAGER
+  DEVELOPER
+  CUSTOM
+}
+
+enum AgentManagerRole {
+  "Crée l'agent, règle ses comptes, peut le retirer ; reçoit ses demandes quand personne ne l'a convoqué."
+  OWNER
+  "Modifie l'agent (instructions, déclencheurs, comptes, coffre), répond à ses demandes, le met en pause."
+  MANAGER
+}
+
+"Une personne, ou un agent de projet (utilisateur qui ne se connecte jamais, propriétaire des sessions qu'il joue)."
+enum UserKind {
+  PERSON
+  AGENT
+}
+
+type AgentAvatar {
+  "Emoji affiché dans l'avatar (sinon l'initiale du nom)."
+  emoji: String
+  "Couleur de fond (hex), sinon dérivée du nom."
+  color: String
+}
+
+"Interrupteurs : ce qui convoque l'agent sans qu'une personne le mentionne."
+type AgentTriggers {
+  "Une tâche créée par une personne (ou l'API) : l'agent intervient pour la cadrer."
+  taskCreated: Boolean!
+  "Restreint taskCreated aux tâches portant cette étiquette (vide : toutes)."
+  taskCreatedTag: String
+  "Une réponse humaine dans le fil d'une tâche où l'agent est intervenu lui revient comme une instruction."
+  threadFollowed: Boolean!
+  "La pull request d'une tâche est fusionnée : l'agent est prévenu."
+  prMerged: Boolean!
+  "Une tâche passée par une personne à l'étiquette d'état taskReadyTag : l'agent démarre dessus."
+  taskReady: Boolean!
+  taskReadyTag: String
+}
+
+"Action nommée : une instruction jouée par l'agent, à la demande ou à heures fixes (session planifiée dédiée)."
+type AgentAction {
+  key: String!
+  label: String!
+  instruction: String!
+  "Expression cron à cinq champs (null : à la demande seulement)."
+  cron: String
+  timezone: String
+  "Session planifiée qui porte l'action quand elle a un cron."
+  scheduleSession: Session
+}
+
+type AgentManager {
+  user: User!
+  role: AgentManagerRole!
+  createdAt: DateTime!
+}
+
+type AgentStats {
+  activeSessions: Int!
+  sessions: Int!
+  "Tâches où l'agent est intervenu."
+  tasks: Int!
+  monthCostUsd: Float!
+  totalCostUsd: Float!
+  lastActivityAt: DateTime
+}
+
+"""
+Un agent de projet : membre du projet qui n'est pas une personne (Product Manager, Developer…). C'est un utilisateur
+(`User.kind = AGENT`) avec ses propres comptes (réglages Claude, GitHub, GitLab, coffre personnel : page Paramètres en
+mode « pour l'agent », `?actAs=<id>` sur l'URL GraphQL, réservé à ses gestionnaires) ; tout ce qu'il fait est une
+session dont il est le propriétaire. On le convoque en le mentionnant dans le fil d'une tâche, en lui confiant une
+tâche, en lui parlant (summonAgent), ou par ses déclencheurs et ses actions.
+"""
+type Agent {
+  "Identifiant de l'agent : celui de son utilisateur."
+  id: ID!
+  user: User!
+  name: String!
+  project: Project!
+  kind: AgentKind!
+  avatar: AgentAvatar!
+  description: String!
+  "Markdown ajouté au prompt système de ses sessions, après le prompt du projet."
+  instructions: String!
+  "Ses sessions sur une tâche travaillent dans le dossier de la tâche (branche task/…) ; sinon un dossier à part par session."
+  taskFolder: Boolean!
+  "Réglages par défaut de ses sessions (même forme que la configuration d'une session : permissionMode, allowedTools, model…)."
+  defaults: JSON!
+  "Dossier de la bibliothèque de contexte réservé à l'agent (sa mémoire durable)."
+  contextFolder: String
+  triggers: AgentTriggers!
+  actions: [AgentAction!]!
+  "En pause : ne réagit ni aux déclencheurs ni aux mentions."
+  enabled: Boolean!
+  archivedAt: DateTime
+  managers: [AgentManager!]!
+  "L'utilisateur connecté peut modifier l'agent (gestionnaire, ou administrateur du projet)."
+  canManage: Boolean!
+  stats: AgentStats!
+  "Ses sessions, les plus récentes d'abord (archivées comprises)."
+  sessions(limit: Int): [Session!]!
+  "Tâches où il est intervenu, les plus récentes d'abord."
+  tasks(limit: Int): [Task!]!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+"Modèle de départ d'un agent."
+type AgentTemplate {
+  kind: AgentKind!
+  label: String!
+  suggestedName: String!
+  avatar: AgentAvatar!
+  description: String!
+  instructions: String!
+  taskFolder: Boolean!
+  defaults: JSON!
+  triggers: AgentTriggers!
+  actions: [AgentAction!]!
+}
+
+input AgentAvatarInput {
+  emoji: String
+  color: String
+}
+
+input AgentTriggersInput {
+  taskCreated: Boolean
+  taskCreatedTag: String
+  threadFollowed: Boolean
+  prMerged: Boolean
+  taskReady: Boolean
+  taskReadyTag: String
+}
+
+input AgentActionInput {
+  "Absent : dérivé du libellé."
+  key: String
+  label: String!
+  instruction: String!
+  cron: String
+  timezone: String
+}
+
+input AgentInput {
+  name: String
+  kind: AgentKind
+  avatar: AgentAvatarInput
+  description: String
+  instructions: String
+  taskFolder: Boolean
+  defaults: JSON
+  triggers: AgentTriggersInput
+  "Remplace la liste complète (les sessions planifiées des actions retirées sont supprimées)."
+  actions: [AgentActionInput!]
+}
+
+input AgentManagerInput {
+  userId: ID!
+  role: AgentManagerRole!
+}
+
+extend type Query {
+  agent(id: ID!): Agent
+  agentTemplates: [AgentTemplate!]!
+  "Agents actifs des projets de l'utilisateur connecté (« Parler à… »)."
+  myAgents: [Agent!]!
+}
+
+extend type Mutation {
+  "Crée un agent dans le projet (administrateur ou membre) ; le créateur en est le propriétaire."
+  createAgent(projectId: ID!, input: AgentInput!): Agent!
+  updateAgent(id: ID!, input: AgentInput!): Agent!
+  setAgentEnabled(id: ID!, enabled: Boolean!): Agent!
+  "Retire l'agent du projet (profil archivé, sessions planifiées supprimées) ; son historique reste."
+  deleteAgent(id: ID!): Boolean!
+  setAgentManagers(id: ID!, managers: [AgentManagerInput!]!): Agent!
+  "Convoque l'agent avec un message : dans sa session reliée à la tâche, sinon dans une nouvelle session (sur la tâche ou libre). Renvoie la session."
+  summonAgent(id: ID!, text: String!, taskId: ID, attachments: [AttachmentInput!]): Session!
+  "Joue une action nommée de l'agent, éventuellement sur une tâche."
+  runAgentAction(id: ID!, key: String!, taskId: ID): Session!
+}
+
+extend type Project {
+  "Agents du projet (non retirés)."
+  agents: [Agent!]!
+}
+
+extend type User {
+  kind: UserKind!
+  "Profil d'agent (null pour une personne)."
+  agent: Agent
+}
+
+extend type Session {
+  "Personne qui a demandé la session quand son propriétaire est un agent (chat avec l'agent, tâche confiée)."
+  requestedBy: User
+  "Agent qui joue la session (null : session d'une personne)."
+  agent: Agent
+}
+
+extend type TaskComment {
+  "Agent dont la session a écrit le message (null sinon)."
+  agent: Agent
 }

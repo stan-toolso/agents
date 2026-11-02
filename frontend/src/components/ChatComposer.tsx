@@ -1,3 +1,5 @@
+import AgentAvatar from './AgentAvatar';
+import { MY_AGENTS, SUMMON_AGENT, agentKindLabels, type AgentRef } from '../graphql/agents';
 import { useMutation, useQuery } from '@apollo/client';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -15,6 +17,7 @@ import './chat.css';
 
 const MODE_KEY = 'skipper.chat.permissionMode';
 const MODEL_KEY = 'skipper.chat.model';
+const AGENT_KEY = 'skipper.chat.agent';
 
 /** Modes d'autorisation qui ont un sens pour un chat (pas d'outil de fichiers ni de commande). */
 const CHAT_MODES = ['default', 'bypassPermissions'];
@@ -61,7 +64,15 @@ export default function ChatComposer({ withGreeting = false, autoFocus = false }
   const { user } = useAuth();
   const navigate = useNavigate();
   const { data: providersData } = useQuery<{ providers: Provider[] }>(PROVIDERS);
-  const [createChat, { loading, error }] = useMutation<{ createChat: Session }>(CREATE_CHAT, { refetchQueries: ['Chats'] });
+  const [createChat, { loading: creating, error: chatError }] = useMutation<{ createChat: Session }>(CREATE_CHAT, { refetchQueries: ['Chats'] });
+  // « Parler à » : son assistant personnel (un chat), ou un agent d'un de ses projets (une session de l'agent, dans le projet).
+  const { data: agentsData } = useQuery<{ myAgents: (AgentRef & { description: string; project: { id: string; name: string } })[] }>(MY_AGENTS);
+  const agents = agentsData?.myAgents ?? [];
+  const [agentId, setAgentId] = useState(() => read(AGENT_KEY));
+  const agent = agents.find((a) => a.id === agentId) ?? null;
+  const [summon, { loading: summoning, error: summonError }] = useMutation<{ summonAgent: { id: string } }>(SUMMON_AGENT, { refetchQueries: ['Sidebar', 'Sessions'] });
+  const loading = creating || summoning;
+  const error = chatError ?? summonError;
   const [text, setText] = useState('');
   const [mode, setMode] = useState(() => (CHAT_MODES.includes(read(MODE_KEY)) ? read(MODE_KEY) : 'default'));
   const [model, setModel] = useState(() => read(MODEL_KEY));
@@ -93,13 +104,19 @@ export default function ChatComposer({ withGreeting = false, autoFocus = false }
     setEncoding(true);
     try {
       const files = attachments.items.length ? await toAttachmentInputs(attachments.items) : null;
-      const res = await createChat({ variables: { text: text.trim(), attachments: files, config: { permissionMode: mode, ...(model ? { model } : {}) } } });
-      const id = res.data?.createChat.id;
-      if (id) {
+      let target: string | null = null;
+      if (agent) {
+        const res = await summon({ variables: { id: agent.id, text: text.trim() || 'Voir les fichiers joints.', attachments: files } });
+        target = res.data ? `/sessions/${res.data.summonAgent.id}` : null;
+      } else {
+        const res = await createChat({ variables: { text: text.trim(), attachments: files, config: { permissionMode: mode, ...(model ? { model } : {}) } } });
+        target = res.data ? `/chats/${res.data.createChat.id}` : null;
+      }
+      if (target) {
         setText('');
         attachments.reset();
         if (inputRef.current) inputRef.current.style.height = 'auto';
-        navigate(`/chats/${id}`);
+        navigate(target);
       }
     } catch {
       /* l'erreur est affichée sous la zone */
@@ -144,7 +161,7 @@ export default function ChatComposer({ withGreeting = false, autoFocus = false }
           ref={inputRef}
           rows={1}
           value={text}
-          placeholder="Que voulez-vous faire ?"
+          placeholder={agent ? `Que voulez-vous dire à ${agent.name} (${agent.project.name}) ?` : 'Que voulez-vous faire ?'}
           disabled={loading || encoding}
           onChange={(e) => {
             setText(e.target.value);
@@ -181,6 +198,30 @@ export default function ChatComposer({ withGreeting = false, autoFocus = false }
             }}
           />
           <span className="chat-composer-spacer" />
+          {agents.length > 0 && (
+            <span className="cc-pill cc-pill-agent" title={agent ? `Vous parlez à ${agent.name}, agent du projet ${agent.project.name} : une session de l'agent s'ouvre avec votre message.` : 'À qui parler : votre assistant personnel (un chat), ou un agent d’un de vos projets.'}>
+              {agent ? <AgentAvatar agent={agent} size={16} /> : <i className="bi bi-person-circle" />}
+              <span className="cc-pill-label">{agent ? agent.name : 'Mon assistant'}</span>
+              <i className="bi bi-chevron-down" />
+              <select
+                className="cc-select"
+                aria-label="À qui parler"
+                value={agent ? agent.id : ''}
+                onChange={(e) => {
+                  setAgentId(e.target.value);
+                  write(AGENT_KEY, e.target.value);
+                }}
+              >
+                <option value="">Mon assistant (chat)</option>
+                {agents.map((a) => (
+                  <option key={a.id} value={a.id} title={a.description}>
+                    {a.name} · {agentKindLabels[a.kind]} · {a.project.name}
+                  </option>
+                ))}
+              </select>
+            </span>
+          )}
+          {!agent && (
           <span className={`cc-pill cc-pill-mode${mode === 'bypassPermissions' ? ' warn' : ''}`} title={`Autorisations du chat : ${permissionModeLabels[mode] ?? mode}. Lancer une session ou lui parler consomme du budget : en mode « demander », le chat vous le soumet d'abord.`}>
             <i className={`bi ${mode === 'bypassPermissions' ? 'bi-exclamation-triangle' : 'bi-shield-check'}`} />
             <span className="cc-pill-label">{permissionModeShortLabels[mode] ?? mode}</span>
@@ -201,7 +242,8 @@ export default function ChatComposer({ withGreeting = false, autoFocus = false }
               ))}
             </select>
           </span>
-          {modelOptions.length > 0 && (
+          )}
+          {!agent && modelOptions.length > 0 && (
             <span className="cc-pill cc-pill-model" title="Modèle du chat (Paramètres → Claude pour les modèles proposés)">
               <span className="cc-pill-label">{modelOptions.find((o) => o.value === model)?.label ?? modelOptions[0]?.label ?? 'Modèle'}</span>
               <i className="bi bi-chevron-down" />
@@ -229,7 +271,7 @@ export default function ChatComposer({ withGreeting = false, autoFocus = false }
       </div>
       {error && <div className="chat-composer-error">{error.message}</div>}
       <div className="chat-composer-suggestions">
-        {SUGGESTIONS.map((s) => (
+        {!agent && SUGGESTIONS.map((s) => (
           <button key={s.label} type="button" className="chat-composer-chip" onClick={() => suggest(s.prompt)} title={s.prompt}>
             {s.label}
           </button>

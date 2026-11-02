@@ -1,3 +1,4 @@
+import { userRepository } from '../users/repository.js';
 import type { Actor } from '../context/types.js';
 import type { AttachmentInput } from '../sessions/types.js';
 import { AppError, NotFoundError } from '../errors.js';
@@ -396,6 +397,8 @@ export const taskService = {
     for (const m of comment.mentions) {
       if (m.kind !== 'user' || notified.has(m.id)) continue;
       notified.add(m.id);
+      // Un agent mentionné n'est pas notifié : il est convoqué (agents/triggers.ts) ou reçoit le message par le fil.
+      if ((await userRepository.findById(m.id))?.kind === 'agent') continue;
       await notificationService.notify({ ...base, type: 'task.mentioned', userId: m.id, title: `${comment.authorName} vous mentionne · ${task.title}`, message: excerpt });
     }
     if (parent?.authorUserId && !notified.has(parent.authorUserId)) {

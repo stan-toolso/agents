@@ -679,6 +679,66 @@ function AppearanceSection() {
 }
 
 /** Paramètres de la personne connectée : Claude (identifiants, modèles, budgets), OpenCode, GitHub, GitLab, notifications, apparence ; serveur pour les administrateurs. */
+/**
+ * Comptes d'un agent de projet (fiche de l'agent, onglet Comptes) : les mêmes sections que Paramètres (Claude, OpenCode,
+ * GitHub, GitLab), rendues sous un client GraphQL qui agit pour le compte de l'agent (voir `createActAsClient`).
+ */
+export function AgentAccountSettings({ agentName }: { agentName: string }) {
+  const [section, setSection] = useState<'claude' | 'opencode' | 'github' | 'gitlab'>('claude');
+  const { data, loading, error } = usePollingQuery<{ settings: AppSettings }>(SETTINGS, { pollInterval: 15_000 });
+  if (loading && !data) return <PageLoading />;
+  if (error) return <Alert variant="danger">Erreur : {error.message}</Alert>;
+  if (!data) return null;
+  const s = data.settings;
+  const claudeReady = s.claudeAuth.mode === 'oauth' ? s.claudeAuth.hasOauthToken : s.claudeAuth.hasApiKey;
+  return (
+    <>
+      <Nav variant="tabs" activeKey={section} onSelect={(k) => setSection((k as typeof section) ?? 'claude')} className="mb-3">
+        <Nav.Item>
+          <Nav.Link eventKey="claude">
+            <i className="bi bi-stars me-1" /> Claude
+            {!claudeReady ? <Badge bg="secondary" className="ms-2">à configurer</Badge> : s.claudeAuth.verification?.ok === false && <Badge bg="danger" className="ms-2">à vérifier</Badge>}
+          </Nav.Link>
+        </Nav.Item>
+        <Nav.Item>
+          <Nav.Link eventKey="opencode">
+            <i className="bi bi-terminal me-1" /> OpenCode
+          </Nav.Link>
+        </Nav.Item>
+        <Nav.Item>
+          <Nav.Link eventKey="github">
+            <i className="bi bi-github me-1" /> GitHub
+            {s.github.connected ? <Badge bg="success" className="ms-2">connecté</Badge> : <Badge bg="secondary" className="ms-2">non connecté</Badge>}
+          </Nav.Link>
+        </Nav.Item>
+        <Nav.Item>
+          <Nav.Link eventKey="gitlab">
+            <i className="bi bi-gitlab me-1" /> GitLab
+            {s.gitlab.connected ? <Badge bg="success" className="ms-2">connecté</Badge> : <Badge bg="secondary" className="ms-2">non connecté</Badge>}
+          </Nav.Link>
+        </Nav.Item>
+      </Nav>
+      <div style={{ maxWidth: 1100 }}>
+        {!claudeReady && section === 'claude' && (
+          <Alert variant="warning" className="small py-2">
+            Sans identifiants Claude, {agentName} ne peut lancer aucune session : connectez un abonnement ou une clé API ci-dessous.
+          </Alert>
+        )}
+        {section === 'claude' && (
+          <>
+            <AuthCard settings={s} />
+            <ModelsCard settings={s} />
+            <BudgetCard settings={s} />
+          </>
+        )}
+        {section === 'opencode' && <OpencodeSection settings={s} />}
+        {section === 'github' && <GithubSection />}
+        {section === 'gitlab' && <GitlabSection />}
+      </div>
+    </>
+  );
+}
+
 export default function SettingsPage() {
   useTabTitle('Paramètres');
   const { user } = useAuth();

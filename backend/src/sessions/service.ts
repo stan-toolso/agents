@@ -23,6 +23,7 @@ import { callInstance } from '../instances/client.js';
 import type { Attachment, AttachmentInput, CreateSessionInput, RelaunchInput, Session, SessionFilter, SessionStatus } from './types.js';
 import { log } from '../log.js';
 import { reviewOf } from '../reviews/types.js';
+import { agentService } from '../agents/service.js';
 
 /** Texte d'une instruction sans texte : les fichiers joints sont l'instruction. */
 const ATTACHMENTS_ONLY_TEXT = 'Voir les fichiers joints.';
@@ -337,6 +338,15 @@ export const sessionService = {
     serverSettings.assertNotInMaintenance();
     const provider = getProvider(input.provider);
     const project = await projectService.get(input.projectId); // lève NotFoundError si le projet n'existe pas
+    // Session jouée par un agent de projet (propriétaire agent) : ses réglages par défaut s'appliquent avant ceux du projet.
+    const agentOwner = input.ownerId ? await agentService.forUser(input.ownerId) : null;
+    if (agentOwner) {
+      if (agentOwner.projectId !== project.id) throw new AppError(`L'agent ${agentOwner.name} n'appartient pas à ce projet`);
+      if (agentOwner.archivedAt) throw new AppError(`L'agent ${agentOwner.name} a été retiré du projet`);
+      input = { ...input, config: agentService.sessionConfig(agentOwner, input.config) };
+    } else {
+      input = { ...input, requestedById: null };
+    }
     // Sans mode d'autorisation précisé (sessions de tâches, sessions sans formulaire), celui du projet s'applique.
     if (!input.config?.permissionMode && provider.describe().configFields.some((f) => f.key === 'permissionMode')) {
       input = { ...input, config: { ...input.config, permissionMode: project.defaultPermissionMode } };
@@ -373,8 +383,10 @@ export const sessionService = {
         const role = await userService.memberRoleFor(parent.ownerId, project.id);
         if (!role || ROLE_RANK[role] < ROLE_RANK.member) throw new AppError(`Lancer une session dans « ${project.name} » demande le rôle membre sur ce projet`);
       }
-      // La session lancée par un agent appartient à la personne qui pilote la session parente.
-      ownerId = parent.ownerId;
+      // La session lancée par un agent appartient à la personne qui pilote la session parente, sauf quand elle est confiée à
+      // un agent du projet (propriétaire agent) ; la personne qui a demandé la session parente reste celle qui demande.
+      ownerId = agentOwner ? agentOwner.id : parent.ownerId;
+      if (agentOwner && !input.requestedById) input = { ...input, requestedById: parent.requestedById ?? parent.ownerId };
       if ((await depthOf(parent.id)) >= MAX_AGENT_DEPTH) throw new AppError(`Imbrication maximale atteinte : une session lancée par un agent lancé par un agent ne peut pas en lancer d'autres`);
       const children = [
         ...(await sessionRepository.list({ parentSessionId: parent.id, status: 'running', limit: MAX_RUNNING_CHILDREN + 1 })),

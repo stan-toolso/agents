@@ -104,6 +104,15 @@ export const TASK_THREAD = gql`
           id
           name
         }
+        agent {
+          id
+          name
+          kind
+          avatar {
+            emoji
+            color
+          }
+        }
         body
         mentions {
           kind

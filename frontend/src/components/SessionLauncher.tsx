@@ -1,3 +1,4 @@
+import { PROJECT_AGENT_REFS, agentKindLabels, type AgentRef } from '../graphql/agents';
 import { useMutation, useQuery } from '@apollo/client';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Alert, Button, Collapse, Form, Modal } from 'react-bootstrap';
@@ -131,6 +132,11 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
   const provider = providers.find((p) => p.type === providerType);
 
   const [createSession, { loading: busy }] = useMutation<{ createSession: Session }>(CREATE_SESSION, { refetchQueries: ['Sidebar', 'Sessions'] });
+  // « En tant que » : la session peut être jouée par un agent du projet (ses comptes, ses instructions) ; par défaut, par la personne.
+  const { data: agentsData } = useQuery<{ project: { id: string; agents: (AgentRef & { description: string; enabled: boolean })[] } | null }>(PROJECT_AGENT_REFS, { variables: { id: projectId }, skip: !projectId || Boolean(project?.isPersonal) });
+  const agents = agentsData?.project?.id === projectId ? agentsData.project.agents.filter((a) => a.enabled) : [];
+  const [agentId, setAgentId] = useState('');
+  const asAgent = agents.find((a) => a.id === agentId) ?? null;
 
   useEffect(() => {
     if (!projectId && projects.length) setProjectId(projects[0].id);
@@ -188,6 +194,7 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
             attachments: attachments.items.length ? await toAttachmentInputs(attachments.items) : null,
             config: buildConfig(provider!.configFields, values),
             autoStart: hasInstruction,
+            agentId: asAgent?.id ?? null,
           },
         },
       });
@@ -201,7 +208,7 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
   const configFields = provider?.configFields ?? [];
   const setValue = (key: string) => (v: string) => setValues((prev) => ({ ...prev, [key]: v }));
   const bypassWarning = values.permissionMode === 'bypassPermissions' ? bypassConnectionsWarning(info?.approvalConnections ?? []) : null;
-  const optionSummary = [provider && providers.length > 1 ? provider.label : null, ...configFields.filter((f) => !f.advanced && values[f.key]).map((f) => f.options?.find((o) => o.value === values[f.key])?.label ?? values[f.key])].filter(Boolean).join(' · ');
+  const optionSummary = [asAgent ? `en tant que ${asAgent.name}` : null, provider && providers.length > 1 ? provider.label : null, ...configFields.filter((f) => !f.advanced && values[f.key]).map((f) => f.options?.find((o) => o.value === values[f.key])?.label ?? values[f.key])].filter(Boolean).join(' · ');
   const submitLabel = busy ? 'Création…' : hasInstruction ? 'Lancer' : 'Créer la session';
 
   return (
@@ -287,9 +294,23 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
                 </Button>
                 <Collapse in={showOptions}>
                   <div className="pt-2 ps-3 border-start">
+                    {agents.length > 0 && (
+                      <Form.Group className="mb-3">
+                        <Form.Label className="mb-1">En tant que</Form.Label>
+                        <Form.Select value={agentId} onChange={(e) => setAgentId(e.target.value)}>
+                          <option value="">Moi (mes comptes)</option>
+                          {agents.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.name} · {agentKindLabels[a.kind]}
+                            </option>
+                          ))}
+                        </Form.Select>
+                        {asAgent && <Form.Text>La session appartient à {asAgent.name} : ses comptes, ses instructions, son budget ; vous en êtes le demandeur.</Form.Text>}
+                      </Form.Group>
+                    )}
                     {providers.length > 1 && (
                       <Form.Group className="mb-3">
-                        <Form.Label className="mb-1">Agent</Form.Label>
+                        <Form.Label className="mb-1">Type d'agent</Form.Label>
                         <Form.Select value={providerType} onChange={(e) => setProviderType(e.target.value)}>
                           {providers.map((p) => (
                             <option key={p.type} value={p.type}>

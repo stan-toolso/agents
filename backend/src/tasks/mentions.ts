@@ -27,9 +27,10 @@ export const fold = (s: string): string => Array.from(s.trim().replace(/\s+/g, '
 
 const isWordChar = (c: string | undefined) => c !== undefined && /[\p{L}\p{N}_]/u.test(c);
 
-/** Membre du projet mentionnable par son nom ou son e-mail. */
-export function userMentionable(u: { id: string; name: string; email: string }): Mentionable {
+/** Membre du projet mentionnable par son nom ou son e-mail ; un agent de projet par son nom seulement (`detail` = « agent »). */
+export function userMentionable(u: { id: string; name: string; email: string; kind?: string | null }): Mentionable {
   const name = u.name.trim();
+  if (u.kind === 'agent') return { kind: 'user', id: u.id, label: name, detail: 'agent', text: `@${name}`, aliases: [name].filter(Boolean) };
   return { kind: 'user', id: u.id, label: name || u.email, detail: name ? u.email : null, text: `@${name || u.email}`, aliases: [name, u.email].filter(Boolean) };
 }
 

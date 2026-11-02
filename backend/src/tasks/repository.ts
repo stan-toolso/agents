@@ -466,9 +466,9 @@ export const taskRepository = {
   // ---- Mentions --------------------------------------------------------------------------------
 
   /** Membres du projet (nom, e-mail) et sessions d'agent non archivées du projet : ce que l'on peut mentionner. */
-  async mentionCandidates(projectId: string): Promise<{ users: { id: string; name: string; email: string }[]; sessions: { id: string; name: string; status: string }[] }> {
+  async mentionCandidates(projectId: string): Promise<{ users: { id: string; name: string; email: string; kind: string }[]; sessions: { id: string; name: string; status: string }[] }> {
     const [users, sessions] = await Promise.all([
-      pool.query<{ id: string; name: string; email: string }>('SELECT u.id, u.name, u.email FROM project_members m JOIN users u ON u.id = m.user_id WHERE m.project_id = $1 ORDER BY u.name ASC', [projectId]),
+      pool.query<{ id: string; name: string; email: string; kind: string }>('SELECT u.id, u.name, u.email, u.kind FROM project_members m JOIN users u ON u.id = m.user_id WHERE m.project_id = $1 ORDER BY (u.kind = \'agent\') DESC, u.name ASC', [projectId]),
       pool.query<{ id: string; name: string; status: string }>(
         `SELECT id, name, status FROM sessions WHERE project_id = $1 AND archived_at IS NULL AND kind = 'session' ORDER BY (status = 'running') DESC, created_at DESC LIMIT 200`,
         [projectId],

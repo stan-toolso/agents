@@ -3,10 +3,14 @@ export type ProjectRole = 'admin' | 'member' | 'viewer';
 /** Ordre des rôles : un rôle donne tous les droits des rôles inférieurs. */
 export const ROLE_RANK: Record<ProjectRole, number> = { viewer: 0, member: 1, admin: 2 };
 
+/** Une personne, ou un agent de projet (utilisateur qui ne se connecte jamais, propriétaire des sessions qu'il joue ; voir agents/). */
+export type UserKind = 'person' | 'agent';
+
 export interface User {
   id: string;
   email: string;
   name: string;
+  kind: UserKind;
   avatarUrl: string | null;
   googleSub: string | null;
   /** Administrateur de l'application : paramètres généraux, utilisateurs. Les droits sur les projets restent par projet. */

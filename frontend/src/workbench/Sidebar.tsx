@@ -1,3 +1,4 @@
+import AgentAvatar from '../components/AgentAvatar';
 import { useMutation, useQuery } from '@apollo/client';
 import PopMenu, { type MenuItem } from '../components/PopMenu';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -264,10 +265,15 @@ function SessionRow({ s, indent, depth = 0, byAgent = false, parentName = null, 
             <i className="bi bi-layers" /> {elsewhere}
           </span>
         )}
-        {s.owner && !mine && (
-          <span className="wb-owner" title={`Session de ${s.owner.name}`}>
-            {initialsOf(s.owner.name)}
-          </span>
+        {s.agent ? (
+          <AgentAvatar agent={s.agent} size={16} className="wb-owner wb-owner-agent" title={`Session de l'agent ${s.agent.name}`} />
+        ) : (
+          s.owner &&
+          !mine && (
+            <span className="wb-owner" title={`Session de ${s.owner.name}`}>
+              {initialsOf(s.owner.name)}
+            </span>
+          )
         )}
         {s.pendingRequestCount > 0 ? <span className="wb-badge">{s.pendingRequestCount}</span> : hint && depth === 0 && <span className="wb-state">{hint}</span>}
       </RowWithMenu>
@@ -418,10 +424,15 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
           <span className="wb-ws-name">{ws.name}</span>
           {ws.primary && ws.projectName && <span className="wb-tag" title="Sessions et terminaux d'avant les work sessions, dans le checkout principal">principal</span>}
           {!ws.exists && <span className="wb-tag missing">absent</span>}
-          {session?.owner && !mine && (
-            <span className="wb-owner" title={`Session de ${session.owner.name}`}>
-              {initialsOf(session.owner.name)}
-            </span>
+          {session?.agent ? (
+            <AgentAvatar agent={session.agent} size={16} className="wb-owner wb-owner-agent" title={`Session de l'agent ${session.agent.name}`} />
+          ) : (
+            session?.owner &&
+            !mine && (
+              <span className="wb-owner" title={`Session de ${session.owner.name}`}>
+                {initialsOf(session.owner.name)}
+              </span>
+            )
           )}
           {pending > 0 ? <span className="wb-badge">{pending}</span> : hint && <span className="wb-state">{hint}</span>}
         </Link>

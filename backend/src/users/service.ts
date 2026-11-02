@@ -31,6 +31,7 @@ export const userService = {
     const normalized = email.trim().toLowerCase();
     if (!EMAIL_RE.test(normalized)) throw new AppError('Adresse e-mail invalide');
     const existing = await userRepository.findByEmail(normalized);
+    if (existing?.kind === 'agent') throw new AppError('Cette adresse est celle d’un agent de projet : un agent ne s’invite pas');
     if (existing) return isAdmin && !existing.isAdmin ? (await userRepository.setAdmin(existing.id, true))! : existing;
     return userRepository.create({ email: normalized, name: nameFromEmail(normalized), isAdmin });
   },
@@ -104,6 +105,7 @@ export const userService = {
     const normalized = email.trim().toLowerCase();
     if (!EMAIL_RE.test(normalized)) throw new AppError('Adresse e-mail invalide');
     const user = (await userRepository.findByEmail(normalized)) ?? (await userRepository.create({ email: normalized, name: nameFromEmail(normalized) }));
+    if (user.kind === 'agent') throw new AppError('Cette adresse est celle d’un agent de projet : un agent se crée depuis l’onglet Agents de son projet');
     return userRepository.upsertMembership({ projectId, userId: user.id, role, invitedById: invitedBy.id });
   },
 

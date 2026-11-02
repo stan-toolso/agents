@@ -1,3 +1,4 @@
+import AgentAvatar from '../components/AgentAvatar';
 import { useMutation, useQuery } from '@apollo/client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Spinner } from 'react-bootstrap';
@@ -306,11 +307,19 @@ export default function SessionDetailPage() {
                 · <span title={`La session a travaillé sur la branche ${session.formerWorksession.branch} ; son dossier de travail a été supprimé depuis`}><i className="bi bi-git" /> {session.formerWorksession.branch} <span className="cc-dimmer">(dossier supprimé)</span></span>
               </>
             )}
-            {session.owner && (
+            {session.agent ? (
               <>
                 {' '}
-                · <i className="bi bi-person" /> {session.owner.id === user?.id ? 'moi' : session.owner.name}
+                · <Link to={`/projects/${session.project.id}/agents/${session.agent.id}`} className="cc-meta" title={`Session jouée par l'agent ${session.agent.name}`}><AgentAvatar agent={session.agent} size={14} className="agent-inline-avatar" />{session.agent.name}</Link>
+                {session.requestedBy && <span className="cc-dimmer"> · demandée par {session.requestedBy.id === user?.id ? 'moi' : session.requestedBy.name}</span>}
               </>
+            ) : (
+              session.owner && (
+                <>
+                  {' '}
+                  · <i className="bi bi-person" /> {session.owner.id === user?.id ? 'moi' : session.owner.name}
+                </>
+              )
             )}
             {session.tasks.map((t) => (
               <span key={t.id}>

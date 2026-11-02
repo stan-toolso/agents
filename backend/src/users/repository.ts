@@ -1,10 +1,11 @@
 import { pool } from '../db/pool.js';
-import type { OpenItems, ProjectMember, ProjectRole, User } from './types.js';
+import type { OpenItems, ProjectMember, ProjectRole, User, UserKind } from './types.js';
 
 interface UserRow {
   id: string;
   email: string;
   name: string;
+  kind: UserKind;
   avatar_url: string | null;
   google_sub: string | null;
   is_admin: boolean;
@@ -28,6 +29,7 @@ const toUser = (r: UserRow): User => ({
   id: r.id,
   email: r.email,
   name: r.name,
+  kind: r.kind ?? 'person',
   avatarUrl: r.avatar_url,
   googleSub: r.google_sub,
   isAdmin: r.is_admin,
@@ -67,10 +69,18 @@ export const userRepository = {
     return rows[0] ? toUser(rows[0]) : null;
   },
 
-  /** Crée un utilisateur « invité » (pas encore connecté). */
-  async create(input: { email: string; name: string; isAdmin?: boolean }): Promise<User> {
-    const { rows } = await pool.query<UserRow>('INSERT INTO users (email, name, is_admin) VALUES ($1, $2, $3) RETURNING *', [input.email.toLowerCase(), input.name, Boolean(input.isAdmin)]);
+  /** Crée un utilisateur « invité » (pas encore connecté), ou un agent de projet (`kind: 'agent'`, identifiant imposé). */
+  async create(input: { id?: string | null; email: string; name: string; isAdmin?: boolean; kind?: UserKind | null }): Promise<User> {
+    const { rows } = await pool.query<UserRow>(
+      'INSERT INTO users (id, email, name, is_admin, kind) VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5) RETURNING *',
+      [input.id ?? null, input.email.toLowerCase(), input.name, Boolean(input.isAdmin), input.kind ?? 'person'],
+    );
     return toUser(rows[0]);
+  },
+
+  async rename(id: string, name: string): Promise<User | null> {
+    const { rows } = await pool.query<UserRow>('UPDATE users SET name = $2 WHERE id = $1 RETURNING *', [id, name]);
+    return rows[0] ? toUser(rows[0]) : null;
   },
 
   async setAdmin(id: string, isAdmin: boolean): Promise<User | null> {
@@ -107,11 +117,11 @@ export const userRepository = {
     return rows.map((r) => r.id);
   },
 
-  /** Utilisateurs partageant au moins un projet avec la personne (candidats au partage). */
+  /** Personnes partageant au moins un projet avec la personne (candidats au partage) ; les agents n'en sont pas. */
   async listColleagues(userId: string): Promise<User[]> {
     const { rows } = await pool.query<UserRow>(
       `SELECT DISTINCT u.* FROM users u JOIN project_members m ON m.user_id = u.id
-       WHERE u.id <> $1 AND m.project_id IN (SELECT project_id FROM project_members WHERE user_id = $1) ORDER BY u.email`,
+       WHERE u.id <> $1 AND u.kind = 'person' AND m.project_id IN (SELECT project_id FROM project_members WHERE user_id = $1) ORDER BY u.email`,
       [userId],
     );
     return rows.map(toUser);
@@ -127,8 +137,9 @@ export const userRepository = {
     return toUser(rows[0]);
   },
 
+  /** Personnes (les agents de projet ne sont pas des comptes à administrer). */
   async list(): Promise<User[]> {
-    const { rows } = await pool.query<UserRow>('SELECT * FROM users ORDER BY name ASC, email ASC');
+    const { rows } = await pool.query<UserRow>(`SELECT * FROM users WHERE kind = 'person' ORDER BY name ASC, email ASC`);
     return rows.map(toUser);
   },
 

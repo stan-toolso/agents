@@ -129,7 +129,19 @@ function validateNote(note: string | null | undefined, label = 'La note'): strin
 
 export { describePullRequest, describeSnapshot } from './types.js';
 
+/** Écouteurs des fusions de pull requests suivies (agents) ; jamais attendus, erreurs journalisées. */
+const mergedListeners = new Map<string, (pr: TrackedPullRequest) => Promise<void> | void>();
+function notifyMerged(pr: TrackedPullRequest): void {
+  for (const [name, fn] of mergedListeners) {
+    Promise.resolve()
+      .then(() => fn(pr))
+      .catch((err) => log.error(`[pull-requests] écouteur ${name}`, err));
+  }
+}
+
 export const trackedPullRequestService = {
+  onMerged: (name: string, fn: (pr: TrackedPullRequest) => Promise<void> | void) => mergedListeners.set(name, fn),
+
   list: (filter?: TrackedPullRequestFilter) => pullRequestRepository.list(filter),
   forTask: (taskId: string) => pullRequestRepository.list({ taskId, limit: 100 }),
   countPending: (projectIds: string[]) => pullRequestRepository.countPending(projectIds),
@@ -291,13 +303,16 @@ export const trackedPullRequestService = {
     const after = await pullRequestRepository.update(id, patch);
     if (!after) throw new NotFoundError('Pull request suivie introuvable');
     if (input.taskId && after.taskId) await this.linkTaskBranch(after.taskId, after.headBranch);
+    if (before.status !== 'merged' && after.status === 'merged') notifyMerged(after);
     return after;
   },
 
   /** Fusion faite depuis Skipper (panneau git) : la PR suivie passe à « fusionnée » (créée au besoin). */
   async markMerged(projectId: string, pr: PullRequest, sha: string | null, actor: PullRequestActor): Promise<TrackedPullRequest> {
     const tracked = await this.recordGithub(projectId, { ...pr, state: 'MERGED', mergedAt: pr.mergedAt ?? new Date() }, actor);
-    return (await pullRequestRepository.update(tracked.id, { status: 'merged', mergeSha: sha, mergedAt: tracked.mergedAt ?? new Date() })) ?? tracked;
+    const merged = (await pullRequestRepository.update(tracked.id, { status: 'merged', mergeSha: sha, mergedAt: tracked.mergedAt ?? new Date() })) ?? tracked;
+    notifyMerged(merged);
+    return merged;
   },
 
   async delete(id: string): Promise<boolean> {
@@ -456,6 +471,7 @@ export const trackedPullRequestService = {
       closedAt: g.closedAt,
     });
     if (updated && tracked.status === 'open' && status !== 'open') {
+      if (status === 'merged') notifyMerged(updated);
       const project = await projectService.get(tracked.projectId).catch(() => null);
       const ref = `${project && !sameRepo(updated.repo, projectRepoName(project)) ? updated.repo : ''}#${updated.number}`;
       void notificationService.notify({

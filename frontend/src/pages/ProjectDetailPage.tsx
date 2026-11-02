@@ -468,7 +468,12 @@ function MembersCard({ projectId, canManage }: { projectId: string; canManage: b
                 <td>
                   <strong>{m.user.name}</strong>
                   {m.user.id === me?.id && <span className="text-secondary"> (vous)</span>}
-                  {m.pending && (
+                  {m.user.kind === 'AGENT' && (
+                    <Link to={`/projects/${projectId}/agents/${m.user.id}`} className="badge text-bg-info ms-2 text-decoration-none" title="Agent de projet : membre qui n'est pas une personne (fiche, comptes, activité)">
+                      <i className="bi bi-robot" /> agent
+                    </Link>
+                  )}
+                  {m.pending && !(m.user.kind === 'AGENT') && (
                     <span className="badge text-bg-secondary ms-2" title="Invité, ne s'est pas encore connecté">
                       en attente
                     </span>
