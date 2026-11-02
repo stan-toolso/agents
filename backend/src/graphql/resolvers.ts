@@ -85,6 +85,7 @@ import type { SessionCleanup } from '../sessions/types.js';
 import { terminalService } from '../terminals/service.js';
 import { worksessionPath, worksessionService } from '../worksessions/service.js';
 import { worksessionRepository } from '../worksessions/repository.js';
+import { worksessionDisk, type WorksessionDiskEntry } from '../worksessions/disk.js';
 import { worksessionLabel, type Worksession } from '../worksessions/types.js';
 import { resumableTaskSession, resumeTaskSession, startTaskSession } from '../tasks/launch.js';
 import { taskService } from '../tasks/service.js';
@@ -648,6 +649,12 @@ export const resolvers = {
     terminals: async (w: Worksession, _: unknown, ctx: Ctx) => (await terminalService.listByProject(w.projectId, requireUser(ctx).id)).filter((t) => t.worksessionId === w.id),
   },
 
+  WorksessionDiskEntry: {
+    activeSessions: (e: WorksessionDiskEntry) => e.activity?.activeSessions ?? 0,
+    busySessions: (e: WorksessionDiskEntry) => e.activity?.busySessions ?? 0,
+    deps: (e: WorksessionDiskEntry) => (e.deps ? e.deps.replace('-', '_').toUpperCase() : null),
+  },
+
   PermissionRule: {
     rule: (r: PermissionRule) => formatRule(r),
     createdBySession: (r: PermissionRule) => (r.createdBySessionId ? sessionService.get(r.createdBySessionId) : null),
@@ -680,6 +687,7 @@ export const resolvers = {
     terminals: (project: Project, _: unknown, ctx: Ctx) => terminalService.listByProject(project.id, requireUser(ctx).id),
     worksessions: (project: Project) => worksessionService.listByProject(project.id),
     archivedWorksessions: (project: Project) => worksessionService.listByProject(project.id, { archived: 'only' }),
+    worksessionDisk: (project: Project, args: { refresh?: boolean | null }, ctx: Ctx) => worksessionDisk.report(project.id, { refresh: Boolean(args.refresh), actorId: ctx.user?.id ?? null }),
     vaultItems: (project: Project, _: unknown, ctx: Ctx) => vaultService.projectRows(project.id, requireUser(ctx).id),
     agents: (project: Project) => (isPersonalProject(project) ? [] : agentService.listByProject(project.id)),
     apiKeys: async (project: Project, _: unknown, ctx: Ctx) => ((await roleFor(ctx, project.id)) === 'admin' ? apiKeyService.list(project.id) : []),
@@ -1771,6 +1779,22 @@ export const resolvers = {
     deleteWorksession: async (_: unknown, args: { id: string; deleteBranch?: boolean | null; deleteSessions?: boolean | null }, ctx: Ctx) => {
       await guardWorksession(ctx, args.id, 'member');
       return deleteWorksessionCascade(args.id, args.deleteBranch ?? false, { deleteSessions: args.deleteSessions ?? false });
+    },
+    cleanMergedWorksessions: async (_: unknown, args: { projectId: string; names?: string[] | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'member');
+      return worksessionDisk.cleanMerged(args.projectId, requireUser(ctx).id, args.names);
+    },
+    shareWorksessionDeps: async (_: unknown, args: { projectId: string; names?: string[] | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'member');
+      return worksessionDisk.shareDeps(args.projectId, args.names);
+    },
+    importOrphanWorksession: async (_: unknown, args: { projectId: string; name: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'member');
+      return worksessionDisk.importOrphan(args.projectId, args.name);
+    },
+    deleteOrphanWorksession: async (_: unknown, args: { projectId: string; name: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'admin');
+      return worksessionDisk.deleteOrphan(args.projectId, args.name);
     },
     // Coffre : les droits sont vérifiés par le service (use / read / manage) ; un projet propriétaire exige un administrateur.
     createVaultItem: async (_: unknown, args: { projectId?: string | null; input: VaultItemInput }, ctx: Ctx) => {

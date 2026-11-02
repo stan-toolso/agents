@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { detectFromPackage, parsePreviewConfig, PreviewConfigError, resolvePreviewConfig } from './config.js';
-import { defaultInstallCommand, depsHash, linkSnapshot, listSnapshots, MARKER, pruneSnapshots, readMarker, saveSnapshot, scanTree, seedWorksessionDeps, writeMarker } from './deps.js';
+import { defaultInstallCommand, depsHash, depsShareState, linkSnapshot, listSnapshots, MARKER, pruneSnapshots, readMarker, relinkDeps, saveSnapshot, scanTree, seedWorksessionDeps, writeMarker } from './deps.js';
 import { freePort, labelFromHost, newHostLabel, parsePreviewTemplate, previewOrigin, PREVIEW_PORT_MIN, safeNext } from './hosts.js';
 import { INSTALL_SCRIPT, RUN_SCRIPT } from './scripts.js';
 import { deriveState, parseEvents } from './state.js';
@@ -179,6 +179,51 @@ describe('instantanés des dépendances', () => {
     expect(await readFile(path.join(e, 'node_modules/pkg/index.js'), 'utf8')).toBe('1');
     expect(await readMarker(e)).toBe(hash);
     expect(await readMarker(e)).not.toBe(await depsHash(e));
+  });
+
+  it('remplace une copie à part des dépendances par l’instantané de même empreinte, liens physiques', async () => {
+    const a = await worktree('a');
+    await write('a/node_modules/.package-lock.json', '{}');
+    await write('a/node_modules/pkg/index.js', '1');
+    await write('a/frontend/node_modules/vite/index.js', 'vite');
+    const hash = (await depsHash(a))!;
+    expect(await depsShareState(store, a)).toEqual({ hash, state: 'no-snapshot' });
+    await saveSnapshot(store, a, hash);
+    expect((await depsShareState(store, a)).state).toBe('linked');
+
+    // Installée à part (avant les instantanés) : mêmes fichiers, autres inodes.
+    const b = await worktree('b');
+    await write('b/node_modules/.package-lock.json', '{}');
+    await write('b/node_modules/pkg/index.js', '1');
+    await write('b/frontend/node_modules/vite/index.js', 'vite');
+    expect((await depsShareState(store, b)).state).toBe('copy');
+    expect(await relinkDeps(store, b)).toBe(true);
+    expect((await depsShareState(store, b)).state).toBe('linked');
+    expect((await stat(path.join(b, 'frontend/node_modules/vite/index.js'))).ino).toBe((await stat(path.join(a, 'frontend/node_modules/vite/index.js'))).ino);
+    expect(await readMarker(b)).toBe(hash);
+    // Rien de la copie ne reste à côté.
+    expect((await scanTree(b)).nodeModules).toEqual(['frontend/node_modules', 'node_modules']);
+    expect(await relinkDeps(store, b)).toBe(false);
+
+    // Autre lockfile : pas d’instantané, rien n’est touché.
+    const c = await worktree('c', '{"lockfileVersion":3,"autre":true}');
+    await write('c/node_modules/.package-lock.json', '{}');
+    expect((await depsShareState(store, c)).state).toBe('no-snapshot');
+    expect(await relinkDeps(store, c)).toBe(false);
+  });
+
+  it('remet la copie en place si l’instantané ne peut pas être lié', async () => {
+    const a = await worktree('a');
+    await write('a/node_modules/.package-lock.json', '{}');
+    const hash = (await depsHash(a))!;
+    await saveSnapshot(store, a, hash);
+    const b = await worktree('b');
+    await write('b/node_modules/.package-lock.json', '{}');
+    await write('b/node_modules/propre-a-b.txt', 'b');
+    // Un node_modules que l’instantané ne connaît pas : la liaison refuse (« present »), la copie est restaurée.
+    await write('b/outils/node_modules/x.js', 'x');
+    await expect(relinkDeps(store, b)).rejects.toThrow(/non appliqué/);
+    expect(await readFile(path.join(b, 'node_modules/propre-a-b.txt'), 'utf8')).toBe('b');
   });
 
   it('ne garde que les instantanés les plus récents', async () => {
