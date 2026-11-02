@@ -77,4 +77,29 @@ export const worksessionRepository = {
     );
     return { sessions: Number(rows[0].s), terminals: Number(rows[0].t) };
   },
+  /**
+   * Occupation et activité de chaque work session d’un projet (archivées comprises), pour la page des dossiers : sessions
+   * non archivées, sessions qui tournent (en cours, en file, ou en attente de démarrage et non archivées), terminaux ouverts, dernière activité.
+   */
+  async activityByProject(projectId: string): Promise<Map<string, WorksessionActivity>> {
+    const { rows } = await pool.query<{ id: string; active: string; busy: string; terms: string; last: Date | null }>(
+      `SELECT w.id,
+              count(s.id) FILTER (WHERE s.archived_at IS NULL)::text AS active,
+              count(s.id) FILTER (WHERE s.status IN ('queued', 'running') OR (s.status = 'pending' AND s.archived_at IS NULL))::text AS busy,
+              (SELECT count(*) FROM terminals t WHERE t.worksession_id = w.id AND t.status = 'running')::text AS terms,
+              max(s.updated_at) AS last
+         FROM worksessions w LEFT JOIN sessions s ON s.worksession_id = w.id
+        WHERE w.project_id = $1
+        GROUP BY w.id`,
+      [projectId],
+    );
+    return new Map(rows.map((r) => [r.id, { activeSessions: Number(r.active), busySessions: Number(r.busy), terminals: Number(r.terms), lastActivityAt: r.last ?? null }]));
+  },
 };
+
+export interface WorksessionActivity {
+  activeSessions: number;
+  busySessions: number;
+  terminals: number;
+  lastActivityAt: Date | null;
+}

@@ -140,6 +140,8 @@ type Project {
   worksessions: [Worksession!]!
   "Work sessions archivées, les plus récemment archivées d'abord."
   archivedWorksessions: [Worksession!]!
+  "Dossiers de travail sur disque (work sessions actives, archivées et orphelines) : place occupée, fusion, occupation. refresh : nouvelle mesure des tailles (sinon gardées 10 min) et fetch d'origin."
+  worksessionDisk(refresh: Boolean = false): WorksessionDiskReport!
   "Éléments du coffre à disposition des agents de ce projet (pour les sessions de l'utilisateur connecté)."
   vaultItems: [ProjectVaultItem!]!
   "Clés d'API du projet (administrateurs)."
@@ -539,6 +541,78 @@ type Worksession {
   sessions: [Session!]!
   "Terminaux de l'utilisateur connecté."
   terminals: [Terminal!]!
+}
+
+"Dossiers de travail d'un projet tels qu'ils sont sur disque."
+type WorksessionDiskReport {
+  "Date de la mesure des tailles (gardées 10 min) ; null : pas encore mesurées."
+  computedAt: DateTime
+  "Une mesure des tailles tourne (une vingtaine de secondes sur un gros projet) : les tailles données sont les précédentes ; interroger à nouveau."
+  measuring: Boolean!
+  "Instantanés de dépendances partagés par liens physiques (.skipper-deps), comptés une seule fois."
+  sharedBytes: Float
+  "Place totale : dossiers et instantanés."
+  totalBytes: Float
+  entries: [WorksessionDiskEntry!]!
+  "Worktrees déclarés à git dont le dossier a disparu (retirés au prochain nettoyage)."
+  prunable: [String!]!
+}
+
+"Un dossier de travail sur disque."
+type WorksessionDiskEntry {
+  "Nom du dossier."
+  name: String!
+  path: String!
+  "Work session de Skipper ; null : dossier orphelin (créé hors de Skipper ou dont l'enregistrement a disparu)."
+  worksession: Worksession
+  branch: String
+  exists: Boolean!
+  "Le dossier est un git worktree du checkout principal."
+  gitWorktree: Boolean!
+  "Place occupée en propre : les fichiers partagés par liens physiques (dépendances) ne sont comptés qu'une fois, à l'instantané."
+  bytes: Float
+  "Commits absents de la branche principale sur origin."
+  aheadCount: Int
+  "Commits locaux absents de la branche du même nom sur origin (null : pas de branche sur origin)."
+  unpushedCount: Int
+  "Fichiers modifiés ou non suivis."
+  changes: Int
+  prMerged: Boolean!
+  "Fusionnée : PR fusionnée, ou aucun commit absent de la branche principale."
+  merged: Boolean!
+  "Sessions non archivées."
+  activeSessions: Int!
+  "Sessions qui tournent."
+  busySessions: Int!
+  lastActivityAt: DateTime
+  "Dépendances (node_modules) : LINKED liées à l'instantané partagé, COPY copie à part que l'instantané de même lockfile peut remplacer, NO_SNAPSHOT sans instantané ; null : sans objet."
+  deps: WorksessionDepsState
+  "« Nettoyer les dossiers fusionnés » le supprimerait."
+  cleanable: Boolean!
+  "Pourquoi il ne serait pas nettoyé."
+  blocker: String
+}
+
+enum WorksessionDepsState {
+  LINKED
+  COPY
+  NO_SNAPSHOT
+}
+
+type WorksessionDepsShareResult {
+  relinked: [String!]!
+  skipped: [WorksessionCleanupSkip!]!
+}
+
+type WorksessionCleanupSkip {
+  name: String!
+  reason: String!
+}
+
+type WorksessionCleanupResult {
+  removed: [String!]!
+  freedBytes: Float!
+  skipped: [WorksessionCleanupSkip!]!
 }
 
 # ---- Aperçus ---------------------------------------------------------------------------------------
@@ -2892,6 +2966,14 @@ type Mutation {
   restoreWorksession(id: ID!): Worksession!
   "Supprime la work session (dossier, terminaux fermés) ; ses sessions sont arrêtées si elles tournent puis archivées avec son souvenir, sauf deleteSessions (suppression définitive, historique compris). La branche est conservée sauf deleteBranch."
   deleteWorksession(id: ID!, deleteBranch: Boolean = false, deleteSessions: Boolean = false): Boolean!
+  "Supprime les dossiers de travail fusionnés (tous ceux qui peuvent l'être, ou ceux de names) : rien n'y tourne, rien de non commité, commits dans la branche principale ou PR fusionnée. Leurs sessions sont archivées avec leur historique, la branche locale supprimée (membres)."
+  cleanMergedWorksessions(projectId: ID!, names: [String!]): WorksessionCleanupResult!
+  "Remplace par l'instantané partagé (liens physiques) les copies à part des dépendances des dossiers où rien ne tourne (tous, ou ceux de names) : la place des copies est rendue (membres)."
+  shareWorksessionDeps(projectId: ID!, names: [String!]): WorksessionDepsShareResult!
+  "Enregistre un dossier orphelin (git worktree sur une branche) comme work session (membres)."
+  importOrphanWorksession(projectId: ID!, name: String!): Worksession!
+  "Supprime un dossier orphelin, modifications comprises ; la branche est conservée (administrateurs)."
+  deleteOrphanWorksession(projectId: ID!, name: String!): Boolean!
   "Crée un élément dans le coffre du projet (administrateurs) ou, sans projectId, dans le coffre personnel."
   createVaultItem(projectId: ID, input: VaultItemInput!): VaultItem!
   "Met à jour un élément (permission MANAGE ; les champs absents sont inchangés)."
