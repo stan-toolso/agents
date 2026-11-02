@@ -117,6 +117,37 @@ export function gitlabRepoOf(url: string | null | undefined, knownHosts: string[
   return { host: known.toLowerCase(), namespace: path.split('/')[0].toLowerCase(), path };
 }
 
+/**
+ * Instances GitLab connues du serveur (celles où une personne a connecté un compte), pour reconnaître le dépôt
+ * auto-hébergé d'un projet sans dépendre des comptes de la personne qui regarde. Relues au plus une fois par minute
+ * (`refreshKnownGitlabHosts`) et à chaque connexion de compte ; gitlab.com est toujours reconnu.
+ */
+let knownHosts: string[] = [];
+let knownHostsAt = 0;
+const KNOWN_HOSTS_TTL_MS = 60_000;
+
+export const knownGitlabHosts = (): string[] => knownHosts;
+
+export async function refreshKnownGitlabHosts(opts: { force?: boolean } = {}): Promise<string[]> {
+  if (!opts.force && Date.now() - knownHostsAt < KNOWN_HOSTS_TTL_MS) return knownHosts;
+  knownHostsAt = Date.now();
+  try {
+    knownHosts = await gitlabAccountRepository.allHosts();
+  } catch (err) {
+    log.warn(`[gitlab] instances connues illisibles : ${(err as Error).message}`);
+  }
+  return knownHosts;
+}
+
+/** Pour les tests : fixe les instances connues. */
+export function setKnownGitlabHosts(hosts: string[]): void {
+  knownHosts = hosts;
+  knownHostsAt = Date.now();
+}
+
+/** Dépôt GitLab d'une URL de projet (gitlab.com ou une instance connue), null sinon. */
+export const projectGitlabRepo = (url: string | null | undefined) => gitlabRepoOf(url, knownHosts);
+
 export async function gitlabFetch(host: string, path: string, init: RequestInit & { token?: string } = {}): Promise<Response> {
   const headers: Record<string, string> = { Accept: 'application/json', 'User-Agent': USER_AGENT, ...((init.headers as Record<string, string>) ?? {}) };
   if (init.token) headers.Authorization = `Bearer ${init.token}`;
@@ -267,6 +298,7 @@ export async function storeGitlabOAuthAccount(userId: string, host: string, t: G
     refreshTokenExpiresAt: null,
   });
   log.info(`[gitlab] compte ${account.login}@${host} connecté (code) pour ${userId}`);
+  void refreshKnownGitlabHosts({ force: true });
   return toPublic(account);
 }
 
@@ -299,6 +331,7 @@ export const gitlabService = {
       refreshTokenExpiresAt: null,
     });
     log.info(`[gitlab] compte ${account.login}@${host} connecté (jeton du coffre) pour ${userId}`);
+    void refreshKnownGitlabHosts({ force: true });
     return toPublic(account);
   },
 
@@ -356,6 +389,14 @@ export const gitlabService = {
     const main = pickCredential(creds, repo?.namespace);
     if (!main) return null;
     return { host: main.host, token: main.token, name: main.name || main.login, email: main.email ?? `${main.login}@users.noreply.${hostname(main.host)}` };
+  },
+
+  /**
+   * Jeton d'API d'une personne pour un dépôt d'une instance : le compte de cette instance qui possède l'espace du
+   * dépôt, sinon son compte par défaut sur l'instance. Null sans compte utilisable sur l'instance.
+   */
+  async apiToken(userId: string | null | undefined, host: string, namespace?: string | null): Promise<string | null> {
+    return pickCredential(await this.credentials(userId, {}, host), namespace)?.token ?? null;
   },
 
   /** Arguments `-c` à ajouter aux commandes git pour authentifier les URL https d'un dépôt GitLab ; vides pour une autre URL ou sans compte. */

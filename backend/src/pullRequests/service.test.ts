@@ -16,12 +16,15 @@ const m = vi.hoisted(() => ({
   notifications: [] as Array<Record<string, unknown>>,
   created: [] as Array<Record<string, unknown>>,
   isGithub: true,
+  /** URL du dépôt du projet quand elle n'est pas celle de GitHub par défaut (projet GitLab). */
+  gitUrl: null as string | null,
   listFails: false,
   /** Projets à synchroniser en fond, avec le membre dont le compte GitHub sert. */
   targets: [] as Array<{ projectId: string; userId: string | null }>,
 }));
 
 const now = () => new Date();
+const GITLAB_REPO = 'equipe/web/app';
 const applyUpdate = (pr: TrackedPullRequest, input: UpdateTrackedPullRequestInput): TrackedPullRequest => {
   const next = { ...pr, updatedAt: now() };
   if (input.taskId !== undefined) next.taskId = input.taskId;
@@ -131,15 +134,16 @@ vi.mock('../git/pullRequests.js', () => ({
     return owner && name ? { owner, name } : null;
   },
   repoFullName: (r: { owner: string; name: string }) => `${r.owner}/${r.name}`,
+  gitlabRepoRef: (path: string) => ({ owner: path.slice(0, path.lastIndexOf('/')), name: path.slice(path.lastIndexOf('/') + 1) }),
   buildDraftText: (branch: string, _commits: unknown[], taskTitle?: string | null) => ({ title: taskTitle ?? `Branche ${branch}`, body: '' }),
   pullRequestService: {
     isGithubProject: async () => m.isGithub,
     list: async () => {
       if (m.listFails) throw new Error('GitHub injoignable');
-      return m.github.filter((g) => g.repo === 'acme/app');
+      return m.github.filter((g) => g.repo === (m.gitUrl ? GITLAB_REPO : 'acme/app'));
     },
     get: async (_p: string, _u: string, number: number, repo?: { owner: string; name: string } | null) => {
-      const name = repo ? `${repo.owner}/${repo.name}` : 'acme/app';
+      const name = repo ? `${repo.owner}/${repo.name}` : m.gitUrl ? GITLAB_REPO : 'acme/app';
       const pr = m.github.find((g) => g.number === number && sameRepo(g.repo, name));
       if (!pr) throw new Error('introuvable');
       return pr;
@@ -178,7 +182,11 @@ vi.mock('./local.js', () => ({
   },
 }));
 vi.mock('../notifications/service.js', () => ({ notificationService: { notify: async (n: Record<string, unknown>) => void m.notifications.push(n) } }));
-vi.mock('../projects/service.js', () => ({ projectService: { get: async (id: string) => ({ id, name: 'Projet', slug: id, gitUrl: m.isGithub ? 'https://github.com/acme/app.git' : 'https://gitlab.com/acme/app.git', gitBranch: 'main' }) } }));
+vi.mock('../projects/service.js', () => ({ projectService: { get: async (id: string) => ({ id, name: 'Projet', slug: id, gitUrl: m.gitUrl ?? (m.isGithub ? 'https://github.com/acme/app.git' : 'https://git.example.org/acme/app.git'), gitBranch: 'main' }) } }));
+vi.mock('../settings/gitlab.js', () => ({
+  refreshKnownGitlabHosts: async () => [],
+  projectGitlabRepo: (url: string | null) => (url?.includes('gitlab.example.fr/') ? { host: 'gitlab.example.fr', namespace: 'equipe', path: 'equipe/web/app' } : null),
+}));
 
 const { describePullRequest, parsePullRequestRef, parsePullRequestUrl, trackedPullRequestService } = await import('./service.js');
 const { stageOf } = await import('./types.js');
@@ -232,6 +240,7 @@ beforeEach(() => {
   m.notifications = [];
   m.created = [];
   m.isGithub = true;
+  m.gitUrl = null;
   m.listFails = false;
   m.targets = [];
   vi.useRealTimers();
@@ -448,7 +457,7 @@ describe('PR en préparation (refreshPending)', () => {
     expect(m.localCalls.map(([id]) => id)).toEqual(['w1', 'w2', 'w3']); // la work session archivée n'est pas regardée
     const line = describePullRequest(after[0]);
     expect(line).toContain('branche feat/a « Tâche A » · en préparation (3 commits)');
-    expect(line).toContain('pas encore ouverte sur GitHub');
+    expect(line).toContain('pas encore ouverte sur la forge');
   });
 
   it('met à jour le travail local, puis retire la PR quand la branche n’a plus rien ou que la work session disparaît', async () => {
@@ -548,5 +557,45 @@ describe('describePullRequest', () => {
     expect(line).toContain('note : à reprendre');
     expect(line).toContain('https://github.com/acme/app/pull/21');
     expect(describePullRequest(pr)).toContain('PR #21'); // sans dépôt du projet connu : le dépôt de la PR est le sien
+  });
+});
+
+describe('merge requests GitLab', () => {
+  const mr = (iid: number, state: PullRequest['state']) => gh(iid, state, { repo: GITLAB_REPO, url: `https://gitlab.example.fr/${GITLAB_REPO}/-/merge_requests/${iid}`, forge: 'gitlab' });
+  beforeEach(() => {
+    m.gitUrl = 'https://gitlab.example.fr/equipe/web/app.git';
+  });
+
+  it("lit l'URL d'une merge request (groupes imbriqués)", () => {
+    expect(parsePullRequestUrl('https://gitlab.example.fr/equipe/web/app/-/merge_requests/12')).toEqual({ owner: 'equipe/web', name: 'app', number: 12, gitlabHost: 'gitlab.example.fr' });
+    expect(parsePullRequestUrl('https://gitlab.com/g/p/-/merge_requests/3/diffs')?.number).toBe(3);
+    expect(parsePullRequestRef('https://gitlab.com/g/p/-/merge_requests/3')).toBe(3);
+  });
+
+  it('suit une merge request du projet déclarée par son URL, dans le dépôt du projet', async () => {
+    m.github.push(mr(12, 'OPEN'));
+    const pr = await trackedPullRequestService.register('p', { url: `https://gitlab.example.fr/${GITLAB_REPO}/-/merge_requests/12` }, { userId: 'u1' }, agent);
+    expect(pr).toMatchObject({ repo: GITLAB_REPO, number: 12, status: 'open', url: `https://gitlab.example.fr/${GITLAB_REPO}/-/merge_requests/12` });
+    expect(describePullRequest(pr, GITLAB_REPO)).toContain('PR #12');
+    expect(trackedPullRequestService.projectRepo({ gitUrl: m.gitUrl, gitHosted: false, slug: 'p' })).toBe(GITLAB_REPO);
+  });
+
+  it("refuse une merge request d'un autre projet GitLab", async () => {
+    await expect(trackedPullRequestService.register('p', { url: 'https://gitlab.example.fr/autre/app/-/merge_requests/3' }, { userId: 'u1' }, human)).rejects.toThrow(/merge requests GitLab du dépôt de ce projet/);
+  });
+
+  it("sans réponse de GitLab, construit l'URL de la merge request", async () => {
+    const pr = await trackedPullRequestService.register('p', { number: 5 }, { userId: 'u1', fallback: { title: 'MR', headBranch: 'feat/x' } }, human);
+    expect(pr.url).toBe(`https://gitlab.example.fr/${GITLAB_REPO}/-/merge_requests/5`);
+  });
+
+  it('la synchronisation suit une merge request fusionnée sur GitLab et adopte celles des branches de tâches', async () => {
+    const tracked = await trackedPullRequestService.recordGithub('p', mr(12, 'OPEN'), human);
+    m.tasks.push({ id: 't1', projectId: 'p', title: 'Tâche', branch: 'task/t13', status: 'in_progress' });
+    m.github.push(mr(12, 'MERGED'), mr(13, 'OPEN'));
+    const after = await trackedPullRequestService.sync('p', 'u1', { force: true });
+    expect((await trackedPullRequestService.get(tracked.id)).status).toBe('merged');
+    expect(after.find((r) => r.number === 13)).toMatchObject({ repo: GITLAB_REPO, taskId: 't1', status: 'open' });
+    expect(m.notifications.map((n) => n.type)).toContain('pull_request.merged');
   });
 });

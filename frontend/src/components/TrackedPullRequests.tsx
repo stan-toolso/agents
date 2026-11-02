@@ -6,6 +6,7 @@ import {
   canRequestReview,
   canResolveConflicts,
   DELETE_PULL_REQUEST,
+  forgeOfUrl,
   localWorkText,
   prRef,
   REGISTER_PULL_REQUEST,
@@ -135,7 +136,7 @@ export function useTrackedPullRequestActions() {
       ),
     setStatus: async (pr: TrackedPullRequest, status: 'OPEN' | 'MERGED' | 'CLOSED') => {
       const labels = { OPEN: 'rouvrir', MERGED: 'marquer comme fusionnée', CLOSED: 'marquer comme annulée (fermée sans fusion)' };
-      if (!(await confirm({ title: `Pull request ${prRef(pr)}`, message: `Voulez-vous ${labels[status]} le suivi de « ${pr.title} » ? La PR sur GitHub n'est pas modifiée.`, confirmLabel: 'Oui' }))) return;
+      if (!(await confirm({ title: `Pull request ${prRef(pr)}`, message: `Voulez-vous ${labels[status]} le suivi de « ${pr.title} » ? La PR sur ${forgeOfUrl(pr.url)} n'est pas modifiée.`, confirmLabel: 'Oui' }))) return;
       await run(update({ variables: { id: pr.id, input: { status } } }));
     },
     editNote: async (pr: TrackedPullRequest) => {
@@ -164,7 +165,7 @@ function ActionsMenu({ pr, onOpen }: { pr: TrackedPullRequest; onOpen: () => voi
     if (pr.task) items.push({ label: 'Détacher de la tâche', icon: 'bi-link-45deg', onClick: () => void actions.detachTask(pr) });
   } else {
     items.push({ label: 'Détail et fusion', icon: 'bi-git', onClick: onOpen });
-    items.push({ label: 'Ouvrir sur GitHub', icon: 'bi-box-arrow-up-right', onClick: () => window.open(pr.url, '_blank', 'noopener') });
+    items.push({ label: `Ouvrir sur ${forgeOfUrl(pr.url)}`, icon: 'bi-box-arrow-up-right', onClick: () => window.open(pr.url, '_blank', 'noopener') });
     if (canRequestReview(pr)) items.push({ label: 'Faire relire par un agent', icon: 'bi-robot', onClick: () => void actions.review(pr) });
     items.push({ label: 'Modifier la note', icon: 'bi-pencil', onClick: () => void actions.editNote(pr) });
     if (pr.status === 'OPEN') {
@@ -248,7 +249,7 @@ export function TrackedPullRequestActions({ pr, canWrite }: { pr: TrackedPullReq
 function By({ type, user, session, pending = false }: { type: string | null; user: { id: string; name: string } | null; session: { id: string; name: string } | null; pending?: boolean }) {
   if (session) return <Link to={`/sessions/${session.id}`} title="Session d'agent">{session.name}</Link>;
   if (user) return <>{user.name}</>;
-  if (type === 'system') return <span className="text-secondary">{pending ? 'branche' : 'GitHub'}</span>;
+  if (type === 'system') return <span className="text-secondary">{pending ? 'branche' : 'synchronisation'}</span>;
   return <span className="text-secondary">—</span>;
 }
 
@@ -289,7 +290,7 @@ export function TrackedPullRequestTable({ prs, showProject = false, showTask = t
               <tr key={pr.id} className={clickable ? 'pr-row' : undefined} onClick={() => openFor(pr)} role={clickable ? 'button' : undefined}>
                 <td className="pr-cell-title">
                   {pr.number != null && <span className="text-secondary me-1">{prRef(pr)}</span>}
-                  {pending && <i className="bi bi-code-slash text-secondary me-1" title="Pas encore ouverte sur GitHub" />}
+                  {pending && <i className="bi bi-code-slash text-secondary me-1" title="Pas encore ouverte sur la forge" />}
                   <span className="fw-semibold">{pr.title}</span>
                   {!pending && <TrackedPullRequestIndicators pr={pr} />}
                   {pr.note && (
@@ -379,10 +380,10 @@ export function RegisterPullRequestModal({ projectId, taskId = null, onClose }: 
           <Modal.Title className="h6">Suivre une pull request</Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          <p className="small text-secondary">Une pull request déjà ouverte sur GitHub (par un agent, en ligne de commande ou par quelqu'un d'autre), dans le dépôt du projet ou dans un autre dépôt. Ses détails sont lus avec votre compte GitHub.</p>
+          <p className="small text-secondary">Une pull request déjà ouverte sur GitHub (par un agent, en ligne de commande ou par quelqu'un d'autre), dans le dépôt du projet ou dans un autre dépôt, ou une merge request GitLab du dépôt du projet. Ses détails sont lus avec votre compte GitHub ou GitLab.</p>
           <Form.Group className="mb-2">
             <Form.Label className="small mb-1">URL ou numéro</Form.Label>
-            <Form.Control value={ref} onChange={(e) => setRef(e.target.value)} placeholder="https://github.com/owner/repo/pull/42 ou 42" required autoFocus />
+            <Form.Control value={ref} onChange={(e) => setRef(e.target.value)} placeholder="https://github.com/owner/repo/pull/42, une merge request GitLab ou 42" required autoFocus />
             <Form.Text className="text-secondary">Un numéro seul désigne une PR du dépôt du projet ; l'URL permet n'importe quel dépôt GitHub.</Form.Text>
           </Form.Group>
           <Form.Group>
