@@ -8,6 +8,7 @@ import { sessionDotClass } from '../workbench/WorkspaceTabs';
 import { useDeletions } from '../workbench/useDeletions';
 import { useDialogs } from './Dialogs';
 import RelaunchModal from './RelaunchModal';
+import ResumeSessionModal from './ResumeSessionModal';
 import ScheduleModal from './ScheduleModal';
 import SessionSettingsModal from './SessionSettingsModal';
 
@@ -32,6 +33,7 @@ export function useSessionActions(session: ControlledSession | null | undefined)
   const [scheduling, setScheduling] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [relaunching, setRelaunching] = useState(false);
+  const [resumingWith, setResumingWith] = useState(false);
   const openSettings = () => setSettingsOpen(true);
   const openSchedule = () => setScheduling(true);
   if (!session) return { buttons: null, modals: null, openSettings, openSchedule };
@@ -43,6 +45,9 @@ export function useSessionActions(session: ControlledSession | null | undefined)
   const schedule = session.schedule;
   // Chat (espace personnel) : pas de planification, et pas d'archive — on le supprime directement.
   const chat = session.kind === 'CHAT';
+  // Session arrêtée (ou archivée) dont le dossier existe encore : « Reprendre » renvoie un message dans sa conversation.
+  const stopped = archived ? session.status !== 'RUNNING' && session.status !== 'QUEUED' : session.status === 'COMPLETED' || session.status === 'FAILED' || session.status === 'STOPPED';
+  const resumable = stopped && (chat || Boolean(session.worksession));
   const buttons = (
     <>
       <button type="button" className="cc-btn" title="Nom de la session et nettoyage automatique de l'historique" onClick={openSettings}>
@@ -58,7 +63,12 @@ export function useSessionActions(session: ControlledSession | null | undefined)
           Exécuter maintenant
         </button>
       )}
-      {session.status === 'INTERRUPTED' && (
+      {resumable && (
+        <button type="button" className="cc-btn accent" title="Envoie un message dans la conversation de cette session, qui reprend là où elle s’était arrêtée" onClick={() => setResumingWith(true)}>
+          <i className="bi bi-play-fill" /> Reprendre
+        </button>
+      )}
+      {session.status === 'INTERRUPTED' && !archived && (
         <button
           type="button"
           className="cc-btn accent"
@@ -89,7 +99,7 @@ export function useSessionActions(session: ControlledSession | null | undefined)
           Arrêter
         </button>
       )}
-      <button type="button" className="cc-btn" title="Repart d'une nouvelle session avec un résumé de celle-ci" onClick={() => setRelaunching(true)}>
+      <button type="button" className="cc-btn" title="Repart d'une nouvelle session (nouveau nom) avec un résumé de celle-ci ; pour continuer la même conversation, utilisez « Reprendre » ou écrivez un message" onClick={() => setRelaunching(true)}>
         <i className="bi bi-arrow-repeat" /> Relancer
       </button>
       {archived || chat ? (
@@ -114,6 +124,16 @@ export function useSessionActions(session: ControlledSession | null | undefined)
     <>
       {scheduling && <ScheduleModal session={session} onClose={() => setScheduling(false)} />}
       {settingsOpen && <SessionSettingsModal session={session} onClose={() => setSettingsOpen(false)} />}
+      {resumingWith && (
+        <ResumeSessionModal
+          session={session}
+          onRelaunch={() => {
+            setResumingWith(false);
+            setRelaunching(true);
+          }}
+          onClose={() => setResumingWith(false)}
+        />
+      )}
       {relaunching && <RelaunchModal session={session} projectName={session.project.name} onClose={() => setRelaunching(false)} />}
     </>
   );

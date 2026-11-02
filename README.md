@@ -998,7 +998,12 @@ session — dossier `task-<slug du titre>`, et branche `task/<slug>` à partir d
 projet git (`backend/src/tasks/launch.ts`, suffixe numérique si le nom existe déjà) —, puis repris
 par toutes ses sessions suivantes (colonne `worksessions.task_id`, restauré s'il était archivé) ; la
 session précédente de la tâche, si elle est encore active, est arrêtée et archivée (une seule session par
-dossier), ce que la modale annonce. Une fois la session lancée, on reste sur la page d'où on l'a confiée
+dossier), ce que la modale annonce. Quand la tâche a déjà une session dans ce dossier (la plus récente en
+charge, sinon la dernière passée par la tâche : `Task.resumableSession`), le bouton devient « Reprendre » et
+la modale propose par défaut de **reprendre sa conversation** : un message modifiable envoyé à cette session
+comme depuis sa page (mutation `resumeTaskSession` : session restaurée si elle était archivée, autres
+sessions actives du dossier archivées, tâche repassée en cours), sans nouvelle session ni nouveau nom ; un
+lien permet de lancer plutôt une nouvelle session avec la consigne complète. Une fois la session lancée, on reste sur la page d'où on l'a confiée
 (liste, kanban, tâche) : la session apparaît sur la tâche et dans la sidebar. La tâche affiche sa branche (colonne `tasks.branch`, conservée après
 suppression du dossier) et sa pull request GitHub avec ses checks et revues ; un clic ouvre la fenêtre de
 fusion. Cycle complet sans quitter Skipper : tâche → session sur sa branche → PR (panneau git) → fusion →
@@ -1449,7 +1454,10 @@ binaires ne sont pas ouverts. API : `workspaceEntries`, `workspaceFile`, `writeW
 
 Une session s'**archive** (bouton sur sa page, menu de la sidebar, liste des sessions) : elle quitte la
 sidebar et reste consultable, restaurable et relançable depuis l'**historique** du projet
-(`/projects/:id/history`, recherche dans les noms, consignes et conversations). « Relancer » crée une
+(`/projects/:id/history`, recherche dans les noms, consignes et conversations). « Reprendre » (session
+arrêtée, terminée, en échec ou archivée, dont le dossier existe encore ; `components/ResumeSessionModal.tsx`)
+continue la **même** conversation : un message modifiable lui est envoyé comme depuis sa page, après l'avoir
+restaurée si elle était archivée — même session, même nom, même historique. « Relancer » crée une
 nouvelle session avec un résumé de la précédente (`<previous_conversation>`, 40 k caractères au plus).
 La relance travaille dans le dossier et sur la branche de la session d'origine (restaurés si besoin ;
 la session d'origine est archivée, arrêtée si elle tournait : une seule session par dossier), ou dans un

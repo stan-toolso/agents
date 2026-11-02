@@ -1,5 +1,7 @@
 import { AppError, NotFoundError } from '../errors.js';
+import { reviewOf } from '../reviews/types.js';
 import { projectService } from '../projects/service.js';
+import { sessionRepository } from '../sessions/repository.js';
 import { sessionService } from '../sessions/service.js';
 import type { Session } from '../sessions/types.js';
 import { worksessionRepository } from '../worksessions/repository.js';
@@ -114,4 +116,47 @@ export async function startTaskSession(taskId: string, options: StartTaskOptions
   // Les sessions précédentes de la tâche (archivées en libérant le dossier) lui passent la charge.
   await taskService.update(task.id, { sessionId: session.id, releaseSessionIds: task.sessionIds.filter((id) => id !== session.id), ...(branch ? { branch } : {}) });
   return options.autoStart === false ? session : sessionService.start(session.id);
+}
+
+/**
+ * La session dont on reprend la conversation quand on confie de nouveau la tâche : la plus récente en charge, sinon
+ * la dernière passée par la tâche, pourvu qu'elle travaille encore dans le dossier de la tâche (work session
+ * existante, archivée ou non). Null : rien à reprendre (première fois, dossier supprimé, chat, revue), il faut une
+ * nouvelle session.
+ */
+export async function resumableTaskSession(task: Task): Promise<Session | null> {
+  const [worksession] = await worksessionRepository.findByTask(task.id);
+  if (!worksession) return null;
+  const ids = [...(task.sessionId ? [task.sessionId] : []), ...(await taskService.sessionIds(task.id))];
+  const sessions = ids.length ? await sessionService.list({ ids: [...new Set(ids)], archived: 'all', limit: 500 }) : [];
+  for (const id of ids) {
+    const s = sessions.find((x) => x.id === id);
+    if (!s || s.kind === 'chat' || reviewOf(s)) continue;
+    return s.worksessionId === worksession.id ? s : null;
+  }
+  return null;
+}
+
+/**
+ * Reprend la tâche dans la conversation de sa session (voir `resumableTaskSession`) au lieu d'en ouvrir une nouvelle :
+ * la session est restaurée si elle était archivée (avec son dossier), les autres sessions actives du dossier sont
+ * archivées (une seule à la fois), la tâche repasse en cours et le message est envoyé à la session — transmis à
+ * l'agent s'il tourne, sinon la session repart avec ce message, conversation comprise.
+ */
+export async function resumeTaskSession(taskId: string, text: string): Promise<Session> {
+  if (!text.trim()) throw new AppError('Le message est vide');
+  const task = await taskService.get(taskId);
+  if (!task) throw new NotFoundError('Tâche introuvable');
+  const session = await resumableTaskSession(task);
+  if (!session) throw new AppError('Aucune session de cette tâche à reprendre : confiez-la à une nouvelle session');
+  await worksessionService.forTask(task.id); // restaurée si elle était archivée
+  const archived: string[] = [];
+  for (const other of await sessionRepository.list({ worksessionId: session.worksessionId!, archived: 'exclude', limit: 50 })) {
+    if (other.id === session.id || reviewOf(other)) continue;
+    await sessionService.archive(other.id);
+    archived.push(other.id);
+  }
+  if (session.archivedAt) await sessionService.unarchive(session.id);
+  await taskService.update(task.id, { status: 'in_progress', sessionId: session.id, releaseSessionIds: archived.filter((id) => task.sessionIds.includes(id)) });
+  return sessionService.sendMessage(session.id, text);
 }
