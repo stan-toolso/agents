@@ -1055,6 +1055,12 @@ créatrice, passée par la tâche ou mentionnée dans son fil : `task_sessions`)
 (`[Mise à jour de la tâche]`), ses messages (`[Commentaire sur la tâche]`) et, pour l'autrice d'un message, les
 réactions qu'il reçoit (`[Réaction sur la tâche]`) ; un message relance la session en charge et les sessions
 mentionnées, les autres sessions reliées ne le reçoivent que si elles tournent (`tasks/sessionFeed.ts`, `feedsFor`).
+Seul ce qui s'adresse à la session lui ouvre un tour (une instruction, résumée en une ligne dans le transcript) :
+un message du fil d'une tâche dont elle est en charge ou qui la mentionne, une modification faite par une personne
+d'une tâche dont elle est en charge. Le reste (modification par une autre session d'agent, tâche seulement reliée,
+réaction) est une **note discrète** (`sessionService.notify`) : le provider Claude la remet avec le résultat du
+prochain lot d'outils (hook `PostToolBatch`, `additionalContext`) ou avec la prochaine instruction, sans tour ni
+réponse de l'agent ; le transcript en garde un événement `task_note`, replié avec les étapes de l'agent.
 Le prompt système d'une session cite la tâche dont elle a la charge et celles auxquelles elle est reliée.
 
 ## Lancer des sessions

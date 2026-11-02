@@ -13,6 +13,7 @@ const MAX_BODY = 1_000_000;
 /** Actions qu'une autre instance du backend peut demander à celle-ci (sur ce qu'elle tient). */
 const actions: Record<string, (body: Record<string, unknown>) => Promise<unknown>> = {
   'session.message': (b) => sessionService.sendMessage(String(b.id), String(b.text), null, { attachments: (b.attachments as Attachment[]) ?? [] }),
+  'session.notify': (b) => sessionService.notify(String(b.id), String(b.text)),
   'session.start': (b) => sessionService.start(String(b.id), typeof b.message === 'string' ? b.message : undefined, (b.attachments as Attachment[]) ?? []),
   'session.interrupt': (b) => sessionService.interrupt(String(b.id)),
   'session.end': (b) => sessionService.end(String(b.id)),

@@ -96,6 +96,11 @@ export interface RunningHandle {
   stop(): Promise<void>;
   /** Envoie une instruction à l'agent en cours d'exécution (providers interactifs). */
   sendMessage?(text: string, attachments?: Attachment[]): Promise<void>;
+  /**
+   * Note discrète : un texte à porter à la connaissance de l'agent sans lui ouvrir de tour (remis avec le résultat de
+   * ses prochains outils, ou avec sa prochaine instruction s'il attend).
+   */
+  notify?(text: string): Promise<void>;
   /** Fin propre : plus d'instructions, l'agent termine son tour puis la session se termine. */
   end?(): Promise<void>;
   /** Interrompt le tour en cours sans terminer la session. */

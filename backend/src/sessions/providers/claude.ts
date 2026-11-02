@@ -281,6 +281,12 @@ export class ClaudeProvider implements SessionProvider {
     };
     // Les observations (instantané, capture, console, réseau, attente) sont libres ; les actions passent par les demandes d'autorisation.
     const browserReadTools = ['mcp__playwright__browser_snapshot', 'mcp__playwright__browser_take_screenshot', 'mcp__playwright__browser_console_messages', 'mcp__playwright__browser_network_requests', 'mcp__playwright__browser_wait_for'];
+    // Notes discrètes (`notify` : changements des tâches reliées qui ne s'adressent pas à l'agent) en attente d'être
+    // remises : avec le résultat du prochain lot d'outils du fil principal (hook PostToolBatch), sinon avec la prochaine
+    // instruction. Aucune ne lui ouvre de tour.
+    const notes: string[] = [];
+    const takeNotes = () => (notes.length ? notes.splice(0).join('\n\n') : null);
+
     const options: Options = {
       cwd: ctx.cwd,
       systemPrompt: { type: 'preset', preset: 'claude_code', append: systemPrompt },
@@ -341,6 +347,22 @@ export class ClaudeProvider implements SessionProvider {
       stderr: (data) => void ctx.emit('stderr', { text: data.trimEnd() }),
       // Les demandes de permission (et l'outil AskUserQuestion) deviennent des demandes d'intervention humaine.
       // Relecture : aucune demande d'autorisation, tout outil hors de la liste est refusé.
+      hooks: review
+        ? undefined
+        : {
+            PostToolBatch: [
+              {
+                hooks: [
+                  async (input) => {
+                    // Outils d'un sous-agent : la note attend le fil principal, qui a le contexte de la tâche.
+                    if ((input as { agent_id?: string }).agent_id) return {};
+                    const additionalContext = takeNotes();
+                    return additionalContext ? { hookSpecificOutput: { hookEventName: 'PostToolBatch' as const, additionalContext } } : {};
+                  },
+                ],
+              },
+            ],
+          },
       canUseTool: review ? async (toolName, _input, options) => ({ behavior: 'deny', message: `Session de relecture en lecture seule : l'outil ${toolName} n'est pas disponible`, toolUseID: options.toolUseID }) : this.canUseTool(ctx, ruleUsage),
     };
 
@@ -438,9 +460,12 @@ export class ClaudeProvider implements SessionProvider {
       },
       sendMessage: async (text, attachments = []) => {
         await (await claudeSettings.forSession(ownerId)).assertBudgetAvailable();
-        queue.push(await this.instruction(ctx, text, attachments));
+        queue.push(await this.instruction(ctx, text, attachments, null, takeNotes()));
         turnInProgress = true;
         await ctx.setActivity('busy');
+      },
+      async notify(text) {
+        notes.push(text);
       },
       async end() {
         queue.close();
@@ -603,9 +628,10 @@ export class ClaudeProvider implements SessionProvider {
     return null;
   }
 
-  private async instruction(ctx: RunContext, text: string, attachments: Attachment[], preamble?: string | null): Promise<SDKUserMessage['message']['content']> {
+  /** `notes` : notes discrètes en attente, remises au modèle avant l'instruction sans paraître dans le transcript (déjà journalisées). */
+  private async instruction(ctx: RunContext, text: string, attachments: Attachment[], preamble?: string | null, notes?: string | null): Promise<SDKUserMessage['message']['content']> {
     await ctx.emit('instruction', { text, ...(attachments.length ? { attachments: attachments.map(publicAttachment) } : {}), ...(preamble ? { preamble: true } : {}) });
-    const body = preamble ? `${preamble}\n\n${text}` : text;
+    const body = [preamble, notes, text].filter(Boolean).join('\n\n');
     if (!attachments.length) return body;
     const note = attachmentsNote(attachments);
     return [{ type: 'text', text: `${body}\n\n${note}` }, ...(await inlineBlocks(attachments))];

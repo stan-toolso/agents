@@ -663,6 +663,29 @@ export const sessionService = {
     return publishSession(await sessionRepository.findById(id));
   },
 
+  /**
+   * Note discrète pour l'agent (changement d'une tâche reliée qui ne s'adresse pas à lui) : elle ne lui ouvre pas de
+   * tour ; le provider la remet avec le résultat de ses prochains outils ou avec sa prochaine instruction. Le
+   * transcript en garde un événement `task_note`, replié dans l'interface. Sans processus (session terminée, garée),
+   * la note est perdue : la session relira ses tâches au prochain démarrage (prompt système). Un provider qui ne sait
+   * pas prendre de note reçoit le texte comme une instruction.
+   */
+  async notify(id: string, text: string): Promise<void> {
+    const handle = running.get(id);
+    if (!handle) {
+      if (!instanceRegistry.hasPeers()) return;
+      const holder = await instanceRegistry.holder((await sessionRepository.findById(id))?.instanceId);
+      if (holder) await callInstance(holder, 'session.notify', { id, text });
+      return;
+    }
+    if (!handle.notify) {
+      if (handle.sendMessage) await this.sendMessage(id, text);
+      return;
+    }
+    await handle.notify(text);
+    await emitEvent(id, 'task_note', { text });
+  },
+
   /** Renomme la session. */
   async rename(id: string, name: string): Promise<Session> {
     const trimmed = name.trim();

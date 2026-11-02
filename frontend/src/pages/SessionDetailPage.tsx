@@ -14,6 +14,7 @@ import { useCachedName } from '../components/PageLoading';
 import { useAuth } from '../auth/AuthContext';
 
 import { bypassConnectionsWarning, permissionModeLabels, permissionModeShortLabels, sessionStatusLabels } from '../lib/humanize';
+import { describeTaskFeed } from '../lib/taskFeed';
 import AttachmentChips from '../components/AttachmentChips';
 import RequestPrompt from '../components/RequestPrompt';
 import { SessionChildren, SessionParentNote, parentStateHint, useSessionActions } from '../components/SessionControls';
@@ -133,7 +134,8 @@ export default function SessionDetailPage() {
     for (const e of events) {
       if (e.type !== 'instruction') continue;
       const t = String((e.payload as { text?: unknown }).text ?? '').trim();
-      if (t && list[list.length - 1] !== t) list.push(t);
+      // Les changements de tâche transmis par Skipper ne sont pas des instructions de la personne.
+      if (t && list[list.length - 1] !== t && !describeTaskFeed(t)) list.push(t);
     }
     return list;
   }, [events]);

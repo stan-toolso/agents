@@ -116,4 +116,17 @@ describe('Transcript', () => {
     // La vue technique garde tout.
     expect(html(events, true)).toContain('Terminé');
   });
+  it('résume en une ligne les changements de tâche transmis à la session, notes discrètes repliées avec le travail', () => {
+    const update = "[Mise à jour de la tâche] La tâche t1 (« Corriger le bug ») dont cette session est en charge a été modifiée par Alice :\n- Statut : à faire → en cours\n\nTiens-en compte dans ton travail.";
+    const out = html([ev('instruction', { text: update })]);
+    expect(out).toContain('cc-task-feed');
+    expect(out).toContain('Tâche « Corriger le bug » modifiée par Alice · Statut : à faire → en cours');
+    expect(out).not.toContain('Tiens-en compte');
+    expect(out).not.toContain('cc-user');
+    const note = update.replace('dont cette session est en charge', 'à laquelle cette session est reliée');
+    // Pendant un tour, la note rejoint les étapes repliées de l'agent.
+    const folded = html([ev('instruction', { text: 'Go' }), tool('t1', 'Read', { file_path: '/w/a.ts' }), result('t1', 'x'), ev('task_note', { text: note }), tool('t2', 'Read', { file_path: '/w/b.ts' }), result('t2', 'y'), text('Fini.')]);
+    expect(folded).not.toContain('cc-task-feed');
+    expect(html([ev('task_note', { text: note })])).toContain('cc-task-feed quiet');
+  });
 });

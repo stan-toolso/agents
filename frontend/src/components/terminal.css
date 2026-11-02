@@ -449,3 +449,13 @@
 .cc-context-banner.danger > i { color: var(--cc-red); }
 .cc-context-banner-text { flex: 1 1 320px; font-size: 13px; }
 .cc-context-banner-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* Changement d'une tâche reliée transmis à l'agent : une ligne repliée, le texte complet au clic */
+.cc-task-feed { margin: 8px 0; color: var(--cc-dim); }
+.cc-task-feed.quiet { margin: 4px 0; color: var(--cc-dimmer); font-size: 12px; }
+.cc-task-feed-head { display: flex; align-items: baseline; gap: 6px; cursor: pointer; min-width: 0; }
+.cc-task-feed-summary { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-task-feed-head[aria-expanded='true'] .cc-task-feed-summary { white-space: normal; }
+.cc-task-feed-link { flex: 0 0 auto; color: inherit; }
+.cc-task-feed-link:hover { color: var(--cc-accent); }
+.cc-task-feed-text { margin: 4px 0 0 20px; white-space: pre-wrap; color: var(--cc-dim); border-left: 2px solid var(--cc-border); padding-left: 8px; }
