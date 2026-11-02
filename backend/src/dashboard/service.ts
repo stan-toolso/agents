@@ -12,6 +12,16 @@ import { claudeSettings } from '../settings/claude.js';
 import { currentMonthStart } from '../settings/usage.js';
 import { taskService } from '../tasks/service.js';
 import type { Task } from '../tasks/types.js';
+import { agentRepository } from '../agents/repository.js';
+import type { Agent } from '../agents/types.js';
+import { conversationService } from '../conversations/service.js';
+import type { Conversation } from '../conversations/types.js';
+import { isPersonalProject } from '../projects/types.js';
+import { scheduleService } from '../schedules/service.js';
+import type { ScheduleWithSession } from '../schedules/types.js';
+import { taskRepository } from '../tasks/repository.js';
+import { userRepository } from '../users/repository.js';
+import type { User } from '../users/types.js';
 
 /**
  * Tableau de bord d'accueil : ce qui attend l'utilisateur, ce qui tourne, et ce que ça coûte, sur
@@ -85,7 +95,28 @@ export interface Dashboard {
   pullRequests: TrackedPullRequest[];
 }
 
+/** Un membre du projet (personne ou agent) et ce qu'il fait en ce moment. */
+export interface ProjectTeamMember {
+  user: User;
+  agent: Agent | null;
+  sessions: Session[];
+  tasks: Task[];
+  lastActivityAt: Date | null;
+}
+
+/** Tableau de bord d'un projet : la vue d'ensemble restreinte au projet, plus ce qui n'a de sens que pour lui. */
+export interface ProjectDashboard extends Omit<Dashboard, 'projects'> {
+  mergedPullRequests: TrackedPullRequest[];
+  staleTasks: Task[];
+  schedules: ScheduleWithSession[];
+  general: Conversation | null;
+  team: ProjectTeamMember[];
+  tasks: Task[];
+}
+
 const DAYS_OF_HISTORY = 30;
+/** Fenêtre des tâches transmises au tableau de bord d'un projet (flux, débit, dernières terminées). */
+const PROJECT_TASKS_WEEKS = 13;
 
 const n = (v: string | number | null | undefined) => Number(v ?? 0);
 
@@ -293,6 +324,55 @@ export const dashboardService = {
       recentSessions: recent,
       attentionTasks: tasks,
       pullRequests,
+    };
+  },
+
+  /**
+   * Tableau de bord d'un projet : la même vue d'ensemble, restreinte au projet, plus l'équipe (qui fait quoi), les
+   * tâches en cours dont l'agent s'est arrêté, les planifications, le canal général et les tâches des dernières
+   * semaines (le flux par étiquette d'état et le débit se calculent côté client, comme la vue pilotage des tâches).
+   */
+  async buildForProject(userId: string, project: Project, now = new Date(), isAdmin = false): Promise<ProjectDashboard> {
+    const since = new Date(now.getTime() - PROJECT_TASKS_WEEKS * 7 * 86_400_000);
+    const [base, merged, schedules, general, members, agents, allTasks] = await Promise.all([
+      this.build(userId, [project.id], now, isAdmin),
+      trackedPullRequestService.list({ projectIds: [project.id], stage: ['merged'], limit: 8 }),
+      scheduleService.listForProjects([project.id]),
+      isPersonalProject(project) ? Promise.resolve(null) : conversationService.ensureGeneral(project.id),
+      userRepository.listMembers(project.id),
+      isPersonalProject(project) ? Promise.resolve([] as Agent[]) : agentRepository.listByProject(project.id),
+      taskRepository.list({ projectId: project.id, status: ['todo', 'in_progress', 'done', 'cancelled'], limit: 1000 }),
+    ]);
+    const { projects: _projects, ...rest } = base;
+    // Les tâches ouvertes, et celles fermées ou touchées récemment : assez pour le flux et le débit, sans tout l'historique.
+    const tasks = allTasks.filter((t) => t.status === 'todo' || t.status === 'in_progress' || t.updatedAt >= since || (t.completedAt && t.completedAt >= since));
+    const runningIds = new Set(base.runningSessions.map((s) => s.id));
+    const staleTasks = tasks.filter((t) => t.status === 'in_progress' && !t.sessionIds.some((id) => runningIds.has(id)));
+
+    // L'équipe : chaque membre avec ses sessions en cours et les tâches dont elles ont la charge ; agents d'abord.
+    const users = await userRepository.findByIds(members.map((m) => m.userId));
+    const agentById = new Map(agents.filter((a) => a.enabled && !a.archivedAt).map((a) => [a.id, a]));
+    const tasksBySession = new Map<string, Task[]>();
+    for (const s of base.runningSessions) tasksBySession.set(s.id, await taskService.tasksInCharge(s.id).catch(() => []));
+    const team: ProjectTeamMember[] = users
+      .filter((u) => u.kind !== 'agent' || agentById.has(u.id))
+      .map((user) => {
+        const sessions = base.runningSessions.filter((s) => s.ownerId === user.id);
+        const seen = new Set<string>();
+        const memberTasks = sessions.flatMap((s) => tasksBySession.get(s.id) ?? []).filter((t) => !seen.has(t.id) && seen.add(t.id));
+        const lastSession = sessions.reduce<Date | null>((max, s) => (!max || s.updatedAt > max ? s.updatedAt : max), null);
+        return { user, agent: agentById.get(user.id) ?? null, sessions, tasks: memberTasks, lastActivityAt: lastSession ?? user.lastLoginAt ?? null };
+      })
+      .sort((a, b) => Number(Boolean(b.agent)) - Number(Boolean(a.agent)) || b.sessions.length - a.sessions.length || a.user.name.localeCompare(b.user.name));
+
+    return {
+      ...rest,
+      mergedPullRequests: merged,
+      staleTasks,
+      schedules: [...schedules].sort((a, b) => (a.nextRunAt?.getTime() ?? Infinity) - (b.nextRunAt?.getTime() ?? Infinity)),
+      general,
+      team,
+      tasks,
     };
   },
 };

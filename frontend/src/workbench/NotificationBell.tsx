@@ -17,6 +17,8 @@ const icons: Record<string, string> = {
   'task.autostart_failed': 'bi-exclamation-octagon',
   'task.mentioned': 'bi-at',
   'task.replied': 'bi-reply',
+  'conversation.mentioned': 'bi-at',
+  'conversation.replied': 'bi-reply',
   'pull_request.opened': 'bi-git',
   'pull_request.merged': 'bi-check2-circle',
   'pull_request.closed': 'bi-x-circle',

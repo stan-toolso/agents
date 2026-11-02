@@ -40,6 +40,10 @@ ev starting
 echo "› ($SKIPPER_APP_DIR) $SKIPPER_COMMAND"
 sh -c "$SKIPPER_COMMAND"
 ev exited $?
+# Ce que la commande laisse derrière elle (\`… &\`, serveur lent à s'arrêter) tiendrait encore ses ports au lancement
+# suivant : le reste du groupe est arrêté, TERM puis KILL (qui emporte ce script en dernier). Rien hors de setsid.
+trap '' TERM
+if kill -TERM -$$ 2>/dev/null; then sleep 1; kill -KILL -$$ 2>/dev/null; fi
 `;
 
 /**

@@ -89,6 +89,8 @@ import { worksessionDisk, type WorksessionDiskEntry } from '../worksessions/disk
 import { worksessionLabel, type Worksession } from '../worksessions/types.js';
 import { resumableTaskSession, resumeTaskSession, startTaskSession } from '../tasks/launch.js';
 import { taskService } from '../tasks/service.js';
+import { conversationService } from '../conversations/service.js';
+import type { Conversation, Message, MessageReaction } from '../conversations/types.js';
 import type { Task, TaskComment, TaskField, TaskPersonInput, TaskPriority, TaskReaction, TaskStatus, ProjectApiKey } from '../tasks/types.js';
 import type { TerminalRecord } from '../terminals/types.js';
 import type { AttachmentInput, CreateSessionInput, RelaunchInput, Session, SessionStatus } from '../sessions/types.js';
@@ -102,6 +104,8 @@ import { log } from '../log.js';
 import { previewService } from '../previews/service.js';
 
 type Ctx = AuthContext;
+/** Message d'un canal enrichi par le résolveur de la liste : ses réactions et ses réponses, lues en une fois. */
+type MessageWithRows = Message & { reactionRows?: MessageReaction[]; replyStat?: { count: number; lastAt: Date | null } | null };
 type GqlRole = Uppercase<ProjectRole>;
 const fromGqlRole = (r?: GqlRole | null): ProjectRole => ((r ?? 'MEMBER').toLowerCase() as ProjectRole);
 
@@ -159,6 +163,16 @@ const guardComment = async (ctx: Ctx, id: string) => {
   const task = await taskService.get(comment.taskId);
   const role = await requireProject(ctx, task.projectId, 'member');
   return { comment, task, role };
+};
+const guardConversation = async (ctx: Ctx, id: string, min: ProjectRole) => {
+  const conversation = await conversationService.get(id);
+  const role = await requireProject(ctx, conversation.projectId, min);
+  return { conversation, role };
+};
+const guardMessage = async (ctx: Ctx, id: string) => {
+  const message = await conversationService.getMessage(id);
+  const { conversation, role } = await guardConversation(ctx, message.conversationId, 'member');
+  return { message, conversation, role };
 };
 const guardFolder = async (ctx: Ctx, id: string, min: ProjectRole) => requireProject(ctx, (await contextService.getFolder(id)).projectId, min);
 const guardInstruction = async (ctx: Ctx, id: string, min: ProjectRole) => requireProject(ctx, (await contextService.getInstruction(id)).projectId, min);
@@ -277,7 +291,7 @@ const projectOf = async (ctx: Ctx, id: string): Promise<Project> => {
 };
 const worksessionOrNull = async (ctx: Ctx, id: string | null | undefined) => (id ? ((await loadersOf(ctx).worksession(id)) ?? null) : null);
 /** Réactions regroupées par emoji (ordre de première apparition), avec les noms et si l'utilisateur connecté en est. */
-function groupReactions(reactions: TaskReaction[], userId: string | undefined): { emoji: string; count: number; actors: string[]; mine: boolean }[] {
+function groupReactions(reactions: Pick<TaskReaction, 'emoji' | 'actorName' | 'userId'>[], userId: string | undefined): { emoji: string; count: number; actors: string[]; mine: boolean }[] {
   const groups = new Map<string, { emoji: string; count: number; actors: string[]; mine: boolean }>();
   for (const r of reactions) {
     const g = groups.get(r.emoji) ?? { emoji: r.emoji, count: 0, actors: [], mine: false };
@@ -426,6 +440,43 @@ export const resolvers = {
       if (c.authorUserId === ctx.user?.id) return true;
       const task = await taskService.get(c.taskId).catch(() => null);
       return task ? (await roleFor(ctx, task.projectId)) === 'admin' : false;
+    },
+  },
+
+  Conversation: {
+    project: (c: Conversation) => projectService.get(c.projectId),
+    unreadCount: async (c: Conversation, _: unknown, ctx: Ctx) => (ctx.user ? ((await conversationService.unreadCounts([c.id], ctx.user.id)).get(c.id) ?? 0) : 0),
+    messageCount: (c: Conversation) => conversationService.countMessages(c.id),
+    // Les réactions et les comptes de réponses de la page sont lus une fois et accrochés à chaque message.
+    messages: async (c: Conversation, args: { before?: Date | null; limit?: number | null }) => {
+      const messages = await conversationService.messages(c.id, { before: args.before ?? null, limit: args.limit ?? undefined });
+      const [reactions, replies] = await Promise.all([conversationService.reactions(messages.map((m) => m.id)), conversationService.replyStats(messages.filter((m) => !m.parentId).map((m) => m.id))]);
+      return messages.map((m): MessageWithRows => ({ ...m, reactionRows: reactions.filter((r) => r.messageId === m.id), replyStat: replies.get(m.id) ?? { count: 0, lastAt: null } }));
+    },
+    mentionables: (c: Conversation) => conversationService.mentionables(c.projectId),
+  },
+
+  Message: {
+    reactions: async (m: MessageWithRows, _: unknown, ctx: Ctx) => groupReactions(m.reactionRows ?? (await conversationService.reactions([m.id])), ctx.user?.id),
+    author: (m: Message, _: unknown, ctx: Ctx) => userOrNull(ctx, m.authorUserId),
+    agent: async (m: Message, _: unknown, ctx: Ctx) => {
+      if (!m.authorSessionId) return null;
+      const session = await loadersOf(ctx).session(m.authorSessionId);
+      return session?.ownerId ? ((await loadersOf(ctx).agent(session.ownerId)) ?? null) : null;
+    },
+    authorSession: (m: Message) => (m.authorSessionId ? sessionService.get(m.authorSessionId) : null),
+    editable: (m: Message, _: unknown, ctx: Ctx) => m.authorType === 'human' && m.authorUserId === ctx.user?.id,
+    deletable: async (m: Message, _: unknown, ctx: Ctx) => {
+      if (m.authorUserId === ctx.user?.id) return true;
+      const conversation = await conversationService.get(m.conversationId).catch(() => null);
+      return conversation ? (await roleFor(ctx, conversation.projectId)) === 'admin' : false;
+    },
+    replyCount: async (m: MessageWithRows) => (m.parentId ? 0 : (m.replyStat ?? (await conversationService.replyStats([m.id])).get(m.id))?.count ?? 0),
+    lastReplyAt: async (m: MessageWithRows) => (m.parentId ? null : (m.replyStat ?? (await conversationService.replyStats([m.id])).get(m.id))?.lastAt ?? null),
+    respondingSessions: async (m: Message) => {
+      if (m.parentId) return [];
+      const ids = await conversationService.busySessionIdsOnThread(m.id);
+      return ids.length ? sessionService.list({ ids, archived: 'all', limit: 20 }) : [];
     },
   },
 
@@ -691,6 +742,9 @@ export const resolvers = {
     vaultItems: (project: Project, _: unknown, ctx: Ctx) => vaultService.projectRows(project.id, requireUser(ctx).id),
     agents: (project: Project) => (isPersonalProject(project) ? [] : agentService.listByProject(project.id)),
     apiKeys: async (project: Project, _: unknown, ctx: Ctx) => ((await roleFor(ctx, project.id)) === 'admin' ? apiKeyService.list(project.id) : []),
+    // Un espace personnel n'a pas de canaux (ses chats suffisent).
+    conversations: (project: Project, args: { includeArchived?: boolean | null }) => (isPersonalProject(project) ? [] : conversationService.list(project.id, { includeArchived: Boolean(args.includeArchived) })),
+    unreadMessages: async (project: Project, _: unknown, ctx: Ctx) => (ctx.user && !isPersonalProject(project) ? ((await conversationService.unreadByProject([project.id], ctx.user.id)).get(project.id) ?? 0) : 0),
     approvalConnections: async (project: Project, _: unknown, ctx: Ctx) => vaultService.approvalNames(await vaultService.agentItems(project.id, ctx.user?.id ?? null)),
     tasks: (project: Project, args: { status?: GqlTaskStatus[] | null }) => taskService.list({ projectId: project.id, status: fromGqlTaskStatuses(args.status) }),
     contextFolders: async (project: Project, args: { agentId?: string | null }) => (await contextService.tree(project.id, await projectAgentLibrary(project.id, args.agentId))).folders,
@@ -1127,6 +1181,15 @@ export const resolvers = {
       return { ...(stored ?? (await billingService.settings())), configured: stored !== null };
     },
     dashboard: async (_: unknown, __: unknown, ctx: Ctx) => dashboardService.build(requireUser(ctx).id, await accessibleProjectIds(ctx), new Date(), requireUser(ctx).isAdmin),
+    projectDashboard: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.id);
+      return dashboardService.buildForProject(requireUser(ctx).id, await projectService.get(args.id), new Date(), requireUser(ctx).isAdmin);
+    },
+    conversation: async (_: unknown, args: { id: string }, ctx: Ctx) => (await guardConversation(ctx, args.id, 'viewer')).conversation,
+    conversationBySlug: async (_: unknown, args: { projectId: string; slug: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId);
+      return conversationService.resolve(args.projectId, args.slug).catch(() => null);
+    },
     inbox: async (_: unknown, __: unknown, ctx: Ctx) => inboxService.build(await accessibleProjectIds(ctx)),
     inboxCounts: async (_: unknown, __: unknown, ctx: Ctx) => inboxService.counts(await accessibleProjectIds(ctx)),
     tasks: async (_: unknown, args: { projectId?: string | null; status?: GqlTaskStatus[] | null; priority?: GqlTaskPriority | null; assignee?: string | null; reporter?: string | null; tag?: string | null; mine?: boolean | null; limit?: number | null }, ctx: Ctx) => {
@@ -1724,6 +1787,42 @@ export const resolvers = {
       const { comment, role } = await guardComment(ctx, args.id);
       if (comment.authorUserId !== requireUser(ctx).id && role !== 'admin') throw new AppError("Seuls l'auteur et les administrateurs du projet suppriment un commentaire", 'FORBIDDEN');
       return taskService.deleteComment(args.id);
+    },
+    // ---- Conversations d'équipe ----
+    createConversation: async (_: unknown, args: { projectId: string; name: string; topic?: string | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'member');
+      return conversationService.create(args.projectId, { name: args.name, topic: args.topic }, requireUser(ctx).id);
+    },
+    updateConversation: async (_: unknown, args: { id: string; name?: string | null; topic?: string | null }, ctx: Ctx) => {
+      await guardConversation(ctx, args.id, 'member');
+      return conversationService.update(args.id, { name: args.name, topic: args.topic });
+    },
+    setConversationArchived: async (_: unknown, args: { id: string; archived: boolean }, ctx: Ctx) => {
+      await guardConversation(ctx, args.id, 'admin');
+      return conversationService.setArchived(args.id, args.archived);
+    },
+    postMessage: async (_: unknown, args: { conversationId: string; body: string; parentId?: string | null }, ctx: Ctx) => {
+      await guardConversation(ctx, args.conversationId, 'member');
+      return conversationService.post(args.conversationId, args.body, actorOf(requireUser(ctx)), { parentId: args.parentId ?? null });
+    },
+    updateMessage: async (_: unknown, args: { id: string; body: string }, ctx: Ctx) => {
+      const { message } = await guardMessage(ctx, args.id);
+      if (message.authorUserId !== requireUser(ctx).id) throw new AppError("Seul l'auteur modifie son message", 'FORBIDDEN');
+      return conversationService.updateMessage(args.id, args.body);
+    },
+    deleteMessage: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      const { message, role } = await guardMessage(ctx, args.id);
+      if (message.authorUserId !== requireUser(ctx).id && role !== 'admin') throw new AppError("Seuls l'auteur et les administrateurs du projet suppriment un message", 'FORBIDDEN');
+      return conversationService.deleteMessage(args.id);
+    },
+    toggleMessageReaction: async (_: unknown, args: { messageId: string; emoji: string }, ctx: Ctx) => {
+      await guardMessage(ctx, args.messageId);
+      return (await conversationService.toggleReaction(args.messageId, args.emoji, actorOf(requireUser(ctx)))).added;
+    },
+    markConversationRead: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      await guardConversation(ctx, args.id, 'viewer');
+      await conversationService.markRead(args.id, requireUser(ctx).id);
+      return true;
     },
     startTaskSession: async (_: unknown, args: { id: string; provider?: string | null; config?: Record<string, unknown> | null; prompt?: string | null; agentId?: string | null }, ctx: Ctx) => {
       await guardTask(ctx, args.id, 'member');

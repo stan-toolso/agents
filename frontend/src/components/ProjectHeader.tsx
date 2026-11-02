@@ -1,12 +1,15 @@
 import type { ReactNode } from 'react';
-import { Button, Nav } from 'react-bootstrap';
+import { Badge, Button, Nav } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
+import { PROJECT_UNREAD_MESSAGES } from '../graphql/conversations';
+import { usePollingQuery } from '../lib/usePollingQuery';
 import { useSessionLauncher } from './SessionLauncher';
 
-export type ProjectTab = 'overview' | 'chats' | 'repo' | 'tasks' | 'agents' | 'pullRequests' | 'context' | 'vault' | 'env' | 'schedules' | 'workflows' | 'history';
+export type ProjectTab = 'overview' | 'conversations' | 'chats' | 'repo' | 'tasks' | 'agents' | 'pullRequests' | 'context' | 'vault' | 'env' | 'schedules' | 'workflows' | 'history' | 'settings';
 
 const TABS: { key: ProjectTab; label: string; path: string; icon: string; title?: string; absolute?: boolean }[] = [
-  { key: 'overview', label: 'Aperçu', path: '', icon: 'bi-folder2-open' },
+  { key: 'overview', label: 'Tableau de bord', path: '', icon: 'bi-speedometer2', title: 'Ce qui attend une réponse, l’équipe au travail, le flux des tâches et la consommation du projet' },
+  { key: 'conversations', label: 'Conversations', path: '/conversations', icon: 'bi-chat-left-text', title: 'Canaux de conversation d’équipe : mentionnez les personnes et les agents du projet, qui répondent dans le fil' },
   { key: 'repo', label: 'Dépôt', path: '/repo', icon: 'bi-code-square', title: 'Dépôt git : branches, commits et fichiers ; dépôt hébergé par Skipper et ses sauvegardes' },
   { key: 'tasks', label: 'Tâches', path: '/tasks', icon: 'bi-check2-square' },
   { key: 'agents', label: 'Agents', path: '/agents', icon: 'bi-robot', title: 'Agents du projet (Product Manager, Developer…) : membres qui ne sont pas des personnes, avec leurs comptes, instructions et déclencheurs' },
@@ -17,7 +20,20 @@ const TABS: { key: ProjectTab; label: string; path: string; icon: string; title?
   { key: 'schedules', label: 'Planifications', path: '/schedules', icon: 'bi-alarm', title: 'Sessions relancées à heures fixes : prochaines échéances, historique des exécutions' },
   { key: 'workflows', label: 'Workflows', path: '/workflows', icon: 'bi-diagram-3', title: 'Workflows : enchaînements d’appels de modèle, de sessions et de tâches' },
   { key: 'history', label: 'Historique', path: '/history', icon: 'bi-clock-history', title: 'Sessions et work sessions archivées' },
+  { key: 'settings', label: 'Réglages', path: '/settings', icon: 'bi-gear', title: 'Dossier de travail, instructions permanentes, membres, autorisations mémorisées, conteneur, clés d’API' },
 ];
+
+/** Non-lus des canaux du projet, sur l'onglet Conversations (relevé toutes les 30 s). */
+function UnreadBadge({ projectId }: { projectId: string }) {
+  const { data } = usePollingQuery<{ project: { id: string; unreadMessages: number } | null }>(PROJECT_UNREAD_MESSAGES, { variables: { id: projectId }, pollInterval: 30_000 });
+  const n = data?.project?.unreadMessages ?? 0;
+  if (!n) return null;
+  return (
+    <Badge bg="primary" pill className="ms-1 project-tab-badge">
+      {n}
+    </Badge>
+  );
+}
 
 /** Onglets de l'espace personnel : pas de workflows, mais les chats (qui ont leur propre page). */
 const PERSONAL_TABS: typeof TABS = [
@@ -81,6 +97,7 @@ export default function ProjectHeader({ project, active, actions }: { project: P
             <Nav.Link as={Link as any} to={t.absolute ? t.path : `/projects/${project.id}${t.path}`} eventKey={t.key} title={t.title}>
               <i className={`bi ${t.icon} me-1`} />
               {t.label}
+              {t.key === 'conversations' && !personal && <UnreadBadge projectId={project.id} />}
             </Nav.Link>
           </Nav.Item>
         ))}

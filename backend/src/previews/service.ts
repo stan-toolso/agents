@@ -432,16 +432,22 @@ export const previewService = {
     return restarted;
   },
 
-  /** Tue le groupe de processus du lancement (TERM, puis KILL au bout de 3 s). */
+  /**
+   * Tue le groupe de processus du lancement (TERM, puis KILL au bout de 3 s). On suit le groupe et non son chef : le
+   * script meurt au premier TERM quand le serveur de développement peut tarder à s'arrêter, et resterait sinon en vie à
+   * tenir son port (« Port … is already in use » au lancement suivant).
+   */
   async stopProcess(project: Project, state: string): Promise<boolean> {
-    if (!(await this.alive(project, state))) return false;
     const pid = (await readText(path.join(state, 'pid'))).trim();
-    await runner.exec(project, ['kill', '-TERM', '--', `-${pid}`]);
+    if (!/^\d+$/.test(pid)) return false;
+    const groupAlive = async () => (await runner.exec(project, ['kill', '-0', '--', `-${pid}`]).catch(() => ({ code: 1 }))).code === 0;
+    if (!(await groupAlive())) return false;
+    await runner.exec(project, ['kill', '-TERM', '--', `-${pid}`]).catch(() => undefined);
     for (let i = 0; i < 15; i++) {
       await new Promise((r) => setTimeout(r, 200));
-      if (!(await this.alive(project, state))) break;
+      if (!(await groupAlive())) break;
     }
-    if (await this.alive(project, state)) await runner.exec(project, ['kill', '-KILL', '--', `-${pid}`]);
+    if (await groupAlive()) await runner.exec(project, ['kill', '-KILL', '--', `-${pid}`]).catch(() => undefined);
     await event(state, 'stopped');
     return true;
   },
