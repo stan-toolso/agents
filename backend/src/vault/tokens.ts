@@ -1,7 +1,7 @@
 /**
  * Jetons applicatifs du coffre (type `token`) : les identifiants que Skipper lui-même utilise pour le
  * compte d'une personne — son identifiant Claude, les clés d'API de ses fournisseurs de modèles OpenCode,
- * ses comptes GitHub. Jamais offerts aux agents (ni outil MCP, ni secret de navigateur, ni lien à un projet) :
+ * ses comptes GitHub et GitLab. Jamais offerts aux agents (ni outil MCP, ni secret de navigateur, ni lien à un projet) :
  * les réglages d'une personne les référencent, et Skipper les relit à chaque usage après avoir vérifié
  * qu'elle peut toujours s'en servir.
  */
@@ -20,6 +20,7 @@ export const TOKEN_SERVICES = {
   anthropic: { label: 'Anthropic (clé API)', prefix: 'sk-ant-', opencode: true },
   claude: { label: 'Abonnement Claude (jeton OAuth)', prefix: 'sk-ant-', pattern: /^sk-ant-[A-Za-z0-9_-]{40,}$/ },
   github: { label: 'GitHub', prefix: null, pattern: /^(ghp_|github_pat_|gho_|ghu_)[A-Za-z0-9_]{20,}$/ },
+  gitlab: { label: 'GitLab', prefix: null },
   openai: { label: 'OpenAI', prefix: 'sk-', opencode: true },
   google: { label: 'Google (Gemini)', prefix: null, opencode: true },
   openrouter: { label: 'OpenRouter', prefix: 'sk-or-', opencode: true },

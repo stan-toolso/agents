@@ -1697,6 +1697,71 @@ type GithubRepository {
   account: String!
 }
 
+"Compte GitLab connecté par la personne (gitlab.com ou instance auto-hébergée). Un dépôt est atteint avec le compte de son instance dont l'identifiant ou les groupes possèdent son espace, sinon le compte par défaut. Les jetons ne sont jamais renvoyés."
+type GitlabAccount {
+  id: ID!
+  "Instance (nom d'hôte) : gitlab.com, gitlab.exemple.fr…"
+  host: String!
+  login: String!
+  name: String
+  avatarUrl: String
+  "OAUTH (connexion par code) ou PAT (jeton personnel du coffre)."
+  method: String!
+  scopes: [String!]!
+  "Groupes de premier niveau du compte."
+  groups: [String!]!
+  isDefault: Boolean!
+  "Élément du coffre (jeton applicatif gitlab) qui détient le jeton."
+  vaultItemId: ID!
+  connectedAt: DateTime!
+  "Expiration du jeton courant (jetons OAuth renouvelés automatiquement ; jetons personnels à remplacer)."
+  tokenExpiresAt: DateTime
+}
+
+"Connexion GitLab de la personne connectée : ses comptes, utilisés par ses actions git, la liste de ses dépôts et ses sessions."
+type GitlabAuthStatus {
+  connected: Boolean!
+  accounts: [GitlabAccount!]!
+  "La connexion par code (device flow) est configurée sur ce serveur (GITLAB_CLIENT_ID)."
+  deviceAvailable: Boolean!
+  "Instance de la connexion par code."
+  deviceHost: String
+}
+
+"Connexion GitLab par code (device flow) en cours : saisir userCode sur verificationUri, puis interroger pollGitlabDeviceLogin."
+type GitlabDeviceLogin {
+  id: ID!
+  userCode: String!
+  verificationUri: String!
+  "Page de validation avec le code déjà saisi, quand l'instance la fournit."
+  verificationUriComplete: String
+  expiresAt: DateTime!
+  interval: Int!
+}
+
+"Résultat d'une interrogation : PENDING, CONNECTED, EXPIRED ou DENIED."
+type GitlabDevicePoll {
+  status: String!
+  interval: Int!
+  account: GitlabAccount
+}
+
+type GitlabRepository {
+  "Chemin complet « groupe/sous-groupe/projet »."
+  fullName: String!
+  name: String!
+  namespace: String!
+  description: String
+  private: Boolean!
+  defaultBranch: String
+  cloneUrl: String!
+  htmlUrl: String!
+  pushedAt: DateTime
+  host: String!
+  "Identifiant du compte connecté avec lequel le dépôt a été listé."
+  account: String!
+}
+
 "Fournisseur de modèles d'OpenCode auquel la personne peut donner une clé (jeton applicatif du coffre)."
 type OpencodeProvider {
   id: String!
@@ -1738,7 +1803,7 @@ input OpencodeSettingsInput {
   sessionBudgetUsd: Float
 }
 
-"Paramètres de la personne connectée (Claude, OpenCode, GitHub, consommation) et, pour les administrateurs, du serveur."
+"Paramètres de la personne connectée (Claude, OpenCode, GitHub, GitLab, consommation) et, pour les administrateurs, du serveur."
 type AppSettings {
   claude: ClaudeSettings!
   claudeAuth: ClaudeAuthStatus!
@@ -1746,6 +1811,7 @@ type AppSettings {
   models: [ClaudeModel!]!
   usage: UsageSummary!
   github: GithubAuthStatus!
+  gitlab: GitlabAuthStatus!
   opencode: OpencodeSettings!
   "Limites d'utilisation de l'abonnement d'après les sessions (administrateurs seulement ; null sinon, ou sans événement reçu)."
   rateLimits: ClaudeRateLimits
@@ -2359,6 +2425,8 @@ type Query {
   claudeLogin(id: ID!): ClaudeLogin!
   "Dépôts GitHub accessibles avec les comptes de la personne connectée (les plus récents d'abord)."
   githubRepositories(query: String): [GithubRepository!]!
+  "Dépôts GitLab dont la personne connectée est membre, sur toutes ses instances (les plus récemment actifs d'abord)."
+  gitlabRepositories(query: String): [GitlabRepository!]!
   "Services qu'un jeton applicatif du coffre peut servir."
   vaultTokenServices: [VaultTokenService!]!
   "Types de session, avec les formulaires adaptés aux réglages de la personne connectée."
@@ -2561,6 +2629,15 @@ type Mutation {
   setDefaultGithubAccount(accountId: ID!): AppSettings!
   "GitHub : oublie un compte (tous sans accountId)."
   disconnectGithub(accountId: ID): AppSettings!
+  "GitLab : démarre la connexion par code (device flow, instance GITLAB_URL)."
+  startGitlabDeviceLogin: GitlabDeviceLogin!
+  "GitLab : une interrogation de la connexion par code ; le compte est enregistré quand l'autorisation est donnée."
+  pollGitlabDeviceLogin(id: ID!): GitlabDevicePoll!
+  "GitLab : connecte un compte avec un jeton personnel du coffre, vérifié auprès de l'instance (host ; gitlab.com par défaut)."
+  connectGitlabFromVault(itemId: ID!, host: String): GitlabAccount!
+  setDefaultGitlabAccount(accountId: ID!): AppSettings!
+  "GitLab : oublie un compte (tous sans accountId)."
+  disconnectGitlab(accountId: ID): AppSettings!
   # ---- Workflows ----------------------------------------------------------------------------
   createWorkflow(input: CreateWorkflowInput!): Workflow!
   updateWorkflow(id: ID!, input: UpdateWorkflowInput!): Workflow!

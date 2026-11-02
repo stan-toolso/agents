@@ -946,6 +946,14 @@ export const vaultService = {
           const u = (await res.json()) as { login: string };
           return `Compte GitHub ${u.login}`;
         }
+        if (s.service === 'gitlab') {
+          // Seul gitlab.com est connu ici : le jeton d'une autre instance est vérifié à sa connexion (Paramètres → GitLab).
+          const res = await fetch('https://gitlab.com/api/v4/user', { headers: { Accept: 'application/json', 'User-Agent': 'skipper', Authorization: `Bearer ${token}` } });
+          if (res.status === 401) return "gitlab.com ne reconnaît pas ce jeton : s'il vient d'une instance auto-hébergée, il sera vérifié à sa connexion dans Paramètres → GitLab.";
+          if (!res.ok) throw new AppError(`GitLab : vérification impossible (${res.status})`);
+          const u = (await res.json()) as { username: string };
+          return `Compte gitlab.com ${u.username}`;
+        }
         return `Jeton ${TOKEN_SERVICES[s.service].label} enregistré ; il est vérifié par le réglage qui l'utilise.`;
       }
       default: {

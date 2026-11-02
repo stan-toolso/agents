@@ -5,6 +5,7 @@ import { Alert, Badge, Button, Card, Col, Form, InputGroup, Nav, ProgressBar, Ro
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import GithubSection from '../components/GithubSection';
+import GitlabSection from '../components/GitlabSection';
 import PageLoading from '../components/PageLoading';
 import RateLimitGauges from '../components/RateLimitGauges';
 import ServerHealthCard from '../components/ServerHealthCard';
@@ -654,7 +655,7 @@ function ServerSection({ server }: { server: ServerState }) {
   );
 }
 
-type SettingsSection = 'claude' | 'opencode' | 'github' | 'server' | 'notifications' | 'appearance';
+type SettingsSection = 'claude' | 'opencode' | 'github' | 'gitlab' | 'server' | 'notifications' | 'appearance';
 
 /** Thème clair / sombre / système, mémorisé dans ce navigateur seulement. */
 function AppearanceSection() {
@@ -677,7 +678,7 @@ function AppearanceSection() {
   );
 }
 
-/** Paramètres de la personne connectée : Claude (identifiants, modèles, budgets), OpenCode, GitHub, notifications, apparence ; serveur pour les administrateurs. */
+/** Paramètres de la personne connectée : Claude (identifiants, modèles, budgets), OpenCode, GitHub, GitLab, notifications, apparence ; serveur pour les administrateurs. */
 export default function SettingsPage() {
   useTabTitle('Paramètres');
   const { user } = useAuth();
@@ -713,6 +714,12 @@ export default function SettingsPage() {
             {s.github.connected ? <Badge bg="success" className="ms-2">{s.github.accounts.length > 1 ? `${s.github.accounts.length} comptes` : 'connecté'}</Badge> : <Badge bg="secondary" className="ms-2">non connecté</Badge>}
           </Nav.Link>
         </Nav.Item>
+        <Nav.Item>
+          <Nav.Link eventKey="gitlab">
+            <i className="bi bi-gitlab me-1" /> GitLab
+            {s.gitlab.connected ? <Badge bg="success" className="ms-2">{s.gitlab.accounts.length > 1 ? `${s.gitlab.accounts.length} comptes` : 'connecté'}</Badge> : <Badge bg="secondary" className="ms-2">non connecté</Badge>}
+          </Nav.Link>
+        </Nav.Item>
         {isAdmin && s.server && (
           <Nav.Item>
             <Nav.Link eventKey="server">
@@ -743,6 +750,7 @@ export default function SettingsPage() {
         )}
         {section === 'opencode' && <OpencodeSection settings={s} />}
         {section === 'github' && <GithubSection />}
+        {section === 'gitlab' && <GitlabSection />}
         {section === 'server' && s.server && <ServerSection server={s.server} />}
         {section === 'notifications' && <NotificationsSection />}
         {section === 'appearance' && <AppearanceSection />}

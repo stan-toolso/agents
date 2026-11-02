@@ -60,6 +60,8 @@ import { sessionChangesService, type SessionChanges } from '../sessions/changes.
 import { loginService } from '../settings/login.js';
 import { githubService } from '../settings/github.js';
 import { githubDeviceAvailable, githubDeviceService } from '../settings/githubDevice.js';
+import { gitlabService } from '../settings/gitlab.js';
+import { gitlabDevice, gitlabDeviceService } from '../settings/gitlabDevice.js';
 import { claudeSettings, type ClaudeSettingsPatch } from '../settings/claude.js';
 import { opencodeProviders, opencodeSettings, type OpencodeSettingsPatch } from '../settings/opencode.js';
 import { workflowService } from '../workflows/service.js';
@@ -254,7 +256,7 @@ const toGqlStatus = (s: SessionStatus): GqlStatus => s.toUpperCase() as GqlStatu
 const fromGqlStatus = (s?: GqlStatus | null): SessionStatus | undefined =>
   s ? (s.toLowerCase() as SessionStatus) : undefined;
 
-/** Paramètres de la personne connectée (Claude, OpenCode, GitHub, consommation) ; les champs du serveur sont réservés aux administrateurs. */
+/** Paramètres de la personne connectée (Claude, OpenCode, GitHub, GitLab, consommation) ; les champs du serveur sont réservés aux administrateurs. */
 const appSettings = (ctx: Ctx) => {
   const user = requireUser(ctx);
   const claude = () => claudeSettings.forUser(user.id);
@@ -264,6 +266,7 @@ const appSettings = (ctx: Ctx) => {
     models: async () => (await claude()).models(),
     usage: () => usageService.summary(user.id),
     github: () => githubService.status(user.id, githubDeviceAvailable()),
+    gitlab: () => gitlabService.status(user.id, gitlabDevice()),
     opencode: async () => {
       const o = await opencodeSettings.forUser(user.id);
       return { defaultModel: o.settings.defaultModel, sessionBudgetUsd: o.settings.sessionBudgetUsd, apiKeys: await o.keyStatus(), providers: opencodeProviders, modelList: o.modelList };
@@ -479,6 +482,15 @@ export const resolvers = {
 
   GithubAccount: {
     method: (a: { method: string }) => a.method.toUpperCase(),
+  },
+  GithubDevicePoll: {
+    status: (p: { status: string }) => p.status.toUpperCase(),
+  },
+  GitlabAccount: {
+    method: (a: { method: string }) => a.method.toUpperCase(),
+  },
+  GitlabDevicePoll: {
+    status: (p: { status: string }) => p.status.toUpperCase(),
   },
 
   Workflow: {
@@ -777,6 +789,7 @@ export const resolvers = {
       requireUser(ctx);
       return githubService.listRepositories(requireUser(ctx).id, args.query);
     },
+    gitlabRepositories: (_: unknown, args: { query?: string | null }, ctx: Ctx) => gitlabService.listRepositories(requireUser(ctx).id, args.query),
     me: (_: unknown, __: unknown, ctx: Ctx) => ctx.user,
     users: (_: unknown, __: unknown, ctx: Ctx) => {
       requireAdmin(ctx);
@@ -1239,6 +1252,17 @@ export const resolvers = {
     },
     disconnectGithub: async (_: unknown, args: { accountId?: string | null }, ctx: Ctx) => {
       await githubService.disconnect(requireUser(ctx).id, args.accountId ?? null);
+      return appSettings(ctx);
+    },
+    startGitlabDeviceLogin: (_: unknown, __: unknown, ctx: Ctx) => gitlabDeviceService.start(requireUser(ctx).id),
+    pollGitlabDeviceLogin: (_: unknown, args: { id: string }, ctx: Ctx) => gitlabDeviceService.poll(requireUser(ctx).id, args.id),
+    connectGitlabFromVault: (_: unknown, args: { itemId: string; host?: string | null }, ctx: Ctx) => gitlabService.connectFromVault(requireUser(ctx).id, args.itemId, args.host),
+    setDefaultGitlabAccount: async (_: unknown, args: { accountId: string }, ctx: Ctx) => {
+      await gitlabService.setDefault(requireUser(ctx).id, args.accountId);
+      return appSettings(ctx);
+    },
+    disconnectGitlab: async (_: unknown, args: { accountId?: string | null }, ctx: Ctx) => {
+      await gitlabService.disconnect(requireUser(ctx).id, args.accountId ?? null);
       return appSettings(ctx);
     },
     // ---- Workflows ----------------------------------------------------------------------------

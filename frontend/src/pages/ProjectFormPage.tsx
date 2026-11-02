@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Col, Collapse, Form, Row, Spinner } from 'react-bootstrap';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { bypassConnectionsWarning, permissionModeLabels } from '../lib/humanize';
-import { CREATE_PROJECT, GITHUB_REPOSITORIES, GITHUB_STATUS, PROJECT, PROJECTS, UPDATE_PROJECT, type GithubAuthStatus, type GithubRepository, type Project } from '../graphql/operations';
+import { CREATE_PROJECT, GITHUB_REPOSITORIES, GITHUB_STATUS, GITLAB_REPOSITORIES, GITLAB_STATUS, PROJECT, PROJECTS, UPDATE_PROJECT, type GithubAuthStatus, type GithubRepository, type GitlabAuthStatus, type GitlabRepository, type Project } from '../graphql/operations';
 
 /** Modes proposés comme réglage de projet (même liste que le backend, projects/types.ts). */
 const projectPermissionModes = ['default', 'acceptEdits', 'bypassPermissions', 'plan'];
@@ -19,7 +19,7 @@ function GithubRepoPicker({ onPick }: { onPick: (repo: GithubRepository) => void
   if (!connected) {
     return (
       <Form.Text>
-        Dépôt privé ? <Link to="/settings?section=github">Connectez votre compte GitHub</Link> pour le choisir dans une liste et l'utiliser sans clé de déploiement.
+        Dépôt privé ? Connectez votre compte <Link to="/settings?section=github">GitHub</Link> ou <Link to="/settings?section=gitlab">GitLab</Link> pour le choisir dans une liste et l'utiliser sans clé de déploiement.
       </Form.Text>
     );
   }
@@ -40,6 +40,38 @@ function GithubRepoPicker({ onPick }: { onPick: (repo: GithubRepository) => void
             {r.private && <span className="text-secondary"> · privé</span>}
             <span className="text-secondary"> · {r.defaultBranch}</span>
             {several && <span className="text-secondary"> · compte {r.account}</span>}
+          </button>
+        ))}
+        {data && repos.length === 0 && <div className="text-secondary">Aucun dépôt ne correspond.</div>}
+      </div>
+    </div>
+  );
+}
+/** Liste des dépôts GitLab de l'utilisateur connecté (toutes ses instances), pour remplir l'URL et la branche ; rien sans compte GitLab. */
+function GitlabRepoPicker({ onPick }: { onPick: (repo: GitlabRepository) => void }) {
+  const { data: statusData } = useQuery<{ settings: { gitlab: GitlabAuthStatus } }>(GITLAB_STATUS);
+  const connected = statusData?.settings.gitlab.connected ?? false;
+  const [query, setQuery] = useState('');
+  const { data, loading } = useQuery<{ gitlabRepositories: GitlabRepository[] }>(GITLAB_REPOSITORIES, { variables: { query }, skip: !connected });
+  if (!connected) return null;
+  const repos = data?.gitlabRepositories ?? [];
+  const accounts = statusData?.settings.gitlab.accounts ?? [];
+  // Plusieurs comptes ou une instance auto-hébergée : on dit d'où vient chaque dépôt.
+  const several = accounts.length > 1 || accounts.some((a) => a.host !== 'gitlab.com');
+  return (
+    <div className="border rounded p-2 mb-2">
+      <div className="d-flex align-items-center gap-2 mb-2">
+        <i className="bi bi-gitlab" />
+        <Form.Control size="sm" placeholder="Rechercher un de vos dépôts GitLab…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        {loading && <Spinner size="sm" />}
+      </div>
+      <div className="small" style={{ maxHeight: 160, overflow: 'auto' }}>
+        {repos.slice(0, 30).map((r) => (
+          <button key={`${r.host}/${r.fullName}`} type="button" className="btn btn-link btn-sm p-0 d-block text-start text-decoration-none" onClick={() => onPick(r)}>
+            {r.fullName}
+            {r.private && <span className="text-secondary"> · privé</span>}
+            {r.defaultBranch && <span className="text-secondary"> · {r.defaultBranch}</span>}
+            {several && <span className="text-secondary"> · {r.account}@{r.host}</span>}
           </button>
         ))}
         {data && repos.length === 0 && <div className="text-secondary">Aucun dépôt ne correspond.</div>}
@@ -262,7 +294,7 @@ export default function ProjectFormPage() {
                       onChange={() => setRepoMode('hosted')}
                       title={hadRemote ? 'Un projet relié à un dépôt distant ne peut pas passer en dépôt hébergé' : !hostedAvailable && !wasHosted ? "L'hébergement de dépôts (Forgejo) n'est pas configuré sur ce serveur" : undefined}
                     />
-                    <Form.Check type="radio" id="repo-remote" name="repoMode" label="Dépôt distant (GitHub ou autre), par son adresse" checked={repoMode === 'remote'} disabled={wasHosted} onChange={() => setRepoMode('remote')} />
+                    <Form.Check type="radio" id="repo-remote" name="repoMode" label="Dépôt distant (GitHub, GitLab ou autre), par son adresse" checked={repoMode === 'remote'} disabled={wasHosted} onChange={() => setRepoMode('remote')} />
                     {wasHosted && <Form.Text>Le dépôt de ce projet est hébergé par Skipper ; l'hébergement ne se désactive pas.</Form.Text>}
                   </div>
                 );
@@ -276,10 +308,19 @@ export default function ProjectFormPage() {
                   }}
                 />
               )}
+              {repoMode === 'remote' && !isEdit && (
+                <GitlabRepoPicker
+                  onPick={(r) => {
+                    setGitUrl(r.cloneUrl);
+                    setGitBranch(r.defaultBranch ?? '');
+                    if (!name) setName(r.name);
+                  }}
+                />
+              )}
               {repoMode === 'remote' && (
                 <Form.Group className="mb-2">
                   <Form.Label className="small mb-1">URL</Form.Label>
-                  <Form.Control value={gitUrl} onChange={(e) => setGitUrl(e.target.value)} placeholder="https://github.com/org/repo.git ou git@github.com:org/repo.git" />
+                  <Form.Control value={gitUrl} onChange={(e) => setGitUrl(e.target.value)} placeholder="https://github.com/org/repo.git, https://gitlab.com/groupe/repo.git ou git@…" />
                 </Form.Group>
               )}
               {repoMode !== 'none' && (

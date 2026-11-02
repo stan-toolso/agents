@@ -10,7 +10,7 @@ export const KINDS: Record<VaultItemKind, { label: string; icon: string; hint: s
   aws: { label: 'Compte AWS', icon: 'bi-cloud-fill', hint: 'CLI aws exécuté par le serveur : connexion par code à IAM Identity Center ou clés d’accès, lecture seule par défaut.', placeholder: 'aws-prod' },
   scaleway: { label: 'Compte Scaleway', icon: 'bi-cloud-haze2-fill', hint: 'CLI scw et API Scaleway exécutés par le serveur avec une clé d’API IAM (application dédiée recommandée), lecture seule par défaut.', placeholder: 'scaleway' },
   google: { label: 'Compte Google', icon: 'bi-google', hint: 'Gmail et Drive, connectés par OAuth ; les écritures demandent une approbation.', placeholder: 'google-moi' },
-  token: { label: 'Jeton applicatif', icon: 'bi-person-badge', hint: 'Identifiant que Skipper utilise pour vous : abonnement ou clé Claude, fournisseurs OpenCode, GitHub. Jamais offert aux agents.', placeholder: 'claude-moi' },
+  token: { label: 'Jeton applicatif', icon: 'bi-person-badge', hint: 'Identifiant que Skipper utilise pour vous : abonnement ou clé Claude, fournisseurs OpenCode, GitHub, GitLab. Jamais offert aux agents.', placeholder: 'claude-moi' },
   litellm: { label: 'Proxy LiteLLM', icon: 'bi-hdd-stack', hint: 'Adresse et clé d’un proxy LiteLLM, pour les agents qui appellent un modèle directement. Jamais offert aux agents des sessions.', placeholder: 'litellm' },
   langfuse: { label: 'Projet Langfuse', icon: 'bi-graph-up', hint: 'Hôte et clés d’un projet Langfuse, où Skipper trace ses appels de modèle. Jamais offert aux agents des sessions.', placeholder: 'langfuse' },
 };
@@ -31,6 +31,7 @@ export function skipperUsageOf(item: VaultItem): string {
       const service = item.token?.service;
       if (service === 'claude' || service === 'anthropic') return 'Paramètres → Claude';
       if (service === 'github') return 'Paramètres → GitHub';
+      if (service === 'gitlab') return 'Paramètres → GitLab';
       return 'Paramètres → OpenCode (clés des fournisseurs) et agents à appel direct';
     }
     case 'litellm':
