@@ -5,6 +5,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useDialogs } from '../components/Dialogs';
 import PageLoading from '../components/PageLoading';
 import RelaunchModal from '../components/RelaunchModal';
+import ResumeSessionModal from '../components/ResumeSessionModal';
 import StatusBadge from '../components/StatusBadge';
 import { DELETE_SESSION, type Session } from '../graphql/operations';
 import { ARCHIVED_SESSIONS, HISTORY_PROJECT, UNARCHIVE_SESSION } from '../graphql/sessions';
@@ -36,6 +37,7 @@ export default function SessionHistoryPage() {
   const [query, setQuery] = useState('');
   const [limit, setLimit] = useState(PAGE);
   const [relaunch, setRelaunch] = useState<Session | null>(null);
+  const [resume, setResume] = useState<Session | null>(null);
   useEffect(() => {
     const t = setTimeout(() => {
       setQuery(search.trim());
@@ -70,7 +72,7 @@ export default function SessionHistoryPage() {
 
       <h2 className="h5">Sessions archivées</h2>
       <p className="small text-secondary">
-        Une session archivée garde toute sa conversation et son dossier de travail (commits, modifications non validées, branche). Rouvrez-la pour la lire, restaurez-la parmi les sessions actives, ou relancez une nouvelle session à partir d'elle, sur la même branche.
+        Une session archivée garde toute sa conversation et son dossier de travail (commits, modifications non validées, branche). Rouvrez-la pour la lire, reprenez-la (un message dans sa conversation, qui la restaure), restaurez-la parmi les sessions actives, ou relancez une nouvelle session à partir d'elle, sur la même branche.
       </p>
       {sessionsQ.error && <Alert variant="danger">{sessionsQ.error.message}</Alert>}
       <Table size="sm" hover responsive>
@@ -104,7 +106,12 @@ export default function SessionHistoryPage() {
               <td className="d-none d-md-table-cell" title={fmt(s.createdAt)}>{timeAgo(s.createdAt)}</td>
               <td className="d-none d-md-table-cell" title={s.archivedAt ? fmt(s.archivedAt) : ''}>{s.archivedAt ? timeAgo(s.archivedAt) : ''}</td>
               <td className="text-end text-nowrap">
-                <Button size="sm" variant="link" className="p-0 px-1" onClick={() => setRelaunch(s)}>
+                {s.worksession && (
+                  <Button size="sm" variant="link" className="p-0 px-1" title="Restaure la session et lui envoie un message : elle reprend sa conversation là où elle s’était arrêtée" onClick={() => setResume(s)}>
+                    Reprendre
+                  </Button>
+                )}
+                <Button size="sm" variant="link" className="p-0 px-1" title="Nouvelle session qui part d’un résumé de celle-ci" onClick={() => setRelaunch(s)}>
                   Relancer
                 </Button>
                 <Button size="sm" variant="link" className="p-0 px-1" title="Remet la session parmi les sessions actives, avec son dossier de travail" onClick={() => unarchive({ variables: { id: s.id } })}>
@@ -147,6 +154,16 @@ export default function SessionHistoryPage() {
             Afficher plus
           </Button>
         </div>
+      )}
+      {resume && (
+        <ResumeSessionModal
+          session={resume}
+          onRelaunch={() => {
+            setRelaunch(resume);
+            setResume(null);
+          }}
+          onClose={() => setResume(null)}
+        />
       )}
       {relaunch && <RelaunchModal session={relaunch} projectName={project.name} onClose={() => setRelaunch(null)} />}
     </>

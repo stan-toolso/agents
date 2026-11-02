@@ -1453,7 +1453,10 @@ binaires ne sont pas ouverts. API : `workspaceEntries`, `workspaceFile`, `writeW
 
 Une session s'**archive** (bouton sur sa page, menu de la sidebar, liste des sessions) : elle quitte la
 sidebar et reste consultable, restaurable et relançable depuis l'**historique** du projet
-(`/projects/:id/history`, recherche dans les noms, consignes et conversations). « Relancer » crée une
+(`/projects/:id/history`, recherche dans les noms, consignes et conversations). « Reprendre » (session
+arrêtée, terminée, en échec ou archivée, dont le dossier existe encore ; `components/ResumeSessionModal.tsx`)
+continue la **même** conversation : un message modifiable lui est envoyé comme depuis sa page, après l'avoir
+restaurée si elle était archivée — même session, même nom, même historique. « Relancer » crée une
 nouvelle session avec un résumé de la précédente (`<previous_conversation>`, 40 k caractères au plus).
 La relance travaille dans le dossier et sur la branche de la session d'origine (restaurés si besoin ;
 la session d'origine est archivée, arrêtée si elle tournait : une seule session par dossier), ou dans un
