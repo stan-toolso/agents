@@ -10,7 +10,8 @@ import type { TrackedPullRequest } from '../pullRequests/types.js';
 const m = vi.hoisted(() => ({
   tasks: {} as Record<string, unknown>,
   prs: {} as Record<string, unknown>,
-  session: { id: 's1', worksessionId: 'w1' as string | null, ownerId: 'u1' },
+  session: { id: 's1', worksessionId: 'w1' as string | null, ownerId: 'u1', takenOverById: null as string | null },
+  ownerKind: null as string | null,
   calls: [] as Array<[string, unknown[]]>,
   taskStatus: 'in_progress' as string,
   taskSessionIds: [] as string[],
@@ -24,7 +25,12 @@ vi.mock('./attachments.js', () => ({ describeAttachments: () => [], imageBlocks:
 vi.mock('../pullRequests/service.js', () => ({ trackedPullRequestService: m.prs }));
 // Comptes du propriétaire (délégation d'un agent de projet) : une personne utilise les siens ; un agent en lecture seule ne pousse pas.
 const accounts = { claudeUserId: 'u1', githubUserId: 'u1', githubReadOnly: false, githubPullRequests: true, gitlabUserId: 'u1', gitlabReadOnly: false, gitlabPullRequests: true, forgeUserId: 'u1' };
-vi.mock('../agents/service.js', () => ({ agentService: { accountsForOwner: async () => accounts } }));
+vi.mock('../agents/service.js', () => ({
+  agentService: {
+    accountsForSession: async (s: { takenOverById: string | null }) => (s.takenOverById ? { ...accounts, githubUserId: s.takenOverById, githubReadOnly: false } : accounts),
+    forUser: async () => (m.ownerKind ? { kind: m.ownerKind } : null),
+  },
+}));
 vi.mock('../git/agentEnv.js', () => ({ gitAccountFor: async (a: typeof accounts) => ({ host: 'github', userId: a.githubUserId, readOnly: a.githubReadOnly, pullRequests: a.githubPullRequests }) }));
 vi.mock('../sessions/service.js', () => ({ sessionService: { get: async () => m.session } }));
 vi.mock('../personal/scope.js', () => ({
@@ -81,7 +87,7 @@ const record = (name: string) => (...args: unknown[]) => void m.calls.push([name
 
 beforeEach(() => {
   m.calls = [];
-  m.session = { id: 's1', worksessionId: 'w1', ownerId: 'u1' };
+  m.session = { id: 's1', worksessionId: 'w1', ownerId: 'u1', takenOverById: null };
   m.taskStatus = 'in_progress';
   m.taskSessionIds = [];
   m.blockedBy = [];
@@ -298,5 +304,27 @@ describe('serveur MCP tasks', () => {
     expect(allowed.isError).toBeFalsy();
     expect(textOf(allowed)).toContain('Pull request ouverte');
     accounts.githubReadOnly = false;
+  });
+
+  it("pr_open est refusé à un Product Manager, sauf quand une personne a pris la main (avec son compte)", async () => {
+    const client = await connect();
+    m.calls.length = 0;
+    m.session = { ...m.session, worksessionId: 'w1', ownerId: 'pm', takenOverById: null };
+    m.ownerKind = 'product_manager';
+    accounts.githubReadOnly = true;
+    accounts.githubPullRequests = false;
+    const refused = await client.callTool({ name: 'pr_open', arguments: { task_id: 't1', title: 'x' } });
+    expect(refused.isError).toBe(true);
+    expect(textOf(refused)).toContain("Tu es Product Manager");
+    expect(m.calls.filter(([n]) => n === 'open')).toHaveLength(0);
+    // Stan prend la main : ses comptes (en écriture) servent la PR.
+    m.session = { ...m.session, takenOverById: 'stan' };
+    const taken = await client.callTool({ name: 'pr_open', arguments: { task_id: 't1', title: 'Reprise' } });
+    expect(taken.isError).toBeFalsy();
+    expect(m.calls.find(([n]) => n === 'open')?.[1][1]).toBe('stan');
+    m.ownerKind = null;
+    accounts.githubReadOnly = false;
+    accounts.githubPullRequests = true;
+    m.session = { ...m.session, ownerId: 'u1', takenOverById: null };
   });
 });

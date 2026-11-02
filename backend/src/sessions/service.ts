@@ -730,6 +730,24 @@ export const sessionService = {
     await emitEvent(id, 'task_note', { text });
   },
 
+  /**
+   * Prise en main de la session d'un agent par une personne (`userId`), ou restitution à l'agent (null) : les comptes et
+   * les droits de la session changent, ce qui ne s'applique qu'au lancement de son processus. En cours, l'agent finit
+   * son tour puis la session se termine sans notification ; la prochaine instruction la relance (conversation reprise)
+   * avec les nouveaux comptes. Les droits de l'appelant sont vérifiés par `agentService.takeOver` / `handBack`.
+   */
+  async setTakenOver(id: string, userId: string | null, notice: string): Promise<Session> {
+    const session = await sessionRepository.findById(id);
+    if (!session) throw new NotFoundError('Session introuvable');
+    assertNotArchived(session);
+    await sessionRepository.update(id, { takenOverById: userId, takenOverAt: userId ? new Date() : null });
+    await emitEvent(id, 'system', { message: notice, notice: true, reason: userId ? 'taken_over' : 'handed_back' });
+    if (session.status === 'running') {
+      await this.end(id, { quiet: true }).catch((err) => log.warn(`[sessions] prise en main de ${id} : fin du processus impossible`, err));
+    }
+    return publishSession(await sessionRepository.findById(id));
+  },
+
   /** Renomme la session. */
   async rename(id: string, name: string): Promise<Session> {
     const trimmed = name.trim();

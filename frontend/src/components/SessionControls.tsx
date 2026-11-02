@@ -1,7 +1,7 @@
 import { useMutation } from '@apollo/client';
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { END_SESSION, INTERRUPT_SESSION, RESUME_SESSION, RUN_SESSION_SCHEDULE_NOW, STOP_SESSION, type ChildSession, type Session } from '../graphql/operations';
+import { END_SESSION, HAND_BACK_SESSION, INTERRUPT_SESSION, TAKE_OVER_SESSION, RESUME_SESSION, RUN_SESSION_SCHEDULE_NOW, STOP_SESSION, type ChildSession, type Session } from '../graphql/operations';
 import { UNARCHIVE_SESSION } from '../graphql/sessions';
 import { sessionStateHint, sessionStatusLabels } from '../lib/humanize';
 import { sessionDotClass } from '../workbench/WorkspaceTabs';
@@ -21,8 +21,10 @@ export type ControlledSession = Session & { childSessions: ChildSession[] };
  * panneau de droite. Le hook accepte une session absente (page en cours de chargement) : il ne rend alors rien.
  */
 export function useSessionActions(session: ControlledSession | null | undefined): { buttons: ReactNode; modals: ReactNode; openSettings: () => void; openContextSettings: () => void; openSchedule: () => void } {
-  const { showError } = useDialogs();
+  const { confirm, showError } = useDialogs();
   const onError = (err: Error) => void showError(err);
+  const [takeOverSession, { loading: takingOver }] = useMutation(TAKE_OVER_SESSION, { onError });
+  const [handBackSession, { loading: handingBack }] = useMutation(HAND_BACK_SESSION, { onError });
   const [interruptSession] = useMutation(INTERRUPT_SESSION, { onError });
   const [resumeSession, { loading: resuming }] = useMutation(RESUME_SESSION, { onError });
   const [endSession] = useMutation(END_SESSION, { onError });
@@ -50,11 +52,30 @@ export function useSessionActions(session: ControlledSession | null | undefined)
   // Session arrêtée (ou archivée) dont le dossier existe encore : « Reprendre » renvoie un message dans sa conversation.
   const stopped = archived ? session.status !== 'RUNNING' && session.status !== 'QUEUED' : session.status === 'COMPLETED' || session.status === 'FAILED' || session.status === 'STOPPED';
   const resumable = stopped && (chat || Boolean(session.worksession));
+  // Session d'un agent : une personne autorisée (demandeur, gestionnaire, administrateur) la continue avec ses comptes.
+  const agentName = session.agent?.name ?? "l'agent";
+  const takeOver = async () => {
+    const ok = await confirm({
+      title: 'Prendre la main',
+      message: `La session continue (même conversation, toujours au nom de ${agentName}) avec vos comptes et vos droits : votre abonnement Claude, vos comptes GitHub et GitLab en écriture (push, pull requests), vos éléments du coffre. Vos instructions priment sur les règles du rôle de ${agentName}.${running ? " Le tour en cours se termine d'abord ; votre prochaine instruction relance la session avec vos comptes." : ''} Vous pourrez rendre la main à tout moment.`,
+      confirmLabel: 'Prendre la main',
+    });
+    if (ok) void takeOverSession({ variables: { id } });
+  };
   const buttons = (
     <>
       <button type="button" className="cc-btn" title="Nom de la session et nettoyage automatique de l'historique" onClick={openSettings}>
         <i className="bi bi-gear" /> Réglages
       </button>
+      {session.viewerCanTakeOver && !archived && (session.takenOverBy ? (
+        <button type="button" className="cc-btn" disabled={handingBack} title={`${session.takenOverBy.name} a la main : la session tourne avec ses comptes. La rendre à ${agentName}, qui reprend les siens`} onClick={() => void handBackSession({ variables: { id } })}>
+          <i className="bi bi-person-dash" /> Rendre la main
+        </button>
+      ) : (
+        <button type="button" className="cc-btn" disabled={takingOver} title={`Continuer cette session avec vos comptes et vos droits au lieu de ceux de ${agentName}`} onClick={() => void takeOver()}>
+          <i className="bi bi-person-check" /> Prendre la main
+        </button>
+      ))}
       {!chat && (
         <button type="button" className="cc-btn" title={schedule ? 'Modifier la planification de cette session' : 'Relancer cette session à intervalles réguliers avec une instruction'} onClick={openSchedule}>
           <i className="bi bi-alarm" /> {schedule ? (schedule.enabled ? 'Planification' : 'Planification (en pause)') : 'Planifier'}

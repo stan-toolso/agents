@@ -263,3 +263,31 @@ describe('setManagers', () => {
     expect(repo.setManagers).toHaveBeenCalledWith('a1', [{ userId: 'u1', role: 'owner' }, { userId: 'u2', role: 'manager' }]);
   });
 });
+
+describe('prise en main d’une session d’agent', () => {
+  const session = (over: Record<string, unknown> = {}) => ({ id: 's1', projectId: 'p1', ownerId: 'a1', requestedById: 'u1', takenOverById: null, status: 'completed', archivedAt: null, ...over });
+
+  it('le demandeur, un gestionnaire ou un administrateur peut prendre la main ; pas un lecteur, pas une session de personne', async () => {
+    expect(await agentService.canTakeOver('u1', session())).toBe(true);
+    expect(await agentService.canTakeOver('u2', session())).toBe(false);
+    repo.isManager = vi.fn(async () => true);
+    expect(await agentService.canTakeOver('u2', session())).toBe(true);
+    userSvc.roleFor = vi.fn(async () => 'viewer');
+    expect(await agentService.canTakeOver('u1', session())).toBe(false);
+    userSvc.roleFor = vi.fn(async () => 'member');
+    expect(await agentService.canTakeOver('u1', session({ ownerId: 'u9' }))).toBe(false);
+  });
+
+  it('takeOver passe les comptes de la session à la personne, handBack les rend à l’agent', async () => {
+    sessionRepo.findById = vi.fn(async () => session());
+    sessions.setTakenOver = vi.fn(async (id: string, userId: string | null) => ({ id, takenOverById: userId }));
+    await agentService.takeOver('s1', { id: 'u1', name: 'Alice' });
+    expect(sessions.setTakenOver).toHaveBeenCalledWith('s1', 'u1', expect.stringContaining('Alice a pris la main'));
+    await expect(agentService.takeOver('s1', { id: 'u2', name: 'Bob' })).rejects.toThrow('prendre la main');
+    expect(await agentService.accountsForSession({ ownerId: 'a1', takenOverById: 'u1' })).toMatchObject({ githubUserId: 'u1', githubReadOnly: false, claudeUserId: 'u1' });
+    expect(await agentService.accountsForSession({ ownerId: 'a1', takenOverById: null })).toMatchObject({ githubUserId: 'a1' });
+    sessionRepo.findById = vi.fn(async () => session({ takenOverById: 'u1' }));
+    await agentService.handBack('s1', { id: 'u1', name: 'Alice' });
+    expect(sessions.setTakenOver).toHaveBeenLastCalledWith('s1', null, expect.stringContaining('rendu la main à Léa'));
+  });
+});

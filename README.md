@@ -1308,6 +1308,24 @@ Skipper pousse alors lui-même la branche de travail (jamais la base) avec le co
 `git push` lancé par l'agent reste bloqué ; le prompt de l'agent lui dit ce qu'il peut faire. La
 consommation reste imputée à l'agent (propriétaire des sessions) ; le plafond mensuel vérifié est celui du délégant.
 
+**Prendre la main sur la session d'un agent** (migration `20261102T2230_session_taken_over_by.sql`). La personne qui
+a demandé la session, un gestionnaire de l'agent ou un administrateur du projet (rôle membre au moins) peut cliquer
+« Prendre la main » (actions de la session ; mutation `takeOverSession`, `handBackSession` pour rendre) : la session
+continue — même conversation, même dossier, toujours au nom de l'agent, coût imputé à l'agent — mais avec **les
+comptes et les droits de cette personne** (`sessions.taken_over_by_id`) : ses identifiants Claude, ses comptes GitHub
+et GitLab en écriture (push, `tasks.pr_open`), son coffre et ses comptes Google. `agentService.accountsForSession`
+remplace `accountsForOwner` partout où l'on choisit les comptes d'une session (providers Claude et OpenCode,
+`tasks.pr_open`). Les comptes d'un processus étant fixés à son lancement, une session en cours finit son tour puis se
+termine sans bruit (`sessionService.setTakenOver`) ; l'instruction suivante la relance avec les nouveaux comptes. Le
+prompt de l'agent dit qui a la main, lève ses règles de rôle et les phrases « lecture seule ».
+
+**Règles de rôle** (`roleRulesPrompt`, `agents/prompt.ts`). Les instructions d'un agent sont copiées du modèle à sa
+création et ne suivent pas les évolutions des modèles ; Skipper ajoute donc au prompt des règles par rôle, quelles que
+soient ses instructions : un **Product Manager** ne modifie pas le code, ne commite, ne pousse ni n'ouvre de PR
+(`tasks.pr_open` le lui refuse) ; un changement de code nécessaire, y compris un bug qui bloque une release, devient une
+tâche « prête » confiée aussitôt à l'agent développeur, la tâche bloquée en dépendant. Un **Developer** ne met rien en
+production et ne fusionne pas. Ces règles sont levées quand une personne a pris la main.
+
 **Type de session et modèles.** Le profil (carte « Sessions ») règle le **type de session par défaut**
 (`defaults.provider` : Claude Code ou OpenCode ; `agentService.providerOf`), le **modèle par défaut**
 (`defaults.model`) et les **modèles autorisés** (`agent_profiles.allowed_models`, vide : tous ; le modèle par défaut

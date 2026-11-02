@@ -58,6 +58,12 @@ export interface Session {
   ownerId: string | null;
   /** Personne qui a demandé la session quand le propriétaire est un agent de projet (chat avec l'agent, tâche confiée) ; null : le propriétaire lui-même. */
   requestedById: string | null;
+  /**
+   * Personne qui a pris la main sur la session d'un agent : la session tourne avec ses comptes et ses droits (Claude, GitHub,
+   * GitLab, coffre) jusqu'à ce qu'elle la rende ; null : avec ceux de son propriétaire.
+   */
+  takenOverById: string | null;
+  takenOverAt: Date | null;
   /** Archivée : cachée des listes actives, consultable et relançable depuis l'historique du projet. */
   archivedAt: Date | null;
   /** Work session supprimée où la session a travaillé (nom, branche, libellé) ; null si elle n'en a pas perdu. */

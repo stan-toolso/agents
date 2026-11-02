@@ -214,6 +214,10 @@ export interface Session {
   owner: Pick<User, 'id' | 'name' | 'email' | 'avatarUrl' | 'kind'> | null;
   /** Personne qui a demandé la session quand son propriétaire est un agent de projet. */
   requestedBy?: { id: string; name: string } | null;
+  /** Personne qui a pris la main sur la session d'un agent : ses comptes et ses droits servent la session. */
+  takenOverBy?: { id: string; name: string } | null;
+  /** La personne connectée peut prendre ou rendre la main (requête Session seulement). */
+  viewerCanTakeOver?: boolean;
   /** Agent de projet qui joue la session (null : session d'une personne). */
   agent?: { id: string; name: string; kind: 'PRODUCT_MANAGER' | 'DEVELOPER' | 'CUSTOM'; avatar: { emoji: string | null; color: string | null } } | null;
   /** Archivée : consultable en lecture seule, relançable. */
@@ -716,6 +720,10 @@ export const SESSION_FIELDS = gql`
       id
       name
     }
+    takenOverBy {
+      id
+      name
+    }
     agent {
       id
       name
@@ -927,6 +935,7 @@ export const SESSION = gql`
   query Session($id: ID!) {
     session(id: $id) {
       ...SessionFields
+      viewerCanTakeOver
       project {
         id
         approvalConnections
@@ -1041,6 +1050,26 @@ export const RESUME_SESSION = gql`
   mutation ResumeSession($id: ID!) {
     resumeSession(id: $id) {
       ...SessionFields
+    }
+  }
+`;
+
+export const TAKE_OVER_SESSION = gql`
+  ${SESSION_FIELDS}
+  mutation TakeOverSession($id: ID!) {
+    takeOverSession(id: $id) {
+      ...SessionFields
+      viewerCanTakeOver
+    }
+  }
+`;
+
+export const HAND_BACK_SESSION = gql`
+  ${SESSION_FIELDS}
+  mutation HandBackSession($id: ID!) {
+    handBackSession(id: $id) {
+      ...SessionFields
+      viewerCanTakeOver
     }
   }
 `;

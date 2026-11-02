@@ -3627,6 +3627,10 @@ extend type Mutation {
   setAgentDelegation(id: ID!, account: AgentAccountKind!, delegate: Boolean!, readOnly: Boolean, pullRequests: Boolean): Agent!
   "Joue une action nommée de l'agent, éventuellement sur une tâche."
   runAgentAction(id: ID!, key: String!, taskId: ID): Session!
+  "Prend la main sur la session d'un agent : elle continue (même conversation, au nom de l'agent) avec les comptes et les droits de la personne connectée (Claude, GitHub, GitLab, coffre). Demandeur de la session, gestionnaire de l'agent ou administrateur du projet. En cours, appliqué après la fin du tour."
+  takeOverSession(id: ID!): Session!
+  "Rend la session à son agent : elle reprend les comptes de l'agent."
+  handBackSession(id: ID!): Session!
 }
 
 extend type Project {
@@ -3645,6 +3649,11 @@ extend type Session {
   requestedBy: User
   "Agent qui joue la session (null : session d'une personne)."
   agent: Agent
+  "Personne qui a pris la main sur la session d'un agent (ses comptes et ses droits servent la session) ; null : les comptes de l'agent."
+  takenOverBy: User
+  takenOverAt: DateTime
+  "La personne connectée peut prendre (ou rendre) la main sur cette session d'agent."
+  viewerCanTakeOver: Boolean!
 }
 
 extend type TaskComment {
