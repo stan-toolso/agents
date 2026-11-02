@@ -66,8 +66,11 @@ export interface Agent extends AgentRef {
     claude: { id: string; name: string } | null;
     github: { id: string; name: string } | null;
     githubReadOnly: boolean;
+    /** Pull requests permises par tasks.pr_open, même en lecture seule. */
+    githubPullRequests: boolean;
     gitlab: { id: string; name: string } | null;
     gitlabReadOnly: boolean;
+    gitlabPullRequests: boolean;
   };
   triggers: AgentTriggers;
   actions: AgentAction[];
@@ -149,11 +152,13 @@ export const AGENT_FIELDS = gql`
         name
       }
       githubReadOnly
+      githubPullRequests
       gitlab {
         id
         name
       }
       gitlabReadOnly
+      gitlabPullRequests
     }
     triggers {
       taskCreated
@@ -378,8 +383,8 @@ export const SUMMON_AGENT = gql`
 
 export const SET_AGENT_DELEGATION = gql`
   ${AGENT_FIELDS}
-  mutation SetAgentDelegation($id: ID!, $account: AgentAccountKind!, $delegate: Boolean!, $readOnly: Boolean) {
-    setAgentDelegation(id: $id, account: $account, delegate: $delegate, readOnly: $readOnly) {
+  mutation SetAgentDelegation($id: ID!, $account: AgentAccountKind!, $delegate: Boolean!, $readOnly: Boolean, $pullRequests: Boolean) {
+    setAgentDelegation(id: $id, account: $account, delegate: $delegate, readOnly: $readOnly, pullRequests: $pullRequests) {
       ...AgentFields
     }
   }

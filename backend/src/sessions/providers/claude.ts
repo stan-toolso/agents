@@ -244,7 +244,7 @@ export class ClaudeProvider implements SessionProvider {
       ? [ctx.project.systemPrompt.trim(), sessionIdentityPrompt(ctx.session, ctx.project), await contextService.promptSummary(ctx.project.id), REVIEW_SYSTEM_PROMPT]
       : [
         ctx.project.systemPrompt.trim(),
-        agent ? agentIdentityPrompt(agent, ctx.project, requestedBy, { githubReadOnly: accounts?.githubReadOnly, gitlabReadOnly: accounts?.gitlabReadOnly }) : '',
+        agent ? agentIdentityPrompt(agent, ctx.project, requestedBy, accounts ?? {}) : '',
         sessionIdentityPrompt(ctx.session, ctx.project),
         projectAgents.length ? [agentsPromptSummary(projectAgents, agent), agentsMcpPrompt()].filter(Boolean).join('\n') : '',
         scope ? await personalService.promptSummary(scope, await userService.get(scope.ownerId)) : '',

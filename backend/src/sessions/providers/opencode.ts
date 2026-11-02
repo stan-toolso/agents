@@ -307,7 +307,7 @@ class OpencodeRun {
     const projectContext = !agent || agent.inheritContext;
     this.systemPrompt = [
       ctx.project.systemPrompt.trim(),
-      agent ? agentIdentityPrompt(agent, ctx.project, null, { githubReadOnly: accounts?.githubReadOnly, gitlabReadOnly: accounts?.gitlabReadOnly }) : '',
+      agent ? agentIdentityPrompt(agent, ctx.project, null, accounts ?? {}) : '',
       sessionIdentityPrompt(ctx.session, ctx.project),
       agent ? await contextService.promptSummary(ctx.project.id, agent.id, { own: true }) : '',
       projectContext ? await contextService.promptSummary(ctx.project.id) : '',

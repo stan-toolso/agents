@@ -1252,15 +1252,19 @@ l'application, la page Contexte d'un projet a un sélecteur de bibliothèque (Pr
 lui **prêter son propre compte** Claude (`claude_delegate_id` : identifiants, modèle par défaut, budgets de cette
 personne), son compte **GitHub** (`github_delegate_id`) et/ou son compte **GitLab** (`gitlab_delegate_id`), chacun
 séparément ; GitHub et GitLab se prêtent **en lecture seule** par défaut (`github_delegate_read_only`,
-`gitlab_delegate_read_only`). Un dépôt hébergé par Skipper (forge) sert toujours avec le compte de l'agent lui-même.
+`gitlab_delegate_read_only`), avec ou sans le droit d'ouvrir des **pull requests / merge requests**
+(`github_delegate_pull_requests`, `gitlab_delegate_pull_requests`, faux par défaut). Un dépôt hébergé par Skipper (forge) sert toujours avec le compte de l'agent lui-même.
 On ne prête que son propre compte (mutation `setAgentDelegation(id, account: CLAUDE | GITHUB | GITLAB, delegate,
-readOnly)`, carte « Comptes prêtés » de l'onglet Comptes) ; un gestionnaire peut retirer une délégation.
+readOnly, pullRequests)`, carte « Comptes prêtés » de l'onglet Comptes) ; un gestionnaire peut retirer une délégation.
 `agentService.accounts(agent)` / `accountsForOwner(ownerId)` donnent les comptes effectifs (`OwnerAccounts` :
-`claudeUserId`, `githubUserId` / `githubReadOnly`, `gitlabUserId` / `gitlabReadOnly`, `forgeUserId`) : le provider
+`claudeUserId`, `githubUserId` / `githubReadOnly` / `githubPullRequests`, `gitlabUserId` / `gitlabReadOnly` /
+`gitlabPullRequests`, `forgeUserId`) : le provider
 Claude lit les réglages Claude du délégant (`claudeSettings.forSession`), passe les comptes à `agentGitEnv` (jeton
 GitHub de l'un, GitLab de l'autre) qui, si le compte de l'hébergeur de l'origine est prêté en lecture seule, pose une
 adresse de push inexistante sur `origin` (`remote.origin.pushurl`) ; `tasks.pr_open` choisit le compte de
-l'hébergeur du dépôt (`gitAccountFor`) et refuse alors d'ouvrir une PR, et le prompt de l'agent le lui dit. La
+l'hébergeur du dépôt (`gitAccountFor`) et refuse alors d'ouvrir une PR, sauf si le prêt permet les pull requests :
+Skipper pousse alors lui-même la branche de travail (jamais la base) avec le compte prêté et ouvre la PR, tandis qu'un
+`git push` lancé par l'agent reste bloqué ; le prompt de l'agent lui dit ce qu'il peut faire. La
 consommation reste imputée à l'agent (propriétaire des sessions) ; le plafond mensuel vérifié est celui du délégant.
 
 **Type de session et modèles.** Le profil (carte « Sessions ») règle le **type de session par défaut**
