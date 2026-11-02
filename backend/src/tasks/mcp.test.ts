@@ -87,7 +87,7 @@ const record = (name: string) => (...args: unknown[]) => void m.calls.push([name
 
 beforeEach(() => {
   m.calls = [];
-  m.session = { id: 's1', worksessionId: 'w1', ownerId: 'u1' };
+  m.session = { id: 's1', worksessionId: 'w1', ownerId: 'u1', takenOverById: null };
   m.taskStatus = 'in_progress';
   m.taskSessionIds = [];
   m.blockedBy = [];
