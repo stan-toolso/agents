@@ -61,9 +61,15 @@ export const notificationRepository = {
   },
   async list(opts: { unreadOnly?: boolean; limit?: number } & NotificationScope = {}): Promise<Notification[]> {
     const { where, params } = scopeWhere(opts);
+    const limit = Math.min(opts.limit ?? 50, 200);
     if (opts.unreadOnly) where.push('read_at IS NULL');
-    params.push(Math.min(opts.limit ?? 50, 200));
-    const { rows } = await pool.query<Row>(`SELECT * FROM notifications ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY created_at DESC LIMIT $${params.length}`, params);
+    else {
+      // Les non-lues plus anciennes que les `limit` dernières restent listées : sinon le compteur en annonce qu'on ne voit pas.
+      const scope = where.join(' AND ');
+      where.push(`(read_at IS NULL OR id IN (SELECT id FROM notifications WHERE ${scope} ORDER BY created_at DESC LIMIT $${params.push(limit)}))`);
+    }
+    params.push(opts.unreadOnly ? limit : 200);
+    const { rows } = await pool.query<Row>(`SELECT * FROM notifications WHERE ${where.join(' AND ')} ORDER BY created_at DESC LIMIT $${params.length}`, params);
     return rows.map(toNotification);
   },
   async countUnread(scope: NotificationScope = {}): Promise<number> {
