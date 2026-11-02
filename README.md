@@ -1412,8 +1412,8 @@ limite se choisit :
   (`skipper.launcher.contextLimit.<projet>`) ; le formulaire envoie toujours son choix (`CreateSessionInput.cleanup`,
   objet vide : aucune limite) ;
 - **par projet** : « Contexte des nouvelles sessions » dans le formulaire du projet (`projects.default_context_cleanup`,
-  migration `056`, null par défaut) ; présélectionné au lancement (« défaut du projet ») et appliqué aux sessions qui
-  n'en choisissent pas : tâches, sessions lancées par un agent (`sessions.create`), workflows. Une relance garde la
+  migration `20261102T2056_project_context_cleanup`, null par défaut) ; présélectionné au lancement (« défaut du
+  projet ») et appliqué aux sessions qui n'en choisissent pas : tâches, sessions lancées par un agent (`sessions.create`), workflows. Une relance garde la
   limite de la session d'origine ; une relecture par un agent n'en a jamais ;
 - **depuis la jauge** : cliquer la jauge de l'en-tête ouvre les réglages sur « Conversation de l'agent », avec
   « Recommandé : compacter au-delà de 100 k tokens » et un bouton « Appliquer » ; la jauge affiche la limite choisie
