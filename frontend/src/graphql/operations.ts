@@ -2498,20 +2498,16 @@ export interface Inbox {
   pullRequests: TrackedPullRequest[];
 }
 
-const INBOX_COUNT_FIELDS = `
-  requests
-  idleSessions
-  failedSessions
-  interruptedSessions
-  pullRequests
-  total
-`;
-
 /** Compteurs seuls, sondés par la sidebar (badge de « À traiter »). */
 export const INBOX_COUNTS = gql`
   query InboxCounts {
     inboxCounts {
-      ${INBOX_COUNT_FIELDS}
+      requests
+      idleSessions
+      failedSessions
+      interruptedSessions
+      pullRequests
+      total
     }
   }
 `;
@@ -2524,7 +2520,12 @@ export const INBOX = gql`
     inbox {
       generatedAt
       counts {
-        ${INBOX_COUNT_FIELDS}
+        requests
+        idleSessions
+        failedSessions
+        interruptedSessions
+        pullRequests
+        total
       }
       requests {
         ...RequestFields
