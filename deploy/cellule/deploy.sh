@@ -74,9 +74,9 @@ classify() {
   backend_changed=0; runner_changed=0; deps_changed=0
   if [ "$FORCE" = 1 ] || [ -z "$1" ]; then backend_changed=1; deps_changed=1; runner_changed=$([ "$FORCE" = 1 ] && echo 1 || echo 0); return; fi
   local changed; changed="$(git -C "$APP" diff --name-only "$1" "$2")"
-  echo "$changed" | grep -qE '^(backend/|package\.json|package-lock\.json|deploy/cellule/templates/env)' && backend_changed=1
-  echo "$changed" | grep -qE '^(package\.json|package-lock\.json|backend/package\.json|frontend/package\.json)' && deps_changed=1
-  echo "$changed" | grep -q '^deploy/runner/' && runner_changed=1
+  grep -qE '^(backend/|package\.json|package-lock\.json|deploy/cellule/templates/env)' <<<"$changed" && backend_changed=1
+  grep -qE '^(package\.json|package-lock\.json|backend/package\.json|frontend/package\.json)' <<<"$changed" && deps_changed=1
+  grep -q '^deploy/runner/' <<<"$changed" && runner_changed=1
   return 0
 }
 
@@ -112,7 +112,7 @@ if [ ! -f "$UPSTREAM" ]; then
   if [ "$OLD" = "$NEW" ] && [ "$FORCE" = 0 ]; then echo "déjà à jour ($OLD)"; exit 0; fi
   git merge --ff-only -q "$NEW"
   echo "$OLD → $NEW"
-  git --no-pager log --oneline "$OLD..$NEW" | head -20
+  git --no-pager log --oneline -n 20 "$OLD..$NEW"
   classify "$OLD" "$NEW"
   step "Build"
   [ "$deps_changed" = 1 ] && npm ci --no-audit --no-fund
@@ -150,7 +150,7 @@ ADIR="/home/skipper/skipper-$ACTIVE"
 if [ "$ACTIVE" = legacy ]; then ACTIVE_REV="$(git rev-parse HEAD)"; else ACTIVE_REV="$(git -C "$ADIR" rev-parse HEAD 2>/dev/null || true)"; fi
 echo "instance active : $ACTIVE (port $ACTIVE_PORT, $(git rev-parse --short "${ACTIVE_REV:-HEAD}"))  →  nouvelle : $TARGET (port $TPORT, $(git rev-parse --short "$NEW"))"
 if [ "$ACTIVE_REV" = "$NEW" ] && [ "$FORCE" = 0 ]; then echo "déjà à jour ($NEW)"; exit 0; fi
-[ -n "$ACTIVE_REV" ] && git --no-pager log --oneline "$ACTIVE_REV..$NEW" | head -20
+[ -n "$ACTIVE_REV" ] && git --no-pager log --oneline -n 20 "$ACTIVE_REV..$NEW"   # pas de « | head » : SIGPIPE + pipefail arrêtait le script au-delà de 20 commits
 # Le clone suit la référence déployée (scripts, lecture du code) ; il ne fait plus tourner de backend (l'ancien service,
 # jusqu'à la transition, tourne sur son dist/, que seul un build dans le clone toucherait).
 git merge --ff-only -q "$NEW" 2>/dev/null || git checkout -q --detach "$NEW"
