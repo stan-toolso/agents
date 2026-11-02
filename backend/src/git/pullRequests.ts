@@ -9,6 +9,8 @@ import { sessionService } from '../sessions/service.js';
 import { forgejoAccounts, forgejoPulls } from '../gitServer/forgejo.js';
 import { hostedRepo } from '../gitServer/paths.js';
 import { githubOwnerOf, githubService } from '../settings/github.js';
+import { gitlabService, projectGitlabRepo, refreshKnownGitlabHosts } from '../settings/gitlab.js';
+import { gitlabMergeRequests, type GitlabTarget } from './gitlabMergeRequests.js';
 import { userService } from '../users/service.js';
 import { taskRepository } from '../tasks/repository.js';
 import { taskService } from '../tasks/service.js';
@@ -22,6 +24,8 @@ import { gitService } from './service.js';
  * Un projet dont le dépôt est hébergé par Skipper a ses PR dans Forgejo (gitServer/forgejo.ts), au même format et avec
  * le même nettoyage : les actions y sont faites au nom de la personne qui agit (compte Forgejo, `sudo`). Les PR d'un
  * autre dépôt que celui du projet restent sur GitHub.
+ * Un projet dont le dépôt est sur GitLab (gitlab.com ou une instance où un compte est connecté) a ses merge requests
+ * au même format (git/gitlabMergeRequests.ts), avec le jeton du compte GitLab de la personne qui agit.
  */
 
 export interface GithubRepoRef {
@@ -80,6 +84,8 @@ export interface PullRequest {
   updatedAt: Date;
   mergedAt: Date | null;
   closedAt: Date | null;
+  /** Forge de la PR quand elle n'est pas déduite de son URL (merge request GitLab). */
+  forge?: 'gitlab';
 }
 
 export interface PullRequestDraft {
@@ -376,14 +382,41 @@ const repoKey = (repo: GithubRepoRef, suffix: string) => `${repo.owner}/${repo.n
 
 // --- Service -------------------------------------------------------------------
 
+/** « owner/name » d'un chemin de projet GitLab (« groupe/sous-groupe/projet » : owner « groupe/sous-groupe »). */
+export function gitlabRepoRef(path: string): GithubRepoRef {
+  const i = path.lastIndexOf('/');
+  return { owner: path.slice(0, i), name: path.slice(i + 1) };
+}
+
 function repoOf(project: { gitUrl: string | null; gitHosted?: boolean; slug?: string }): GithubRepoRef {
   if (project.gitHosted && project.slug) return hostedRepo(project.slug);
   const repo = parseGithubRepo(project.gitUrl);
-  if (!repo) throw new AppError(project.gitUrl ? "Le dépôt de ce projet n'est pas hébergé sur GitHub" : "Ce projet n'est pas relié à un dépôt git");
-  return repo;
+  if (repo) return repo;
+  const gitlab = project.gitHosted ? null : projectGitlabRepo(project.gitUrl);
+  if (gitlab) return gitlabRepoRef(gitlab.path);
+  throw new AppError(project.gitUrl ? "Le dépôt de ce projet n'est hébergé ni sur GitHub ni sur GitLab" : "Ce projet n'est pas relié à un dépôt git");
 }
 
-const projectRepo = async (projectId: string): Promise<GithubRepoRef> => repoOf(await projectService.get(projectId));
+const projectRepo = async (projectId: string): Promise<GithubRepoRef> => {
+  await refreshKnownGitlabHosts();
+  return repoOf(await projectService.get(projectId));
+};
+
+/** Dépôt GitLab du projet (gitlab.com ou instance connue), null sinon ; jamais celui d'un autre dépôt (`repoRef`) ni d'un projet hébergé. */
+async function onGitlab(projectId: string, repoRef?: GithubRepoRef | null): Promise<{ host: string; namespace: string; path: string } | null> {
+  if (repoRef) return null;
+  const project = await projectService.get(projectId);
+  if (project.gitHosted || parseGithubRepo(project.gitUrl)) return null;
+  await refreshKnownGitlabHosts();
+  return projectGitlabRepo(project.gitUrl);
+}
+
+/** Projet GitLab visé avec le jeton de la personne qui agit (compte de l'instance qui sert l'espace du dépôt). */
+async function gitlabTarget(repo: { host: string; namespace: string; path: string }, userId: string | null | undefined): Promise<GitlabTarget> {
+  const token = await gitlabService.apiToken(userId, repo.host, repo.namespace);
+  if (!token) throw new AppError(`GitLab non connecté : connectez un compte ${repo.host} dans Paramètres → GitLab`, 'GITLAB_NOT_CONNECTED');
+  return { host: repo.host, path: repo.path, token };
+}
 
 /** Les PR de ce dépôt sont-elles dans Forgejo ? Celles du projet hébergé ; jamais celles d'un autre dépôt (`repoRef`). */
 async function onForgejo(projectId: string, repoRef?: GithubRepoRef | null): Promise<boolean> {
@@ -417,10 +450,10 @@ async function currentBranch(cwd: string): Promise<string> {
 
 export const pullRequestService = {
   isGithubProject: async (projectId: string) => Boolean(parseGithubRepo((await projectService.get(projectId)).gitUrl)),
-  /** Le projet a-t-il des pull requests (dépôt GitHub, ou dépôt hébergé dans Forgejo) ? */
+  /** Le projet a-t-il des pull requests (dépôt GitHub ou GitLab, ou dépôt hébergé dans Forgejo) ? */
   hasPullRequests: async (projectId: string) => {
     const project = await projectService.get(projectId);
-    return project.gitHosted || Boolean(parseGithubRepo(project.gitUrl));
+    return project.gitHosted || Boolean(parseGithubRepo(project.gitUrl)) || Boolean(await onGitlab(projectId));
   },
 
   /**
@@ -435,7 +468,13 @@ export const pullRequestService = {
       const project = await projectService.get(projectId);
       // Projet sans dépôt : rien à lister, ce n'est pas une erreur (le panneau git interroge tous les projets).
       if (!project.gitUrl) return [];
+      await refreshKnownGitlabHosts();
       repo = repoOf(project);
+      const gl = await onGitlab(projectId);
+      if (gl) {
+        const target = await gitlabTarget(gl, userId);
+        return cached(repoKey(repo, `gitlab:list:${filter}:${limit}:${userId ?? ''}`), () => gitlabMergeRequests.list(projectId, target, filter, limit), opts);
+      }
       if (project.gitHosted) {
         const fjRepo = repo;
         return cached(repoKey(fjRepo, `forgejo:list:${filter}:${limit}`), () => forgejoPulls.list(projectId, fjRepo, filter, Math.min(Math.max(limit, 1), 100)), opts);
@@ -464,6 +503,8 @@ export const pullRequestService = {
   async get(projectId: string, userId: string | null | undefined, number: number, repoRef?: GithubRepoRef | null): Promise<PullRequest> {
     const repo = repoRef ?? (await projectRepo(projectId));
     if (await onForgejo(projectId, repoRef)) return forgejoPulls.get(projectId, repo, number);
+    const gl = await onGitlab(projectId, repoRef);
+    if (gl) return gitlabMergeRequests.get(projectId, await gitlabTarget(gl, userId), number);
     const token = await requireToken(projectId, userId, repoRef);
     const data = await graphql<{ repository: { pullRequest: GqlPullRequest | null } }>(
       token,
@@ -494,7 +535,10 @@ export const pullRequestService = {
     const project = await projectService.get(ref.projectId);
     const cwd = await resolveRoot(ref);
     const branch = await currentBranch(cwd);
-    const base = project.gitBranch || (project.gitHosted ? await forgejoPulls.defaultBranch(repo) : await defaultBranch(repo, await requireToken(ref.projectId, userId)));
+    const gl = await onGitlab(ref.projectId);
+    const base =
+      project.gitBranch ||
+      (project.gitHosted ? await forgejoPulls.defaultBranch(repo) : gl ? await gitlabMergeRequests.defaultBranch(await gitlabTarget(gl, userId)) : await defaultBranch(repo, await requireToken(ref.projectId, userId)));
     if (branch === base) throw new AppError(`Vous êtes sur la branche de base (${base}) : créez ou choisissez une autre branche`);
     await git(['fetch', 'origin', base], cwd, await gitAuthFor(project, userId)).catch(() => undefined);
     const baseRef = (await git(['rev-parse', '--verify', '--quiet', `origin/${base}`], cwd).catch(() => '')) ? `origin/${base}` : base;
@@ -535,6 +579,18 @@ export const pullRequestService = {
       if (!remote) throw new AppError(`Le dossier ${sub} n'a pas de remote origin sur GitHub`);
       repo = remote;
     } else {
+      // Dépôt GitLab du projet : la merge request est ouverte sur GitLab, avec le compte de la personne qui agit.
+      const gl = await onGitlab(ref.projectId);
+      if (gl) {
+        const target = await gitlabTarget(gl, userId);
+        const branch = await currentBranch(cwd);
+        const base = validateBranchName(input.base?.trim() || project.gitBranch || (await gitlabMergeRequests.defaultBranch(target)));
+        if (branch === base) throw new AppError('La branche et la base sont identiques');
+        await gitService.push(ref, userId);
+        const iid = await gitlabMergeRequests.create(target, { title, head: branch, base, body: input.body ?? '', draft: Boolean(input.draft) });
+        invalidate(gitlabRepoRef(gl.path));
+        return this.get(ref.projectId, userId, iid);
+      }
       repo = (await remoteRepoOf(cwd)) ?? repoOf(project);
     }
     const projectRepoRef = project.gitHosted ? hostedRepo(project.slug) : parseGithubRepo(project.gitUrl);
@@ -572,6 +628,8 @@ export const pullRequestService = {
 
   /** Poste un commentaire sur la PR (fil de conversation GitHub) avec le compte de la personne ; renvoie son URL. */
   async comment(projectId: string, userId: string | null | undefined, number: number, body: string, repoRef?: GithubRepoRef | null): Promise<string> {
+    const gl = await onGitlab(projectId, repoRef);
+    if (gl) return gitlabMergeRequests.comment(await gitlabTarget(gl, userId), number, body);
     const repo = repoRef ?? (await projectRepo(projectId));
     const token = await requireToken(projectId, userId, repoRef);
     const res = await rest<{ html_url: string }>(token, 'POST', `/repos/${repo.owner}/${repo.name}/issues/${number}/comments`, { body });
@@ -586,14 +644,18 @@ export const pullRequestService = {
   async merge(projectId: string, userId: string | null | undefined, number: number, method: MergeMethod = 'MERGE', cleanup: MergeCleanup = {}, repoRef?: GithubRepoRef | null): Promise<MergeResult> {
     const repo = repoRef ?? (await projectRepo(projectId));
     const forgejo = await onForgejo(projectId, repoRef);
-    const token = forgejo ? null : await requireToken(projectId, userId, repoRef);
+    const gl = forgejo ? null : await onGitlab(projectId, repoRef);
+    const gitlab = gl ? await gitlabTarget(gl, userId) : null;
+    const token = forgejo || gitlab ? null : await requireToken(projectId, userId, repoRef);
     const pr = await this.get(projectId, userId, number, repoRef);
-    const forgeName = forgejo ? 'Forgejo' : 'GitHub';
+    const forgeName = forgejo ? 'Forgejo' : gitlab ? 'GitLab' : 'GitHub';
     if (pr.state !== 'OPEN') throw new AppError(`La pull request #${number} n'est pas ouverte`);
     if (pr.isDraft) throw new AppError(`Pull request en brouillon : marquez-la prête pour la revue sur ${forgeName} avant de la fusionner`);
     let sha: string | null = null;
     if (forgejo) {
       sha = await forgejoPulls.merge(repo, number, method, await forgejoActor(userId));
+    } else if (gitlab) {
+      sha = await gitlabMergeRequests.merge(gitlab, number, method);
     } else {
       try {
         const res = await rest<{ sha: string; merged: boolean; message: string }>(token!, 'PUT', `/repos/${repo.owner}/${repo.name}/pulls/${number}/merge`, { merge_method: method.toLowerCase() });
@@ -614,6 +676,7 @@ export const pullRequestService = {
     if (cleanup.deleteRemoteBranch && !pr.isCrossRepository) {
       try {
         if (forgejo) await forgejoPulls.deleteBranch(repo, branch);
+        else if (gitlab) await gitlabMergeRequests.deleteBranch(gitlab, branch);
         else await rest(token!, 'DELETE', `/repos/${repo.owner}/${repo.name}/git/refs/heads/${branch.split('/').map(encodeURIComponent).join('/')}`);
       } catch (err) {
         // 422 : déjà supprimée (suppression automatique des branches activée sur le dépôt).
