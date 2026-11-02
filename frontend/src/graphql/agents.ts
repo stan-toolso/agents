@@ -56,7 +56,10 @@ export interface Agent extends AgentRef {
   instructions: string;
   taskFolder: boolean;
   defaults: Record<string, unknown>;
-  contextFolder: string | null;
+  /** En plus de sa propre bibliothèque de contexte, l'agent reçoit celle du projet. */
+  inheritContext: boolean;
+  /** Comptes prêtés par une personne (sinon les comptes propres de l'agent). */
+  delegations: { claude: { id: string; name: string } | null; git: { id: string; name: string } | null; gitReadOnly: boolean };
   triggers: AgentTriggers;
   actions: AgentAction[];
   enabled: boolean;
@@ -101,6 +104,7 @@ export interface AgentInput {
   defaults?: Record<string, unknown> | null;
   triggers?: Partial<AgentTriggers> | null;
   actions?: AgentActionInput[] | null;
+  inheritContext?: boolean | null;
 }
 
 export const AGENT_REF_FIELDS = gql`
@@ -123,7 +127,18 @@ export const AGENT_FIELDS = gql`
     instructions
     taskFolder
     defaults
-    contextFolder
+    inheritContext
+    delegations {
+      claude {
+        id
+        name
+      }
+      git {
+        id
+        name
+      }
+      gitReadOnly
+    }
     triggers {
       taskCreated
       taskCreatedTag
@@ -339,6 +354,15 @@ export const SUMMON_AGENT = gql`
     summonAgent(id: $id, text: $text, taskId: $taskId, attachments: $attachments) {
       id
       name
+    }
+  }
+`;
+
+export const SET_AGENT_DELEGATION = gql`
+  ${AGENT_FIELDS}
+  mutation SetAgentDelegation($id: ID!, $account: AgentAccountKind!, $delegate: Boolean!, $readOnly: Boolean) {
+    setAgentDelegation(id: $id, account: $account, delegate: $delegate, readOnly: $readOnly) {
+      ...AgentFields
     }
   }
 `;

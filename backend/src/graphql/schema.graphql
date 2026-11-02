@@ -114,10 +114,10 @@ type Project {
   createdAt: DateTime!
   updatedAt: DateTime!
   sessions(status: SessionStatus, limit: Int, offset: Int): [Session!]!
-  "Bibliothèque de contexte : dossiers et instructions à plat, avec leur chemin."
-  contextFolders: [ContextFolder!]!
-  contextInstructions: [ContextInstruction!]!
-  contextChanges(limit: Int): [ContextChange!]!
+  "Bibliothèque de contexte : dossiers et instructions à plat, avec leur chemin ; agentId : la bibliothèque propre d’un agent du projet."
+  contextFolders(agentId: ID): [ContextFolder!]!
+  contextInstructions(agentId: ID): [ContextInstruction!]!
+  contextChanges(limit: Int, agentId: ID): [ContextChange!]!
   "Terminaux de l'utilisateur connecté dans ce projet."
   terminals: [Terminal!]!
   tasks(status: [TaskStatus!]): [Task!]!
@@ -164,6 +164,8 @@ type PermissionRule {
 type ContextFolder {
   id: ID!
   projectId: ID!
+  "Bibliothèque propre d'un agent (null : bibliothèque du projet)."
+  agentId: ID
   parentId: ID
   name: String!
   slug: String!
@@ -177,6 +179,8 @@ type ContextFolder {
 type ContextInstruction {
   id: ID!
   projectId: ID!
+  "Bibliothèque propre d'un agent (null : bibliothèque du projet)."
+  agentId: ID
   folderId: ID
   name: String!
   slug: String!
@@ -2542,11 +2546,13 @@ type Query {
   tasks(projectId: ID, status: [TaskStatus!], priority: TaskPriority, assignee: String, reporter: String, tag: String, mine: Boolean, limit: Int): [Task!]!
   task(id: ID!): Task
   contextInstruction(id: ID!): ContextInstruction
-  searchContext(projectId: ID!, query: String!): [ContextInstruction!]!
+  searchContext(projectId: ID!, query: String!, agentId: ID): [ContextInstruction!]!
 }
 
 input CreateContextInstructionInput {
   projectId: ID!
+  "Bibliothèque propre d'un agent du projet (absent : bibliothèque du projet)."
+  agentId: ID
   folderId: ID
   name: String!
   description: String
@@ -2885,7 +2891,7 @@ type Mutation {
   closeTerminal(id: ID!): Terminal!
   deleteTerminal(id: ID!): Boolean!
 
-  createContextFolder(projectId: ID!, parentId: ID, name: String!): ContextFolder!
+  createContextFolder(projectId: ID!, parentId: ID, name: String!, agentId: ID): ContextFolder!
   renameContextFolder(id: ID!, name: String!): ContextFolder!
   moveContextFolder(id: ID!, parentId: ID): ContextFolder!
   "Supprime le dossier et tout son contenu."
@@ -3363,8 +3369,10 @@ type Agent {
   taskFolder: Boolean!
   "Réglages par défaut de ses sessions (même forme que la configuration d'une session : permissionMode, allowedTools, model…)."
   defaults: JSON!
-  "Dossier de la bibliothèque de contexte réservé à l'agent (sa mémoire durable)."
-  contextFolder: String
+  "En plus de sa propre bibliothèque de contexte, l'agent reçoit celle du projet."
+  inheritContext: Boolean!
+  "Comptes prêtés à l'agent par une personne (sinon ses comptes propres)."
+  delegations: AgentDelegations!
   triggers: AgentTriggers!
   actions: [AgentAction!]!
   "En pause : ne réagit ni aux déclencheurs ni aux mentions."
@@ -3422,6 +3430,7 @@ input AgentActionInput {
 input AgentInput {
   name: String
   kind: AgentKind
+  inheritContext: Boolean
   avatar: AgentAvatarInput
   description: String
   instructions: String
@@ -3435,6 +3444,22 @@ input AgentInput {
 input AgentManagerInput {
   userId: ID!
   role: AgentManagerRole!
+}
+
+enum AgentAccountKind {
+  "Réglages Claude (identifiants, modèle par défaut, budgets)."
+  CLAUDE
+  "Comptes GitHub, GitLab et forge."
+  GIT
+}
+
+type AgentDelegations {
+  "Personne qui prête son compte Claude (null : les réglages Claude propres de l'agent)."
+  claude: User
+  "Personne qui prête ses comptes git (null : les comptes propres de l'agent)."
+  git: User
+  "Comptes git prêtés en lecture seule : ni push, ni pull request."
+  gitReadOnly: Boolean!
 }
 
 extend type Query {
@@ -3454,6 +3479,8 @@ extend type Mutation {
   setAgentManagers(id: ID!, managers: [AgentManagerInput!]!): Agent!
   "Convoque l'agent avec un message : dans sa session reliée à la tâche, sinon dans une nouvelle session (sur la tâche ou libre). Renvoie la session."
   summonAgent(id: ID!, text: String!, taskId: ID, attachments: [AttachmentInput!]): Session!
+  "Prête son propre compte à l'agent (delegate: true) ou retire la délégation (false) ; readOnly pour les comptes git (défaut : vrai)."
+  setAgentDelegation(id: ID!, account: AgentAccountKind!, delegate: Boolean!, readOnly: Boolean): Agent!
   "Joue une action nommée de l'agent, éventuellement sur une tâche."
   runAgentAction(id: ID!, key: String!, taskId: ID): Session!
 }

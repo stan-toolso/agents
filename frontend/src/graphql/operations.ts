@@ -1224,14 +1224,24 @@ export const CONTEXT_INSTRUCTION_FIELDS = gql`
 
 export const PROJECT_CONTEXT = gql`
   ${CONTEXT_INSTRUCTION_FIELDS}
-  query ProjectContext($id: ID!) {
+  query ProjectContext($id: ID!, $agentId: ID) {
     project(id: $id) {
       id
       name
       description
       myRole
       isPersonal
-      contextFolders {
+      agents {
+        id
+        name
+        kind
+        avatar {
+          emoji
+          color
+        }
+        inheritContext
+      }
+      contextFolders(agentId: $agentId) {
         id
         projectId
         parentId
@@ -1241,10 +1251,10 @@ export const PROJECT_CONTEXT = gql`
         createdAt
         updatedAt
       }
-      contextInstructions {
+      contextInstructions(agentId: $agentId) {
         ...ContextInstructionFields
       }
-      contextChanges(limit: 100) {
+      contextChanges(limit: 100, agentId: $agentId) {
         id
         kind
         path
@@ -1284,8 +1294,8 @@ export const CONTEXT_INSTRUCTION = gql`
 `;
 
 export const CREATE_CONTEXT_FOLDER = gql`
-  mutation CreateContextFolder($projectId: ID!, $parentId: ID, $name: String!) {
-    createContextFolder(projectId: $projectId, parentId: $parentId, name: $name) {
+  mutation CreateContextFolder($projectId: ID!, $parentId: ID, $name: String!, $agentId: ID) {
+    createContextFolder(projectId: $projectId, parentId: $parentId, name: $name, agentId: $agentId) {
       id
       path
     }

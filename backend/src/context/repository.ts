@@ -1,10 +1,11 @@
 import { pool, type Queryable } from '../db/pool.js';
 import { toJson } from '../db/json.js';
-import type { Actor, ContextChange, ContextChangeKind, ContextFolder, ContextInstruction, ContextInstructionVersion } from './types.js';
+import type { Actor, ContextChange, ContextChangeKind, ContextFolder, ContextInstruction, ContextInstructionVersion, Library } from './types.js';
 
 interface FolderRow {
   id: string;
   project_id: string;
+  agent_id: string | null;
   parent_id: string | null;
   name: string;
   slug: string;
@@ -14,6 +15,7 @@ interface FolderRow {
 interface InstructionRow {
   id: string;
   project_id: string;
+  agent_id: string | null;
   folder_id: string | null;
   name: string;
   slug: string;
@@ -38,6 +40,7 @@ interface VersionRow {
 interface ChangeRow {
   id: string;
   project_id: string;
+  agent_id: string | null;
   kind: ContextChangeKind;
   path: string;
   details: Record<string, unknown>;
@@ -53,6 +56,7 @@ export type InstructionRecord = Omit<ContextInstruction, 'path'>;
 const toFolder = (r: FolderRow): FolderRecord => ({
   id: r.id,
   projectId: r.project_id,
+  agentId: r.agent_id ?? null,
   parentId: r.parent_id,
   name: r.name,
   slug: r.slug,
@@ -62,6 +66,7 @@ const toFolder = (r: FolderRow): FolderRecord => ({
 const toInstruction = (r: InstructionRow): InstructionRecord => ({
   id: r.id,
   projectId: r.project_id,
+  agentId: r.agent_id ?? null,
   folderId: r.folder_id,
   name: r.name,
   slug: r.slug,
@@ -86,6 +91,7 @@ const toVersion = (r: VersionRow): ContextInstructionVersion => ({
 const toChange = (r: ChangeRow): ContextChange => ({
   id: String(r.id),
   projectId: r.project_id,
+  agentId: r.agent_id ?? null,
   kind: r.kind,
   path: r.path,
   details: r.details ?? {},
@@ -96,18 +102,19 @@ const toChange = (r: ChangeRow): ContextChange => ({
 
 export const contextRepository = {
   // --- Dossiers ---
-  async listFolders(projectId: string, db: Queryable = pool): Promise<FolderRecord[]> {
-    const { rows } = await db.query<FolderRow>('SELECT * FROM context_folders WHERE project_id = $1 ORDER BY name', [projectId]);
+  // Toutes les listes sont par bibliothèque : celle du projet (agentId null) ou celle d'un agent.
+  async listFolders(projectId: string, agentId: string | null = null, db: Queryable = pool): Promise<FolderRecord[]> {
+    const { rows } = await db.query<FolderRow>('SELECT * FROM context_folders WHERE project_id = $1 AND agent_id IS NOT DISTINCT FROM $2 ORDER BY name', [projectId, agentId]);
     return rows.map(toFolder);
   },
   async findFolder(id: string, db: Queryable = pool): Promise<FolderRecord | null> {
     const { rows } = await db.query<FolderRow>('SELECT * FROM context_folders WHERE id = $1', [id]);
     return rows[0] ? toFolder(rows[0]) : null;
   },
-  async createFolder(projectId: string, parentId: string | null, name: string, slug: string, db: Queryable = pool): Promise<FolderRecord> {
+  async createFolder(projectId: string, agentId: string | null, parentId: string | null, name: string, slug: string, db: Queryable = pool): Promise<FolderRecord> {
     const { rows } = await db.query<FolderRow>(
-      'INSERT INTO context_folders (project_id, parent_id, name, slug) VALUES ($1, $2, $3, $4) RETURNING *',
-      [projectId, parentId, name, slug],
+      'INSERT INTO context_folders (project_id, agent_id, parent_id, name, slug) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [projectId, agentId, parentId, name, slug],
     );
     return toFolder(rows[0]);
   },
@@ -126,31 +133,31 @@ export const contextRepository = {
   },
 
   // --- Instructions ---
-  async listInstructions(projectId: string, db: Queryable = pool): Promise<InstructionRecord[]> {
-    const { rows } = await db.query<InstructionRow>('SELECT * FROM context_instructions WHERE project_id = $1 ORDER BY name', [projectId]);
+  async listInstructions(projectId: string, agentId: string | null = null, db: Queryable = pool): Promise<InstructionRecord[]> {
+    const { rows } = await db.query<InstructionRow>('SELECT * FROM context_instructions WHERE project_id = $1 AND agent_id IS NOT DISTINCT FROM $2 ORDER BY name', [projectId, agentId]);
     return rows.map(toInstruction);
   },
   async findInstruction(id: string, db: Queryable = pool): Promise<InstructionRecord | null> {
     const { rows } = await db.query<InstructionRow>('SELECT * FROM context_instructions WHERE id = $1', [id]);
     return rows[0] ? toInstruction(rows[0]) : null;
   },
-  async searchInstructions(projectId: string, query: string, db: Queryable = pool): Promise<InstructionRecord[]> {
+  async searchInstructions(projectId: string, query: string, agentId: string | null = null, db: Queryable = pool): Promise<InstructionRecord[]> {
     const { rows } = await db.query<InstructionRow>(
       `SELECT * FROM context_instructions
-       WHERE project_id = $1 AND (name ILIKE $2 OR description ILIKE $2 OR content ILIKE $2)
+       WHERE project_id = $1 AND agent_id IS NOT DISTINCT FROM $3 AND (name ILIKE $2 OR description ILIKE $2 OR content ILIKE $2)
        ORDER BY name LIMIT 50`,
-      [projectId, `%${query}%`],
+      [projectId, `%${query}%`, agentId],
     );
     return rows.map(toInstruction);
   },
   async createInstruction(
-    input: { projectId: string; folderId: string | null; name: string; slug: string; description: string; content: string },
+    input: { projectId: string; agentId: string | null; folderId: string | null; name: string; slug: string; description: string; content: string },
     db: Queryable = pool,
   ): Promise<InstructionRecord> {
     const { rows } = await db.query<InstructionRow>(
-      `INSERT INTO context_instructions (project_id, folder_id, name, slug, description, content)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [input.projectId, input.folderId, input.name, input.slug, input.description, input.content],
+      `INSERT INTO context_instructions (project_id, agent_id, folder_id, name, slug, description, content)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [input.projectId, input.agentId, input.folderId, input.name, input.slug, input.description, input.content],
     );
     return toInstruction(rows[0]);
   },
@@ -194,16 +201,16 @@ export const contextRepository = {
   },
 
   // --- Journal ---
-  async addChange(projectId: string, kind: ContextChangeKind, path: string, details: Record<string, unknown>, actor: Actor, db: Queryable = pool): Promise<ContextChange> {
+  async addChange(library: Library, kind: ContextChangeKind, path: string, details: Record<string, unknown>, actor: Actor, db: Queryable = pool): Promise<ContextChange> {
     const { rows } = await db.query<ChangeRow>(
-      `INSERT INTO context_changes (project_id, kind, path, details, author_type, author_session_id)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [projectId, kind, path, toJson(details), actor.type, actor.sessionId ?? null],
+      `INSERT INTO context_changes (project_id, agent_id, kind, path, details, author_type, author_session_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [library.projectId, library.agentId, kind, path, toJson(details), actor.type, actor.sessionId ?? null],
     );
     return toChange(rows[0]);
   },
-  async listChanges(projectId: string, limit = 100, db: Queryable = pool): Promise<ContextChange[]> {
-    const { rows } = await db.query<ChangeRow>('SELECT * FROM context_changes WHERE project_id = $1 ORDER BY id DESC LIMIT $2', [projectId, Math.min(limit, 500)]);
+  async listChanges(projectId: string, agentId: string | null = null, limit = 100, db: Queryable = pool): Promise<ContextChange[]> {
+    const { rows } = await db.query<ChangeRow>('SELECT * FROM context_changes WHERE project_id = $1 AND agent_id IS NOT DISTINCT FROM $3 ORDER BY id DESC LIMIT $2', [projectId, Math.min(limit, 500), agentId]);
     return rows.map(toChange);
   },
 };
