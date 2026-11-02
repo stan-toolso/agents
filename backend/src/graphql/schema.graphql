@@ -338,6 +338,8 @@ type Task {
   session: Session
   "Toutes les sessions en charge actuellement (plusieurs agents peuvent se partager une tâche), la plus récente d'abord."
   sessionsInCharge: [Session!]!
+  "Session dont « Confier à un agent » reprend la conversation (la plus récente en charge, sinon la dernière passée par la tâche, si elle travaille encore dans le dossier de la tâche) ; null : il faut une nouvelle session."
+  resumableSession: Session
   "Toutes les sessions passées par la tâche (archivées comprises), la plus récemment reliée d'abord."
   sessions: [Session!]!
   "Coût attribué à la tâche (unité d'affichage : crédits dans une cellule facturée). Chaque tour d'une session est réparti à parts égales entre les tâches auxquelles elle était reliée à ce moment."
@@ -2771,6 +2773,8 @@ type Mutation {
   deleteTaskComment(id: ID!): Boolean!
   "Confie la tâche à un agent, dans le dossier de la tâche (créé à sa première session, branche task/<slug> pour un projet git, repris ensuite : la session précédente de la tâche est archivée). prompt : consigne relue (sinon le texte de la tâche)."
   startTaskSession(id: ID!, provider: String, config: JSON, prompt: String): Session!
+  "Reprend la tâche dans la conversation de sa session (Task.resumableSession) avec ce message, au lieu d’en lancer une nouvelle."
+  resumeTaskSession(id: ID!, text: String!): Session!
   "Crée une clé d'API du projet (administrateurs) ; le secret n'est montré qu'une fois."
   createProjectApiKey(projectId: ID!, name: String!): CreatedProjectApiKey!
   deleteProjectApiKey(id: ID!): Boolean!

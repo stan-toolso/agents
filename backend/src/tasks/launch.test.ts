@@ -3,10 +3,10 @@ import type { SessionProvider } from '../sessions/providers/provider.js';
 
 // Mode d'autorisation par défaut du projet : appliqué aux sessions de tâches (et à toute session créée sans mode),
 // sans écraser un mode choisi explicitement. Dépôts et services voisins simulés, sans base.
-const state = vi.hoisted(() => ({ created: [] as Record<string, unknown>[], projectMode: 'acceptEdits', taskWorksession: null as Record<string, unknown> | null, active: [] as { id: string; name: string; worksessionId: string }[] }));
+const state = vi.hoisted(() => ({ created: [] as Record<string, unknown>[], projectMode: 'acceptEdits', taskWorksession: null as Record<string, unknown> | null, active: [] as { id: string; name: string; worksessionId: string }[], known: [] as Record<string, unknown>[], taskWorksessionRow: null as Record<string, unknown> | null }));
 const repo = vi.hoisted(() => ({
   // Sessions actives d'une work session (règle « une seule session active par work session »).
-  list: vi.fn(async (filter: { worksessionId?: string }) => state.active.filter((s) => s.worksessionId === filter.worksessionId)),
+  list: vi.fn(async (filter: { worksessionId?: string; ids?: string[] }) => (filter.ids ? state.known.filter((s) => filter.ids!.includes(s.id as string)) : state.active.filter((s) => s.worksessionId === filter.worksessionId))),
   create: vi.fn(async (input: Record<string, unknown>) => {
     state.created.push(input);
     return { id: `s${state.created.length}`, projectId: 'p', name: input.name, provider: input.provider, status: 'pending', prompt: input.prompt, promptAttachments: [], config: input.config ?? {} };
@@ -18,6 +18,7 @@ const tasks = vi.hoisted(() => ({
   describeForPrompt: vi.fn(() => 'Réalise la tâche'),
   comments: vi.fn(async () => []),
   attachments: vi.fn(async () => []),
+  sessionIds: vi.fn(async () => [] as string[]),
 }));
 
 vi.mock('../sessions/repository.js', () => ({ sessionRepository: repo }));
@@ -34,7 +35,7 @@ vi.mock('../worksessions/service.js', () => ({
     create: vi.fn(async (_p: string, input: Record<string, unknown>) => ({ id: 'w-new', name: input.name, branch: input.branch, label: input.label, taskId: input.taskId })),
   },
 }));
-vi.mock('../worksessions/repository.js', () => ({ worksessionRepository: { listByProject: async () => [] } }));
+vi.mock('../worksessions/repository.js', () => ({ worksessionRepository: { listByProject: async () => [], findByTask: async () => (state.taskWorksessionRow ? [state.taskWorksessionRow] : []) } }));
 vi.mock('../requests/service.js', () => ({ requestService: {} }));
 vi.mock('../notifications/service.js', () => ({ notificationService: { notify: vi.fn() } }));
 vi.mock('../settings/repository.js', () => ({ settingsRepository: { get: vi.fn(async () => null), set: vi.fn() } }));
@@ -48,13 +49,15 @@ vi.mock('../sessions/providers/registry.js', () => ({
 }));
 
 const { sessionService } = await import('../sessions/service.js');
-const { startTaskSession, taskWorksessionNames } = await import('./launch.js');
+const { resumableTaskSession, resumeTaskSession, startTaskSession, taskWorksessionNames } = await import('./launch.js');
 
 beforeEach(() => {
   state.created = [];
   state.projectMode = 'acceptEdits';
   state.taskWorksession = null;
   state.active = [];
+  state.known = [];
+  state.taskWorksessionRow = null;
   vi.spyOn(sessionService, 'start').mockImplementation(async (id: string) => ({ id }) as never);
   vi.spyOn(sessionService, 'archive').mockImplementation(async (id: string) => {
     state.active = state.active.filter((s) => s.id !== id);
@@ -123,5 +126,43 @@ describe('work session de la tâche', () => {
 
   it('refuse une session sans work session', async () => {
     await expect(sessionService.create({ projectId: 'p', name: 'x', provider: 'claude', prompt: null, config: {}, autoStart: false })).rejects.toThrow(/work session/);
+  });
+});
+
+describe('reprise de la conversation de la tâche', () => {
+  const task = { id: 't1', projectId: 'p', title: 'Tâche', description: '', status: 'todo', sessionId: 's-prev', sessionIds: ['s-prev'] };
+  beforeEach(() => {
+    state.taskWorksessionRow = { id: 'w-task', name: 'task-export', branch: 'task/export', archivedAt: null };
+    state.known = [{ id: 's-prev', name: 'Tâche', kind: 'session', worksessionId: 'w-task', status: 'stopped', archivedAt: null, config: {} }];
+    tasks.get.mockResolvedValue(task as never);
+    vi.spyOn(sessionService, 'sendMessage').mockImplementation(async (id: string) => ({ id }) as never);
+    vi.spyOn(sessionService, 'unarchive').mockImplementation(async (id: string) => ({ id }) as never);
+  });
+
+  it('retrouve la session en charge qui travaille dans le dossier de la tâche', async () => {
+    expect((await resumableTaskSession(task as never))?.id).toBe('s-prev');
+  });
+
+  it('ne reprend rien quand le dossier de la tâche a disparu ou que sa session travaille ailleurs', async () => {
+    state.known[0].worksessionId = 'w-other';
+    expect(await resumableTaskSession(task as never)).toBeNull();
+    state.taskWorksessionRow = null;
+    expect(await resumableTaskSession(task as never)).toBeNull();
+  });
+
+  it('envoie le message dans la conversation existante, sans créer de session', async () => {
+    await resumeTaskSession('t1', 'Continue');
+    expect(sessionService.sendMessage).toHaveBeenCalledWith('s-prev', 'Continue');
+    expect(state.created).toHaveLength(0);
+    expect(tasks.update).toHaveBeenCalledWith('t1', expect.objectContaining({ status: 'in_progress', sessionId: 's-prev' }));
+  });
+
+  it('restaure la session archivée et archive les autres sessions actives du dossier', async () => {
+    state.known[0].archivedAt = new Date();
+    state.active = [{ id: 's-other', name: 'Autre', worksessionId: 'w-task' }];
+    await resumeTaskSession('t1', 'Continue');
+    expect(sessionService.archive).toHaveBeenCalledWith('s-other');
+    expect(sessionService.unarchive).toHaveBeenCalledWith('s-prev');
+    expect(sessionService.sendMessage).toHaveBeenCalledWith('s-prev', 'Continue');
   });
 });

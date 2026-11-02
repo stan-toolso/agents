@@ -82,7 +82,7 @@ import { terminalService } from '../terminals/service.js';
 import { worksessionPath, worksessionService } from '../worksessions/service.js';
 import { worksessionRepository } from '../worksessions/repository.js';
 import { worksessionLabel, type Worksession } from '../worksessions/types.js';
-import { startTaskSession } from '../tasks/launch.js';
+import { resumableTaskSession, resumeTaskSession, startTaskSession } from '../tasks/launch.js';
 import { taskService } from '../tasks/service.js';
 import type { Task, TaskComment, TaskField, TaskPersonInput, TaskPriority, TaskReaction, TaskStatus, ProjectApiKey } from '../tasks/types.js';
 import type { TerminalRecord } from '../terminals/types.js';
@@ -339,6 +339,7 @@ export const resolvers = {
       const sessions = t.sessionIds.length ? await sessionService.list({ ids: t.sessionIds, archived: 'all', limit: 100 }) : [];
       return t.sessionIds.map((id) => sessions.find((s) => s.id === id)).filter((s): s is Session => Boolean(s));
     },
+    resumableSession: (t: Task) => resumableTaskSession(t),
     sessions: async (t: Task) => {
       const ids = await taskService.sessionIds(t.id);
       const sessions = ids.length ? await sessionService.list({ ids, archived: 'all', limit: 500 }) : [];
@@ -1564,6 +1565,10 @@ export const resolvers = {
     startTaskSession: async (_: unknown, args: { id: string; provider?: string | null; config?: Record<string, unknown> | null; prompt?: string | null }, ctx: Ctx) => {
       await guardTask(ctx, args.id, 'member');
       return startTaskSession(args.id, { ...args, ownerId: requireUser(ctx).id });
+    },
+    resumeTaskSession: async (_: unknown, args: { id: string; text: string }, ctx: Ctx) => {
+      await guardTask(ctx, args.id, 'member');
+      return resumeTaskSession(args.id, args.text);
     },
     createProjectApiKey: async (_: unknown, args: { projectId: string; name: string }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId, 'admin');

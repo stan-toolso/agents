@@ -67,6 +67,9 @@ export default function TaskActions({ task, target, onEdit, onDeleted, compact =
   const [menuAt, setMenuAt] = useState<{ top: number; right: number } | null>(null);
   const move = (status: TaskStatus) => updateTask({ variables: { id: task.id, input: { status } } });
   const open = task.status === 'TODO' || task.status === 'IN_PROGRESS';
+  // Une session déjà en charge : la modale propose de reprendre sa conversation plutôt que d'en lancer une nouvelle.
+  const resume = Boolean(task.session);
+  const launchTitle = resume ? 'Reprendre la conversation de la session de la tâche avec un nouveau message (ou lancer une nouvelle session)' : "Choisir la consigne, l'agent et l'endroit où il travaille, puis lancer une session";
   const remove = async () => {
     if (await confirm({ title: 'Supprimer la tâche', message: `Supprimer la tâche « ${task.title} » ?`, confirmLabel: 'Supprimer', danger: true })) deleteTask({ variables: { id: task.id } });
   };
@@ -87,8 +90,8 @@ export default function TaskActions({ task, target, onEdit, onDeleted, compact =
     return (
       <div className="task-actions-compact">
         {open ? (
-          <Button size="sm" variant="primary" className="text-nowrap" onClick={() => launchTask(task, target)} title="Choisir la consigne, l'agent et l'endroit où il travaille, puis lancer une session">
-            <i className="bi bi-play-fill" /> Confier
+          <Button size="sm" variant="primary" className="text-nowrap" onClick={() => launchTask(task, target)} title={launchTitle}>
+            <i className="bi bi-play-fill" /> {resume ? 'Reprendre' : 'Confier'}
           </Button>
         ) : (
           <Button size="sm" variant="outline-secondary" className="text-nowrap" onClick={() => move('TODO')}>
@@ -120,8 +123,8 @@ export default function TaskActions({ task, target, onEdit, onDeleted, compact =
   return (
     <div className="d-flex flex-wrap gap-1 align-items-center">
       {open && (
-        <Button size="sm" variant="primary" onClick={() => launchTask(task, target)} title="Choisir la consigne, l'agent et l'endroit où il travaille, puis lancer une session">
-          <i className="bi bi-play-fill" /> Confier à un agent
+        <Button size="sm" variant="primary" onClick={() => launchTask(task, target)} title={launchTitle}>
+          <i className="bi bi-play-fill" /> {resume ? 'Reprendre' : 'Confier à un agent'}
         </Button>
       )}
       {task.status === 'TODO' && (
