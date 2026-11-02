@@ -472,6 +472,8 @@
   display: none; flex: 0 0 auto; align-items: center; justify-content: center; width: 44px;
   background: none; border: 0; border-right: 1px solid var(--cc-border); color: var(--cc-dim); font-size: 20px; cursor: pointer;
 }
+.wb-burger { position: relative; }
+.wb-burger-badge { position: absolute; top: 4px; right: 4px; margin: 0; font-size: 9.5px; line-height: 14px; padding: 0 4px; }
 .wb-burger:hover, .wb-burger.open { color: var(--cc-fg); background: var(--cc-bg-hover); }
 .wb-backdrop { display: none; }
 

@@ -10,6 +10,7 @@ export type TabKind =
   | 'projects'
   | 'sessions'
   | 'requests'
+  | 'inbox'
   | 'project'
   | 'project-form'
   | 'context'
@@ -114,6 +115,7 @@ export function describeRoute(pathname: string): { title: string; kind: TabKind 
   if (/^\/sessions\/[^/]+$/.test(pathname)) return { title: 'Session', kind: 'session' };
   if (/^\/sessions\/[^/]+\/browser$/.test(pathname)) return { title: 'Navigateur', kind: 'browser' };
   if (pathname === '/requests') return { title: 'Demandes', kind: 'requests' };
+  if (pathname === '/inbox') return { title: 'À traiter', kind: 'inbox' };
   if (pathname === '/settings') return { title: 'Paramètres', kind: 'settings' };
   const files = pathname.match(/^\/(?:projects|sessions)\/[^/]+\/files(?:\/(.*))?$/);
   if (files) {
