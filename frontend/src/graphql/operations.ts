@@ -2478,3 +2478,64 @@ export const PREVIEW_ACCESS_URL = gql`
     previewAccessUrl(worksessionId: $worksessionId, path: $path)
   }
 `;
+
+// ---- File « À traiter » -------------------------------------------------------------------------
+
+export interface InboxCounts {
+  requests: number;
+  idleSessions: number;
+  failedSessions: number;
+  interruptedSessions: number;
+  pullRequests: number;
+  total: number;
+}
+
+export interface Inbox {
+  generatedAt: string;
+  counts: InboxCounts;
+  requests: HumanRequest[];
+  sessions: Session[];
+  pullRequests: TrackedPullRequest[];
+}
+
+/** Compteurs seuls, sondés par la sidebar (badge de « À traiter »). */
+export const INBOX_COUNTS = gql`
+  query InboxCounts {
+    inboxCounts {
+      requests
+      idleSessions
+      failedSessions
+      interruptedSessions
+      pullRequests
+      total
+    }
+  }
+`;
+
+export const INBOX = gql`
+  ${SESSION_FIELDS}
+  ${REQUEST_FIELDS}
+  ${TRACKED_PULL_REQUEST_FIELDS}
+  query Inbox {
+    inbox {
+      generatedAt
+      counts {
+        requests
+        idleSessions
+        failedSessions
+        interruptedSessions
+        pullRequests
+        total
+      }
+      requests {
+        ...RequestFields
+      }
+      sessions {
+        ...SessionFields
+      }
+      pullRequests {
+        ...TrackedPullRequestFields
+      }
+    }
+  }
+`;

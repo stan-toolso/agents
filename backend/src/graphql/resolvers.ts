@@ -23,6 +23,7 @@ import { billingService } from '../billing/service.js';
 import type { BillingSettings, CtoTimeEntryInput } from '../billing/types.js';
 import { applyCostConversion, costDisplay, costRate, toStoredUsd } from '../billing/display.js';
 import { dashboardService } from '../dashboard/service.js';
+import { inboxService } from '../inbox/service.js';
 import { AppError, NotFoundError } from '../errors.js';
 import { fileService, type WorkspaceRef } from '../files/service.js';
 import { parseRepoFullName, pullRequestService, type MergeCleanup, type MergeMethod, type PullRequest, type PullRequestFilter } from '../git/pullRequests.js';
@@ -1021,6 +1022,8 @@ export const resolvers = {
       return { ...(stored ?? (await billingService.settings())), configured: stored !== null };
     },
     dashboard: async (_: unknown, __: unknown, ctx: Ctx) => dashboardService.build(requireUser(ctx).id, await accessibleProjectIds(ctx), new Date(), requireUser(ctx).isAdmin),
+    inbox: async (_: unknown, __: unknown, ctx: Ctx) => inboxService.build(await accessibleProjectIds(ctx)),
+    inboxCounts: async (_: unknown, __: unknown, ctx: Ctx) => inboxService.counts(await accessibleProjectIds(ctx)),
     tasks: async (_: unknown, args: { projectId?: string | null; status?: GqlTaskStatus[] | null; priority?: GqlTaskPriority | null; assignee?: string | null; reporter?: string | null; tag?: string | null; mine?: boolean | null; limit?: number | null }, ctx: Ctx) => {
       if (args.projectId) await requireProject(ctx, args.projectId);
       return taskService.list({

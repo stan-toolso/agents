@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { Spinner } from 'react-bootstrap';
 import { useAuth } from '../auth/AuthContext';
-import { CLOSE_TERMINAL, REQUESTS, SIDEBAR, SIDEBAR_PULL_REQUESTS, STOP_SESSION, type HumanRequest } from '../graphql/operations';
+import { CLOSE_TERMINAL, INBOX_COUNTS, REQUESTS, SIDEBAR, SIDEBAR_PULL_REQUESTS, STOP_SESSION, type HumanRequest } from '../graphql/operations';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { sessionStateHint, taskChipOf } from '../lib/humanize';
 import Logo from '../components/Logo';
@@ -123,6 +123,7 @@ function ChatsBlock({ chats, expanded, onToggle }: { chats: SidebarSession[]; ex
 /** Menus principaux, affichés en une ligne d'icônes (le libellé sert d'infobulle). */
 const MAIN_MENU: { to: string; label: string; icon: string; title?: string }[] = [
   { to: '/', label: 'Tableau de bord', icon: 'bi-speedometer2' },
+  { to: '/inbox', label: 'À traiter', icon: 'bi-inbox', title: 'À traiter : demandes, sessions en attente et pull requests à fusionner, tous projets' },
   { to: '/projects', label: 'Projets', icon: 'bi-folder2' },
   { to: '/sessions', label: 'Sessions', icon: 'bi-chat-dots' },
   { to: '/chats', label: 'Chats', icon: 'bi-chat-left-text', title: 'Chats : conversations légères de votre espace personnel, avec accès à tous vos projets' },
@@ -584,6 +585,8 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   const { data: prData } = usePollingQuery<{ projects: { id: string; worksessions: { id: string; trackedPullRequest: PullRequestRef | null }[] }[] }>(SIDEBAR_PULL_REQUESTS, { variables: { open }, pollInterval: 60_000 });
   const { data: pendingData } = usePollingQuery<{ requests: HumanRequest[] }>(REQUESTS, { variables: { status: 'PENDING' }, pollInterval: 3000 });
   const pending = pendingData?.requests.length ?? 0;
+  const { data: inboxData } = usePollingQuery<{ inboxCounts: { total: number } }>(INBOX_COUNTS, { pollInterval: 5000 });
+  const inboxTotal = inboxData?.inboxCounts.total ?? 0;
   const prByWorksession = useMemo(() => new Map((prData?.projects ?? []).flatMap((p) => p.worksessions.map((w) => [w.id, w.trackedPullRequest] as const))), [prData]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>(loadExpanded);
   const [filter, setFilter] = useState<'mine' | 'all'>(() => {
@@ -672,8 +675,13 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
 
       <nav className="wb-menu wb-menu-icons" aria-label="Navigation principale">
         {MAIN_MENU.map((m) => (
-          <NavLink key={m.to} to={m.to} end={m.to !== '/requests'} className="wb-menu-item" title={m.title ?? m.label} aria-label={m.label}>
+          <NavLink key={m.to} to={m.to} end={m.to !== '/requests' && m.to !== '/inbox'} className="wb-menu-item" title={m.title ?? m.label} aria-label={m.label}>
             <i className={`bi ${m.icon} wb-icon`} />
+            {m.to === '/inbox' && inboxTotal > 0 && (
+              <span className="wb-badge" title="Éléments qui attendent une action de votre part">
+                {inboxTotal}
+              </span>
+            )}
             {m.to === '/requests' && pending > 0 && (
               <span className="wb-badge" title="Un agent attend votre réponse">
                 {pending}

@@ -16,7 +16,7 @@ import Markdown from './Markdown';
 import { usePollingQuery } from '../lib/usePollingQuery';
 
 /** Requêtes à rafraîchir après une création ou une fusion (panneau git, tâches, sidebar, PR suivies, tableau de bord). */
-const PR_REFETCH = ['GithubPullRequests', 'Tasks', 'Sidebar', 'GitStatus', 'GitBranches', 'GitLog', 'PullRequests', 'TaskPage', 'Dashboard'];
+const PR_REFETCH = ['GithubPullRequests', 'Tasks', 'Sidebar', 'GitStatus', 'GitBranches', 'GitLog', 'PullRequests', 'TaskPage', 'Dashboard', 'Inbox', 'InboxCounts'];
 
 const stateLabels: Record<string, { label: string; bg: string; icon: string }> = {
   OPEN: { label: 'ouverte', bg: 'success', icon: 'bi-git' },
