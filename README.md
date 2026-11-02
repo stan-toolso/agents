@@ -809,8 +809,10 @@ sous elle. Une session ouverte occupe **un seul onglet** dans la barre du haut (
 (« principal ») que pour les sessions et terminaux d'avant les work sessions. Les
 pages restent montées quand on change d'onglet (React 19 `<Activity>`), les onglets ouverts sont
 mémorisés dans le navigateur, un onglet fermé se rouvre (Alt+Maj+T), et la sidebar se replie. Le filtre
-« Mes sessions / Tout le monde » cache les sessions des autres ; les pastilles portent les initiales de
-leur auteur. Menu « ⋮ » d'une session : ouvrir, fichiers, nouveau terminal, arrêter, renommer,
+« Mes sessions / Tout le monde » cache les sessions des autres ; quand elles sont affichées, elles sont
+**rangées par personne ou agent** sous une ligne repliable (pastille, nom, nombre de sessions, état ; ouverte
+d'office quand l'une attend une réponse ou est affichée ; `ownerGroups` dans `workbench/workspaces.ts`),
+pour que le travail des autres et des agents ne noie pas le sien. Les pastilles portent les initiales de leur auteur. Menu « ⋮ » d'une session : ouvrir, fichiers, nouveau terminal, arrêter, renommer,
 archiver, supprimer. **Recherche** (⌘K ou Ctrl+K, `search`) sur les projets, sessions (nom et
 conversation), tâches, pages et éléments du coffre ; **raccourcis** listés par « ? »
 (`lib/shortcuts.ts`). Le panneau de droite a deux onglets : **Tâche** (la tâche liée à la session,
@@ -1338,7 +1340,8 @@ nouvelle session dans son propre dossier, nommée d'après le message. Quatre fa
 **Déclencheurs** (`triggers`, écouteurs du service des tâches et des PR suivies, garde anti-boucle : rien de ce qu'une
 session d'agent fait ne déclenche les agents) : `taskCreated` (tâche créée par une personne ou l'API, filtrable par
 étiquette : le PM intervient pour la cadrer), `threadFollowed` (une réponse humaine dans un fil où l'agent est
-intervenu revient à sa session comme instruction, via `tasks/sessionFeed.ts`), `prMerged` (PR d'une tâche
+intervenu revient à sa session comme instruction, via `tasks/sessionFeed.ts` ; si ses sessions sur la tâche ont été
+archivées — les agents rangent les leurs une fois le travail rendu —, il est convoqué à nouveau, message « [Fil suivi] »), `prMerged` (PR d'une tâche
 fusionnée), `taskReady` (tâche passée par une personne à l'étiquette d'état `taskReadyTag`, « prête » : le Developer
 démarre). **Actions** : instructions nommées jouées à la demande (menu « Actions ») ou à heures fixes (`cron` : une
 session planifiée dédiée dont l'agent est propriétaire, créée et tenue à jour par `syncActionSchedules`). Les modèles
@@ -1642,7 +1645,17 @@ La relance travaille dans le dossier et sur la branche de la session d'origine (
 la session d'origine est archivée, arrêtée si elle tournait : une seule session par dossier), ou dans un
 nouveau dossier si le sien a été supprimé. Archiver une session archive son dossier (terminaux fermés,
 dossier et branche conservés) ; la restaurer le restaure ; un dossier disparu est recréé à la prochaine
-utilisation. Une session se renomme depuis la sidebar ou ses réglages. Les mutations `archiveWorksession`,
+utilisation. Une session se renomme depuis la sidebar ou ses réglages.
+
+**Une session peut s'archiver elle-même** (outil MCP `sessions.archive`, libre) : sans `id`, la session
+courante, archivée **à la fin de son tour** (`sessionService.archiveWhenDone` : fin propre par `end`, puis
+`archiveSessionCascade` branché par `onArchiveWhenDone` dans `index.ts` ; un événement `agent_archive` le note
+dans le transcript, avec la raison donnée) ; avec un `id`, une session qu'elle a lancée. Le prompt système dit quand
+(`archivePromptSummary` dans `sessions/mcp.ts`) : une session **d'agent de projet** se range elle-même une fois son
+travail rendu (fil à jour, PR ouverte, rien de non poussé, aucune sous-session en cours, pas de conversation en cours
+avec la personne qui l'a demandée) ; une **sous-session** laisse sa parente l'archiver ; une session **pilotée par une
+personne** ne s'archive que si elle le demande ; toutes archivent les sessions qu'elles ont lancées une fois leur
+réponse lue. Les mutations `archiveWorksession`,
 `restoreWorksession`, `renameWorksession` et `deleteWorksession` restent dans l'API (sans interface).
 
 ## Export et import

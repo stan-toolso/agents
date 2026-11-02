@@ -45,6 +45,7 @@ beforeEach(() => {
   repo.sessionIdsOnTask = vi.fn(async () => []);
   sessions.findByIds = vi.fn(async () => []);
   tasks.get = vi.fn(async () => task());
+  tasks.sessionIds = vi.fn(async () => []);
   users.findById = vi.fn(async () => ({ name: 'Alice' }));
 });
 
@@ -99,6 +100,23 @@ describe('onTaskChanged', () => {
   it('un agent mentionné qui a déjà une session reliée n’est pas convoqué (le fil la relance)', async () => {
     service.sessionOnTask = vi.fn(async () => ({ id: 's1' }));
     const change: TaskChange = { kind: 'commented', task: task(), comment: comment({ mentions: [{ kind: 'user', id: 'a1', label: 'Léa', text: '@Léa' }] }), attachments: [], parent: null };
+    await onTaskChanged(change);
+    expect(service.summon).not.toHaveBeenCalled();
+  });
+
+  it('un agent qui suit le fil et dont la session sur la tâche est archivée est convoqué à nouveau', async () => {
+    tasks.sessionIds = vi.fn(async () => ['s1', 's2']);
+    sessions.findByIds = vi.fn(async () => [
+      { id: 's1', ownerId: 'a1' },
+      { id: 's2', ownerId: 'a2' },
+    ]);
+    repo.findByIds = vi.fn(async () => [agent(), agent({ id: 'a2', name: 'Max', triggers: { ...agent().triggers, threadFollowed: false } })]);
+    const change: TaskChange = { kind: 'commented', task: task(), comment: comment({ body: 'Où en est-on ?' }), attachments: [], parent: null };
+    await onTaskChanged(change);
+    expect(service.summon).toHaveBeenCalledTimes(1);
+    expect(service.summon).toHaveBeenCalledWith('a1', expect.objectContaining({ taskId: 't1', text: expect.stringContaining('[Fil suivi]') }));
+    (service.summon as ReturnType<typeof vi.fn>).mockClear();
+    service.sessionOnTask = vi.fn(async () => ({ id: 's1' }));
     await onTaskChanged(change);
     expect(service.summon).not.toHaveBeenCalled();
   });

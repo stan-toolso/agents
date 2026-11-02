@@ -37,7 +37,7 @@ import { createEnvMcpServer } from '../../envFiles/mcp.js';
 import { envFileService } from '../../envFiles/service.js';
 import { attachmentsNote, publicAttachment } from '../attachments.js';
 import { sessionIdentityPrompt } from '../identity.js';
-import { createSessionsMcpServer, sessionsPromptSummary } from '../mcp.js';
+import { archivePromptSummary, createSessionsMcpServer, sessionsPromptSummary } from '../mcp.js';
 import type { Attachment } from '../types.js';
 import { startMcpBridges, type McpBridges, type McpFactory } from './opencodeBridge.js';
 import { allowedByRules, claudeQuestions, claudeTool, mcpToolOf, OPENCODE_EDIT_TOOLS, opencodeAnswers, permissionSuggestions, permissionTitle, permissionTool, toolResultData, type OpencodePermissionRequest, type ToolCall } from './opencodeEvents.js';
@@ -75,7 +75,7 @@ const BROWSER_READ_TOOLS = ['browser_snapshot', 'browser_take_screenshot', 'brow
 const BROWSER_FIELD_READERS = ['browser_evaluate', 'browser_run_code'];
 
 /** Outils des serveurs MCP de Skipper autorisés d'office (mêmes règles que pour une session Claude). */
-const SKIPPER_FREE_TOOLS = ['mcp__context', ...TASKS_FREE_TOOLS, 'mcp__vault', 'mcp__worksessions__list', 'mcp__worksessions__create', 'mcp__sessions__list', 'mcp__sessions__get', 'mcp__sessions__wait', 'mcp__sessions__end', 'mcp__pages__list', 'mcp__env'];
+const SKIPPER_FREE_TOOLS = ['mcp__context', ...TASKS_FREE_TOOLS, 'mcp__vault', 'mcp__worksessions__list', 'mcp__worksessions__create', 'mcp__sessions__list', 'mcp__sessions__get', 'mcp__sessions__wait', 'mcp__sessions__end', 'mcp__sessions__archive', 'mcp__pages__list', 'mcp__env'];
 
 /** Autorisations d'OpenCode lui-même : lectures et recherches libres, tout le reste demande — à cet exécuteur, qui applique le mode et les règles de la session puis interroge l'humain. */
 const BASE_PERMISSION: Record<string, string> = { '*': 'ask', read: 'allow', glob: 'allow', grep: 'allow', list: 'allow', lsp: 'allow', todowrite: 'allow', todoread: 'allow', question: 'allow', skill: 'allow', task: 'allow' };
@@ -317,6 +317,7 @@ class OpencodeRun {
       vaultService.promptSummary(vaultItems, ctx.project),
       await envFileService.promptSummary(ctx.project.id),
       sessionsPromptSummary(ctx.project),
+      archivePromptSummary({ agent: Boolean(agent), child: Boolean(ctx.session.parentSessionId) }),
       googleAccountService.promptSummary(googleAccounts),
       sharedPagesPrompt(),
       ctx.session.worksessionId ? previewPrompt(previewsEnabled(), ctx.session.worksessionId) : '',

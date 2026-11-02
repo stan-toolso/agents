@@ -89,21 +89,25 @@ export async function agentFeedTargets(change: TaskChange, linked: string[]): Pr
   return out;
 }
 
-/** Un message d'une personne qui mentionne un agent sans session reliée à la tâche : l'agent est convoqué. */
+/**
+ * Un message d'une personne pour un agent sans session active reliée à la tâche : l'agent mentionné est convoqué, et
+ * celui qui suit le fil (`threadFollowed`) aussi quand ses sessions sur la tâche ont été archivées (il les range
+ * lui-même une fois son travail rendu : le fil doit pouvoir le rappeler).
+ */
 async function onCommented(change: Extract<TaskChange, { kind: 'commented' }>): Promise<void> {
   const c = change.comment;
   if (c.authorType !== 'human') return;
-  const mentionedIds = c.mentions.filter((m) => m.kind === 'user').map((m) => m.id);
-  if (!mentionedIds.length) return;
-  const agents = (await agentRepository.findByIds(mentionedIds)).filter((a) => a.enabled && !a.archivedAt && a.projectId === change.task.projectId);
+  const mentionedIds = new Set(c.mentions.filter((m) => m.kind === 'user').map((m) => m.id));
+  const followers = (await agentSessions(await taskService.sessionIds(change.task.id).catch(() => [] as string[]))).map((x) => x.agent).filter((a) => a.triggers.threadFollowed);
+  const mentioned = mentionedIds.size ? await agentRepository.findByIds([...mentionedIds]) : [];
+  const agents = [...new Map([...mentioned, ...followers].map((a) => [a.id, a])).values()].filter((a) => a.enabled && !a.archivedAt && a.projectId === change.task.projectId);
+  const excerpt = c.body.length > 2000 ? `${c.body.slice(0, 2000)}…` : c.body;
   for (const agent of agents) {
     if (await agentService.sessionOnTask(agent, change.task.id)) continue; // sa session reliée reçoit le message par le fil
-    const excerpt = c.body.length > 2000 ? `${c.body.slice(0, 2000)}…` : c.body;
-    await summonQuietly(
-      agent,
-      { taskId: change.task.id, requestedById: c.authorUserId, text: `[Mention] ${c.authorName} te mentionne dans le fil de ${taskLink(change.task)} :\n\n${excerpt}\n\nRéponds dans le fil (\`tasks.comment\`, \`reply_to\` ${c.id} pour rester dans son fil) et agis selon tes instructions.` },
-      'mention',
-    );
+    const text = mentionedIds.has(agent.id)
+      ? `[Mention] ${c.authorName} te mentionne dans le fil de ${taskLink(change.task)} :\n\n${excerpt}\n\nRéponds dans le fil (\`tasks.comment\`, \`reply_to\` ${c.id} pour rester dans son fil) et agis selon tes instructions.`
+      : `[Fil suivi] ${c.authorName} a écrit dans le fil de ${taskLink(change.task)}, que tu suis (ta session précédente sur cette tâche est archivée) :\n\n${excerpt}\n\nRelis la tâche et son fil (\`tasks.get\`). Si le message t'est adressé ou relève de ton rôle, réponds dans le fil (\`tasks.comment\`, \`reply_to\` ${c.id}) et agis selon tes instructions ; sinon ne réponds pas et archive cette session (\`sessions.archive\`).`;
+    await summonQuietly(agent, { taskId: change.task.id, requestedById: c.authorUserId, text }, mentionedIds.has(agent.id) ? 'mention' : 'fil suivi');
   }
 }
 
