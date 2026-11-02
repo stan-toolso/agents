@@ -35,7 +35,8 @@ interface ThreadData {
 export interface ThreadOpening {
   authorName: string;
   byAgent: boolean;
-  sessionId: string | null;
+  /** Session qui a ouvert la tâche (lien discret à côté de l'auteur). */
+  session: { id: string; name: string } | null;
   createdAt: string;
   body: ReactNode;
   attachments: AttachmentRef[];
@@ -52,6 +53,16 @@ function Avatar({ name, agent, projectAgent }: { name: string; agent: boolean; p
     <span className="tt-avatar" title={name}>
       {initialsOf(name)}
     </span>
+  );
+}
+
+/** Lien discret vers la session qui a écrit le message, à côté de son auteur (la personne ou l'agent qui la pilote). */
+function SessionLink({ session }: { session: { id: string; name: string } }) {
+  return (
+    <Link to={`/sessions/${session.id}`} className="tt-session-link" title={`Écrit par la session « ${session.name} »`}>
+      <i className="bi bi-robot" />
+      session
+    </Link>
   );
 }
 
@@ -314,20 +325,19 @@ function Message({
   const [remove] = useMutation(DELETE_TASK_COMMENT, { refetchQueries: REFETCH, onError: (e) => void showError(e) });
   const edited = new Date(c.updatedAt).getTime() - new Date(c.createdAt).getTime() > 1000;
   const mentionsMe = Boolean(user && c.mentions.some((m) => m.kind === 'user' && m.id === user.id));
-  const agent = c.authorType === 'agent';
+  // Un message de session est signé par qui la pilote (personne ou agent du projet) ; le titre de la session
+  // n'est plus que le repli d'une session sans pilote connu.
+  const owner = c.authorSession?.owner ?? null;
+  const name = c.agent?.name ?? owner?.name ?? c.authorName;
+  const robot = c.authorType === 'agent' && !owner;
   return (
     <div id={`comment-${c.id}`} className={`tt-msg${isReply ? ' tt-reply' : ''}${mentionsMe ? ' tt-mentions-me' : ''}`}>
-      <Avatar name={c.authorName} agent={agent} projectAgent={c.agent} />
+      <Avatar name={name} agent={robot} projectAgent={c.agent} />
       <div className="tt-msg-main">
         <div className="tt-msg-head">
-          {c.authorSession ? (
-            <Link to={`/sessions/${c.authorSession.id}`} className="tt-author">
-              {c.authorName}
-            </Link>
-          ) : (
-            <span className="tt-author">{c.authorName}</span>
-          )}
-          {agent && <span className="tt-badge-agent">{c.agent ? agentKindLabels[c.agent.kind] : 'agent'}</span>}
+          <span className="tt-author">{name}</span>
+          {(c.agent || robot) && <span className="tt-badge-agent">{c.agent ? agentKindLabels[c.agent.kind] : 'agent'}</span>}
+          {c.authorSession && <SessionLink session={c.authorSession} />}
           <span className="tt-time" title={fmtFull(c.createdAt)}>
             {timeAgo(c.createdAt)}
             {edited && ' · modifié'}
@@ -472,14 +482,9 @@ export default function TaskThread({ taskId, opening, canWrite = true, compact }
           <Avatar name={opening.authorName} agent={opening.byAgent} />
           <div className="tt-msg-main">
             <div className="tt-msg-head">
-              {opening.sessionId ? (
-                <Link to={`/sessions/${opening.sessionId}`} className="tt-author">
-                  {opening.authorName}
-                </Link>
-              ) : (
-                <span className="tt-author">{opening.authorName}</span>
-              )}
+              <span className="tt-author">{opening.authorName}</span>
               {opening.byAgent && <span className="tt-badge-agent">agent</span>}
+              {opening.session && <SessionLink session={opening.session} />}
               <span className="tt-time" title={fmtFull(opening.createdAt)}>
                 a ouvert la tâche {timeAgo(opening.createdAt)}
               </span>

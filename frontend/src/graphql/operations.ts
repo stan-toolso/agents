@@ -344,7 +344,8 @@ export interface TaskComment {
   authorType: 'human' | 'agent';
   authorName: string;
   author: { id: string; name: string } | null;
-  authorSession: { id: string; name: string } | null;
+  /** Session qui a écrit le message ; `owner` est la personne (ou l'agent) qui la pilote. */
+  authorSession: { id: string; name: string; owner: { id: string; name: string } | null } | null;
   /** Agent de projet dont la session a écrit le message. */
   agent?: { id: string; name: string; kind: 'PRODUCT_MANAGER' | 'DEVELOPER' | 'CUSTOM'; avatar: { emoji: string | null; color: string | null } } | null;
   body: string;
@@ -386,7 +387,8 @@ export interface Task {
   worksession: { id: string; branch: string; archivedAt: string | null } | null;
   project: { id: string; name: string };
   session: { id: string; name: string; status: SessionStatus; activity: SessionActivity | null; worksession: { id: string; branch: string } | null } | null;
-  createdBySession: { id: string; name: string } | null;
+  /** `owner` (personne ou agent qui pilote la session) n'est demandé que par TASK_PAGE. */
+  createdBySession: { id: string; name: string; owner?: { id: string; name: string } | null } | null;
   /** Présent seulement dans la query TASKS. */
   pullRequest?: PullRequestSummary | null;
   /** Pull requests suivies de la tâche (objets Skipper) ; présentes dans TASKS et TASK_PAGE. */
