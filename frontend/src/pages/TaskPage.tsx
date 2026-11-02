@@ -84,7 +84,8 @@ export default function TaskPage() {
   const canWrite = target ? target.myRole !== 'VIEWER' : false;
   // Le fil s'écrit sauf pour un lecteur ; tant que le rôle n'est pas connu, la saisie est montrée (le serveur tranche).
   const canPost = !target || target.myRole !== 'VIEWER';
-  const openedBy = task.createdBySession?.name ?? task.reporter?.name ?? task.reporter?.email ?? (task.createdByType === 'agent' ? 'Un agent' : 'Quelqu’un');
+  // Ouverte par une session : signée par qui la pilote, le titre de la session n'est qu'un repli.
+  const openedBy = task.createdBySession?.owner?.name ?? task.createdBySession?.name ?? task.reporter?.name ?? task.reporter?.email ?? (task.createdByType === 'agent' ? 'Un agent' : 'Quelqu’un');
 
   return (
     <>
@@ -129,8 +130,8 @@ export default function TaskPage() {
                 canWrite={canPost}
                 opening={{
                   authorName: openedBy,
-                  byAgent: task.createdByType === 'agent',
-                  sessionId: task.createdBySession?.id ?? null,
+                  byAgent: task.createdByType === 'agent' && !task.createdBySession?.owner,
+                  session: task.createdBySession ?? null,
                   createdAt: task.createdAt,
                   body: task.description ? <Linkified text={task.description} /> : <span className="text-secondary fst-italic">Pas de description.</span>,
                   attachments: task.attachments,

@@ -320,8 +320,10 @@ const comment = (t, author, minutesAgo, body, extra = {}) => {
   return c;
 };
 comment(T.tarifs, U.lea, 60 * 26, 'Le support reçoit beaucoup de questions sur l’offre annuelle : on peut l’afficher directement sur la page ?');
-comment(T.tarifs, U.chris, 60 * 25, 'J’ai ajouté l’interrupteur mensuel / annuel aux critères d’acceptation. @Camille Laurent, tu valides la remise de 20 % ?');
+comment(T.tarifs, U.chris, 60 * 25, 'J’ai ajouté l’interrupteur mensuel / annuel aux critères d’acceptation. @Camille Laurent, tu valides la remise de 20 % ?', { authorType: 'agent', authorSession: S.blog });
 comment(T.tarifs, U.me, 60 * 24, 'Oui, 20 % sur l’annuel. Go.', { reactions: [{ __typename: 'TaskReaction', emoji: '👍', count: 2, actors: ['Léa Fontaine', 'Chris'], mine: false }] });
+// Message écrit par une session pilotée par une personne : signé par la personne, avec un lien discret vers la session.
+comment(T.tarifs, U.me, 60 * 23, 'Interrupteur mensuel / annuel en place, remise de 20 % appliquée. Capture mobile jointe à la PR.', { authorType: 'agent', authorName: S.tarifs.name, author: null, authorSession: S.tarifs, editable: false });
 comment(T.pdf, U.hugo, 90, 'Le rendu des montants négatifs (avoirs) est à vérifier avec la compta.');
 comment(T.relances, U.me, 60 * 20, 'Bloqué tant qu’on n’a pas le modèle d’e-mail validé par le juridique.');
 comment(T.pdf, U.nora, 20, 'Revue de la PR #118 : le calcul des totaux arrondit ligne par ligne, ce qui peut décaler d’un centime le total TTC. Voir `InvoicePdf.ts:84`.');
