@@ -349,6 +349,8 @@ export interface TaskComment {
 
 export interface Task {
   id: string;
+  /** Coût attribué à la tâche (unité d'affichage). */
+  costUsd: number;
   title: string;
   description: string;
   status: TaskStatus;
@@ -1513,6 +1515,7 @@ export const TASK_FIELDS = gql`
     }
     commentCount
     attachmentCount
+    costUsd
     attachments {
       id
       name

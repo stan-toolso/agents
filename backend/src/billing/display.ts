@@ -49,6 +49,8 @@ export async function describeCost(usd: number): Promise<string> {
 /** Champs de coût convertis (type GraphQL → champs). */
 export const COST_FIELDS: Record<string, string[]> = {
   Session: ['costUsd'],
+  Task: ['costUsd'],
+  TaskSessionCost: ['usd'],
   WorkflowRun: ['costUsd'],
   ScheduleRun: ['costUsd'],
   SessionContext: ['coldTurnUsd'],

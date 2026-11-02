@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Form } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import type { Task } from '../graphql/operations';
-import { timeAgo } from '../lib/humanize';
+import { formatCost, timeAgo } from '../lib/humanize';
 import {
   applyFilters,
   cellText,
@@ -57,7 +57,7 @@ export default function TaskGrid({ tasks, showProject, projects, filters, onFilt
   const totalWidth = cols.reduce((sum, c) => sum + (layout.widths[c.key] ?? c.width), 0);
 
   const toggleSort = (key: TaskColumnKey) =>
-    setLayout((l) => ({ ...l, sort: l.sort.key === key ? { key, dir: l.sort.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'createdAt' || key === 'updatedAt' || key === 'completedAt' || key === 'comments' ? 'desc' : 'asc' } }));
+    setLayout((l) => ({ ...l, sort: l.sort.key === key ? { key, dir: l.sort.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'createdAt' || key === 'updatedAt' || key === 'completedAt' || key === 'comments' || key === 'cost' ? 'desc' : 'asc' } }));
   const setWidth = (key: TaskColumnKey, width: number | null) =>
     setLayout((l) => {
       const widths = { ...l.widths };
@@ -356,6 +356,8 @@ function Cell({ task: t, col, onEdit, onTag, target }: { task: Task; col: TaskCo
           {t.commentCount}
         </Link>
       ) : null;
+    case 'cost':
+      return t.costUsd > 0 ? <>{formatCost(t.costUsd)}</> : null;
     case 'attachments':
       return t.attachmentCount ? <>{t.attachmentCount}</> : null;
     case 'createdBy':

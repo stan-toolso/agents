@@ -1012,6 +1012,14 @@ défaut), trie et choisit (bouton « Colonnes », avec flèches pour l'ordre), f
 dans `localStorage` (`skipper.tasks.table.v1`). Le kanban reste disponible (filtres de la barre d'outils : priorité,
 responsable, rapporteur, étiquette), ainsi que « mes tâches ouvertes » et « voir les annulées » dans les deux vues.
 
+**Coût d'une tâche.** `Task.costUsd` et `Task.sessionCosts` (`backend/src/tasks/cost.ts`, chargeur `taskCost`) lisent `usage_ledger`,
+la même source que le tableau de bord. Règle de répartition : chaque tour facturé d'une session est partagé **à parts
+égales** entre les tâches auxquelles la session était reliée à la date du tour (`task_sessions.linked_at` ; la fin
+d'une prise en charge n'étant pas datée, une session libérée reste reliée) ; un tour antérieur à toute liaison n'est
+attribué à aucune tâche, donc le total des tâches ne dépasse jamais celui des sessions. Les champs passent par la
+conversion d'unité (`billing/display.ts`) : crédits dans une cellule facturée, jamais d'USD. Affichage : total et part
+de chaque session sur la page de la tâche, colonne « Coût » (masquée par défaut, triable) de la grille.
+
 **Sessions en charge.** Une tâche peut avoir **plusieurs sessions en charge** à la fois, et une session mener
 **plusieurs tâches** (`task_sessions.in_charge_since`, null pour un simple passage ; `tasks.session_id` reste la
 plus récente des sessions en charge). Prend la charge : « Confier à un agent » (la nouvelle session remplace les

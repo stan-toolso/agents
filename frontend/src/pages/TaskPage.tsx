@@ -34,7 +34,7 @@ interface TaskSession {
   worksession: { id: string; branch: string } | null;
 }
 
-type TaskWithSessions = Task & { sessions: TaskSession[] };
+type TaskWithSessions = Task & { sessions: TaskSession[]; sessionCosts?: { session: { id: string }; usd: number }[] };
 
 const fmt = (iso: string) => new Date(iso).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -139,7 +139,10 @@ export default function TaskPage() {
             </Card.Body>
           </Card>
           <Card className="mt-3">
-            <Card.Header>Sessions ({task.sessions.length})</Card.Header>
+            <Card.Header>
+              Sessions ({task.sessions.length})
+              {task.costUsd > 0 && <span className="float-end text-secondary" title="Coût attribué à la tâche : chaque tour d'une session est réparti à parts égales entre les tâches auxquelles elle était reliée">Coût de la tâche : {formatCost(task.costUsd)}</span>}
+            </Card.Header>
             <Card.Body className="small p-0">
               {task.sessions.length === 0 ? (
                 <div className="p-3 text-secondary fst-italic">Aucune session n'a encore travaillé sur cette tâche. « Confier à un agent » en lance une.</div>
@@ -153,6 +156,7 @@ export default function TaskPage() {
                       <th className="d-none d-md-table-cell">Par</th>
                       <th className="d-none d-md-table-cell">Démarrée</th>
                       <th className="text-end">Coût</th>
+                      <th className="text-end" title="Part attribuée à cette tâche">Part</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -176,6 +180,7 @@ export default function TaskPage() {
                           {s.endedAt && <span className="text-secondary"> · fin {timeAgo(s.endedAt)}</span>}
                         </td>
                         <td className="text-end">{formatCost(s.costUsd)}</td>
+                        <td className="text-end">{formatCost(task.sessionCosts?.find((c) => c.session.id === s.id)?.usd ?? 0)}</td>
                       </tr>
                     ))}
                   </tbody>
