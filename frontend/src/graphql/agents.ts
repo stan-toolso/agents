@@ -55,11 +55,20 @@ export interface Agent extends AgentRef {
   description: string;
   instructions: string;
   taskFolder: boolean;
+  /** Réglages par défaut de ses sessions : provider (type de session), model, permissionMode, allowedTools… */
   defaults: Record<string, unknown>;
+  /** Modèles que ses sessions peuvent utiliser (vide : tous). */
+  allowedModels: string[];
   /** En plus de sa propre bibliothèque de contexte, l'agent reçoit celle du projet. */
   inheritContext: boolean;
-  /** Comptes prêtés par une personne (sinon les comptes propres de l'agent). */
-  delegations: { claude: { id: string; name: string } | null; git: { id: string; name: string } | null; gitReadOnly: boolean };
+  /** Comptes prêtés par une personne (sinon les comptes propres de l'agent), GitHub et GitLab séparément. */
+  delegations: {
+    claude: { id: string; name: string } | null;
+    github: { id: string; name: string } | null;
+    githubReadOnly: boolean;
+    gitlab: { id: string; name: string } | null;
+    gitlabReadOnly: boolean;
+  };
   triggers: AgentTriggers;
   actions: AgentAction[];
   enabled: boolean;
@@ -102,6 +111,7 @@ export interface AgentInput {
   instructions?: string | null;
   taskFolder?: boolean | null;
   defaults?: Record<string, unknown> | null;
+  allowedModels?: string[] | null;
   triggers?: Partial<AgentTriggers> | null;
   actions?: AgentActionInput[] | null;
   inheritContext?: boolean | null;
@@ -127,17 +137,23 @@ export const AGENT_FIELDS = gql`
     instructions
     taskFolder
     defaults
+    allowedModels
     inheritContext
     delegations {
       claude {
         id
         name
       }
-      git {
+      github {
         id
         name
       }
-      gitReadOnly
+      githubReadOnly
+      gitlab {
+        id
+        name
+      }
+      gitlabReadOnly
     }
     triggers {
       taskCreated
@@ -218,6 +234,8 @@ export const PROJECT_AGENT_REFS = gql`
         description
         enabled
         taskFolder
+        defaults
+        allowedModels
       }
     }
   }

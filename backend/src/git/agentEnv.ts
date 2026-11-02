@@ -7,6 +7,7 @@ import { forgejoAccounts } from '../gitServer/forgejo.js';
 import { userService } from '../users/service.js';
 import { githubService } from '../settings/github.js';
 import { gitlabRepoOf, gitlabService } from '../settings/gitlab.js';
+import { ownAccounts, type OwnerAccounts } from '../agents/types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -32,6 +33,18 @@ export const AGENT_GIT_ENV_KEYS = [
   'GIT_COMMITTER_EMAIL',
 ];
 
+export type GitHostKind = 'github' | 'gitlab' | 'forge';
+
+/**
+ * Compte qui sert un dépôt pour un propriétaire de session : la forge de Skipper (dépôt hébergé), GitLab (gitlab.com ou
+ * une instance des comptes GitLab en jeu) ou GitHub, avec la personne dont le compte sert et le prêt en lecture seule.
+ */
+export async function gitAccountFor(accounts: OwnerAccounts, repoUrl: string | null | undefined): Promise<{ host: GitHostKind; userId: string; readOnly: boolean }> {
+  if (isHostedGitUrl(repoUrl)) return { host: 'forge', userId: accounts.forgeUserId, readOnly: false };
+  if (gitlabRepoOf(repoUrl, await gitlabService.hosts(accounts.gitlabUserId).catch(() => []))) return { host: 'gitlab', userId: accounts.gitlabUserId, readOnly: accounts.gitlabReadOnly };
+  return { host: 'github', userId: accounts.githubUserId, readOnly: accounts.githubReadOnly };
+}
+
 let identityCache: { name: string | null; email: string | null } | null = null;
 
 async function hostIdentity(): Promise<{ name: string | null; email: string | null }> {
@@ -56,16 +69,20 @@ async function hostIdentity(): Promise<{ name: string | null; email: string | nu
  * jeton (les dépôts publics restent accessibles). Un usage par une session est journalisé sur le jeton.
  * Dépôt hébergé par Skipper (Forgejo) : le jeton Forgejo des sessions du propriétaire (forge_accounts), servi de la même
  * façon pour l'origine de Forgejo, afin que fetch et push depuis le conteneur passent par la forge avec son compte.
+ * `owner` : l'identifiant d'une personne (ses comptes), ou les comptes d'un agent (`agentService.accounts`) : GitHub et
+ * GitLab peuvent alors venir de personnes différentes, et l'origine ne se pousse pas si le compte de son hébergeur est
+ * prêté en lecture seule.
  */
-export async function agentGitEnv(ownerId: string | null | undefined, repoUrl?: string | null, actor: { sessionId?: string | null; projectId?: string | null } = {}, opts: { readOnly?: boolean } = {}): Promise<Record<string, string>> {
+export async function agentGitEnv(owner: string | OwnerAccounts | null | undefined, repoUrl?: string | null, actor: { sessionId?: string | null; projectId?: string | null } = {}): Promise<Record<string, string>> {
   const env: Record<string, string> = {};
+  const accounts = typeof owner === 'string' ? ownAccounts(owner) : (owner ?? null);
   const hosted = isHostedGitUrl(repoUrl);
   const [auth, gitlab, gitlabHosts, identity, hostedToken] = await Promise.all([
-    hosted ? null : githubService.gitAuth(ownerId, repoUrl, actor).catch(() => null),
-    hosted ? null : gitlabService.gitAuth(ownerId, repoUrl, actor).catch(() => null),
-    hosted ? [] : gitlabService.hosts(ownerId).catch(() => []),
+    hosted ? null : githubService.gitAuth(accounts?.githubUserId, repoUrl, actor).catch(() => null),
+    hosted ? null : gitlabService.gitAuth(accounts?.gitlabUserId, repoUrl, actor).catch(() => null),
+    hosted ? [] : gitlabService.hosts(accounts?.gitlabUserId).catch(() => []),
     hostIdentity(),
-    hosted && ownerId ? userService.get(ownerId).then((u) => forgejoAccounts.agentToken(u)).catch((err) => (log.warn(`[forgejo] jeton des sessions : ${(err as Error).message}`), null)) : null,
+    hosted && accounts ? userService.get(accounts.forgeUserId).then((u) => forgejoAccounts.agentToken(u)).catch((err) => (log.warn(`[forgejo] jeton des sessions : ${(err as Error).message}`), null)) : null,
   ]);
   const configs: [string, string][] = [];
   if (auth) {
@@ -82,8 +99,8 @@ export async function agentGitEnv(ownerId: string | null | undefined, repoUrl?: 
     env.SKIPPER_GIT_TOKEN = hostedToken;
     configs.push([`credential.${new URL(config.forgejo.url).origin}.helper`, '!f() { echo username=skipper; echo "password=$SKIPPER_GIT_TOKEN"; }; f']);
   }
-  // Comptes prêtés en lecture seule (agent de projet) : l'origine ne se pousse pas (adresse de push inexistante, erreur explicite).
-  if (opts.readOnly) configs.push(['remote.origin.pushurl', 'https://lecture-seule.skipper.invalid/comptes-git-pretes-en-lecture-seule']);
+  // Compte prêté en lecture seule (agent de projet) pour l'hébergeur de l'origine : elle ne se pousse pas (adresse de push inexistante, erreur explicite).
+  if (accounts && !hosted && (gitlabRepoOf(repoUrl, gitlabHosts) ? accounts.gitlabReadOnly : accounts.githubReadOnly)) configs.push(['remote.origin.pushurl', 'https://lecture-seule.skipper.invalid/comptes-git-pretes-en-lecture-seule']);
   if (configs.length) {
     env.GIT_CONFIG_COUNT = String(configs.length);
     configs.forEach(([key, value], i) => {

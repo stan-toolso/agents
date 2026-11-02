@@ -302,12 +302,12 @@ class OpencodeRun {
     const googleAccounts = await googleAccountService.accountsFor(ctx.project.id, this.ownerId);
     // Session jouée par un agent de projet : son identité, sa bibliothèque propre (et celle du projet s'il en hérite), ses comptes prêtés.
     const agent = await agentService.forUser(this.ownerId);
-    const accounts = (await agentService.accountsForOwner(this.ownerId)) ?? { claudeUserId: this.ownerId ?? '', gitUserId: this.ownerId ?? '', gitReadOnly: false };
+    const accounts = await agentService.accountsForOwner(this.ownerId);
     const agentLibraries = isPersonalProject(ctx.project) ? [] : await agentService.libraries(ctx.project.id);
     const projectContext = !agent || agent.inheritContext;
     this.systemPrompt = [
       ctx.project.systemPrompt.trim(),
-      agent ? agentIdentityPrompt(agent, ctx.project, null, { gitReadOnly: accounts.gitReadOnly }) : '',
+      agent ? agentIdentityPrompt(agent, ctx.project, null, { githubReadOnly: accounts?.githubReadOnly, gitlabReadOnly: accounts?.gitlabReadOnly }) : '',
       sessionIdentityPrompt(ctx.session, ctx.project),
       agent ? await contextService.promptSummary(ctx.project.id, agent.id, { own: true }) : '',
       projectContext ? await contextService.promptSummary(ctx.project.id) : '',
@@ -393,7 +393,7 @@ class OpencodeRun {
       OPENCODE_DISABLE_PROJECT_CONFIG: '1',
       OPENCODE_ENABLE_QUESTION_TOOL: '1',
       OPENCODE_SERVER_PASSWORD: password,
-      ...(await agentGitEnv(this.ownerId ? accounts.gitUserId : null, ctx.project.gitUrl, actor, { readOnly: accounts.gitReadOnly })),
+      ...(await agentGitEnv(accounts, ctx.project.gitUrl, actor)),
     };
 
     // Session connue de Skipper mais absente de ce conteneur (recréé) : sa conversation est réimportée d'abord.

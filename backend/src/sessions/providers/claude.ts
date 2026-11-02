@@ -187,8 +187,8 @@ export class ClaudeProvider implements SessionProvider {
     // Réglages du PROPRIÉTAIRE de la session : identifiants (coffre), modèle par défaut, budgets, plafond mensuel. Pour un
     // agent de projet, les comptes qu'une personne lui a prêtés (délégation) remplacent les siens.
     const ownerId = ctx.session.ownerId;
-    const accounts = (await agentService.accountsForOwner(ownerId)) ?? { claudeUserId: ownerId ?? '', gitUserId: ownerId ?? '', gitReadOnly: false };
-    const owner = await claudeSettings.forSession(ownerId ? accounts.claudeUserId : null);
+    const accounts = await agentService.accountsForOwner(ownerId);
+    const owner = await claudeSettings.forSession(accounts?.claudeUserId ?? null);
     owner.assertCredentials();
     await owner.assertBudgetAvailable();
     const general = owner.settings;
@@ -222,7 +222,7 @@ export class ClaudeProvider implements SessionProvider {
     // de configuration propre à l'espace (conversations reprises) et aucune variable git ; une session, ses seuls identifiants.
     const env: Record<string, string | undefined> = chat
       ? { ...cliEnv(credentials), CLAUDE_CONFIG_DIR: chatConfigDir(ctx.project), [SESSION_ENV]: ctx.session.id }
-      : { ...credentials, ...(await agentGitEnv(ownerId ? accounts.gitUserId : null, ctx.project.gitUrl, actor, { readOnly: accounts.gitReadOnly })), [SESSION_ENV]: ctx.session.id };
+      : { ...credentials, ...(await agentGitEnv(accounts, ctx.project.gitUrl, actor)), [SESSION_ENV]: ctx.session.id };
     if (chat) await mkdir(chatConfigDir(ctx.project), { recursive: true });
     // Script de relais qui exécute le CLI dans le conteneur du projet (avant le navigateur : rien à nettoyer s'il échoue) ;
     // un chat utilise le CLI du serveur (CLAUDE_BIN, sinon celui du SDK), comme la vérification des identifiants.
@@ -244,7 +244,7 @@ export class ClaudeProvider implements SessionProvider {
       ? [ctx.project.systemPrompt.trim(), sessionIdentityPrompt(ctx.session, ctx.project), await contextService.promptSummary(ctx.project.id), REVIEW_SYSTEM_PROMPT]
       : [
         ctx.project.systemPrompt.trim(),
-        agent ? agentIdentityPrompt(agent, ctx.project, requestedBy, { gitReadOnly: accounts.gitReadOnly }) : '',
+        agent ? agentIdentityPrompt(agent, ctx.project, requestedBy, { githubReadOnly: accounts?.githubReadOnly, gitlabReadOnly: accounts?.gitlabReadOnly }) : '',
         sessionIdentityPrompt(ctx.session, ctx.project),
         projectAgents.length ? [agentsPromptSummary(projectAgents, agent), agentsMcpPrompt()].filter(Boolean).join('\n') : '',
         scope ? await personalService.promptSummary(scope, await userService.get(scope.ownerId)) : '',

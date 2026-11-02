@@ -1250,14 +1250,28 @@ l'application, la page Contexte d'un projet a un sélecteur de bibliothèque (Pr
 
 **Comptes prêtés (délégation).** Plutôt que de régler des comptes propres à l'agent, la personne qui le configure peut
 lui **prêter son propre compte** Claude (`claude_delegate_id` : identifiants, modèle par défaut, budgets de cette
-personne) et/ou ses comptes git (`git_delegate_id` : GitHub, GitLab, forge ; **en lecture seule** par défaut,
-`git_delegate_read_only`). On ne prête que son propre compte (mutation `setAgentDelegation(id, account, delegate,
+personne), son compte **GitHub** (`github_delegate_id`) et/ou son compte **GitLab** (`gitlab_delegate_id`), chacun
+séparément ; GitHub et GitLab se prêtent **en lecture seule** par défaut (`github_delegate_read_only`,
+`gitlab_delegate_read_only`). Un dépôt hébergé par Skipper (forge) sert toujours avec le compte de l'agent lui-même.
+On ne prête que son propre compte (mutation `setAgentDelegation(id, account: CLAUDE | GITHUB | GITLAB, delegate,
 readOnly)`, carte « Comptes prêtés » de l'onglet Comptes) ; un gestionnaire peut retirer une délégation.
-`agentService.accounts(agent)` / `accountsForOwner(ownerId)` donnent les comptes effectifs (`OwnerAccounts`) :
-le provider Claude lit les réglages Claude du délégant (`claudeSettings.forSession`), passe ses comptes git à
-`agentGitEnv` et, en lecture seule, pose une adresse de push inexistante sur `origin` (`remote.origin.pushurl`) ;
-`tasks.pr_open` refuse alors d'ouvrir une PR, et le prompt de l'agent le lui dit. La consommation reste imputée à
-l'agent (propriétaire des sessions) ; le plafond mensuel vérifié est celui du délégant.
+`agentService.accounts(agent)` / `accountsForOwner(ownerId)` donnent les comptes effectifs (`OwnerAccounts` :
+`claudeUserId`, `githubUserId` / `githubReadOnly`, `gitlabUserId` / `gitlabReadOnly`, `forgeUserId`) : le provider
+Claude lit les réglages Claude du délégant (`claudeSettings.forSession`), passe les comptes à `agentGitEnv` (jeton
+GitHub de l'un, GitLab de l'autre) qui, si le compte de l'hébergeur de l'origine est prêté en lecture seule, pose une
+adresse de push inexistante sur `origin` (`remote.origin.pushurl`) ; `tasks.pr_open` choisit le compte de
+l'hébergeur du dépôt (`gitAccountFor`) et refuse alors d'ouvrir une PR, et le prompt de l'agent le lui dit. La
+consommation reste imputée à l'agent (propriétaire des sessions) ; le plafond mensuel vérifié est celui du délégant.
+
+**Type de session et modèles.** Le profil (carte « Sessions ») règle le **type de session par défaut**
+(`defaults.provider` : Claude Code ou OpenCode ; `agentService.providerOf`), le **modèle par défaut**
+(`defaults.model`) et les **modèles autorisés** (`agent_profiles.allowed_models`, vide : tous ; le modèle par défaut
+doit en faire partie, `agentService.validModels`). Une session de l'agent ne peut utiliser qu'un modèle autorisé :
+`sessionConfig` refuse un modèle demandé hors liste et applique sinon le modèle de l'agent (ou le premier autorisé),
+`sessionService.updateConfig` refuse de passer à un autre, et `sessionService.start` ramène une session dont le modèle
+n'est plus autorisé (fiche modifiée depuis, session planifiée) au modèle par défaut (`constrainModel`). Les lanceurs
+(« Nouvelle session » en tant qu'agent, « Confier à un agent ») préremplissent type, modèle et autorisations de
+l'agent et ne proposent que ses modèles autorisés (`lib/agentSessions.ts`).
 
 **Convoquer un agent** (`agentService.summon`) : avec une tâche, sa session non archivée reliée à la tâche reçoit le
 message (relancée si elle était terminée) ; sinon une session s'ouvre pour lui sur la tâche — dans le **dossier de la

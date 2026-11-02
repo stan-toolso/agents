@@ -18,12 +18,13 @@ import { userService } from '../users/service.js';
 import { ROLE_RANK, type User } from '../users/types.js';
 import { agentRepository } from './repository.js';
 import { AGENT_TEMPLATES, templateFor } from './templates.js';
-import { AGENT_KINDS, type Agent, type AgentAccountKind, type AgentAction, type AgentActionInput, type AgentInput, type AgentManagerRole, type AgentStats, type AgentTemplate, type OwnerAccounts, normalizeAvatar, normalizeTriggers } from './types.js';
+import { AGENT_KINDS, AGENT_PROVIDERS, type Agent, type AgentAccountKind, type AgentAction, type AgentActionInput, type AgentInput, type AgentManagerRole, type AgentStats, type AgentTemplate, type OwnerAccounts, normalizeAvatar, ownAccounts, normalizeTriggers } from './types.js';
 
 const NAME_MAX = 60;
 const DESCRIPTION_MAX = 200;
 const INSTRUCTIONS_MAX = 20_000;
 const ACTION_MAX = 20;
+const ALLOWED_MODELS_MAX = 30;
 
 /** Adresse technique d'un agent : jamais invitable, jamais rapprochée d'un compte Google. */
 export const agentEmail = (id: string) => `agent-${id}@agents.skipper`;
@@ -129,7 +130,7 @@ export const agentService = {
       description: (input.description ?? template.description).trim().slice(0, DESCRIPTION_MAX),
       instructions: this.validInstructions(input.instructions ?? template.instructions),
       taskFolder: input.taskFolder ?? template.taskFolder,
-      defaults: input.defaults ?? template.defaults,
+      ...this.validModels(input.defaults ?? template.defaults, input.allowedModels ?? []),
       inheritContext: input.inheritContext ?? true,
       triggers: normalizeTriggers(input.triggers ?? template.triggers),
       actions,
@@ -138,6 +139,25 @@ export const agentService = {
     await agentRepository.setManagers(agent.id, [{ userId: creator.id, role: 'owner' }]);
     await this.syncActionSchedules(agent).catch((err) => log.warn(`[agents] planification des actions de ${agent.name}`, err));
     return this.get(agent.id);
+  },
+
+  /**
+   * Réglages par défaut et modèles autorisés validés ensemble : type de session (`provider`) connu, liste sans doublon,
+   * modèle par défaut parmi les modèles autorisés quand la liste n'est pas vide.
+   */
+  validModels(defaults: Record<string, unknown>, allowedModels: string[]): { defaults: Record<string, unknown>; allowedModels: string[] } {
+    const allowed = [...new Set(allowedModels.map((m) => m.trim()).filter(Boolean))];
+    if (allowed.length > ALLOWED_MODELS_MAX) throw new AppError(`Au plus ${ALLOWED_MODELS_MAX} modèles autorisés`);
+    const out = { ...defaults };
+    for (const key of ['provider', 'model']) {
+      const v = out[key];
+      if (v === undefined || v === null || (typeof v === 'string' && !v.trim())) delete out[key];
+      else if (typeof v !== 'string') throw new AppError(`Réglage par défaut ${key} invalide`);
+      else out[key] = v.trim();
+    }
+    if (out.provider && !AGENT_PROVIDERS.includes(out.provider as string)) throw new AppError(`Type de session inconnu pour un agent : ${String(out.provider)}`);
+    if (allowed.length && out.model && !allowed.includes(out.model as string)) throw new AppError(`Le modèle par défaut (${String(out.model)}) doit faire partie des modèles autorisés`);
+    return { defaults: out, allowedModels: allowed };
   },
 
   validInstructions(text: string): string {
@@ -178,7 +198,7 @@ export const agentService = {
       ...(input.description !== undefined && input.description !== null ? { description: input.description.trim().slice(0, DESCRIPTION_MAX) } : {}),
       ...(input.instructions !== undefined && input.instructions !== null ? { instructions: this.validInstructions(input.instructions) } : {}),
       ...(input.taskFolder !== undefined && input.taskFolder !== null ? { taskFolder: input.taskFolder } : {}),
-      ...(input.defaults !== undefined && input.defaults !== null ? { defaults: input.defaults } : {}),
+      ...(input.defaults != null || input.allowedModels != null ? this.validModels(input.defaults ?? agent.defaults, input.allowedModels ?? agent.allowedModels) : {}),
       ...(input.inheritContext !== undefined && input.inheritContext !== null ? { inheritContext: input.inheritContext } : {}),
       ...(input.triggers !== undefined && input.triggers !== null ? { triggers: normalizeTriggers({ ...agent.triggers, ...input.triggers }) } : {}),
       ...(input.actions !== undefined && input.actions !== null ? { actions: this.prepareActions(input.actions, agent.actions) } : {}),
@@ -234,8 +254,11 @@ export const agentService = {
   accounts(agent: Agent): OwnerAccounts {
     return {
       claudeUserId: agent.claudeDelegateId ?? agent.id,
-      gitUserId: agent.gitDelegateId ?? agent.id,
-      gitReadOnly: Boolean(agent.gitDelegateId && agent.gitDelegateReadOnly),
+      githubUserId: agent.githubDelegateId ?? agent.id,
+      githubReadOnly: Boolean(agent.githubDelegateId && agent.githubDelegateReadOnly),
+      gitlabUserId: agent.gitlabDelegateId ?? agent.id,
+      gitlabReadOnly: Boolean(agent.gitlabDelegateId && agent.gitlabDelegateReadOnly),
+      forgeUserId: agent.id,
     };
   },
 
@@ -243,12 +266,13 @@ export const agentService = {
   async accountsForOwner(ownerId: string | null | undefined): Promise<OwnerAccounts | null> {
     if (!ownerId) return null;
     const agent = await agentRepository.findById(ownerId);
-    return agent ? this.accounts(agent) : { claudeUserId: ownerId, gitUserId: ownerId, gitReadOnly: false };
+    return agent ? this.accounts(agent) : ownAccounts(ownerId);
   },
 
   /**
    * Prête (ou reprend) un compte à l'agent : `delegateId` est la personne qui prête — elle ne peut prêter que son propre
-   * compte, et doit être membre du projet ; null retire la délégation. Les comptes git se prêtent en lecture seule par défaut.
+   * compte, et doit être membre du projet ; null retire la délégation. Les comptes GitHub et GitLab se prêtent chacun à
+   * part, en lecture seule par défaut.
    */
   async setDelegation(agentId: string, account: AgentAccountKind, delegateId: string | null, opts: { readOnly?: boolean | null } = {}): Promise<Agent> {
     const agent = await this.get(agentId);
@@ -258,7 +282,14 @@ export const agentService = {
       const role = await userService.roleFor(delegateId, agent.projectId);
       if (!role || ROLE_RANK[role] < ROLE_RANK.member) throw new AppError(`${user.name} doit être membre du projet pour prêter son compte à l'agent`);
     }
-    const updated = await agentRepository.update(agentId, account === 'claude' ? { claudeDelegateId: delegateId } : { gitDelegateId: delegateId, gitDelegateReadOnly: delegateId ? (opts.readOnly ?? true) : true });
+    const readOnly = delegateId ? (opts.readOnly ?? true) : true;
+    const patch =
+      account === 'claude'
+        ? { claudeDelegateId: delegateId }
+        : account === 'github'
+          ? { githubDelegateId: delegateId, githubDelegateReadOnly: readOnly }
+          : { gitlabDelegateId: delegateId, gitlabDelegateReadOnly: readOnly };
+    const updated = await agentRepository.update(agentId, patch);
     if (!updated) throw new NotFoundError('Agent introuvable');
     return updated;
   },
@@ -281,12 +312,39 @@ export const agentService = {
     return null;
   },
 
-  /** Configuration d'une session de l'agent : ses réglages par défaut, puis ceux demandés. */
+  /**
+   * Configuration d'une session de l'agent : ses réglages par défaut, puis ceux demandés. Un modèle demandé hors des
+   * modèles autorisés est refusé ; sans modèle demandé, celui de l'agent (ou le premier autorisé) s'applique.
+   */
   sessionConfig(agent: Agent, config: Record<string, unknown> | null | undefined): Record<string, unknown> {
     const { provider: _provider, ...defaults } = agent.defaults as Record<string, unknown> & { provider?: string };
-    return { ...defaults, ...(config ?? {}) };
+    const merged = { ...defaults, ...(config ?? {}) };
+    this.assertModelAllowed(agent, merged.model);
+    return this.constrainModel(agent, merged) ?? merged;
   },
 
+  /** Refuse un modèle explicite que l'agent n'a pas le droit d'utiliser. */
+  assertModelAllowed(agent: Agent, model: unknown): void {
+    const m = typeof model === 'string' ? model.trim() : '';
+    if (m && agent.allowedModels.length && !agent.allowedModels.includes(m)) {
+      throw new AppError(`${agent.name} n'utilise que les modèles autorisés dans sa fiche : ${agent.allowedModels.join(', ')}`);
+    }
+  },
+
+  /**
+   * Configuration ramenée aux modèles autorisés de l'agent (null : rien à changer) : sans modèle ou avec un modèle
+   * qui n'est plus autorisé, le modèle par défaut de l'agent s'il est autorisé, sinon le premier de la liste.
+   */
+  constrainModel(agent: Agent, config: Record<string, unknown>): Record<string, unknown> | null {
+    const allowed = agent.allowedModels;
+    if (!allowed.length) return null;
+    const model = typeof config.model === 'string' ? config.model.trim() : '';
+    if (model && allowed.includes(model)) return null;
+    const fallback = typeof agent.defaults.model === 'string' && allowed.includes(agent.defaults.model) ? agent.defaults.model : allowed[0];
+    return { ...config, model: fallback };
+  },
+
+  /** Type de session par défaut de l'agent (`defaults.provider`), Claude Code sinon. */
   providerOf(agent: Agent): string {
     const p = agent.defaults.provider;
     return typeof p === 'string' && p.trim() ? p.trim() : 'claude';

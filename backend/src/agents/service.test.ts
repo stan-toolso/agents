@@ -43,8 +43,11 @@ const agent = (over: Partial<Agent> = {}): Agent =>
     defaults: { permissionMode: 'acceptEdits', provider: 'claude', allowedTools: 'Read' },
     inheritContext: true,
     claudeDelegateId: null,
-    gitDelegateId: null,
-    gitDelegateReadOnly: true,
+    githubDelegateId: null,
+    githubDelegateReadOnly: true,
+    gitlabDelegateId: null,
+    gitlabDelegateReadOnly: true,
+    allowedModels: [],
     triggers: { taskCreated: true, taskCreatedTag: null, threadFollowed: true, prMerged: false, taskReady: false, taskReadyTag: null },
     actions: [],
     enabled: true,
@@ -195,26 +198,51 @@ describe('syncActionSchedules', () => {
 });
 
 describe('comptes et délégation', () => {
-  it('accounts : les comptes propres de l’agent, ou ceux prêtés (git en lecture seule par défaut)', async () => {
-    expect(agentService.accounts(agent())).toEqual({ claudeUserId: 'a1', gitUserId: 'a1', gitReadOnly: false });
-    expect(agentService.accounts(agent({ claudeDelegateId: 'u1', gitDelegateId: 'u2', gitDelegateReadOnly: true }))).toEqual({ claudeUserId: 'u1', gitUserId: 'u2', gitReadOnly: true });
-    expect(agentService.accounts(agent({ gitDelegateId: 'u2', gitDelegateReadOnly: false })).gitReadOnly).toBe(false);
-    expect(await agentService.accountsForOwner('u1')).toEqual({ claudeUserId: 'u1', gitUserId: 'u1', gitReadOnly: false });
+  it('accounts : les comptes propres de l’agent, ou ceux prêtés (GitHub et GitLab séparément, lecture seule par défaut)', async () => {
+    const own = { claudeUserId: 'a1', githubUserId: 'a1', githubReadOnly: false, gitlabUserId: 'a1', gitlabReadOnly: false, forgeUserId: 'a1' };
+    expect(agentService.accounts(agent())).toEqual(own);
+    expect(agentService.accounts(agent({ claudeDelegateId: 'u1', githubDelegateId: 'u2', githubDelegateReadOnly: true }))).toEqual({ ...own, claudeUserId: 'u1', githubUserId: 'u2', githubReadOnly: true });
+    expect(agentService.accounts(agent({ gitlabDelegateId: 'u3', gitlabDelegateReadOnly: false }))).toEqual({ ...own, gitlabUserId: 'u3' });
+    // La forge de Skipper sert toujours avec le compte de l’agent lui-même.
+    expect(agentService.accounts(agent({ githubDelegateId: 'u2', gitlabDelegateId: 'u3' })).forgeUserId).toBe('a1');
+    expect(await agentService.accountsForOwner('u1')).toEqual({ claudeUserId: 'u1', githubUserId: 'u1', githubReadOnly: false, gitlabUserId: 'u1', gitlabReadOnly: false, forgeUserId: 'u1' });
     expect(await agentService.accountsForOwner(null)).toBeNull();
   });
 
   it('setDelegation : seule une personne membre du projet prête son compte ; null retire la délégation', async () => {
-    await agentService.setDelegation('a1', 'git', 'u1', { readOnly: false });
-    expect(repo.update).toHaveBeenLastCalledWith('a1', { gitDelegateId: 'u1', gitDelegateReadOnly: false });
+    await agentService.setDelegation('a1', 'github', 'u1', { readOnly: false });
+    expect(repo.update).toHaveBeenLastCalledWith('a1', { githubDelegateId: 'u1', githubDelegateReadOnly: false });
+    await agentService.setDelegation('a1', 'gitlab', 'u1');
+    expect(repo.update).toHaveBeenLastCalledWith('a1', { gitlabDelegateId: 'u1', gitlabDelegateReadOnly: true });
     await agentService.setDelegation('a1', 'claude', 'u1');
     expect(repo.update).toHaveBeenLastCalledWith('a1', { claudeDelegateId: 'u1' });
-    await agentService.setDelegation('a1', 'git', null);
-    expect(repo.update).toHaveBeenLastCalledWith('a1', { gitDelegateId: null, gitDelegateReadOnly: true });
+    await agentService.setDelegation('a1', 'github', null);
+    expect(repo.update).toHaveBeenLastCalledWith('a1', { githubDelegateId: null, githubDelegateReadOnly: true });
     users.findById = vi.fn(async (id: string) => ({ id, name: 'Léa', kind: 'agent' }));
-    await expect(agentService.setDelegation('a1', 'git', 'a2')).rejects.toThrow('Seule une personne');
+    await expect(agentService.setDelegation('a1', 'gitlab', 'a2')).rejects.toThrow('Seule une personne');
     users.findById = vi.fn(async (id: string) => ({ id, name: 'Alice', kind: 'person' }));
     userSvc.roleFor = vi.fn(async () => 'viewer');
     await expect(agentService.setDelegation('a1', 'claude', 'u1')).rejects.toThrow('membre du projet');
+  });
+});
+
+describe('type de session et modèles', () => {
+  it('validModels : type de session connu, modèle par défaut parmi les modèles autorisés, liste nettoyée', () => {
+    expect(agentService.validModels({ provider: 'opencode', model: ' opus ' }, ['opus', ' sonnet', 'opus', ''])).toEqual({ defaults: { provider: 'opencode', model: 'opus' }, allowedModels: ['opus', 'sonnet'] });
+    expect(agentService.validModels({ provider: '', model: '', permissionMode: 'plan' }, [])).toEqual({ defaults: { permissionMode: 'plan' }, allowedModels: [] });
+    expect(() => agentService.validModels({ provider: 'shell' }, [])).toThrow('Type de session inconnu');
+    expect(() => agentService.validModels({ model: 'haiku' }, ['opus'])).toThrow('modèles autorisés');
+  });
+
+  it('sessionConfig : refuse un modèle non autorisé, applique sinon le modèle de l’agent ou le premier autorisé', () => {
+    const a = agent({ defaults: { provider: 'claude', model: 'sonnet' }, allowedModels: ['opus', 'sonnet'] });
+    expect(agentService.sessionConfig(a, null)).toEqual({ model: 'sonnet' });
+    expect(agentService.sessionConfig(a, { model: 'opus' })).toEqual({ model: 'opus' });
+    expect(agentService.sessionConfig(a, { model: '' })).toEqual({ model: 'sonnet' });
+    expect(() => agentService.sessionConfig(a, { model: 'haiku' })).toThrow('modèles autorisés');
+    expect(agentService.constrainModel(agent({ defaults: {}, allowedModels: ['opus'] }), { model: 'haiku' })).toEqual({ model: 'opus' });
+    expect(agentService.constrainModel(agent({ defaults: {}, allowedModels: [] }), { model: 'haiku' })).toBeNull();
+    expect(agentService.providerOf(agent({ defaults: { provider: 'opencode' } }))).toBe('opencode');
   });
 });
 
