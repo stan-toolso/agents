@@ -11,6 +11,7 @@ import { handleTaskAttachmentRoute } from './tasks/attachmentRoute.js';
 import { handleSharedPageRoute } from './sharedPages/viewRoute.js';
 import { handleFileViewRoute } from './files/viewRoute.js';
 import { handleTasksApiRoute } from './tasks/api.js';
+import { handleExportRoute } from './exports/routes.js';
 import { handleGitHttpRoute } from './gitServer/httpRoute.js';
 import { gitServer } from './gitServer/service.js';
 import { registerTaskSessionFeed } from './tasks/sessionFeed.js';
@@ -208,6 +209,7 @@ async function main() {
       .then((handled) => handled || handleFileViewRoute(req, res))
       .then((handled) => handled || handlePreviewOpenRoute(req, res))
       .then((handled) => handled || handleTasksApiRoute(req, res))
+      .then((handled) => handled || handleExportRoute(req, res))
       .then((handled) => handled || handleGitHttpRoute(req, res))
       .then((handled) => handled || handleInternalRoute(req, res))
       .then((handled) => {

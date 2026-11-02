@@ -560,7 +560,7 @@ export const sessionService = {
           await persistConfig(id, changes, Object.keys(changes));
         },
         ask: async (input, signal) => {
-          await emit('request', { type: input.type, title: input.title, payload: input.payload ?? {} });
+          await emit('request', { type: input.type, title: input.title, ...(input.message ? { message: input.message } : {}), payload: input.payload ?? {} });
           // La notification porte l'identifiant de la demande : elle sera marquée lue quand la demande sera réglée.
           const response = await requestService.ask(id, input, signal, (request) => {
             void notificationService.notify({

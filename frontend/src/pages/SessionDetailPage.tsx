@@ -27,6 +27,7 @@ import { confirmedPending, newPendingInstruction, withPendingInstructions, type 
 import DictationButton from '../components/DictationButton';
 import '../components/terminal.css';
 import '../components/chat.css';
+import { sessionExportUrl } from '../lib/exports';
 import {
   INTERRUPT_SESSION,
   PROVIDERS,
@@ -376,6 +377,9 @@ export default function SessionDetailPage() {
             )}
           </span>
         </div>
+        <a className="cc-header-export" href={sessionExportUrl(session.id)} download title="Exporter la session en Markdown (instructions, réponses, appels d'outils repliés, demandes et réponses)" aria-label="Exporter la session en Markdown">
+          <i className="bi bi-download" />
+        </a>
         <button type="button" className="cc-header-toggle" aria-expanded={headerOpen} title={headerOpen ? 'Replier le détail de la session' : 'Détail et actions de la session (aussi dans le panneau de droite)'} onClick={() => setHeaderOpen((v) => !v)}>
           <i className={`bi bi-chevron-${headerOpen ? 'up' : 'down'}`} />
         </button>
