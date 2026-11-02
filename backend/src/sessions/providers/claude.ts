@@ -59,7 +59,7 @@ import { SESSION_ENV } from '../../runners/stats.js';
 import { log } from '../../log.js';
 import { REVIEW_ALLOWED_TOOLS, REVIEW_DISALLOWED_TOOLS, REVIEW_SYSTEM_PROMPT, REVIEW_TOOLS, reviewOf } from '../../reviews/types.js';
 import { agentService } from '../../agents/service.js';
-import { agentIdentityPrompt, agentsPromptSummary } from '../../agents/prompt.js';
+import { agentIdentityPrompt, agentsPromptSummary, scopedAgentsPromptSummary } from '../../agents/prompt.js';
 import { AGENTS_FREE_TOOLS, agentsMcpPrompt, createAgentsMcpServer } from '../../agents/mcp.js';
 import { userRepository } from '../../users/repository.js';
 
@@ -207,6 +207,9 @@ export class ClaudeProvider implements SessionProvider {
     const agent = chat || review ? null : await agentService.forUser(ownerId);
     const requestedBy = agent && ctx.session.requestedById ? await userRepository.findById(ctx.session.requestedById) : null;
     const projectAgents = chat || review || isPersonalProject(ctx.project) ? [] : await agentService.listByProject(ctx.project.id);
+    // Chat ou session d'un espace personnel : les agents de tous les projets de la personne, à qui elle peut s'adresser.
+    const scopeProjects = scope && !review ? await scope.projects() : [];
+    const scopedAgents = scopeProjects.length ? await agentService.listActive(scopeProjects.map((p) => p.id)) : [];
     const actor = { sessionId: ctx.session.id, projectId: ctx.project.id };
     const credentials = await owner.credentialEnv(general.authMode, actor);
     // Un chat reçoit l'environnement du serveur sans ses secrets Anthropic (comme la vérification des identifiants), un dossier
@@ -239,6 +242,7 @@ export class ClaudeProvider implements SessionProvider {
         sessionIdentityPrompt(ctx.session, ctx.project),
         projectAgents.length ? [agentsPromptSummary(projectAgents, agent), agentsMcpPrompt()].filter(Boolean).join('\n') : '',
         scope ? await personalService.promptSummary(scope, await userService.get(scope.ownerId)) : '',
+        scopedAgents.length ? [scopedAgentsPromptSummary(scopedAgents, scopeProjects), agentsMcpPrompt({ scoped: true })].join('\n') : '',
         await contextService.promptSummary(ctx.project.id),
         await taskService.linkedTaskPrompt(ctx.session.id),
         await taskService.promptSummary(ctx.project.id, ctx.session.id),
@@ -305,6 +309,7 @@ export class ClaudeProvider implements SessionProvider {
         context: createContextMcpServer(ctx.project, ctx.session.id),
         tasks: createTasksMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name, scope),
         ...(projectAgents.length ? { agents: createAgentsMcpServer(ctx.project, ctx.session.id) } : {}),
+        ...(scopedAgents.length ? { agents: createAgentsMcpServer(ctx.project, ctx.session.id, scope) } : {}),
         ...(vaultTools ? { vault: createVaultMcpServer(vaultContext) } : {}),
         worksessions: createWorksessionsMcpServer(ctx.project, ctx.session.id, scope),
         sessions: createSessionsMcpServer(ctx.project, ctx.session.id, scope),

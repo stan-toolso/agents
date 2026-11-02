@@ -38,3 +38,20 @@ export function agentsPromptSummary(agents: Agent[], me: Agent | null): string {
     "Pour passer la main à l'un d'eux : mentionne-le dans le fil de la tâche (« @Nom » dans `tasks.comment`), ou convoque-le avec l'outil `agents.summon` (identifiant ou nom, instruction, tâche éventuelle) : il reçoit le message dans sa session reliée à la tâche, ou dans une nouvelle. Convoquer un agent lance ou relance une session (soumis à autorisation). Ne le fais que quand une personne l'a décidé ou que tes instructions le prévoient.",
   ].join('\n');
 }
+
+/**
+ * Paragraphe du prompt système d'un chat ou d'une session d'espace personnel : les agents de tous les projets de la
+ * personne, avec leur rôle et leur projet. Interpeller un agent (« @Nom », « demande à Nom ») vaut décision de le
+ * convoquer : le chat lui transmet la demande et rapporte sa réponse plutôt que de chercher un projet de ce nom.
+ */
+export function scopedAgentsPromptSummary(agents: Agent[], projects: Pick<Project, 'id' | 'name'>[]): string {
+  const active = agents.filter((a) => a.enabled && !a.archivedAt);
+  if (!active.length) return '';
+  const nameOf = (a: Agent) => projects.find((p) => p.id === a.projectId)?.name ?? a.projectId;
+  const lines = active.map((a) => `- ${a.name} : ${AGENT_KIND_LABELS[a.kind]} du projet ${nameOf(a)}${a.description ? ` (${a.description})` : ''}, identifiant ${a.id}`);
+  return [
+    'Les projets de la personne ont des agents, membres de leur projet au même titre que les personnes :',
+    ...lines,
+    "Quand la personne s'adresse à l'un d'eux (« @Nom », « demande à Nom… ») ou que sa demande relève clairement du rôle d'un agent, convoque-le avec `agents.summon` : un message complet et autonome (il ne voit pas cette conversation), la tâche concernée s'il y en a une ; puis attends sa réponse avec `sessions.wait` sur la session renvoyée et rapporte-la (avec le lien de sa session). Un nom d'agent n'est pas un nom de projet : l'agent travaille dans son projet. Si plusieurs agents portent ce nom, précise le projet (paramètre `project`).",
+  ].join('\n');
+}
