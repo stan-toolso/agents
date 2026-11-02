@@ -75,6 +75,12 @@ const toAccount = (r: Row): GitlabAccountRecord => ({
 });
 
 export const gitlabAccountRepository = {
+  /** Instances où au moins une personne a connecté un compte (pour reconnaître les dépôts auto-hébergés des projets). */
+  async allHosts(): Promise<string[]> {
+    const { rows } = await pool.query<{ host: string }>("SELECT DISTINCT host FROM user_gitlab_accounts ORDER BY host");
+    return rows.map((r) => r.host);
+  },
+
   async listByUser(userId: string): Promise<GitlabAccountRecord[]> {
     const { rows } = await pool.query<Row>('SELECT * FROM user_gitlab_accounts WHERE user_id = $1 ORDER BY is_default DESC, created_at, host, login', [userId]);
     return rows.map(toAccount);

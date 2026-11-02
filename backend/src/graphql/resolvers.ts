@@ -432,7 +432,7 @@ export const resolvers = {
   },
 
   PullRequest: {
-    forgeName: (pr: PullRequest) => (config.forgejo.url && pr.url.startsWith(`${config.forgejo.url}/`) ? 'Forgejo' : 'GitHub'),
+    forgeName: (pr: PullRequest) => (pr.forge === 'gitlab' ? 'GitLab' : config.forgejo.url && pr.url.startsWith(`${config.forgejo.url}/`) ? 'Forgejo' : 'GitHub'),
     worksession: async (pr: PullRequest) => (pr.isCrossRepository ? null : (await worksessionService.listByProject(pr.projectId)).find((w) => w.branch === pr.headRefName) ?? null),
     tasks: async (pr: PullRequest) => (pr.isCrossRepository ? [] : (await taskService.list({ projectId: pr.projectId, limit: 1000 })).filter((t) => t.branch === pr.headRefName)),
   },
