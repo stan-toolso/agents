@@ -9,6 +9,8 @@ import { scheduleService } from '../schedules/service.js';
 import { sessionRepository } from '../sessions/repository.js';
 import { sessionService } from '../sessions/service.js';
 import type { AttachmentInput, Session } from '../sessions/types.js';
+import { channelRef, conversationService, describeMessages, threadTitle } from '../conversations/service.js';
+import type { Conversation } from '../conversations/types.js';
 import { composeTaskPrompt, startTaskSession, taskFiles } from '../tasks/launch.js';
 import { fold } from '../tasks/mentions.js';
 import { taskService } from '../tasks/service.js';
@@ -33,6 +35,8 @@ export const agentEmail = (id: string) => `agent-${id}@agents.skipper`;
 export interface SummonOptions {
   /** Tâche concernée : la session reliée de l'agent reçoit le message, sinon une session est ouverte sur la tâche. */
   taskId?: string | null;
+  /** Fil d'un canal de conversation : la session reliée de l'agent reçoit le message, sinon une session est ouverte sur le fil. */
+  thread?: { conversationId: string; rootMessageId: string } | null;
   text: string;
   attachments?: AttachmentInput[] | null;
   /** Personne qui convoque (null : un déclencheur ou une planification). */
@@ -439,6 +443,15 @@ export const agentService = {
       }
       return this.sessionBesideTask(agent, task, text, opts, actor, project.taskInstructions);
     }
+    if (opts.thread) {
+      const conversation = await conversationService.get(opts.thread.conversationId);
+      if (conversation.projectId !== agent.projectId) throw new AppError(`Le canal n'appartient pas au projet de ${agent.name}`);
+      const existing = await this.sessionOnThread(agent, opts.thread.rootMessageId);
+      if (existing && existing.status !== 'queued') {
+        return sessionService.sendMessage(existing.id, text, opts.attachments ?? null);
+      }
+      return this.sessionOnChannelThread(agent, conversation, opts.thread.rootMessageId, text, opts, actor);
+    }
     return sessionService.create(
       {
         projectId: agent.projectId,
@@ -453,6 +466,52 @@ export const agentService = {
       },
       actor,
     );
+  },
+
+  /** Session non archivée de l'agent reliée à un fil de canal, la plus récente, pourvu que son dossier existe encore. */
+  async sessionOnThread(agent: Agent, rootMessageId: string): Promise<Session | null> {
+    for (const id of await conversationService.agentSessionIdsOnThread(agent.id, rootMessageId)) {
+      const s = await sessionRepository.findById(id);
+      if (!s || s.archivedAt || !s.worksessionId) continue;
+      return s;
+    }
+    return null;
+  },
+
+  /**
+   * Session de l'agent sur un fil de canal : nouveau dossier à elle, le fil complet en contexte, reliée au fil (elle en
+   * reçoit les messages suivants). La réponse de l'agent se fait dans le fil, par `conversations.post`.
+   */
+  async sessionOnChannelThread(agent: Agent, conversation: Conversation, rootMessageId: string, text: string, opts: SummonOptions, actor: Actor): Promise<Session> {
+    const thread = await conversationService.thread(rootMessageId);
+    const title = thread[0] ? threadTitle(thread[0], 60) : 'conversation';
+    const prompt = [
+      `Tu es convoqué dans le canal ${channelRef(conversation)} du projet, dans le fil « ${title} » (fil ${rootMessageId}, canal « ${conversation.slug} »). Le fil complet :`,
+      '',
+      ...describeMessages(thread, await conversationService.reactions(thread.map((m) => m.id))),
+      '',
+      text,
+      '',
+      `Réponds dans ce fil avec \`conversations.post\` (channel « ${conversation.slug} », reply_to ${rootMessageId}) : c'est là que l'équipe te lit. Tu recevras les messages suivants du fil ; \`conversations.read\` avec \`thread\` le relit en entier.`,
+    ].join('\n');
+    const name = `${agent.name} · ${channelRef(conversation)} · ${title}`;
+    const session = await sessionService.create(
+      {
+        projectId: agent.projectId,
+        newWorksession: { label: name.slice(0, 100) },
+        name: name.slice(0, 80),
+        provider: this.providerOf(agent),
+        prompt,
+        attachments: opts.attachments ?? null,
+        config: this.sessionConfig(agent, null),
+        ownerId: agent.id,
+        requestedById: opts.requestedById ?? null,
+        autoStart: false,
+      },
+      actor,
+    );
+    await conversationService.linkSession(rootMessageId, session.id).catch((err) => log.warn('[agents] session non reliée au fil', err));
+    return sessionService.start(session.id);
   },
 
   /** Session de l'agent sur une tâche sans en prendre le dossier : nouveau dossier à elle, reliée à la tâche (fil suivi). */

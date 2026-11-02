@@ -111,8 +111,8 @@ export function feedFor(change: TaskChange, sessionId: string | null = change.ta
   return feedsFor(change).find((f) => f.sessionId === sessionId) ?? null;
 }
 
-/** Transmet un message à la session concernée si elle peut le recevoir. */
-async function deliver(feed: TaskFeed): Promise<void> {
+/** Transmet un message à la session concernée si elle peut le recevoir (aussi utilisé par conversations/feed.ts). */
+export async function deliverFeed(feed: TaskFeed): Promise<void> {
   const session = await sessionService.get(feed.sessionId).catch(() => null);
   if (!session || session.archivedAt || session.status === 'queued' || session.status === 'pending') return;
   // Un provider non interactif (commande shell) exécuterait le texte comme une commande.
@@ -136,7 +136,7 @@ async function deliver(feed: TaskFeed): Promise<void> {
 export async function deliverTaskChange(change: TaskChange): Promise<void> {
   const linked = await taskService.sessionIds(change.task.id).catch(() => [] as string[]);
   const addressed = await agentFeedTargets(change, linked).catch(() => new Set<string>());
-  await Promise.all(feedsFor(change, linked, addressed).map(deliver));
+  await Promise.all(feedsFor(change, linked, addressed).map(deliverFeed));
 }
 
 /** Branche l'écouteur sur le service des tâches (au démarrage du serveur). */

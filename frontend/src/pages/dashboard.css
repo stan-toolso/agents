@@ -185,3 +185,17 @@ a.dash-tile:hover { border-color: var(--cc-dim); color: inherit; }
   .inbox-item .side { flex: 1 1 100%; justify-content: flex-end; }
   .inbox-item .title, .inbox-item .meta { white-space: normal; }
 }
+
+/* ---- Tableau de bord d'un projet (pages/ProjectDetailPage.tsx) ---------------------------------- */
+.dash-embedded-channel { border: 1px solid var(--cc-border); border-radius: 6px; background: var(--cc-bg-elevated); padding: 4px 6px; }
+.dash-initials { width: 26px; height: 26px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; background: var(--cc-accent); color: #fff; flex: none; }
+.dash-list .agent-avatar.icon { width: 26px; height: 26px; }
+/* Flux des tâches : une colonne par étiquette d'état, la plus chargée soulignée. */
+.dash-flow { display: flex; gap: 4px; }
+.dash-flow-stage { flex: 1; min-width: 0; text-align: center; background: var(--cc-bg-hover); border-radius: 6px; padding: 6px 2px; color: var(--cc-fg); text-decoration: none; border: 1px solid transparent; }
+.dash-flow-stage:hover { border-color: var(--cc-dim); color: var(--cc-fg); }
+.dash-flow-stage.hot { border-color: var(--cc-yellow); }
+.dash-flow-stage b { display: block; font-size: 18px; line-height: 1.1; }
+.dash-flow-stage small { display: block; color: var(--cc-dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-kpis { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; font-size: 12px; color: var(--cc-dim); }
+.dash-kpis b { display: block; color: var(--cc-fg); font-size: 17px; font-weight: 600; }

@@ -15,6 +15,9 @@ const PREFIXES: Array<[string, TaskFeedSummary['kind']]> = [
   ['[Mise à jour de la tâche]', 'update'],
   ['[Commentaire sur la tâche]', 'comment'],
   ['[Réaction sur la tâche]', 'reaction'],
+  // Canaux de conversation (backend conversations/feed.ts) : même rendu, sans tâche.
+  ['[Message dans un canal]', 'comment'],
+  ['[Réaction dans un canal]', 'reaction'],
 ];
 
 const clip = (s: string, max = 300) => (s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s);
@@ -26,6 +29,7 @@ export function describeTaskFeed(text: string): TaskFeedSummary | null {
   const kind = prefix[1];
   const lines = text.split('\n');
   const head = lines[0].slice(prefix[0].length).trim();
+  if (prefix[0].endsWith('canal]')) return describeChannelFeed(kind, head, lines);
   // Le titre peut contenir lui-même des guillemets : on prend jusqu'au dernier « ») » de la ligne.
   const task = /tâche (\S+) \(« (.*) »\)/.exec(head);
   const taskId = task?.[1] ?? null;
@@ -45,4 +49,18 @@ export function describeTaskFeed(text: string): TaskFeedSummary | null {
   }
   const reaction = head.replace(/ de la tâche .*$/, '');
   return { kind, taskId, title, summary: clip(`${reaction} · tâche ${named}`) };
+}
+
+/** Résumé d'un texte des canaux : « Alice dans #general (fil « … ») : première ligne », ou la réaction reçue. */
+function describeChannelFeed(kind: TaskFeedSummary['kind'], head: string, lines: string[]): TaskFeedSummary {
+  const thread = /fil « (.*) » du canal (#\S+)/.exec(head);
+  const title = thread?.[1] ?? null;
+  const channel = thread?.[2] ?? /dans (#\S+)/.exec(head)?.[1] ?? 'un canal';
+  if (kind === 'comment') {
+    const at = lines.findIndex((l) => l.startsWith('- '));
+    const author = at >= 0 ? /^- (.*?), \d{4}-\d{2}-\d{2}/.exec(lines[at])?.[1] : undefined;
+    const first = at >= 0 ? lines.slice(at + 1).find((l) => l.startsWith('  ') && l.trim()) : undefined;
+    return { kind, taskId: null, title, summary: clip(`${author ?? 'Nouveau message'} dans ${channel}${title ? ` (fil « ${title} »)` : ''}${first ? ` : ${first.trim()}` : ''}`) };
+  }
+  return { kind, taskId: null, title, summary: clip(head.replace(/\. Rien à faire.*$/, '')) };
 }

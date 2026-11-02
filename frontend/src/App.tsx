@@ -7,6 +7,7 @@ import { DialogProvider } from './components/Dialogs';
 import TabPages from './workbench/TabPages';
 import ProjectsPage from './pages/ProjectsPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
+const ProjectSettingsPage = lazy(() => import('./pages/ProjectSettingsPage'));
 import LoginPage from './pages/LoginPage';
 import SessionsPage from './pages/SessionsPage';
 import SessionDetailPage from './pages/SessionDetailPage';
@@ -14,6 +15,7 @@ import RequestsPage from './pages/RequestsPage';
 import InboxPage from './pages/InboxPage';
 import DashboardPage from './pages/DashboardPage';
 import TasksPage from './pages/TasksPage';
+const ConversationsPage = lazy(() => import('./pages/ConversationsPage'));
 import TaskPage from './pages/TaskPage';
 import PersonalSpaceRedirect from './pages/PersonalSpaceRedirect';
 import PageLoading from './components/PageLoading';
@@ -55,8 +57,11 @@ function PageRoutes({ location, isAdmin }: { location: Location; isAdmin: boolea
       <Route path="/projects/new" element={<ProjectFormPage />} />
       <Route path="/projects/:id" element={<ProjectDetailPage />} />
       <Route path="/projects/:id/edit" element={<ProjectFormPage />} />
+      <Route path="/projects/:id/settings" element={<ProjectSettingsPage />} />
       <Route path="/projects/:id/context" element={<ContextPage />} />
       <Route path="/projects/:id/tasks" element={<TasksPage />} />
+      <Route path="/projects/:id/conversations" element={<ConversationsPage />} />
+      <Route path="/projects/:id/conversations/:slug" element={<ConversationsPage />} />
       <Route path="/projects/:id/agents" element={<ProjectAgentsPage />} />
       <Route path="/projects/:id/agents/:agentId" element={<AgentPage />} />
       <Route path="/projects/:id/pull-requests" element={<ProjectPullRequestsPage />} />

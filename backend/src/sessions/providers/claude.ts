@@ -39,6 +39,8 @@ import { runner } from '../../runners/index.js';
 import { agentGitEnv } from '../../git/agentEnv.js';
 import { gitServer } from '../../gitServer/service.js';
 import { createTasksMcpServer, TASKS_FREE_TOOLS } from '../../tasks/mcp.js';
+import { CONVERSATIONS_FREE_TOOLS, conversationsMcpPrompt, createConversationsMcpServer } from '../../conversations/mcp.js';
+import { conversationService, linkedThreadsPrompt } from '../../conversations/service.js';
 import { trackedPullRequestService } from '../../pullRequests/service.js';
 import { taskService } from '../../tasks/service.js';
 import { createWorksessionsMcpServer } from '../../worksessions/mcp.js';
@@ -213,6 +215,8 @@ export class ClaudeProvider implements SessionProvider {
     const requestedBy = agent && ctx.session.requestedById ? await userRepository.findById(ctx.session.requestedById) : null;
     const takenOverBy = agent && ctx.session.takenOverById ? await userRepository.findById(ctx.session.takenOverById) : null;
     const projectAgents = chat || review || isPersonalProject(ctx.project) ? [] : await agentService.listByProject(ctx.project.id);
+    // Canaux de conversation d'équipe du projet (serveur MCP `conversations`) ; un espace personnel n'en a pas.
+    const channels = chat || review || isPersonalProject(ctx.project) ? [] : await conversationService.list(ctx.project.id);
     // Bibliothèques de contexte : celle du projet (sauf pour un agent qui n'en hérite pas), la bibliothèque propre d'un agent
     // qui joue la session (cible par défaut de ses outils `context`), et celles des autres agents (paramètre `library`).
     const agentLibraries = projectAgents.map((a) => ({ id: a.id, name: a.name }));
@@ -258,6 +262,7 @@ export class ClaudeProvider implements SessionProvider {
         agentLibraries.filter((l) => l.id !== agent?.id).length ? `Les autres agents du projet ont chacun leur bibliothèque de contexte, lisible et modifiable avec les outils \`context\` (paramètre \`library\` : ${agentLibraries.filter((l) => l.id !== agent?.id).map((l) => `« ${l.name} »`).join(', ')}).` : '',
         await taskService.linkedTaskPrompt(ctx.session.id),
         await taskService.promptSummary(ctx.project.id, ctx.session.id),
+        scope ? conversationsMcpPrompt([], { scoped: true }) : channels.length ? [conversationsMcpPrompt(channels), await linkedThreadsPrompt(ctx.session.id)].filter(Boolean).join('\n\n') : '',
         ctx.project.gitUrl && !chat ? trackedPullRequestService.promptSummary() : '',
         chat ? '' : gitServer.promptSummary(ctx.project),
         vaultService.promptSummary(vaultItems, ctx.project),
@@ -322,6 +327,7 @@ export class ClaudeProvider implements SessionProvider {
       mcpServers: review ? { context: createContextMcpServer(ctx.project, ctx.session.id) } : {
         context: createContextMcpServer(ctx.project, ctx.session.id, { agentLibraries, defaultAgentId: agent?.id ?? null }),
         tasks: createTasksMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name, scope),
+        ...(scope || channels.length ? { conversations: createConversationsMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name, scope) } : {}),
         ...(projectAgents.length ? { agents: createAgentsMcpServer(ctx.project, ctx.session.id) } : {}),
         ...(scopedAgents.length ? { agents: createAgentsMcpServer(ctx.project, ctx.session.id, scope) } : {}),
         ...(vaultTools ? { vault: createVaultMcpServer(vaultContext) } : {}),
@@ -364,7 +370,7 @@ export class ClaudeProvider implements SessionProvider {
       // Fichiers d'environnement : libres (modèles du projet en base, écriture dans le seul dossier de travail ; une valeur
       // du coffre n'y arrive que si l'élément le permet, choix de qui le gère).
       // Aperçu : libre (le même bouton que l'onglet « Aperçu », dans le conteneur du projet, sans coût ni effet extérieur).
-      allowedTools: review ? REVIEW_ALLOWED_TOOLS : [...allowedTools, ...projectRules.map(formatRule), 'mcp__context', ...TASKS_FREE_TOOLS, 'mcp__vault', 'mcp__worksessions__list', 'mcp__worksessions__create', 'mcp__sessions__list', 'mcp__sessions__get', 'mcp__sessions__wait', 'mcp__sessions__end', 'mcp__sessions__archive', 'mcp__pages__list', 'mcp__projects', ...AGENTS_FREE_TOOLS, ...(chat ? [] : ['mcp__env']), ...(previewWorksession ? ['mcp__preview'] : []), ...(browserServer ? browserReadTools : []), ...(googleAccounts.length ? googleReadTools(googleAccounts) : [])],
+      allowedTools: review ? REVIEW_ALLOWED_TOOLS : [...allowedTools, ...projectRules.map(formatRule), 'mcp__context', ...TASKS_FREE_TOOLS, ...CONVERSATIONS_FREE_TOOLS, 'mcp__vault', 'mcp__worksessions__list', 'mcp__worksessions__create', 'mcp__sessions__list', 'mcp__sessions__get', 'mcp__sessions__wait', 'mcp__sessions__end', 'mcp__sessions__archive', 'mcp__pages__list', 'mcp__projects', ...AGENTS_FREE_TOOLS, ...(chat ? [] : ['mcp__env']), ...(previewWorksession ? ['mcp__preview'] : []), ...(browserServer ? browserReadTools : []), ...(googleAccounts.length ? googleReadTools(googleAccounts) : [])],
       ...(review ? { disallowedTools: REVIEW_DISALLOWED_TOOLS } : {}),
       // Le coffre saisit des secrets dans le navigateur : les outils qui pourraient relire la valeur sont retirés à l'agent.
       ...(browserServer && vaultBrowser ? { disallowedTools: ['mcp__playwright__browser_evaluate', 'mcp__playwright__browser_run_code'] } : {}),

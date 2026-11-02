@@ -35,3 +35,20 @@ describe('describeTaskFeed', () => {
     expect(describeTaskFeed(text)).toMatchObject({ kind: 'reaction', taskId: 't1', summary: 'Alice a réagi 👍 à ton message c1 · tâche « Corriger le bug »' });
   });
 });
+
+describe('describeTaskFeed (canaux de conversation)', () => {
+  it('résume un message d’un canal par son auteur, le canal, le fil et sa première ligne', () => {
+    const text = [
+      '[Message dans un canal] Nouveau message dans le fil « On livre ce soir ? » du canal #general (fil m1) que cette session suit, et qui mentionne cette session :',
+      '- Alice, 2026-11-02 10:00 UTC (message m2, en réponse à Alice) :',
+      '  Oui @session:s2',
+      '',
+      'Réponds-y avec l’outil `conversations.post`…',
+    ].join('\n');
+    expect(describeTaskFeed(text)).toEqual({ kind: 'comment', taskId: null, title: 'On livre ce soir ?', summary: 'Alice dans #general (fil « On livre ce soir ? ») : Oui @session:s2' });
+  });
+  it('résume une réaction reçue dans un canal', () => {
+    const text = '[Réaction dans un canal] Alice a réagi 👍 à ton message m1 dans #general : « Point du matin ». Rien à faire, sauf si cela appelle une suite.';
+    expect(describeTaskFeed(text)).toEqual({ kind: 'reaction', taskId: null, title: null, summary: 'Alice a réagi 👍 à ton message m1 dans #general : « Point du matin »' });
+  });
+});
