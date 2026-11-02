@@ -811,6 +811,14 @@ une question, le mode d'autorisation et le modèle, et un chat de l'espace perso
 (voir « Espace personnel et chats »). Sur mobile, le tableau des projets devient une
 liste de cartes. Sans projet, la page redevient le parcours d'accueil en trois étapes, sous la zone de chat.
 
+**À traiter** (`/inbox`, `frontend/src/pages/InboxPage.tsx`, entrée de la sidebar) : la file unifiée de ce qui attend une action
+humaine sur tous les projets — demandes en attente (réponse sur place via `RequestCard`), sessions en attente
+d'instructions, en erreur ou interrompues depuis 24 h (bouton « Reprendre »), pull requests ouvertes (la puce ouvre la fenêtre de
+revue et de fusion). Tri par urgence puis ancienneté, filtres par projet et par nature (`lib/inbox.ts`, pur et testé), rendu
+mobile en cartes. Backend : `backend/src/inbox/service.ts`, queries `inbox` (éléments, sondée toutes les 5 s par la page) et
+`inboxCounts` (une requête SQL, sondée par la sidebar pour le badge). Les tâches « à livrer » n'y sont pas encore (voir la tâche
+« Tâches terminées dont la branche n'est pas fusionnée »).
+
 Sur les pages d'un projet ou d'une session (projet, session, terminal, fichiers, tâches, contexte),
 un **panneau git** à droite (`frontend/src/workbench/GitPanel.tsx`) montre la branche courante et son
 avance/retard, les fichiers indexés et modifiés (clic : diff coloré ; boutons indexer, désindexer,

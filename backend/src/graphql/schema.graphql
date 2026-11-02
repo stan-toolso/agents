@@ -1819,6 +1819,34 @@ type AppSettings {
   server: ServerState
 }
 
+# ---- File « À traiter » -------------------------------------------------------------------------
+
+"Compteurs de la file « À traiter »."
+type InboxCounts {
+  "Demandes (autorisation, question, saisie) en attente de réponse."
+  requests: Int!
+  "Sessions dont l'agent attend des instructions, sans demande en attente."
+  idleSessions: Int!
+  "Sessions en erreur depuis 24 h."
+  failedSessions: Int!
+  "Sessions coupées en plein tour depuis 24 h."
+  interruptedSessions: Int!
+  "Pull requests ouvertes (à fusionner, brouillons compris)."
+  pullRequests: Int!
+  total: Int!
+}
+
+"Ce qui attend une action humaine sur les projets de l'utilisateur."
+type Inbox {
+  generatedAt: DateTime!
+  counts: InboxCounts!
+  "Demandes en attente, les plus anciennes d'abord."
+  requests: [Request!]!
+  "Sessions à reprendre : en attente d'instructions, en erreur ou interrompues (les plus anciennes d'abord)."
+  sessions: [Session!]!
+  pullRequests: [TrackedPullRequest!]!
+}
+
 # ---- Tableau de bord ----------------------------------------------------------------------------
 
 "Compteurs globaux du tableau de bord, sur les projets de l'utilisateur."
@@ -2495,6 +2523,10 @@ type Query {
   unreadNotificationCount: Int!
   "Tableau de bord de l'utilisateur connecté."
   dashboard: Dashboard!
+  "File « À traiter » : ce qui attend une action humaine, tous projets confondus."
+  inbox: Inbox!
+  "Compteurs seuls de la file « À traiter » (légers : sondés par la sidebar)."
+  inboxCounts: InboxCounts!
   "Tâches, tous projets confondus (par défaut : ouvertes). assignee / reporter : texte cherché dans le nom ou l'e-mail ; mine : tâches dont le responsable a mon e-mail ; tag : tâches portant cette étiquette (sans tenir compte de la casse)."
   tasks(projectId: ID, status: [TaskStatus!], priority: TaskPriority, assignee: String, reporter: String, tag: String, mine: Boolean, limit: Int): [Task!]!
   task(id: ID!): Task

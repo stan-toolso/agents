@@ -11,6 +11,7 @@ import LoginPage from './pages/LoginPage';
 import SessionsPage from './pages/SessionsPage';
 import SessionDetailPage from './pages/SessionDetailPage';
 import RequestsPage from './pages/RequestsPage';
+import InboxPage from './pages/InboxPage';
 import DashboardPage from './pages/DashboardPage';
 import TasksPage from './pages/TasksPage';
 import TaskPage from './pages/TaskPage';
@@ -77,6 +78,7 @@ function PageRoutes({ location, isAdmin }: { location: Location; isAdmin: boolea
       <Route path="/chats/:id" element={<SessionDetailPage />} />
       <Route path="/me" element={<PersonalSpaceRedirect />} />
       <Route path="/sessions/:id/browser" element={<BrowserPage />} />
+      <Route path="/inbox" element={<InboxPage />} />
       <Route path="/requests" element={<RequestsPage />} />
       <Route path="/terminals/:id" element={<TerminalPage />} />
       <Route path="/settings" element={<SettingsPage />} />
