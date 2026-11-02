@@ -67,7 +67,7 @@ function pastedName(file: File, index: number): string {
   return `capture-${stamp}${index ? `-${index + 1}` : ''}.${ext}`;
 }
 
-function readAsBase64(file: File): Promise<string> {
+export function readAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(reader.error ?? new Error(`Lecture impossible : ${file.name}`));

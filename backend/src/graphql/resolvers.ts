@@ -42,6 +42,7 @@ import { repoBrowser, type RepoEntry, type RepoRef } from '../gitServer/browse.j
 import { gitServer } from '../gitServer/service.js';
 import type { GitBackup } from '../gitServer/backups.js';
 import { archiveSessionCascade, archiveWorksessionCascade, deleteProjectCascade, deleteSessionCascade, deleteWorksessionCascade, restoreWorksessionCascade } from '../projects/cleanup.js';
+import { importProjectArchive, MAX_IMPORT_BYTES } from '../exports/service.js';
 import { runner, type RunnerConfig } from '../runners/index.js';
 import { containerMonitor } from '../runners/monitor.js';
 import { runnerLifecycle } from '../runners/lifecycle.js';
@@ -1538,6 +1539,13 @@ export const resolvers = {
       await requireProject(ctx, args.id, 'admin');
       await personalService.assertNotPersonal(args.id, 'Supprimer');
       return deleteProjectCascade(args.id, { deleteHostedRepo: Boolean(args.deleteHostedRepo) });
+    },
+    importProjectArchive: async (_: unknown, args: { projectId: string; archive: string; context?: boolean | null; tasks?: boolean | null; settings?: boolean | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'admin');
+      const archive = Buffer.from(args.archive, 'base64');
+      if (!archive.length) throw new AppError('Archive vide');
+      if (archive.length > MAX_IMPORT_BYTES) throw new AppError(`Archive trop volumineuse (${Math.round(MAX_IMPORT_BYTES / 1024 / 1024)} Mo au plus)`);
+      return importProjectArchive(args.projectId, archive, { context: args.context !== false, tasks: args.tasks !== false, settings: Boolean(args.settings) });
     },
     createSession: async (
       _: unknown,

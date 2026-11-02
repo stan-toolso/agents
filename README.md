@@ -272,6 +272,7 @@ backend/
     previews/                  # aperçus des branches : configuration, lancement dans le conteneur, proxy par sous-domaine, instantanés des dépendances, MCP `preview`
     sharedPages/               # pages partagées : publication, versions, membres, route de lecture en bac à sable, MCP `pages`
     search/                    # recherche globale (projets, sessions, tâches, pages, coffre)
+    exports/                   # export d'une session en Markdown, archive tar.gz d'un projet et import (routes /api/…/export.*)
     apiKeys/                   # clés d'API des projets
     context/
       service.ts               # bibliothèque de contexte : dossiers, instructions, versions, journal
@@ -1621,6 +1622,27 @@ dossier et branche conservés) ; la restaurer le restaure ; un dossier disparu e
 utilisation. Une session se renomme depuis la sidebar ou ses réglages. Les mutations `archiveWorksession`,
 `restoreWorksession`, `renameWorksession` et `deleteWorksession` restent dans l'API (sans interface).
 
+## Export et import
+
+- **Session en Markdown** : le bouton de téléchargement de l'en-tête d'une session télécharge `GET /api/sessions/<id>/export.md`
+  (accès au projet suffisant) : instructions citées, réponses de l'agent, appels d'outils repliés dans des `<details>`
+  (entrée et résultat, coupés à 4 000 caractères), demandes faites aux humains et leurs réponses, fins de tour. La
+  réflexion, le détail interne des sous-agents, le coût et les événements techniques n'y sont pas. Le fichier se lit
+  sans l'application (GitHub, éditeur, texte brut). Calcul pur : `backend/src/exports/sessionMarkdown.ts`.
+- **Projet en archive** : page de modification du projet (administrateurs) › « Exporter le projet »
+  (`GET /api/projects/<id>/export.tar.gz`). L'archive contient `manifest.json`, `project.json` (réglages, règles
+  d'autorisation, fichiers d'environnement réduits à leurs clés et références au coffre), `context/library.json`
+  (dossiers, instructions et toutes leurs versions) et `context/**/*.md` (contenu actuel lisible), `tasks.json` et
+  `tasks.md` (tâches et leur fil ; fichiers joints listés, pas inclus), `connections.json` (éléments du coffre du projet
+  **sans secrets** : champs secrets vidés, identifiants retirés des adresses). Bibliothèque du projet seulement, pas
+  celles de ses agents. Format tar.gz écrit et lu sans dépendance (`exports/tar.ts`, noms longs PAX et GNU).
+- **Import** : même carte, « Importer une archive » (mutation `importProjectArchive`, archive en base64, 50 Mo au plus),
+  au choix contexte, tâches, réglages. Le contexte reproduit la même arborescence (noms, slugs, versions et notes de
+  version) ; une instruction déjà présente au même chemin est laissée telle quelle. Les tâches sont ajoutées avec leur fil,
+  sans session, sans notification ni déclencheur d'agent. Les réglages remplacent prompt système, consignes des tâches
+  et mode d'autorisation ; les règles d'autorisation s'ajoutent. Les connexions ne sont jamais recréées. Tout se fait dans
+  une transaction. Test d'aller-retour sur PostgreSQL : `exports/service.db.test.ts`.
+
 ## Pages partagées
 
 Un agent (outil `pages.publish`) ou l'éditeur de fichiers publie un fichier HTML comme **page**
@@ -1849,7 +1871,7 @@ Toutes les opérations exigent une session (cookie), sauf `me`. Les erreurs de d
 - `AppSettings.server` (maintenance, sessions actives, reprise automatique) ; `setMaintenanceMode(enabled, message)`, `updateServerSettings(autoResumeInterrupted)`
 - Connexion OAuth : `startClaudeLogin` (URL à ouvrir), `completeClaudeLogin(id, code)`, `cancelClaudeLogin`, `claudeLogin(id)`
 - `providers` : types d'agents disponibles et leurs options
-- `projects`, `project(id)` ; `createProject`, `updateProject`, `prepareProjectWorkspace`, `deleteProject`
+- `projects`, `project(id)` ; `createProject`, `updateProject`, `prepareProjectWorkspace`, `deleteProject`, `importProjectArchive(projectId, archive, context, tasks, settings)` (voir « Export et import »)
 - `sessions(projectId, status, provider, limit, offset)`, `session(id)` avec `events(after, limit)` et `requests(status)`
 - `createSession(input)` (`input.newWorksession { name, branch, label, baseRef }` ou `input.worksessionId` d'une work session libre, l'un des deux obligatoire), `startSession(id)`, `stopSession(id)`, `archiveSession(id)` (avec son dossier), `unarchiveSession(id)`, `relaunchSession(id, { name, instruction })`, `deleteSession(id, deleteBranch)` (avec son dossier) ; `Session.parentSession`, `Session.childSessions`
 - `sendSessionMessage(id, text, attachments)`, `resumeSession(id)`, `interruptSession(id)`, `endSession(id)`, `updateSessionConfig(id, config)` ; `CreateSessionInput.attachments` et `Session.promptAttachments` (fichiers joints, voir « Lancer des sessions »)

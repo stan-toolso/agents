@@ -888,6 +888,30 @@ export const DELETE_PROJECT = gql`
   }
 `;
 
+export interface ProjectImportReport {
+  foldersCreated: number;
+  instructionsCreated: number;
+  instructionsSkipped: string[];
+  tasksCreated: number;
+  commentsCreated: number;
+  settingsUpdated: boolean;
+  connections: string[];
+}
+
+export const IMPORT_PROJECT_ARCHIVE = gql`
+  mutation ImportProjectArchive($projectId: ID!, $archive: String!, $context: Boolean, $tasks: Boolean, $settings: Boolean) {
+    importProjectArchive(projectId: $projectId, archive: $archive, context: $context, tasks: $tasks, settings: $settings) {
+      foldersCreated
+      instructionsCreated
+      instructionsSkipped
+      tasksCreated
+      commentsCreated
+      settingsUpdated
+      connections
+    }
+  }
+`;
+
 export const SESSIONS = gql`
   ${SESSION_FIELDS}
   query Sessions($projectId: ID, $status: SessionStatus, $provider: String, $ownerId: ID, $limit: Int) {

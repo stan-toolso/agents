@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from '@apollo/client';
 import PageLoading from '../components/PageLoading';
+import ProjectArchiveCard from '../components/ProjectArchiveCard';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Col, Collapse, Form, Row, Spinner } from 'react-bootstrap';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -364,6 +365,7 @@ export default function ProjectFormPage() {
           </Form>
         </Card.Body>
       </Card>
+      {isEdit && id && data?.project?.myRole === 'ADMIN' && <ProjectArchiveCard projectId={id} />}
     </>
   );
 }
