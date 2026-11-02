@@ -15,7 +15,7 @@ describe('migrations du dépôt', () => {
 
 describe('checkMigrationNames', () => {
   it('accepte les numéros historiques et les horodatages', () => {
-    expect(checkMigrationNames(['001_init.sql', '054_agents.sql', '20261101T0715_task_deps.sql'])).toEqual([]);
+    expect(checkMigrationNames(['001_init.sql', '055_agent_libraries.sql', '20261101T0715_task_deps.sql'])).toEqual([]);
   });
 
   it('tolère les doublons historiques connus, pas un troisième fichier', () => {
@@ -31,7 +31,7 @@ describe('checkMigrationNames', () => {
   });
 
   it('refuse un nouveau numéro NNN_, un nom hors convention et une date impossible', () => {
-    expect(checkMigrationNames(['055_suite.sql'])).toHaveLength(1);
+    expect(checkMigrationNames(['056_suite.sql'])).toHaveLength(1);
     expect(checkMigrationNames(['nouvelle.sql', '20261101T0715_Majuscule.sql'])).toHaveLength(2);
     expect(checkMigrationNames(['20261332T0715_x.sql', '20261101T2460_x.sql'])).toHaveLength(2);
   });

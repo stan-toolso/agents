@@ -4,11 +4,11 @@
  * Les nouvelles migrations sont préfixées par un horodatage UTC à la minute (`20261101T0715_nom.sql`,
  * créé par `npm run migration:new <nom>`) : deux branches qui en ajoutent chacune une fusionnent sans
  * renumérotation, et le tri lexical reste correct car `0xx_` < `2026…`. Les fichiers numérotés
- * historiques (`001_` à `054_`) ne bougent pas : leur nom est enregistré dans `schema_migrations`.
+ * historiques (`001_` à `055_`) ne bougent pas : leur nom est enregistré dans `schema_migrations`.
  */
 
 /** Dernier numéro de l'ancienne convention : aucun nouveau fichier `NNN_` au-delà. */
-export const LAST_LEGACY_NUMBER = 54;
+export const LAST_LEGACY_NUMBER = 55;
 
 /** Numéros historiques partagés par deux fichiers, antérieurs à la convention : tolérés, sans en ajouter. */
 export const LEGACY_DUPLICATE_PREFIXES = new Set(['011', '013', '014', '015', '020', '034', '043']);

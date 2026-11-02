@@ -112,7 +112,7 @@ Les migrations SQL (`backend/src/db/migrations/*.sql`) sont appliquées automati
 du backend, ou à la main avec `npm run db:migrate`. Une nouvelle migration se crée avec
 `npm run migration:new <nom>` : le fichier est préfixé par un horodatage UTC à la minute
 (`20261102T0715_nom.sql`), si bien que deux branches qui en ajoutent chacune une fusionnent sans
-renumérotation. Les fichiers numérotés `001_` à `054_` gardent leur nom (il est enregistré dans
+renumérotation. Les fichiers numérotés `001_` à `055_` gardent leur nom (il est enregistré dans
 `schema_migrations`) ; aucun nouveau `NNN_` n'est accepté. Une migration plus ancienne que la dernière
 appliquée passe quand même, avec un avertissement au démarrage (« appliquée hors ordre »).
 
