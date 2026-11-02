@@ -7,7 +7,7 @@ import type { Project } from '../projects/types.js';
 import * as drive from './drive.js';
 import * as gmail from './gmail.js';
 import { accessLabels } from './service.js';
-import type { GoogleAccess, GoogleAccount } from './types.js';
+import { gmailCan, type GoogleAccess, type GoogleAccount } from './types.js';
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
 const failure = (t: string) => ({ content: [{ type: 'text' as const, text: t }], isError: true });
@@ -63,6 +63,17 @@ export function createGoogleMcpServer(ctx: GoogleMcpContext): McpSdkServerConfig
     }
     if (eligible.length === 1) return eligible[0];
     throw new AppError(`Plusieurs comptes Google ont l'accès ${label} : précise lequel avec le paramètre account (${eligible.map((a) => a.email).join(', ')})`);
+  };
+
+  /** Compte Gmail visé par une écriture qui demande une portée ajoutée après coup (brouillons, corbeille). */
+  const pickGmail = (email: string | undefined, what: 'drafts' | 'trash'): GoogleAccount => {
+    const acct = pick(email, 'gmail', 'write');
+    if (gmailCan(acct, what)) return acct;
+    if (!email) {
+      const capable = accounts.filter((a) => gmailCan(a, what));
+      if (capable.length === 1) return capable[0];
+    }
+    throw new AppError(`Le compte ${acct.email} a été relié avant l'ajout ${what === 'drafts' ? 'des brouillons' : 'de la suppression'} : il faut le reconnecter depuis le coffre (élément \`${acct.name}\`, Gmail en écriture) pour accorder cet accès`);
   };
 
   const run = async (fn: () => Promise<string>) => {
@@ -146,6 +157,20 @@ export function createGoogleMcpServer(ctx: GoogleMcpContext): McpSdkServerConfig
             return `Pièce jointe « ${r.filename} » (${r.mimeType}) enregistrée dans ${path.relative(ctx.cwd, r.localPath)} (${r.bytes} octets).`;
           }),
       ),
+      tool(
+        'gmail_drafts',
+        "Liste les brouillons du compte (identifiant du brouillon, pour gmail_draft ou gmail_delete, et du message, pour gmail_read).",
+        { max_results: z.number().int().min(1).max(50).optional().describe('Nombre de brouillons (défaut 20)'), account: accountParam },
+        async ({ max_results, account }) =>
+          run(async () => {
+            const acct = pick(account, 'gmail', 'read');
+            const drafts = await audited(acct, 'gmail', 'gmail_drafts', 'brouillons', async () => {
+              const r = await gmail.listDrafts(acct.id, max_results ?? 20);
+              return { result: r, note: `${r.length} brouillon(s)` };
+            });
+            return gmail.renderDrafts(drafts);
+          }),
+      ),
     );
   }
   if (accounts.some((a) => a.gmailAccess === 'write')) {
@@ -170,6 +195,64 @@ export function createGoogleMcpServer(ctx: GoogleMcpContext): McpSdkServerConfig
               return { result: r, note: `à ${r.to}` };
             });
             return `Message envoyé à ${sent.to} (sujet : ${sent.subject}, id ${sent.id}, fil ${sent.threadId}).`;
+          }),
+      ),
+      tool(
+        'gmail_draft',
+        "Rédige un brouillon (texte brut) dans le compte, sans l'envoyer : nouveau message ou réponse à un message existant (même fil). Avec draft_id, remplace entièrement le contenu d'un brouillon existant (gmail_drafts). Soumis à l'approbation d'un humain.",
+        {
+          to: z.string().optional().describe("Destinataires (séparés par des virgules) ; pour une réponse, défaut : l'expéditeur du message d'origine"),
+          subject: z.string().optional().describe('Sujet ; pour une réponse, défaut : "Re: …"'),
+          body: z.string().describe('Corps du message, texte brut'),
+          cc: z.string().optional(),
+          bcc: z.string().optional(),
+          reply_to_message_id: z.string().optional().describe('Identifiant du message auquel répondre'),
+          draft_id: z.string().optional().describe('Brouillon existant à remplacer'),
+          account: accountParam,
+        },
+        async ({ to, subject, body, cc, bcc, reply_to_message_id, draft_id, account }) =>
+          run(async () => {
+            const acct = pickGmail(account, 'drafts');
+            const d = await audited(acct, 'gmail', 'gmail_draft', `${draft_id ? `remplace ${draft_id} · ` : ''}${to ?? '(réponse)'} · ${subject ?? ''}`.trim(), async () => {
+              const r = await gmail.saveDraft(acct.id, { to: to ?? '', subject: subject ?? '', body, cc, bcc, replyToMessageId: reply_to_message_id, draftId: draft_id });
+              return { result: r, note: r.to ? `à ${r.to}` : undefined };
+            });
+            return `Brouillon ${d.replaced ? 'mis à jour' : 'enregistré'} (non envoyé) : à ${d.to || '(personne)'}, sujet ${d.subject || '(sans sujet)'} ; brouillon ${d.draftId}, message ${d.messageId}, fil ${d.threadId}.`;
+          }),
+      ),
+      tool(
+        'gmail_delete',
+        "Supprime des messages (placés dans la corbeille de Gmail, récupérables 30 jours) ou un brouillon (supprimé définitivement). Soumis à l'approbation d'un humain.",
+        {
+          message_ids: z.array(z.string()).max(100).optional().describe('Messages à mettre à la corbeille (identifiants de gmail_search)'),
+          draft_id: z.string().optional().describe('Brouillon à supprimer (identifiant de gmail_drafts)'),
+          account: accountParam,
+        },
+        async ({ message_ids, draft_id, account }) =>
+          run(async () => {
+            const ids = (message_ids ?? []).map((id) => id.trim()).filter(Boolean);
+            if (!ids.length && !draft_id?.trim()) throw new AppError('Indique message_ids ou draft_id');
+            const lines: string[] = [];
+            if (draft_id?.trim()) {
+              const acct = pickGmail(account, 'drafts');
+              await audited(acct, 'gmail', 'gmail_delete', `brouillon ${draft_id}`, async () => ({ result: await gmail.deleteDraft(acct.id, draft_id.trim()) }));
+              lines.push(`Brouillon ${draft_id} supprimé.`);
+            }
+            if (ids.length) {
+              const acct = pickGmail(account, 'trash');
+              for (const id of ids) {
+                try {
+                  const m = await audited(acct, 'gmail', 'gmail_delete', id, async () => {
+                    const r = await gmail.trash(acct.id, id);
+                    return { result: r, note: r.subject.slice(0, 60) };
+                  });
+                  lines.push(`- [${m.id}] à la corbeille : ${m.subject || '(sans sujet)'} (de ${m.from || '?'})`);
+                } catch (err) {
+                  lines.push(`- [${id}] échec : ${(err as Error).message}`);
+                }
+              }
+            }
+            return lines.join('\n');
           }),
       ),
     );

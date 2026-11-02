@@ -61,6 +61,10 @@ projet **Skipper** (`skipper-510112`, organisation toolso.io, compte de facturat
   `http://localhost:4000/auth/google/callback` (développement). Le même client et le même callback
   servent à relier un compte Google à un projet (Gmail, Drive) : pour cela, activer les API **Gmail
   API** et **Google Drive API** dans « API et services » du projet Google Cloud (fait le 2026-09-29).
+  Portées demandées : `gmail.readonly` (lecture) ; en écriture, `gmail.send`, `gmail.compose`
+  (brouillons) et `gmail.modify` (corbeille) ; `drive.readonly` ou `drive`. Si l'écran « Accès aux données »
+  de Google Auth Platform les déclare, y ajouter `gmail.compose` et `gmail.modify` (portées restreintes,
+  comme `gmail.readonly`). Un compte relié en écriture avant leur ajout doit être reconnecté.
 - Le secret du client n'est visible qu'à sa création : il est dans le `.env` du poste de
   développement (jamais versionné). Le reporter dans `~/skipper/.env` sur le serveur
   (`GOOGLE_CLIENT_ID=...`, `GOOGLE_CLIENT_SECRET=...`), puis `pm2 restart skipper --update-env`.

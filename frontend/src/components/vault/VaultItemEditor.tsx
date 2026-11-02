@@ -106,6 +106,12 @@ export default function VaultItemEditor({ item, owners, initialOwner, tunnels, g
   const serviceInfo = services.find((t) => t.id === service);
   const oauthToken = Boolean(item && isOauthToken(item));
   const [gmail, setGmail] = useState<GoogleAccess>(item?.google?.gmailAccess ?? 'READ');
+  // Comptes Gmail en écriture reliés avant l'ajout des brouillons (gmail.compose) et de la corbeille (gmail.modify).
+  const gmailScopes = item?.google?.scopes ?? [];
+  const gmailMissingScopes =
+    item?.google?.gmailAccess === 'WRITE' &&
+    !gmailScopes.includes('https://mail.google.com/') &&
+    !(gmailScopes.includes('https://www.googleapis.com/auth/gmail.compose') && gmailScopes.includes('https://www.googleapis.com/auth/gmail.modify'));
   const [drive, setDrive] = useState<GoogleAccess>(item?.google?.driveAccess ?? 'NONE');
   const [error, setError] = useState<string | null>(null);
 
@@ -347,8 +353,9 @@ export default function VaultItemEditor({ item, owners, initialOwner, tunnels, g
                 </Col>
               </Row>
               <p className="text-secondary small mt-3 mb-0">
-                Vous serez redirigé vers Google pour accorder ces accès. Les lectures sont libres ; les écritures (envoi d'un e-mail, création d'un fichier…) demandent votre accord à chaque fois. Le jeton reste sur le serveur.
+                Vous serez redirigé vers Google pour accorder ces accès. Les lectures sont libres ; les écritures (envoi d'un e-mail, brouillon, suppression d'un e-mail, création d'un fichier…) demandent votre accord à chaque fois. Le jeton reste sur le serveur.
                 {editing && ' Sur Google, vous pouvez aussi choisir un autre compte : il remplacera celui-ci.'}
+                {gmailMissingScopes && ' Ce compte a été relié avant les brouillons et la suppression d\'e-mails : reconnectez-le en écriture pour les autoriser.'}
               </p>
             </>
           ) : (

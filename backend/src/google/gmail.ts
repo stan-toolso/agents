@@ -228,7 +228,8 @@ export interface SendInput {
 /** Encodage RFC 2047 d'un en-tête non ASCII. */
 const encodeHeader = (v: string) => (/^[\x20-\x7e]*$/.test(v) ? v : `=?UTF-8?B?${Buffer.from(v, 'utf8').toString('base64')}?=`);
 
-export async function send(accountId: string, input: SendInput): Promise<{ id: string; threadId: string; to: string; subject: string }> {
+/** Message MIME prêt pour l'API (raw en base64url) ; pour une réponse, le fil et les en-têtes de suivi du message d'origine. */
+async function compose(accountId: string, input: SendInput, draft: boolean): Promise<{ raw: string; threadId?: string; to: string; subject: string }> {
   let to = input.to.trim();
   let subject = input.subject.trim();
   let threadId: string | undefined;
@@ -251,10 +252,11 @@ export async function send(accountId: string, input: SendInput): Promise<{ id: s
       extraHeaders.push(`References: ${[header(h, 'References'), msgId].filter(Boolean).join(' ')}`);
     }
   }
-  if (!to) throw new AppError('Destinataire obligatoire');
-  if (!subject) throw new AppError('Sujet obligatoire');
+  // Un brouillon peut rester incomplet (destinataire ou sujet à remplir plus tard) ; un envoi, non.
+  if (!draft && !to) throw new AppError('Destinataire obligatoire');
+  if (!draft && !subject) throw new AppError('Sujet obligatoire');
   const headers = [
-    `To: ${to}`,
+    to ? `To: ${to}` : '',
     input.cc?.trim() ? `Cc: ${input.cc.trim()}` : '',
     input.bcc?.trim() ? `Bcc: ${input.bcc.trim()}` : '',
     `Subject: ${encodeHeader(subject)}`,
@@ -264,13 +266,71 @@ export async function send(accountId: string, input: SendInput): Promise<{ id: s
     'Content-Transfer-Encoding: base64',
   ].filter(Boolean);
   const mime = `${headers.join('\r\n')}\r\n\r\n${Buffer.from(input.body, 'utf8').toString('base64')}`;
-  const raw = Buffer.from(mime, 'utf8').toString('base64url');
+  return { raw: Buffer.from(mime, 'utf8').toString('base64url'), threadId, to, subject };
+}
+
+export async function send(accountId: string, input: SendInput): Promise<{ id: string; threadId: string; to: string; subject: string }> {
+  const { raw, threadId, to, subject } = await compose(accountId, input, false);
   const sent = await googleAccountService.json<{ id: string; threadId: string }>(accountId, `${BASE}/messages/send`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(threadId ? { raw, threadId } : { raw }),
   });
   return { id: sent.id, threadId: sent.threadId, to, subject };
+}
+
+export interface DraftSummary extends MessageSummary {
+  draftId: string;
+}
+
+/** Brouillons du compte, les plus récents d'abord. */
+export async function listDrafts(accountId: string, maxResults: number): Promise<DraftSummary[]> {
+  const list = await googleAccountService.json<{ drafts?: Array<{ id: string }> }>(accountId, `${BASE}/drafts?maxResults=${maxResults}`);
+  const drafts = await Promise.all(
+    (list.drafts ?? []).map((d) => googleAccountService.json<{ id: string; message: Message }>(accountId, `${BASE}/drafts/${encodeURIComponent(d.id)}?format=metadata`)),
+  );
+  return drafts.map((d) => ({ ...toSummary(d.message), draftId: d.id }));
+}
+
+/**
+ * Crée un brouillon, ou remplace entièrement le contenu d'un brouillon existant (`draftId`). Une réponse
+ * (`replyToMessageId`) est rangée dans le fil du message d'origine, comme gmail_send.
+ */
+export async function saveDraft(accountId: string, input: SendInput & { draftId?: string }): Promise<{ draftId: string; messageId: string; threadId: string; to: string; subject: string; replaced: boolean }> {
+  const { raw, threadId, to, subject } = await compose(accountId, input, true);
+  const message = threadId ? { raw, threadId } : { raw };
+  const draftId = input.draftId?.trim();
+  const saved = await googleAccountService.json<{ id: string; message: { id: string; threadId: string } }>(
+    accountId,
+    draftId ? `${BASE}/drafts/${encodeURIComponent(draftId)}` : `${BASE}/drafts`,
+    {
+      method: draftId ? 'PUT' : 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(draftId ? { id: draftId, message } : { message }),
+    },
+  );
+  return { draftId: saved.id, messageId: saved.message.id, threadId: saved.message.threadId, to, subject, replaced: Boolean(draftId) };
+}
+
+/** Supprime définitivement un brouillon (les brouillons ne passent pas par la corbeille). */
+export async function deleteDraft(accountId: string, draftId: string): Promise<void> {
+  await googleAccountService.raw(accountId, `${BASE}/drafts/${encodeURIComponent(draftId)}`, { method: 'DELETE' });
+}
+
+/** Place un message dans la corbeille (récupérable 30 jours dans Gmail, puis supprimé). */
+export async function trash(accountId: string, messageId: string): Promise<MessageSummary> {
+  await googleAccountService.json<Message>(accountId, `${BASE}/messages/${encodeURIComponent(messageId)}/trash`, { method: 'POST' });
+  const m = await googleAccountService.json<Message>(
+    accountId,
+    `${BASE}/messages/${encodeURIComponent(messageId)}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`,
+  );
+  return toSummary(m);
+}
+
+export function renderDrafts(drafts: DraftSummary[]): string {
+  if (drafts.length === 0) return 'Aucun brouillon.';
+  const lines = drafts.map((d) => `- [brouillon ${d.draftId}, message ${d.id}] ${d.date} · à ${d.to || '(personne)'} · ${d.subject || '(sans sujet)'}\n  ${d.snippet}`);
+  return [`${drafts.length} brouillon(s) (gmail_read avec l'identifiant du message pour le corps) :`, ...lines].join('\n');
 }
 
 export function renderSummaries(result: { messages: MessageSummary[]; estimate: number }): string {

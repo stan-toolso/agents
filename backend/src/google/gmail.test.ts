@@ -4,11 +4,12 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Client Gmail testé sans réseau : googleAccountService.json renvoie des réponses préparées par URL.
-const { calls, responses } = vi.hoisted(() => ({ calls: [] as string[], responses: new Map<string, unknown>() }));
+const { calls, inits, responses } = vi.hoisted(() => ({ calls: [] as string[], inits: [] as Array<RequestInit | undefined>, responses: new Map<string, unknown>() }));
 vi.mock('./service.js', () => ({
   googleAccountService: {
-    json: async (_accountId: string, url: string) => {
+    json: async (_accountId: string, url: string, init?: RequestInit) => {
       calls.push(url);
+      inits.push(init);
       for (const [suffix, value] of responses) if (url.endsWith(suffix)) return value;
       throw new Error(`réponse non préparée pour ${url}`);
     },
@@ -37,6 +38,7 @@ let dir: string;
 beforeEach(async () => {
   dir = await mkdtemp(path.join(os.tmpdir(), 'gmail-test-'));
   calls.length = 0;
+  inits.length = 0;
   responses.clear();
   responses.set('/messages/m1?format=full', message);
   responses.set('/messages/m1/attachments/ATT-1', { size: 3, data: b64('JPG') });
@@ -89,5 +91,30 @@ describe('gmail.downloadAttachment', () => {
   it('signale un message sans pièce jointe', async () => {
     responses.set('/messages/m3?format=full', { id: 'm3', threadId: 't3', payload: { mimeType: 'text/plain', body: { data: b64('rien') } } });
     await expect(gmail.downloadAttachment('a', 'm3', '1', target)).rejects.toThrow("Ce message n'a pas de pièce jointe");
+  });
+
+  it('rédige un brouillon de réponse dans le fil, sans destinataire imposé, ou remplace un brouillon existant', async () => {
+    responses.set('/messages/m1?format=metadata&metadataHeaders=From&metadataHeaders=Reply-To&metadataHeaders=Subject&metadataHeaders=Message-ID&metadataHeaders=References', {
+      id: 'm1',
+      threadId: 't1',
+      payload: { headers: [{ name: 'From', value: 'perrine@example.org' }, { name: 'Subject', value: 'Remboursement' }, { name: 'Message-ID', value: '<abc@mail>' }] },
+    });
+    responses.set('/drafts', { id: 'd1', message: { id: 'm9', threadId: 't1' } });
+    const d = await gmail.saveDraft('a', { to: '', subject: '', body: 'Bien reçu.', replyToMessageId: 'm1' });
+    expect(d).toEqual({ draftId: 'd1', messageId: 'm9', threadId: 't1', to: 'perrine@example.org', subject: 'Re: Remboursement', replaced: false });
+    const sent = JSON.parse(String(inits.at(-1)?.body)) as { message: { raw: string; threadId: string } };
+    expect(inits.at(-1)?.method).toBe('POST');
+    expect(sent.message.threadId).toBe('t1');
+    const mime = Buffer.from(sent.message.raw, 'base64url').toString('utf8');
+    expect(mime).toContain('In-Reply-To: <abc@mail>');
+    expect(mime).toContain('To: perrine@example.org');
+
+    // Brouillon sans destinataire ni sujet : accepté (l'envoi, lui, les exige).
+    responses.set('/drafts/d1', { id: 'd1', message: { id: 'm10', threadId: 't2' } });
+    const r = await gmail.saveDraft('a', { to: '', subject: '', body: 'Notes', draftId: 'd1' });
+    expect(r.replaced).toBe(true);
+    expect(inits.at(-1)?.method).toBe('PUT');
+    expect(JSON.parse(String(inits.at(-1)?.body))).toEqual(expect.objectContaining({ id: 'd1' }));
+    await expect(gmail.send('a', { to: '', subject: 'x', body: 'y' })).rejects.toThrow('Destinataire obligatoire');
   });
 });
