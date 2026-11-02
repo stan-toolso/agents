@@ -1747,11 +1747,12 @@ export const resolvers = {
     markNotificationRead: async (_: unknown, args: { id: string }, ctx: Ctx) => {
       const n = await notificationService.get(args.id);
       if (n.adminsOnly) requireAdmin(ctx);
+      if (n.userId && n.userId !== requireUser(ctx).id) throw new AppError('Cette notification est adressée à une autre personne', 'FORBIDDEN');
       if (n.projectId) await requireProject(ctx, n.projectId);
       else requireUser(ctx);
       return notificationService.markRead(args.id);
     },
-    markAllNotificationsRead: async (_: unknown, __: unknown, ctx: Ctx) => notificationService.markAllRead({ projectIds: await accessibleProjectIds(ctx), admin: requireUser(ctx).isAdmin }),
+    markAllNotificationsRead: async (_: unknown, __: unknown, ctx: Ctx) => notificationService.markAllRead({ projectIds: await accessibleProjectIds(ctx), admin: requireUser(ctx).isAdmin, userId: requireUser(ctx).id }),
     createTask: async (_: unknown, { input }: { input: GqlTaskInput & { projectId: string; title: string } }, ctx: Ctx) => {
       await requireProject(ctx, input.projectId, 'member');
       return taskService.create(input.projectId, { ...toTaskInput(input), title: input.title }, actorOf(requireUser(ctx)));
