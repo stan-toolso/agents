@@ -178,11 +178,12 @@ if ! wait_healthy "$TPORT" "skipper@$TARGET"; then
 fi
 
 step "Bascule de nginx vers $TARGET"
-printf '# Instance active du backend, réécrit par deploy/cellule/deploy.sh (4101 : blue, 4102 : green).\nserver 127.0.0.1:%s;\n' "$TPORT" > "$UPSTREAM.new"
-cp "$UPSTREAM" "$UPSTREAM.prev"
-cat "$UPSTREAM.new" > "$UPSTREAM" && rm -f "$UPSTREAM.new"
+# skipper n'a le droit d'écrire que ce fichier, pas le dossier /etc/nginx : pas de fichier temporaire à côté, l'ancien
+# contenu est gardé en mémoire pour revenir en arrière.
+PREV_UPSTREAM="$(cat "$UPSTREAM")"
+printf '# Instance active du backend, réécrit par deploy/cellule/deploy.sh (4101 : blue, 4102 : green).\nserver 127.0.0.1:%s;\n' "$TPORT" > "$UPSTREAM"
 if ! sudo nginx -t 2>/dev/null; then
-  cat "$UPSTREAM.prev" > "$UPSTREAM"
+  printf '%s\n' "$PREV_UPSTREAM" > "$UPSTREAM"
   sudo systemctl stop "skipper@$TARGET"
   echo "configuration nginx invalide : bascule annulée" >&2; exit 1
 fi
