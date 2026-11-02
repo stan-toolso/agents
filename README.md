@@ -109,7 +109,12 @@ npm run dev                 # backend (http://localhost:4000/graphql) + frontend
 ```
 
 Les migrations SQL (`backend/src/db/migrations/*.sql`) sont appliquées automatiquement au démarrage
-du backend, ou à la main avec `npm run db:migrate`.
+du backend, ou à la main avec `npm run db:migrate`. Une nouvelle migration se crée avec
+`npm run migration:new <nom>` : le fichier est préfixé par un horodatage UTC à la minute
+(`20261102T0715_nom.sql`), si bien que deux branches qui en ajoutent chacune une fusionnent sans
+renumérotation. Les fichiers numérotés `001_` à `055_` gardent leur nom (il est enregistré dans
+`schema_migrations`) ; aucun nouveau `NNN_` n'est accepté. Une migration plus ancienne que la dernière
+appliquée passe quand même, avec un avertissement au démarrage (« appliquée hors ordre »).
 
 ### Tests
 
@@ -133,7 +138,9 @@ les migrations deux fois (le second passage ne doit rien faire), vérifie qu'une
 est annulée, puis supprime la base. Sans `TEST_DATABASE_URL` il est ignoré en local et échoue en CI.
 Ne jamais y mettre l'URL de la base de production.
 
-**CI** : `.github/workflows/ci.yml` lance `npm ci`, `npm run typecheck`, `npm run build` et
+**CI** : `.github/workflows/ci.yml` lance `npm ci`, `npm run check:migrations -w backend` (échec sur
+un nom de migration invalide ou un préfixe en double, avertissement si la branche ajoute une migration
+plus ancienne que la dernière de main), `npm run typecheck`, `npm run build` et
 `npm test` à chaque push et pull request, avec un service PostgreSQL 16 pour le test des migrations.
 Le déploiement reste manuel (`DEPLOY.md`).
 
@@ -226,7 +233,9 @@ backend/
       mentions.ts              # mentions @Nom / @e-mail / @session:<id> : candidats et résolution dans un texte
       sessionFeed.ts           # changements, messages et réactions transmis aux sessions reliées à la tâche (en charge, passées par la tâche, mentionnées)
       mcp.ts                   # serveur MCP `tasks` (list, get, create, update, claim, release, comment, react, people, pr_list, pr_open, pr_register, pr_update)
-      launch.ts                # confier une tâche à un nouvel agent
+      launch.ts                # confier une tâche à un nouvel agent (refusé tant qu'elle est bloquée)
+      dependencyGraph.ts       # dépendances entre tâches : détection des cycles (sans base)
+      autoStart.ts             # enchaînement : tâche débloquée lancée automatiquement, notifiée
       api.ts                   # API REST /api/v1/tasks (clés d'API du projet)
     gitServer/
       paths.ts                 # dépôt Forgejo d'un projet (organisation, URL de clone et web), miroirs locaux
@@ -264,6 +273,7 @@ backend/
     previews/                  # aperçus des branches : configuration, lancement dans le conteneur, proxy par sous-domaine, instantanés des dépendances, MCP `preview`
     sharedPages/               # pages partagées : publication, versions, membres, route de lecture en bac à sable, MCP `pages`
     search/                    # recherche globale (projets, sessions, tâches, pages, coffre)
+    exports/                   # export d'une session en Markdown, archive tar.gz d'un projet et import (routes /api/…/export.*)
     apiKeys/                   # clés d'API des projets
     context/
       service.ts               # bibliothèque de contexte : dossiers, instructions, versions, journal
@@ -861,7 +871,7 @@ bouton **Fusionner la base** (`gitMergeBase` : fetch puis `git merge --no-edit <
 en cours au lieu d'échouer) ; le pull reste en avance rapide seulement.
 
 **Pull requests GitHub** (section du panneau git, `backend/src/git/pullRequests.ts`), pour un projet
-dont le dépôt est sur GitHub, avec le compte GitHub de la personne qui agit (Paramètres → GitHub ;
+dont le dépôt est sur GitHub (sur GitLab : merge requests, voir « GitLab » plus bas ; hébergé : Forgejo), avec le compte GitHub de la personne qui agit (Paramètres → GitHub ;
 compte choisi d'après le propriétaire du dépôt, sinon le compte par défaut) : la PR de la branche courante, ou
 « Créer une pull request » (titre et description pré-remplis avec la tâche liée à la branche et les
 commits, base = branche du projet sinon celle du dépôt ; la branche est poussée au besoin), puis les
@@ -1070,6 +1080,24 @@ montre la consigne envoyée à l'agent et permet de la modifier avant le lanceme
 (`/api/v1/tasks`, clés `skp_…` créées sur la fiche du projet, haché en base) permet à un outil externe de
 lister et créer des tâches.
 
+**Dépendances entre tâches (« bloquée par »).** Table `task_dependencies (task_id, depends_on_task_id)` (migration
+`20261102T2057_task_dependencies`) : une tâche dépend d'autres tâches **du même projet** ; tant que l'une d'elles n'est pas
+**terminée** (une dépendance annulée bloque encore : on la retire), elle est bloquée et ne peut pas être confiée à un
+agent (`assertUnblocked` dans `startTaskSession`, `resumeTaskSession` et `tasks.claim` ; pas de prise implicite par
+`tasks.update`). Les **cycles sont refusés** à l'écriture (`dependencyCycle` de `tasks/dependencyGraph.ts`, message qui
+nomme le chemin) ; déplacer une tâche dans un autre projet retire ses dépendances. Option **« Lancer automatiquement
+quand débloquée »** (`tasks.auto_start_when_unblocked`, au nom de `auto_start_by_id`, la personne qui l'a armée ou le
+propriétaire de la session d'agent) : quand la dernière dépendance passe à terminée, l'écouteur de `tasks/autoStart.ts`
+consomme l'option (une seule session même si deux dépendances se terminent en même temps) et appelle
+`startTaskSession` avec la configuration par défaut du projet (celle de l'agent si l'option a été armée par un agent
+de projet), puis notifie `task.unblocked` (ou `task.autostart_failed`, famille « Tâches »). L'option n'est armée que si
+une dépendance reste à terminer. Exposé : GraphQL `Task.dependsOn`, `blockedBy`, `blocked`, `dependents`,
+`autoStartWhenUnblocked`, `autoStartBy` et `dependsOnIds` / `autoStartWhenUnblocked` des entrées ; MCP `tasks`
+(`depends_on` et `auto_start` de `create` / `update`, détail dans `get` et `list`) ; REST `dependsOn` / `blockedBy`.
+Le prompt système des agents indique, pour chaque tâche ouverte, ce qui la bloque. Interface : badge « bloquée » (cadenas,
+éclair si lancement automatique) sur les cartes, la grille et la fiche ; champ « Bloquée par » et interrupteur dans le
+formulaire ; listes « Bloquée par » / « Bloque » dans la fiche et le panneau de droite ; bouton « Confier » désactivé.
+
 ### Le fil d'une tâche : une conversation
 
 La fiche d'une tâche (`pages/TaskPage.tsx`) se lit comme un canal de discussion : la description **ouvre le fil**, puis
@@ -1103,7 +1131,9 @@ d'une tâche dont elle est en charge. Le reste (modification par une autre sessi
 réaction) est une **note discrète** (`sessionService.notify`) : le provider Claude la remet avec le résultat du
 prochain lot d'outils (hook `PostToolBatch`, `additionalContext`) ou avec la prochaine instruction, sans tour ni
 réponse de l'agent ; le transcript en garde un événement `task_note`, replié avec les étapes de l'agent.
-Le prompt système d'une session cite la tâche dont elle a la charge et celles auxquelles elle est reliée.
+Le prompt système d'une session cite la tâche dont elle a la charge et celles auxquelles elle est reliée. La liste des
+tâches ouvertes qu'il embarque (relue à chaque tour) est plafonnée à 15 (`tasks/promptList.ts`) : celles de la session,
+puis les tâches en cours, puis les plus prioritaires ; un décompte par priorité renvoie vers `tasks.list` pour le reste.
 
 ## Lancer des sessions
 
@@ -1399,6 +1429,26 @@ planifiée qui tourne tous les jours. Deux réglages indépendants (`Session.cle
   session qui attend des instructions est d'abord terminée, une session au travail est laissée tranquille (le
   nettoyage est reporté).
 
+**Limite de contexte d'une session manuelle** (opt-in, jamais imposée) : une session dont la conversation est en
+`compact` ou `reset` avec un seuil est nettoyée **à la fin de chaque tour** (hors exécution planifiée) où le contexte
+dépasse ce seuil (`cleanupService.afterTurn`, appelé quand l'activité repasse à « idle ») : compaction, ou remise à
+zéro **en gardant un résumé** (la session, qui attend des instructions, est terminée sans notification ; la prochaine
+instruction ouvre une conversation neuve avec le résumé). Sans limite, rien ne change : le bandeau propose seulement. La
+limite se choisit :
+
+- **à la création** : option « Contexte » du formulaire de nouvelle session, à côté des autorisations (« Me proposer de
+  nettoyer au-delà de 150 k », « Compacter au-delà de N k », « Repartir d'une conversation neuve au-delà de N k »),
+  rappelée dans la ligne récapitulative des options et mémorisée par projet dans le navigateur
+  (`skipper.launcher.contextLimit.<projet>`) ; le formulaire envoie toujours son choix (`CreateSessionInput.cleanup`,
+  objet vide : aucune limite) ;
+- **par projet** : « Contexte des nouvelles sessions » dans le formulaire du projet (`projects.default_context_cleanup`,
+  migration `20261102T2056_project_context_cleanup`, null par défaut) ; présélectionné au lancement (« défaut du
+  projet ») et appliqué aux sessions qui n'en choisissent pas : tâches, sessions lancées par un agent (`sessions.create`), workflows. Une relance garde la
+  limite de la session d'origine ; une relecture par un agent n'en a jamais ;
+- **depuis la jauge** : cliquer la jauge de l'en-tête ouvre les réglages sur « Conversation de l'agent », avec
+  « Recommandé : compacter au-delà de 100 k tokens » et un bouton « Appliquer » ; la jauge affiche la limite choisie
+  (« 84 k / limite 100 k »).
+
 La modale de planification porte le même réglage (`SessionScheduleInput.cleanup`) : une nouvelle planification
 part sur « nouvelle conversation à chaque exécution », une planification existante sans nettoyage affiche un
 avertissement et un bouton « Activer le nettoyage par défaut » (rien n'est modifié sans l'accord de l'utilisateur ;
@@ -1415,7 +1465,7 @@ du seuil de signalement (la sidebar n'en affiche pas, pour rester lisible). Ce s
 « Session » du panneau de droite (dans la page elle-même pour un chat, qui n'a pas de panneau) propose
 « Compacter » (`compactSessionContext`), « Repartir d'une conversation neuve » (`resetSessionContext`, avec ou
 sans résumé des derniers échanges, transmis au modèle avec la prochaine instruction via `sessions.resume_digest`)
-ou « Ignorer » (jusqu'à 50 000 tokens de plus) ; rien n'est fait automatiquement pour une session manuelle.
+ou « Ignorer » (jusqu'à 50 000 tokens de plus) ; rien n'est fait automatiquement pour une session manuelle sans limite choisie.
 « Nettoyer maintenant » applique les réglages sans attendre (`applySessionCleanup`) ;
 `updateSession(id, { name, cleanup })` renomme et enregistre les réglages. Les événements `cleanup` (purge,
 compaction, remise à zéro, report) apparaissent dans le transcript.
@@ -1581,6 +1631,27 @@ dossier et branche conservés) ; la restaurer le restaure ; un dossier disparu e
 utilisation. Une session se renomme depuis la sidebar ou ses réglages. Les mutations `archiveWorksession`,
 `restoreWorksession`, `renameWorksession` et `deleteWorksession` restent dans l'API (sans interface).
 
+## Export et import
+
+- **Session en Markdown** : le bouton de téléchargement de l'en-tête d'une session télécharge `GET /api/sessions/<id>/export.md`
+  (accès au projet suffisant) : instructions citées, réponses de l'agent, appels d'outils repliés dans des `<details>`
+  (entrée et résultat, coupés à 4 000 caractères), demandes faites aux humains et leurs réponses, fins de tour. La
+  réflexion, le détail interne des sous-agents, le coût et les événements techniques n'y sont pas. Le fichier se lit
+  sans l'application (GitHub, éditeur, texte brut). Calcul pur : `backend/src/exports/sessionMarkdown.ts`.
+- **Projet en archive** : page de modification du projet (administrateurs) › « Exporter le projet »
+  (`GET /api/projects/<id>/export.tar.gz`). L'archive contient `manifest.json`, `project.json` (réglages, règles
+  d'autorisation, fichiers d'environnement réduits à leurs clés et références au coffre), `context/library.json`
+  (dossiers, instructions et toutes leurs versions) et `context/**/*.md` (contenu actuel lisible), `tasks.json` et
+  `tasks.md` (tâches et leur fil ; fichiers joints listés, pas inclus), `connections.json` (éléments du coffre du projet
+  **sans secrets** : champs secrets vidés, identifiants retirés des adresses). Bibliothèque du projet seulement, pas
+  celles de ses agents. Format tar.gz écrit et lu sans dépendance (`exports/tar.ts`, noms longs PAX et GNU).
+- **Import** : même carte, « Importer une archive » (mutation `importProjectArchive`, archive en base64, 50 Mo au plus),
+  au choix contexte, tâches, réglages. Le contexte reproduit la même arborescence (noms, slugs, versions et notes de
+  version) ; une instruction déjà présente au même chemin est laissée telle quelle. Les tâches sont ajoutées avec leur fil,
+  sans session, sans notification ni déclencheur d'agent. Les réglages remplacent prompt système, consignes des tâches
+  et mode d'autorisation ; les règles d'autorisation s'ajoutent. Les connexions ne sont jamais recréées. Tout se fait dans
+  une transaction. Test d'aller-retour sur PostgreSQL : `exports/service.db.test.ts`.
+
 ## Pages partagées
 
 Un agent (outil `pages.publish`) ou l'éditeur de fichiers publie un fichier HTML comme **page**
@@ -1709,7 +1780,23 @@ retenu est celui de l'instance dont l'identifiant ou un groupe de premier niveau
 sinon le compte par défaut. Il sert aux actions git de la personne (`gitAuthFor` : en-tête `oauth2:<jeton>`),
 à la liste des dépôts du formulaire de projet (`gitlabRepositories`) et aux agents : credential helper pour
 l'instance, `GITLAB_TOKEN` et `GITLAB_HOST` (lus par `glab`), identité des commits du compte GitLab quand le
-dépôt du projet est sur GitLab. Les merge requests ne sont pas encore suivies comme les pull requests GitHub.
+dépôt du projet est sur GitLab.
+
+**Merge requests GitLab** (`git/gitlabMergeRequests.ts`, API v4 `/projects/:id/merge_requests`) : un projet dont le
+dépôt est sur GitLab (gitlab.com, ou une instance où **une personne du serveur** a connecté un compte : liste
+`user_gitlab_accounts.host` relue au plus une fois par minute, `refreshKnownGitlabHosts`) a ses merge requests
+traitées comme les pull requests GitHub, au même format (`PullRequest.forge = 'gitlab'`, `forgeName` « GitLab ») :
+panneau git (liste, création, fusion et nettoyage), `tasks.pr_open` / `pr_register` (URL
+`https://<instance>/<groupe>/<projet>/-/merge_requests/<n>`, groupes imbriqués compris), synchronisation des PR
+suivies (de fond comprise : `syncTargets` préfère un membre qui a un compte de la forge du dépôt) et commentaire
+de la revue de code. Le numéro est l'`iid` de la MR, le dépôt (`repo`) le chemin complet du projet. Les MR
+ouvertes sont détaillées : pipeline du dernier commit (`head_pipeline` → `checksState`) et ses jobs (checks ; un
+job `allow_failure` en échec est neutre), approbations (`reviewDecision` : APPROVED, REVIEW_REQUIRED ;
+`detailed_merge_status` donne conflits, rebase nécessaire, blocages). La fenêtre de détail lit aussi commits et
+diff. Brouillon = préfixe « Draft: ». Fusion merge ou squash (`PUT …/merge`, `squash`) ; pas de rebase à la
+demande (refusé, l'option est masquée). Jeton : compte GitLab de la personne qui agit sur l'instance du dépôt
+(`gitlabService.apiToken`), sinon « GitLab non connecté ». Limites : seules les MR du dépôt du projet sont suivies
+(pas d'autre projet GitLab), `pr_open` avec `path` reste réservé aux clones GitHub.
 
 **OpenCode** (`settings/opencode.ts`) : modèle par défaut (`fournisseur/modèle`), budget par session,
 et la clé de chaque fournisseur de modèles (OpenAI, Anthropic, Google, OpenRouter, OpenCode Zen,
@@ -1793,7 +1880,7 @@ Toutes les opérations exigent une session (cookie), sauf `me`. Les erreurs de d
 - `AppSettings.server` (maintenance, sessions actives, reprise automatique) ; `setMaintenanceMode(enabled, message)`, `updateServerSettings(autoResumeInterrupted)`
 - Connexion OAuth : `startClaudeLogin` (URL à ouvrir), `completeClaudeLogin(id, code)`, `cancelClaudeLogin`, `claudeLogin(id)`
 - `providers` : types d'agents disponibles et leurs options
-- `projects`, `project(id)` ; `createProject`, `updateProject`, `prepareProjectWorkspace`, `deleteProject`
+- `projects`, `project(id)` ; `createProject`, `updateProject`, `prepareProjectWorkspace`, `deleteProject`, `importProjectArchive(projectId, archive, context, tasks, settings)` (voir « Export et import »)
 - `sessions(projectId, status, provider, limit, offset)`, `session(id)` avec `events(after, limit)` et `requests(status)`
 - `createSession(input)` (`input.newWorksession { name, branch, label, baseRef }` ou `input.worksessionId` d'une work session libre, l'un des deux obligatoire), `startSession(id)`, `stopSession(id)`, `archiveSession(id)` (avec son dossier), `unarchiveSession(id)`, `relaunchSession(id, { name, instruction })`, `deleteSession(id, deleteBranch)` (avec son dossier) ; `Session.parentSession`, `Session.childSessions`
 - `sendSessionMessage(id, text, attachments)`, `resumeSession(id)`, `interruptSession(id)`, `endSession(id)`, `updateSessionConfig(id, config)` ; `CreateSessionInput.attachments` et `Session.promptAttachments` (fichiers joints, voir « Lancer des sessions »)

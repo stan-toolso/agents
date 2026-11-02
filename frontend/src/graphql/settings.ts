@@ -827,3 +827,14 @@ export const REFRESH_OPENCODE_MODELS = gql`
     }
   }
 `;
+
+/** Seuil de signalement du contexte de la personne connectée (libellé « me proposer au-delà de… » du lancement). */
+export const CONTEXT_WARN_SETTING = gql`
+  query ContextWarnSetting {
+    settings {
+      claude {
+        contextWarnTokens
+      }
+    }
+  }
+`;

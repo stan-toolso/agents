@@ -48,6 +48,12 @@ jobs:
       - name: Installation
         run: npm ci --no-audit --no-fund
 
+      # Nommage des migrations (échec sur un préfixe en double) et ordre par rapport à main (avertissement).
+      - name: Migrations
+        run: |
+          git fetch --no-tags --depth=1 origin main
+          npm run check:migrations -w backend -- origin/main
+
       - name: Typecheck
         run: npm run typecheck
 

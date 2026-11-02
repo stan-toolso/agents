@@ -142,6 +142,11 @@ export interface CreateSessionInput {
   /** Fichiers joints à la première instruction (enregistrés à la création). */
   attachments?: AttachmentInput[] | null;
   config?: Record<string, unknown> | null;
+  /**
+   * Limite de contexte choisie au lancement (`contextAction` compact | reset et `contextMaxTokens`) ; objet vide :
+   * aucune limite. Absente : le défaut du projet (`Project.defaultContextCleanup`).
+   */
+  cleanup?: SessionCleanup | null;
 }
 
 export interface SessionFilter {

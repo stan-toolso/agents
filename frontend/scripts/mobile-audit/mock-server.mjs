@@ -6,6 +6,8 @@
 //   DIST=/tmp/skipper-mobile-dist node scripts/mobile-audit/mock-server.mjs     # PORT=4555 par défaut
 //
 // Les données sont inventées : les écrans servent à juger la mise en page, pas le contenu.
+// MOCK_DEMO=1 (aperçu de Skipper, .skipper/preview.json) : données de démonstration cohérentes (demo-data.mjs) — une
+// personne connectée, son espace personnel, des projets d'équipe, leurs sessions, tâches, demandes et agents.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,6 +21,7 @@ const { buildSchema, parse, execute, isNonNullType, isListType, isObjectType, is
 
 const DIST = process.env.DIST || '/tmp/skipper-mobile-dist';
 const PORT = Number(process.env.PORT || 4555);
+const DEMO = process.env.MOCK_DEMO ? await import('./demo-data.mjs') : null;
 const schema = buildSchema(fs.readFileSync(path.join(repo, 'backend/src/graphql/schema.graphql'), 'utf8'));
 
 let counter = 0;
@@ -29,6 +32,8 @@ const PARA = `${LONG}. Deuxième phrase assez longue pour vérifier le retour à
 function scalar(type, field, parentType) {
   const f = field.toLowerCase();
   counter++;
+  const demo = DEMO?.demoScalar(type, field, parentType, counter);
+  if (demo !== undefined) return demo;
   switch (type.name) {
     case 'ID':
       // Dossiers parents absents : les éléments apparaissent à la racine des arbres (contexte, explorateur).
@@ -63,7 +68,7 @@ function scalar(type, field, parentType) {
 }
 function value(type, field, parentType, depth) {
   if (isNonNullType(type)) return value(type.ofType, field, parentType, depth);
-  if (isListType(type)) return Array.from({ length: depth > 6 ? 0 : 3 }, () => value(type.ofType, field, parentType, depth + 1));
+  if (isListType(type)) return Array.from({ length: depth > 6 ? 0 : DEMO ? 2 : 3 }, () => value(type.ofType, field, parentType, depth + 1));
   if (isEnumType(type)) {
     const vals = type.getValues().map((v) => v.name);
     return vals[counter++ % vals.length];
@@ -77,7 +82,11 @@ function value(type, field, parentType, depth) {
   return null;
 }
 const fieldResolver = (source, _args, _ctx, info) => {
-  if (source && typeof source === 'object' && info.fieldName in source) return source[info.fieldName];
+  // Données de démonstration : un champ peut être une fonction des arguments (relations, filtres).
+  if (source && typeof source === 'object' && info.fieldName in source) {
+    const v = source[info.fieldName];
+    return typeof v === 'function' ? v(_args, info) : v;
+  }
   // Fichier ouvert dans l'éditeur : son nom suit le chemin demandé (l'aperçu HTML et le bouton « Code » n'existent
   // que pour un .html), au lieu d'alterner au gré du compteur.
   if (info.fieldName === 'name' && /^File/.test(info.parentType.name)) {
@@ -101,8 +110,8 @@ http
       try {
         const { query, variables } = JSON.parse(body);
         // MOCK_STABLE=1 (aperçu de Skipper) : mêmes données d'un sondage à l'autre, sinon les listes changent toutes les secondes.
-        if (process.env.MOCK_STABLE) counter = 0;
-        return res.end(JSON.stringify(await execute({ schema, document: parse(query), variableValues: variables, fieldResolver, typeResolver, rootValue: {} })));
+        if (process.env.MOCK_STABLE || DEMO) counter = 0;
+        return res.end(JSON.stringify(await execute({ schema, document: parse(query), variableValues: variables, fieldResolver, typeResolver, rootValue: DEMO?.demoRoot ?? {} })));
       } catch (e) {
         return res.end(JSON.stringify({ errors: [{ message: String(e) }] }));
       }

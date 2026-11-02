@@ -1,17 +1,36 @@
 import { pool } from '../db/pool.js';
+import { AppError } from '../errors.js';
 import type { Session, SessionCleanup } from './types.js';
 
 /**
  * Seuil par défaut (tokens) au-delà duquel l'interface signale le contexte d'une session et propose de le nettoyer :
  * jauge en couleur dans l'en-tête, pastille dans les onglets, bandeau « Compacter / Repartir de zéro / Ignorer ».
  * Chaque personne peut le remplacer, ou désactiver le signalement, dans ses réglages Claude (`contextWarnTokens`).
- * Aucune action automatique : une session manuelle n'est jamais compactée sans l'accord de l'utilisateur.
+ * Aucune action automatique par défaut : une session manuelle n'est compactée que si une limite a été choisie pour elle
+ * (formulaire de lancement, réglages de la session, défaut du projet ; voir `cleanupService.afterTurn`).
  */
 export const CONTEXT_WARN_TOKENS = 150_000;
 /** Seuil de compaction proposé par défaut pour une planification (option « compacter au-delà de… »). */
 export const DEFAULT_SCHEDULE_CONTEXT_MAX_TOKENS = 100_000;
 /** Nettoyage appliqué par défaut à une nouvelle planification : conversation neuve à chaque exécution. */
 export const DEFAULT_SCHEDULE_CLEANUP: SessionCleanup = { contextAction: 'fresh' };
+/** Limite recommandée pour une session manuelle (« Recommandé : compacter au-delà de 100 k tokens »). */
+export const RECOMMENDED_CONTEXT_MAX_TOKENS = 100_000;
+/** Seuil minimal de contexte acceptable (en tokens) : en dessous, la compaction tournerait en boucle. */
+export const MIN_CONTEXT_TOKENS = 10_000;
+
+/**
+ * Limite de contexte d'une session (défaut d'un projet, choix du formulaire de lancement) : compacter (« compact ») ou
+ * repartir d'une conversation neuve (« reset ») au-delà de `contextMaxTokens`. Null, objet vide ou action absente :
+ * aucune limite (null). « fresh » n'a de sens que pour une planification : refusé ici.
+ */
+export function normalizeContextLimit(input: SessionCleanup | null | undefined): SessionCleanup | null {
+  if (!input?.contextAction) return null;
+  if (input.contextAction !== 'compact' && input.contextAction !== 'reset') throw new AppError("La limite de contexte doit être « compact » (compacter) ou « reset » (repartir d'une conversation neuve)");
+  const max = Number(input.contextMaxTokens);
+  if (!Number.isInteger(max) || max < MIN_CONTEXT_TOKENS) throw new AppError(`Le seuil de contexte doit être un nombre entier de tokens, au moins ${MIN_CONTEXT_TOKENS}`);
+  return { contextAction: input.contextAction, contextMaxTokens: max };
+}
 
 export interface ModelProfile {
   /** Fenêtre de contexte (tokens). */

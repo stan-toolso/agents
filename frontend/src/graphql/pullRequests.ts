@@ -63,6 +63,14 @@ export function prRef(pr: Pick<TrackedPullRequest, 'number' | 'repo' | 'foreignR
   return pr.foreignRepo ? `${pr.repo}#${pr.number}` : `#${pr.number}`;
 }
 
+/** Forge d'une PR suivie d'après son URL : GitLab (merge request), GitHub, sinon la forge de Skipper. */
+export function forgeOfUrl(url: string | null | undefined): string {
+  if (!url) return 'la forge';
+  if (/\/-\/merge_requests\/\d+/.test(url)) return 'GitLab';
+  if (/^https?:\/\/(www\.)?github\.com\//i.test(url)) return 'GitHub';
+  return 'Forgejo';
+}
+
 /** Travail local d'une PR en préparation : « 3 commits, 2 fichiers non commités ». */
 export function localWorkText(pr: Pick<TrackedPullRequest, 'localCommits' | 'localChanges'>): string {
   const parts: string[] = [];

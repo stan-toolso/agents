@@ -191,7 +191,7 @@ export function describeSnapshot(pr: TrackedPullRequest): string[] {
 
 /**
  * Une PR suivie sur une ligne, pour les agents : « - <id> · PR #12 « titre » · à fusionner (checks réussis) · branche x → main · tâche <id> ».
- * Une PR en préparation : « - <id> · branche task/x « titre » · en préparation (3 commits) · … · pas encore ouverte sur GitHub (pr_open) ».
+ * Une PR en préparation : « - <id> · branche task/x « titre » · en préparation (3 commits) · … · pas encore ouverte sur la forge (pr_open) ».
  * `projectRepo` : dépôt du projet, pour ne nommer le dépôt que quand la PR est ailleurs.
  */
 export function describePullRequest(pr: TrackedPullRequest, projectRepo?: string | null): string {
@@ -201,7 +201,7 @@ export function describePullRequest(pr: TrackedPullRequest, projectRepo?: string
   const parts = [`${pr.id} · ${ref} « ${pr.title} » · ${stage}${hints.length ? ` (${hints.join(', ')})` : ''}`, `${pr.headBranch}${pr.baseBranch ? ` → ${pr.baseBranch}` : ''}`];
   if (pr.taskId) parts.push(`tâche ${pr.taskId}`);
   if (pr.note) parts.push(`note : ${pr.note}`);
-  if (pr.number == null) parts.push('pas encore ouverte sur GitHub (pr_open, ou pr_register si elle l’a été autrement)');
+  if (pr.number == null) parts.push('pas encore ouverte sur la forge (pr_open, ou pr_register si elle l’a été autrement)');
   else parts.push(pr.url);
   return `- ${parts.join(' · ')}`;
 }

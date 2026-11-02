@@ -14,8 +14,12 @@ const m = vi.hoisted(() => ({
   calls: [] as Array<[string, unknown[]]>,
   taskStatus: 'in_progress' as string,
   taskSessionIds: [] as string[],
+  blockedBy: [] as string[],
+  assertUnblocked: async (t: { blockedByIds: string[] }) => {
+    if (t.blockedByIds.length) throw new Error(`La tâche est bloquée par ${t.blockedByIds.join(', ')}`);
+  },
 }));
-vi.mock('./service.js', () => ({ taskService: m.tasks, describeThread: () => ['Fil de discussion :'], summarizeReactions: () => '', formatPerson: () => '', statusTagText: () => '' }));
+vi.mock('./service.js', () => ({ taskService: m.tasks, describeThread: () => ['Fil de discussion :'], summarizeReactions: () => '', formatPerson: () => '', statusTagText: () => '', dependencyText: () => '', assertUnblocked: m.assertUnblocked }));
 vi.mock('./attachments.js', () => ({ describeAttachments: () => [], imageBlocks: async () => [] }));
 vi.mock('../pullRequests/service.js', () => ({ trackedPullRequestService: m.prs }));
 // Comptes du propriétaire (délégation d'un agent de projet) : une personne utilise les siens ; un agent en lecture seule ne pousse pas.
@@ -79,18 +83,20 @@ beforeEach(() => {
   m.session = { id: 's1', worksessionId: 'w1', ownerId: 'u1' };
   m.taskStatus = 'in_progress';
   m.taskSessionIds = [];
+  m.blockedBy = [];
   Object.assign(m.tasks, {
     get: async (id: string) => {
       if (id !== 't1') throw new Error('Tâche introuvable');
-      return { id, projectId: 'p', title: 'Tâche', description: '', status: m.taskStatus, priority: 'medium', tags: [], customFields: [], branch: 'task/x', commentCount: 0, sessionIds: m.taskSessionIds };
+      return { id, projectId: 'p', title: 'Tâche', description: '', status: m.taskStatus, priority: 'medium', tags: [], customFields: [], branch: 'task/x', commentCount: 0, sessionIds: m.taskSessionIds, dependsOnIds: m.blockedBy, blockedByIds: m.blockedBy, dependentIds: [] };
     },
+    findByIds: async (ids: string[]) => ids.map((id) => ({ id, title: `Tâche ${id}`, status: 'todo' })),
     create: async (_p: string, input: Record<string, unknown>) => {
       record('create')(input);
-      return { id: 't2', projectId: 'p', title: input.title, description: '', status: input.status ?? 'todo', priority: 'medium', tags: [], customFields: [], branch: null, commentCount: 0, sessionIds: input.sessionId ? [input.sessionId] : [] };
+      return { id: 't2', projectId: 'p', title: input.title, description: '', status: input.status ?? 'todo', priority: 'medium', tags: [], customFields: [], branch: null, commentCount: 0, sessionIds: input.sessionId ? [input.sessionId] : [], dependsOnIds: [], blockedByIds: [], dependentIds: [] };
     },
     update: async (id: string, input: Record<string, unknown>) => {
       record('taskUpdate')(id, input);
-      return { id, projectId: 'p', title: 'Tâche', description: '', status: input.status ?? m.taskStatus, priority: 'medium', tags: [], customFields: [], branch: null, commentCount: 0, sessionIds: input.sessionId ? [input.sessionId] : m.taskSessionIds };
+      return { id, projectId: 'p', title: 'Tâche', description: '', status: input.status ?? m.taskStatus, priority: 'medium', tags: [], customFields: [], branch: null, commentCount: 0, sessionIds: input.sessionId ? [input.sessionId] : m.taskSessionIds, dependsOnIds: m.blockedBy, blockedByIds: m.blockedBy, dependentIds: [] };
     },
     comments: async () => [],
     attachments: async () => [],
@@ -166,6 +172,28 @@ describe('serveur MCP tasks', () => {
     m.taskSessionIds = ['s9'];
     await client.callTool({ name: 'update', arguments: { id: 't1', status: 'in_progress' } });
     expect((m.calls[0][1][1] as Record<string, unknown>).sessionId).toBeUndefined();
+  });
+
+  it('dépendances : create et update les transmettent, auto_start est armé au nom du propriétaire de la session', async () => {
+    const client = await connect();
+    await client.callTool({ name: 'create', arguments: { title: 'Suite', depends_on: ['t1'], auto_start: true } });
+    expect(m.calls[0]).toEqual(['create', [expect.objectContaining({ dependsOn: ['t1'], autoStartWhenUnblocked: true, autoStartById: 'u1' })]]);
+    await client.callTool({ name: 'update', arguments: { id: 't1', depends_on: [], auto_start: false } });
+    expect(m.calls[1]).toEqual(['taskUpdate', ['t1', expect.objectContaining({ dependsOn: [], autoStartWhenUnblocked: false, autoStartById: null })]]);
+  });
+
+  it('une tâche bloquée ne se prend pas : claim refusé, pas de prise implicite par update', async () => {
+    m.blockedBy = ['t0'];
+    m.taskStatus = 'todo';
+    const client = await connect();
+    const claimed = await client.callTool({ name: 'claim', arguments: { id: 't1' } });
+    expect(claimed.isError).toBe(true);
+    expect(textOf(claimed)).toMatch(/bloquée par t0/);
+    expect(m.calls).toEqual([]);
+    await client.callTool({ name: 'update', arguments: { id: 't1', status: 'in_progress' } });
+    expect((m.calls[0][1] as unknown[])[1]).not.toHaveProperty('sessionId');
+    const got = await client.callTool({ name: 'get', arguments: { id: 't1' } });
+    expect(textOf(got)).toMatch(/Bloquée par[\s\S]*t0 · \[todo\] Tâche t0/);
   });
 
   it('release rend une tâche dont la session est en charge', async () => {

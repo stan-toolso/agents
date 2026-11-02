@@ -80,6 +80,19 @@ type ProjectMember {
   pending: Boolean!
 }
 
+"Compte rendu de l'import d'une archive de projet."
+type ProjectImportReport {
+  foldersCreated: Int!
+  instructionsCreated: Int!
+  "Instructions déjà présentes au même chemin, laissées telles quelles."
+  instructionsSkipped: [String!]!
+  tasksCreated: Int!
+  commentsCreated: Int!
+  settingsUpdated: Boolean!
+  "Connexions de l'archive : jamais recréées (leurs secrets n'y sont pas)."
+  connections: [String!]!
+}
+
 "Un projet regroupe des sessions ; chacune s'exécute dans le workspace du projet."
 type Project {
   id: ID!
@@ -97,6 +110,8 @@ type Project {
   runnerConfig: JSON!
   "Mode d'autorisation des nouvelles sessions qui n'en précisent pas (default, acceptEdits, bypassPermissions, plan)."
   defaultPermissionMode: String!
+  "Limite de contexte des nouvelles sessions qui n'en choisissent pas (tâches, sessions lancées par un agent), présélectionnée au lancement : contextAction « compact » ou « reset » au-delà de contextMaxTokens. Null : aucune limite (l'interface propose au-delà du seuil de signalement)."
+  defaultContextCleanup: SessionCleanup
   "Noms des éléments du coffre dont les usages par les agents sont soumis à l'approbation d'un humain (même en mode bypassPermissions)."
   approvalConnections: [String!]!
   "Faux quand l'utilisateur atteint le projet en tant que super administrateur sans en être membre."
@@ -379,6 +394,18 @@ type Task {
   pullRequest: PullRequest
   "Pull requests suivies de la tâche (objets Skipper : étape, déploiement, note), celles qui attendent une action d'abord."
   pullRequests: [TrackedPullRequest!]!
+  "Tâches du même projet dont celle-ci dépend (« bloquée par »), dans l'ordre d'ajout."
+  dependsOn: [Task!]!
+  "Celles de dependsOn qui ne sont pas terminées (une annulée bloque encore) : tant qu'il en reste, la tâche ne peut pas être confiée à un agent."
+  blockedBy: [Task!]!
+  "Vrai tant qu'au moins une dépendance n'est pas terminée."
+  blocked: Boolean!
+  "Tâches qui dépendent de celle-ci."
+  dependents: [Task!]!
+  "Confiée automatiquement à une session (configuration par défaut du projet) quand sa dernière dépendance passe à terminée ; option consommée au lancement."
+  autoStartWhenUnblocked: Boolean!
+  "Personne (ou agent) au nom de qui la session sera lancée : celle qui a armé l'option."
+  autoStartBy: User
   createdAt: DateTime!
   updatedAt: DateTime!
   completedAt: DateTime
@@ -398,6 +425,10 @@ input CreateTaskInput {
   reporter: TaskPersonInput
   "Fichiers joints à la tâche (10 au plus, 10 Mo chacun, 12 Mo au total)."
   attachments: [AttachmentInput!]
+  "Tâches du même projet dont celle-ci dépend."
+  dependsOnIds: [ID!]
+  "Lancer automatiquement quand la dernière dépendance est terminée (au nom de la personne connectée)."
+  autoStartWhenUnblocked: Boolean
 }
 
 input UpdateTaskInput {
@@ -424,6 +455,10 @@ input UpdateTaskInput {
   attachments: [AttachmentInput!]
   "Pièces jointes de la tâche (pas de ses commentaires) à retirer."
   removeAttachmentIds: [ID!]
+  "Remplace la liste complète des dépendances (refusé s'il en résulte un cycle)."
+  dependsOnIds: [ID!]
+  "Arme (au nom de la personne connectée) ou désarme le lancement automatique quand la tâche est débloquée."
+  autoStartWhenUnblocked: Boolean
 }
 
 "Clé d'API d'un projet (API REST des tâches) ; le secret n'est montré qu'à la création."
@@ -1325,11 +1360,11 @@ type PullRequestReview {
   state: String!
 }
 
-"Pull request GitHub du dépôt d'un projet, ou d'un autre dépôt (lue avec le jeton de la connexion GitHub) ; pour un dépôt hébergé par Skipper, pull request de sa forge Forgejo."
+"Pull request GitHub du dépôt d'un projet, ou d'un autre dépôt (lue avec le jeton de la connexion GitHub) ; pour un dépôt hébergé par Skipper, pull request de sa forge Forgejo ; pour un dépôt GitLab, merge request (numéro = iid)."
 type PullRequest {
-  "Dépôt « owner/name » (GitHub, ou Forgejo pour un dépôt hébergé)."
+  "Dépôt « owner/name » (GitHub, ou Forgejo pour un dépôt hébergé) ; chemin complet du projet pour GitLab."
   repo: String!
-  "Forge de la PR, pour les libellés : « GitHub » ou « Forgejo »."
+  "Forge de la PR, pour les libellés : « GitHub », « GitLab » ou « Forgejo »."
   forgeName: String!
   number: Int!
   title: String!
@@ -2655,6 +2690,8 @@ input CreateProjectInput {
   gitHosted: Boolean
   runnerConfig: JSON
   defaultPermissionMode: String
+  "Limite de contexte des nouvelles sessions (contextAction « compact » ou « reset », contextMaxTokens) ; null ou objet vide : aucune."
+  defaultContextCleanup: SessionCleanupInput
   taskInstructions: String
 }
 
@@ -2668,6 +2705,8 @@ input UpdateProjectInput {
   gitHosted: Boolean
   runnerConfig: JSON
   defaultPermissionMode: String
+  "Limite de contexte des nouvelles sessions (contextAction « compact » ou « reset », contextMaxTokens) ; null ou objet vide : aucune."
+  defaultContextCleanup: SessionCleanupInput
   taskInstructions: String
 }
 
@@ -2706,6 +2745,8 @@ input CreateSessionInput {
   autoStart: Boolean
   "Agent de projet qui joue la session (propriétaire) ; l'utilisateur connecté en est le demandeur."
   agentId: ID
+  "Limite de contexte (contextAction « compact » ou « reset » au-delà de contextMaxTokens, appliquée à la fin d'un tour) ; objet vide : aucune. Absente : le défaut du projet."
+  cleanup: SessionCleanupInput
 }
 
 type Mutation {
@@ -2805,6 +2846,8 @@ type Mutation {
   resetProjectRunner(id: ID!): Project!
   "Supprime le projet et tout ce qui en dépend : sessions, terminaux, work sessions, conteneur, dossier de travail. Irréversible. Dépôt hébergé (Forgejo) : supprimé avec deleteHostedRepo, sinon conservé dans Forgejo, archivé (lecture seule) et renommé."
   deleteProject(id: ID!, deleteHostedRepo: Boolean = false): Boolean!
+  "Importe une archive d'export de projet (tar.gz encodé en base64, produite par GET /api/projects/<id>/export.tar.gz) : contexte avec ses versions, tâches avec leur fil, réglages. Administrateurs du projet."
+  importProjectArchive(projectId: ID!, archive: String!, context: Boolean = true, tasks: Boolean = true, settings: Boolean = false): ProjectImportReport!
   createSession(input: CreateSessionInput!): Session!
   "Ouvre un chat dans l'espace personnel avec un premier message (config : permissionMode, model) et le lance aussitôt."
   createChat(text: String!, attachments: [AttachmentInput!], config: JSON): Session!
@@ -3130,7 +3173,7 @@ extend type Mutation {
 type SessionCleanup {
   "Les événements du transcript plus vieux que N jours sont supprimés (null : jamais)."
   retentionDays: Int
-  "Conversation de l'agent avant une exécution planifiée : « compact » (compacter) ou « reset » (repartir d'une conversation neuve) quand le contexte dépasse contextMaxTokens ; « fresh » : conversation neuve à chaque exécution. Null : rien."
+  "Conversation de l'agent : « compact » (compacter) ou « reset » (repartir d'une conversation neuve, avec un résumé) quand le contexte dépasse contextMaxTokens, avant une exécution planifiée et à la fin de chaque autre tour ; « fresh » : conversation neuve avant chaque exécution planifiée. Null : rien (l'interface propose seulement)."
   contextAction: String
   contextMaxTokens: Int
 }

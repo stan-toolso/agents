@@ -158,6 +158,8 @@ export interface Project {
   runnerConfig: { image?: string; memory?: string; cpus?: string; browser?: boolean; maxSessions?: number };
   /** Mode d'autorisation des nouvelles sessions : default, acceptEdits, bypassPermissions ou plan. */
   defaultPermissionMode: string;
+  /** Limite de contexte des nouvelles sessions (compact / reset au-delà d'un seuil) ; null : aucune. */
+  defaultContextCleanup: Pick<SessionCleanup, 'contextAction' | 'contextMaxTokens'> | null;
   /** Éléments du coffre soumis à approbation (requête PROJECT seulement). */
   approvalConnections?: string[];
   /** Faux quand le projet est atteint en tant que super administrateur sans en être membre. */
@@ -391,6 +393,22 @@ export interface Task {
   pullRequests?: TrackedPullRequestSummary[];
   /** Sessions en charge (TASK_PAGE). */
   sessionsInCharge?: { id: string }[];
+  /** Tâches dont celle-ci dépend (« bloquée par »). */
+  dependsOn: TaskRef[];
+  /** Celles de dependsOn qui ne sont pas terminées : la tâche ne peut pas être confiée à un agent tant qu'il en reste. */
+  blockedBy: TaskRef[];
+  /** Tâches qui dépendent de celle-ci. */
+  dependents: TaskRef[];
+  /** Confiée automatiquement à une session quand sa dernière dépendance est terminée. */
+  autoStartWhenUnblocked: boolean;
+  autoStartBy: { id: string; name: string } | null;
+}
+
+/** Tâche citée par une autre (dépendance). */
+export interface TaskRef {
+  id: string;
+  title: string;
+  status: TaskStatus;
 }
 
 export interface AppNotification {
@@ -510,6 +528,10 @@ export const PROJECT_FIELDS = gql`
     gitHosted
     runnerConfig
     defaultPermissionMode
+    defaultContextCleanup {
+      contextAction
+      contextMaxTokens
+    }
     runnerStatus {
       kind
       ready
@@ -863,6 +885,30 @@ export const RESET_PROJECT_RUNNER = gql`
 export const DELETE_PROJECT = gql`
   mutation DeleteProject($id: ID!, $deleteHostedRepo: Boolean) {
     deleteProject(id: $id, deleteHostedRepo: $deleteHostedRepo)
+  }
+`;
+
+export interface ProjectImportReport {
+  foldersCreated: number;
+  instructionsCreated: number;
+  instructionsSkipped: string[];
+  tasksCreated: number;
+  commentsCreated: number;
+  settingsUpdated: boolean;
+  connections: string[];
+}
+
+export const IMPORT_PROJECT_ARCHIVE = gql`
+  mutation ImportProjectArchive($projectId: ID!, $archive: String!, $context: Boolean, $tasks: Boolean, $settings: Boolean) {
+    importProjectArchive(projectId: $projectId, archive: $archive, context: $context, tasks: $tasks, settings: $settings) {
+      foldersCreated
+      instructionsCreated
+      instructionsSkipped
+      tasksCreated
+      commentsCreated
+      settingsUpdated
+      connections
+    }
   }
 `;
 
@@ -1472,6 +1518,10 @@ export const PROJECT_LAUNCH_INFO = gql`
       id
       gitUrl
       defaultPermissionMode
+      defaultContextCleanup {
+        contextAction
+        contextMaxTokens
+      }
       approvalConnections
       git {
         branch
@@ -1588,6 +1638,26 @@ export const TASK_FIELDS = gql`
       }
     }
     createdBySession {
+      id
+      name
+    }
+    dependsOn {
+      id
+      title
+      status
+    }
+    blockedBy {
+      id
+      title
+      status
+    }
+    dependents {
+      id
+      title
+      status
+    }
+    autoStartWhenUnblocked
+    autoStartBy {
       id
       name
     }

@@ -24,6 +24,7 @@ import type { Attachment, AttachmentInput, CreateSessionInput, RelaunchInput, Se
 import { log } from '../log.js';
 import { reviewOf } from '../reviews/types.js';
 import { agentService } from '../agents/service.js';
+import { normalizeContextLimit } from './context.js';
 
 /** Texte d'une instruction sans texte : les fichiers joints sont l'instruction. */
 const ATTACHMENTS_ONLY_TEXT = 'Voir les fichiers joints.';
@@ -37,7 +38,7 @@ const running = new Map<string, RunningHandle>();
 const slots = new Map<string, string>();
 /** Depuis quand chaque session en cours attend des instructions (ms), pour l'arrêt des sessions inactives. */
 const idleSince = new Map<string, number>();
-/** Sessions terminées par le serveur pour inactivité : leur fin n'est pas notifiée. */
+/** Sessions terminées par le serveur (inactivité, remise à zéro de la conversation à la limite de contexte) : leur fin n'est pas notifiée. */
 const endedForIdle = new Set<string>();
 /** Traitement de fin de session (mise à jour du statut) en cours, par id de session. */
 const finishing = new Map<string, Promise<void>>();
@@ -352,6 +353,9 @@ export const sessionService = {
       input = { ...input, config: { ...input.config, permissionMode: project.defaultPermissionMode } };
     }
     provider.validateConfig?.(input.config ?? {});
+    // Limite de contexte : celle choisie au lancement (objet vide : aucune), sinon le défaut du projet (sessions de
+    // tâches, lancées par un agent…). Jamais d'autre limite que celle qu'une personne a choisie.
+    input = { ...input, cleanup: (input.cleanup ? normalizeContextLimit(input.cleanup) : project.defaultContextCleanup) ?? {} };
     if (input.worksessionId && input.newWorksession) throw new AppError('Choisissez une work session existante ou une nouvelle, pas les deux');
     if (input.kind === 'chat') {
       // Un chat est une session légère d'un espace personnel : pas de work session (il n'a pas de dossier de travail), provider Claude.
@@ -555,12 +559,19 @@ export const sessionService = {
           else idleSince.delete(id);
           await publishSession(await sessionRepository.update(id, { activity }));
           if (activity === 'idle' && drainingInstance) void park(id);
+          // Fin d'un tour ordinaire : la limite de contexte choisie pour la session s'applique (rien sans limite). Les
+          // exécutions planifiées appliquent la leur avant de démarrer (schedules/service.ts).
+          else if (activity === 'idle' && !stopping && !scheduledRuns.has(id)) {
+            void import('./cleanup.js')
+              .then(({ cleanupService }) => cleanupService.afterTurn(id))
+              .catch((err) => log.error(`[cleanup] limite de contexte de la session ${id}`, err));
+          }
         },
         recordConfig: async (changes) => {
           await persistConfig(id, changes, Object.keys(changes));
         },
         ask: async (input, signal) => {
-          await emit('request', { type: input.type, title: input.title, payload: input.payload ?? {} });
+          await emit('request', { type: input.type, title: input.title, ...(input.message ? { message: input.message } : {}), payload: input.payload ?? {} });
           // La notification porte l'identifiant de la demande : elle sera marquée lue quand la demande sera réglée.
           const response = await requestService.ask(id, input, signal, (request) => {
             void notificationService.notify({
@@ -706,9 +717,13 @@ export const sessionService = {
     return publishSession(await sessionRepository.update(id, { name: trimmed }));
   },
 
-  /** Fin propre : l'agent termine son tour en cours, puis la session se termine. */
-  async end(id: string): Promise<Session> {
+  /**
+   * Fin propre : l'agent termine son tour en cours, puis la session se termine. `quiet` : fin décidée par le serveur
+   * (remise à zéro de la conversation), sans notification de fin.
+   */
+  async end(id: string, opts: { quiet?: boolean } = {}): Promise<Session> {
     const handle = running.get(id);
+    if (handle && opts.quiet) endedForIdle.add(id);
     if (!handle) {
       const elsewhere = (await forwardToHolder(id, 'session.end')) ?? (await endParked(id, 'completed'));
       if (elsewhere) return elsewhere;
@@ -849,6 +864,8 @@ export const sessionService = {
       provider: source.provider,
       prompt,
       config: source.config,
+      // La session relancée garde la limite de contexte de l'origine (aucune si elle n'en avait pas).
+      cleanup: source.cleanup.contextAction === 'compact' || source.cleanup.contextAction === 'reset' ? source.cleanup : {},
     });
   },
 
