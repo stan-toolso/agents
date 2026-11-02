@@ -1232,8 +1232,31 @@ plus `sessions.requested_by_id` : la personne qui l'a demandée (le client qui p
 confie la tâche), à qui l'agent répond d'abord ; « Mes sessions » inclut celles qu'on a demandées. Le provider Claude
 ouvre le prompt système d'une telle session par l'identité et les instructions de l'agent (`agents/prompt.ts`),
 applique ses réglages par défaut (`defaults`, sous ceux demandés explicitement), signe ses messages de fil de son nom,
-et décrit à toute session du projet les agents qui existent et comment les convoquer. Chaque agent a un dossier
-`agents/<slug>` dans la bibliothèque de contexte : sa mémoire durable.
+et décrit à toute session du projet les agents qui existent et comment les convoquer.
+
+**Bibliothèque de contexte propre à chaque agent** (migration `055_agent_libraries.sql`). Les tables du contexte
+(`context_folders`, `context_instructions`, `context_changes`) portent un `agent_id` : null pour la bibliothèque du
+projet, l'identifiant de l'agent pour la sienne (mêmes chemins, mêmes versions, mêmes outils ; `contextService` prend
+un `agentId` sur ses entrées par bibliothèque, `tree`, `resolve`, `createFolder`, `createInstruction`,
+`writeInstructionAtPath`, `search`, `changes`, `promptSummary`). Les sessions d'un agent reçoivent sa bibliothèque
+(skills `memoire:<chemin>`, cible par défaut de leurs outils `context`) et, si `inherit_context` (réglage « Hérite
+aussi de la bibliothèque du projet », vrai par défaut), celle du projet (skills `context:`). **Toute session du
+projet** (personne ou agent) lit et modifie n'importe quelle bibliothèque par le paramètre `library` des outils
+`context` (« projet », ou le nom ou l'identifiant d'un agent ; outil `libraries` pour la liste). Dans
+l'application, la page Contexte d'un projet a un sélecteur de bibliothèque (Projet, puis un onglet par agent ;
+`?library=<id>`) et les entrées GraphQL prennent `agentId` (`Project.contextFolders`, `contextInstructions`,
+`contextChanges`, `searchContext`, `createContextFolder`, `CreateContextInstructionInput`).
+
+**Comptes prêtés (délégation).** Plutôt que de régler des comptes propres à l'agent, la personne qui le configure peut
+lui **prêter son propre compte** Claude (`claude_delegate_id` : identifiants, modèle par défaut, budgets de cette
+personne) et/ou ses comptes git (`git_delegate_id` : GitHub, GitLab, forge ; **en lecture seule** par défaut,
+`git_delegate_read_only`). On ne prête que son propre compte (mutation `setAgentDelegation(id, account, delegate,
+readOnly)`, carte « Comptes prêtés » de l'onglet Comptes) ; un gestionnaire peut retirer une délégation.
+`agentService.accounts(agent)` / `accountsForOwner(ownerId)` donnent les comptes effectifs (`OwnerAccounts`) :
+le provider Claude lit les réglages Claude du délégant (`claudeSettings.forSession`), passe ses comptes git à
+`agentGitEnv` et, en lecture seule, pose une adresse de push inexistante sur `origin` (`remote.origin.pushurl`) ;
+`tasks.pr_open` refuse alors d'ouvrir une PR, et le prompt de l'agent le lui dit. La consommation reste imputée à
+l'agent (propriétaire des sessions) ; le plafond mensuel vérifié est celui du délégant.
 
 **Convoquer un agent** (`agentService.summon`) : avec une tâche, sa session non archivée reliée à la tâche reçoit le
 message (relancée si elle était terminée) ; sinon une session s'ouvre pour lui sur la tâche — dans le **dossier de la

@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { contextService } from '../context/service.js';
 import type { Actor } from '../context/types.js';
 import { AppError, NotFoundError } from '../errors.js';
 import { log } from '../log.js';
@@ -19,7 +18,7 @@ import { userService } from '../users/service.js';
 import { ROLE_RANK, type User } from '../users/types.js';
 import { agentRepository } from './repository.js';
 import { AGENT_TEMPLATES, templateFor } from './templates.js';
-import { AGENT_KINDS, type Agent, type AgentAction, type AgentActionInput, type AgentInput, type AgentManagerRole, type AgentStats, type AgentTemplate, normalizeAvatar, normalizeTriggers } from './types.js';
+import { AGENT_KINDS, type Agent, type AgentAccountKind, type AgentAction, type AgentActionInput, type AgentInput, type AgentManagerRole, type AgentStats, type AgentTemplate, type OwnerAccounts, normalizeAvatar, normalizeTriggers } from './types.js';
 
 const NAME_MAX = 60;
 const DESCRIPTION_MAX = 200;
@@ -121,7 +120,6 @@ export const agentService = {
     const id = randomUUID();
     const user = await userRepository.create({ id, email: agentEmail(id), name, kind: 'agent' });
     await userRepository.upsertMembership({ projectId, userId: user.id, role: 'member', invitedById: creator.id });
-    const contextFolder = `agents/${slugify(name) || id.slice(0, 8)}`;
     const actions = this.prepareActions(input.actions ?? template.actions, []);
     const agent = await agentRepository.create({
       userId: user.id,
@@ -132,13 +130,12 @@ export const agentService = {
       instructions: this.validInstructions(input.instructions ?? template.instructions),
       taskFolder: input.taskFolder ?? template.taskFolder,
       defaults: input.defaults ?? template.defaults,
-      contextFolder,
+      inheritContext: input.inheritContext ?? true,
       triggers: normalizeTriggers(input.triggers ?? template.triggers),
       actions,
       createdById: creator.id,
     });
     await agentRepository.setManagers(agent.id, [{ userId: creator.id, role: 'owner' }]);
-    await contextService.ensureFolderPath(projectId, contextFolder, { type: 'human' }).catch((err) => log.warn(`[agents] dossier de contexte ${contextFolder} non créé`, err));
     await this.syncActionSchedules(agent).catch((err) => log.warn(`[agents] planification des actions de ${agent.name}`, err));
     return this.get(agent.id);
   },
@@ -182,6 +179,7 @@ export const agentService = {
       ...(input.instructions !== undefined && input.instructions !== null ? { instructions: this.validInstructions(input.instructions) } : {}),
       ...(input.taskFolder !== undefined && input.taskFolder !== null ? { taskFolder: input.taskFolder } : {}),
       ...(input.defaults !== undefined && input.defaults !== null ? { defaults: input.defaults } : {}),
+      ...(input.inheritContext !== undefined && input.inheritContext !== null ? { inheritContext: input.inheritContext } : {}),
       ...(input.triggers !== undefined && input.triggers !== null ? { triggers: normalizeTriggers({ ...agent.triggers, ...input.triggers }) } : {}),
       ...(input.actions !== undefined && input.actions !== null ? { actions: this.prepareActions(input.actions, agent.actions) } : {}),
     });
@@ -228,6 +226,46 @@ export const agentService = {
     }
     await agentRepository.setManagers(id, managers);
     return agent;
+  },
+
+  // ---- Comptes et délégation ---------------------------------------------------------------------
+
+  /** Les comptes qui font tourner les sessions d'un agent : les siens, ou ceux qu'une personne lui a prêtés. */
+  accounts(agent: Agent): OwnerAccounts {
+    return {
+      claudeUserId: agent.claudeDelegateId ?? agent.id,
+      gitUserId: agent.gitDelegateId ?? agent.id,
+      gitReadOnly: Boolean(agent.gitDelegateId && agent.gitDelegateReadOnly),
+    };
+  },
+
+  /** Comptes d'un propriétaire de session quel qu'il soit : une personne (les siens), ou un agent (délégation éventuelle). */
+  async accountsForOwner(ownerId: string | null | undefined): Promise<OwnerAccounts | null> {
+    if (!ownerId) return null;
+    const agent = await agentRepository.findById(ownerId);
+    return agent ? this.accounts(agent) : { claudeUserId: ownerId, gitUserId: ownerId, gitReadOnly: false };
+  },
+
+  /**
+   * Prête (ou reprend) un compte à l'agent : `delegateId` est la personne qui prête — elle ne peut prêter que son propre
+   * compte, et doit être membre du projet ; null retire la délégation. Les comptes git se prêtent en lecture seule par défaut.
+   */
+  async setDelegation(agentId: string, account: AgentAccountKind, delegateId: string | null, opts: { readOnly?: boolean | null } = {}): Promise<Agent> {
+    const agent = await this.get(agentId);
+    if (delegateId) {
+      const user = await userRepository.findById(delegateId);
+      if (!user || user.kind !== 'person') throw new AppError('Seule une personne peut prêter son compte');
+      const role = await userService.roleFor(delegateId, agent.projectId);
+      if (!role || ROLE_RANK[role] < ROLE_RANK.member) throw new AppError(`${user.name} doit être membre du projet pour prêter son compte à l'agent`);
+    }
+    const updated = await agentRepository.update(agentId, account === 'claude' ? { claudeDelegateId: delegateId } : { gitDelegateId: delegateId, gitDelegateReadOnly: delegateId ? (opts.readOnly ?? true) : true });
+    if (!updated) throw new NotFoundError('Agent introuvable');
+    return updated;
+  },
+
+  /** Bibliothèques propres des agents actifs d'un projet (outils `context`, paramètre `library`). */
+  async libraries(projectId: string): Promise<{ id: string; name: string }[]> {
+    return (await agentRepository.listByProject(projectId)).map((a) => ({ id: a.id, name: a.name }));
   },
 
   // ---- Convocation ------------------------------------------------------------------------------

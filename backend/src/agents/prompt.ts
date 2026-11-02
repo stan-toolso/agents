@@ -10,15 +10,13 @@ export const agentLink = (agent: Pick<Agent, 'id' | 'projectId'>) => `${config.a
  * Section du prompt système d'une session jouée par un agent : qui il est, ses instructions, sa mémoire (dossier du
  * contexte), et qui l'a convoqué. Placée juste après le prompt du projet, avant l'identité de la session.
  */
-export function agentIdentityPrompt(agent: Agent, project: Pick<Project, 'name'>, requestedBy: Pick<User, 'name' | 'email'> | null): string {
+export function agentIdentityPrompt(agent: Agent, project: Pick<Project, 'name'>, requestedBy: Pick<User, 'name' | 'email'> | null, opts: { gitReadOnly?: boolean } = {}): string {
   const role = AGENT_KIND_LABELS[agent.kind];
   const lines = [
     `Tu es **${agent.name}**, ${role} du projet ${project.name}${agent.description ? ` : ${agent.description}` : ''}. Tu es un membre du projet à part entière : tes sessions, tes messages dans les fils de tâches, tes commits et tes pull requests sont à ton nom (les outils signent pour toi). Les personnes du projet peuvent te convoquer en te mentionnant (« @${agent.name} ») dans le fil d'une tâche, ou en te confiant une tâche ; tu reçois alors leur message dans cette session ou dans une nouvelle.`,
     requestedBy ? `- Cette session a été demandée par ${requestedBy.name} (${requestedBy.email}) : c'est à cette personne que tu réponds d'abord.` : '',
     `- Ta fiche : ${agentLink(agent)}`,
-    agent.contextFolder
-      ? `- Ta mémoire durable est le dossier \`${agent.contextFolder}\` de la bibliothèque de contexte : lis-le en début de travail et ranges-y ce qui doit durer (décisions, conventions, glossaire). Le reste de la bibliothèque est à lire aussi, mais n'y écris que des instructions valables pour tout le projet.`
-      : '',
+    opts.gitReadOnly ? "- Tes comptes git sont prêtés en lecture seule : tu peux lire et récupérer le dépôt, mais ni pousser une branche ni ouvrir de pull request. Laisse tes commits en local et demande dans le fil de la tâche à une personne de pousser, ou signale-le." : '',
     agent.instructions.trim() ? `\nInstructions de ${agent.name} :\n\n${agent.instructions.trim()}` : '',
   ];
   return lines.filter(Boolean).join('\n');

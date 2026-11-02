@@ -24,6 +24,8 @@ export const AGENT_GIT_ENV_KEYS = [
   'GIT_CONFIG_VALUE_1',
   'GIT_CONFIG_KEY_2',
   'GIT_CONFIG_VALUE_2',
+  'GIT_CONFIG_KEY_3',
+  'GIT_CONFIG_VALUE_3',
   'GIT_AUTHOR_NAME',
   'GIT_AUTHOR_EMAIL',
   'GIT_COMMITTER_NAME',
@@ -55,7 +57,7 @@ async function hostIdentity(): Promise<{ name: string | null; email: string | nu
  * Dépôt hébergé par Skipper (Forgejo) : le jeton Forgejo des sessions du propriétaire (forge_accounts), servi de la même
  * façon pour l'origine de Forgejo, afin que fetch et push depuis le conteneur passent par la forge avec son compte.
  */
-export async function agentGitEnv(ownerId: string | null | undefined, repoUrl?: string | null, actor: { sessionId?: string | null; projectId?: string | null } = {}): Promise<Record<string, string>> {
+export async function agentGitEnv(ownerId: string | null | undefined, repoUrl?: string | null, actor: { sessionId?: string | null; projectId?: string | null } = {}, opts: { readOnly?: boolean } = {}): Promise<Record<string, string>> {
   const env: Record<string, string> = {};
   const hosted = isHostedGitUrl(repoUrl);
   const [auth, gitlab, gitlabHosts, identity, hostedToken] = await Promise.all([
@@ -80,6 +82,8 @@ export async function agentGitEnv(ownerId: string | null | undefined, repoUrl?: 
     env.SKIPPER_GIT_TOKEN = hostedToken;
     configs.push([`credential.${new URL(config.forgejo.url).origin}.helper`, '!f() { echo username=skipper; echo "password=$SKIPPER_GIT_TOKEN"; }; f']);
   }
+  // Comptes prêtés en lecture seule (agent de projet) : l'origine ne se pousse pas (adresse de push inexistante, erreur explicite).
+  if (opts.readOnly) configs.push(['remote.origin.pushurl', 'https://lecture-seule.skipper.invalid/comptes-git-pretes-en-lecture-seule']);
   if (configs.length) {
     env.GIT_CONFIG_COUNT = String(configs.length);
     configs.forEach(([key, value], i) => {
