@@ -19,7 +19,7 @@ vi.mock('../gitServer/forgejo.js', () => ({ forgejoAccounts: { agentToken: async
 
 const { agentGitEnv, gitAccountFor } = await import('./agentEnv.js');
 
-const agentAccounts = (over: Partial<OwnerAccounts> = {}): OwnerAccounts => ({ claudeUserId: 'a1', githubUserId: 'a1', githubReadOnly: false, gitlabUserId: 'a1', gitlabReadOnly: false, forgeUserId: 'a1', ...over });
+const agentAccounts = (over: Partial<OwnerAccounts> = {}): OwnerAccounts => ({ claudeUserId: 'a1', githubUserId: 'a1', githubReadOnly: false, githubPullRequests: true, gitlabUserId: 'a1', gitlabReadOnly: false, gitlabPullRequests: true, forgeUserId: 'a1', ...over });
 const pushUrl = (env: Record<string, string>) => Object.keys(env).find((k) => k.startsWith('GIT_CONFIG_KEY_') && env[k] === 'remote.origin.pushurl');
 
 beforeEach(() => {
@@ -43,6 +43,8 @@ describe('agentGitEnv : comptes GitHub et GitLab prêtés séparément', () => {
     expect(pushUrl(onGitlab)).toBeDefined();
     expect(onGitlab.GIT_AUTHOR_NAME).toBe('GL u2');
     expect(pushUrl(await agentGitEnv(agentAccounts({ githubUserId: 'u1', githubReadOnly: true }), 'https://github.com/acme/app.git'))).toBeDefined();
+    // Pull requests permises : le push depuis la session reste bloqué (seul pr_open pousse, côté serveur).
+    expect(pushUrl(await agentGitEnv(agentAccounts({ githubUserId: 'u1', githubReadOnly: true, githubPullRequests: true }), 'https://github.com/acme/app.git'))).toBeDefined();
   });
 
   it('une personne (identifiant) utilise ses propres comptes, en écriture', async () => {
@@ -55,11 +57,11 @@ describe('agentGitEnv : comptes GitHub et GitLab prêtés séparément', () => {
 
 describe('gitAccountFor', () => {
   it("choisit le compte selon l'hébergeur du dépôt", async () => {
-    const acc = agentAccounts({ githubUserId: 'u1', githubReadOnly: true, gitlabUserId: 'u2' });
-    expect(await gitAccountFor(acc, 'https://github.com/acme/app.git')).toEqual({ host: 'github', userId: 'u1', readOnly: true });
-    expect(await gitAccountFor(acc, 'https://gitlab.com/acme/app.git')).toEqual({ host: 'gitlab', userId: 'u2', readOnly: false });
+    const acc = agentAccounts({ githubUserId: 'u1', githubReadOnly: true, githubPullRequests: false, gitlabUserId: 'u2' });
+    expect(await gitAccountFor(acc, 'https://github.com/acme/app.git')).toEqual({ host: 'github', userId: 'u1', readOnly: true, pullRequests: false });
+    expect(await gitAccountFor(acc, 'https://gitlab.com/acme/app.git')).toEqual({ host: 'gitlab', userId: 'u2', readOnly: false, pullRequests: true });
     // Instance GitLab auto-hébergée reconnue par les comptes de la personne qui prête GitLab.
-    expect(await gitAccountFor(acc, 'https://gitlab.acme.io/acme/app.git')).toEqual({ host: 'gitlab', userId: 'u2', readOnly: false });
-    expect(await gitAccountFor(acc, null)).toEqual({ host: 'github', userId: 'u1', readOnly: true });
+    expect(await gitAccountFor(acc, 'https://gitlab.acme.io/acme/app.git')).toEqual({ host: 'gitlab', userId: 'u2', readOnly: false, pullRequests: true });
+    expect(await gitAccountFor(acc, null)).toEqual({ host: 'github', userId: 'u1', readOnly: true, pullRequests: false });
   });
 });

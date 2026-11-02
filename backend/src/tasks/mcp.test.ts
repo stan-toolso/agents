@@ -23,9 +23,9 @@ vi.mock('./service.js', () => ({ taskService: m.tasks, describeThread: () => ['F
 vi.mock('./attachments.js', () => ({ describeAttachments: () => [], imageBlocks: async () => [] }));
 vi.mock('../pullRequests/service.js', () => ({ trackedPullRequestService: m.prs }));
 // Comptes du propriétaire (délégation d'un agent de projet) : une personne utilise les siens ; un agent en lecture seule ne pousse pas.
-const accounts = { claudeUserId: 'u1', githubUserId: 'u1', githubReadOnly: false, gitlabUserId: 'u1', gitlabReadOnly: false, forgeUserId: 'u1' };
+const accounts = { claudeUserId: 'u1', githubUserId: 'u1', githubReadOnly: false, githubPullRequests: true, gitlabUserId: 'u1', gitlabReadOnly: false, gitlabPullRequests: true, forgeUserId: 'u1' };
 vi.mock('../agents/service.js', () => ({ agentService: { accountsForOwner: async () => accounts } }));
-vi.mock('../git/agentEnv.js', () => ({ gitAccountFor: async (a: typeof accounts) => ({ host: 'github', userId: a.githubUserId, readOnly: a.githubReadOnly }) }));
+vi.mock('../git/agentEnv.js', () => ({ gitAccountFor: async (a: typeof accounts) => ({ host: 'github', userId: a.githubUserId, readOnly: a.githubReadOnly, pullRequests: a.githubPullRequests }) }));
 vi.mock('../sessions/service.js', () => ({ sessionService: { get: async () => m.session } }));
 vi.mock('../personal/scope.js', () => ({
   inScope: async (_p: Project, _s: unknown, projectId: string) => projectId === 'p',
@@ -288,9 +288,15 @@ describe('serveur MCP tasks', () => {
     // Compte GitHub prêté en lecture seule : ni push ni PR.
     m.session = { ...m.session, worksessionId: 'w1' } as typeof m.session;
     accounts.githubReadOnly = true;
+    accounts.githubPullRequests = false;
     const ro = await client.callTool({ name: 'pr_open', arguments: { task_id: 't1', title: 'x' } });
     expect(ro.isError).toBe(true);
     expect(textOf(ro)).toContain('lecture seule');
+    // Lecture seule mais pull requests permises : pr_open passe, avec le compte prêté.
+    accounts.githubPullRequests = true;
+    const allowed = await client.callTool({ name: 'pr_open', arguments: { task_id: 't1', title: 'Permise' } });
+    expect(allowed.isError).toBeFalsy();
+    expect(textOf(allowed)).toContain('Pull request ouverte');
     accounts.githubReadOnly = false;
   });
 });

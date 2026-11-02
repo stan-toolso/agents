@@ -256,8 +256,10 @@ export const agentService = {
       claudeUserId: agent.claudeDelegateId ?? agent.id,
       githubUserId: agent.githubDelegateId ?? agent.id,
       githubReadOnly: Boolean(agent.githubDelegateId && agent.githubDelegateReadOnly),
+      githubPullRequests: !(agent.githubDelegateId && agent.githubDelegateReadOnly) || agent.githubDelegatePullRequests,
       gitlabUserId: agent.gitlabDelegateId ?? agent.id,
       gitlabReadOnly: Boolean(agent.gitlabDelegateId && agent.gitlabDelegateReadOnly),
+      gitlabPullRequests: !(agent.gitlabDelegateId && agent.gitlabDelegateReadOnly) || agent.gitlabDelegatePullRequests,
       forgeUserId: agent.id,
     };
   },
@@ -272,9 +274,10 @@ export const agentService = {
   /**
    * Prête (ou reprend) un compte à l'agent : `delegateId` est la personne qui prête — elle ne peut prêter que son propre
    * compte, et doit être membre du projet ; null retire la délégation. Les comptes GitHub et GitLab se prêtent chacun à
-   * part, en lecture seule par défaut.
+   * part, en lecture seule par défaut ; `pullRequests` permet, en lecture seule, d'ouvrir des pull requests (merge
+   * requests) par `tasks.pr_open`. Une option absente garde sa valeur tant que le prêt reste à la même personne.
    */
-  async setDelegation(agentId: string, account: AgentAccountKind, delegateId: string | null, opts: { readOnly?: boolean | null } = {}): Promise<Agent> {
+  async setDelegation(agentId: string, account: AgentAccountKind, delegateId: string | null, opts: { readOnly?: boolean | null; pullRequests?: boolean | null } = {}): Promise<Agent> {
     const agent = await this.get(agentId);
     if (delegateId) {
       const user = await userRepository.findById(delegateId);
@@ -282,13 +285,19 @@ export const agentService = {
       const role = await userService.roleFor(delegateId, agent.projectId);
       if (!role || ROLE_RANK[role] < ROLE_RANK.member) throw new AppError(`${user.name} doit être membre du projet pour prêter son compte à l'agent`);
     }
-    const readOnly = delegateId ? (opts.readOnly ?? true) : true;
+    const current =
+      account === 'github'
+        ? { id: agent.githubDelegateId, readOnly: agent.githubDelegateReadOnly, pullRequests: agent.githubDelegatePullRequests }
+        : { id: agent.gitlabDelegateId, readOnly: agent.gitlabDelegateReadOnly, pullRequests: agent.gitlabDelegatePullRequests };
+    const same = delegateId != null && delegateId === current.id;
+    const readOnly = delegateId ? (opts.readOnly ?? (same ? current.readOnly : true)) : true;
+    const pullRequests = delegateId ? (opts.pullRequests ?? (same ? current.pullRequests : false)) : false;
     const patch =
       account === 'claude'
         ? { claudeDelegateId: delegateId }
         : account === 'github'
-          ? { githubDelegateId: delegateId, githubDelegateReadOnly: readOnly }
-          : { gitlabDelegateId: delegateId, gitlabDelegateReadOnly: readOnly };
+          ? { githubDelegateId: delegateId, githubDelegateReadOnly: readOnly, githubDelegatePullRequests: pullRequests }
+          : { gitlabDelegateId: delegateId, gitlabDelegateReadOnly: readOnly, gitlabDelegatePullRequests: pullRequests };
     const updated = await agentRepository.update(agentId, patch);
     if (!updated) throw new NotFoundError('Agent introuvable');
     return updated;

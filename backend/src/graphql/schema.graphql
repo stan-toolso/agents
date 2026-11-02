@@ -3592,12 +3592,16 @@ type AgentDelegations {
   claude: User
   "Personne qui prête son compte GitHub (null : les comptes GitHub propres de l'agent)."
   github: User
-  "Compte GitHub prêté en lecture seule : ni push, ni pull request."
+  "Compte GitHub prêté en lecture seule : ni push, ni pull request (sauf githubPullRequests)."
   githubReadOnly: Boolean!
+  "L'agent peut ouvrir des pull requests GitHub (tasks.pr_open pousse sa branche de travail), même en lecture seule."
+  githubPullRequests: Boolean!
   "Personne qui prête son compte GitLab (null : les comptes GitLab propres de l'agent)."
   gitlab: User
-  "Compte GitLab prêté en lecture seule : ni push, ni merge request."
+  "Compte GitLab prêté en lecture seule : ni push, ni merge request (sauf gitlabPullRequests)."
   gitlabReadOnly: Boolean!
+  "L'agent peut ouvrir des merge requests GitLab (tasks.pr_open pousse sa branche de travail), même en lecture seule."
+  gitlabPullRequests: Boolean!
   git: User @deprecated(reason: "Utiliser github et gitlab")
   gitReadOnly: Boolean! @deprecated(reason: "Utiliser githubReadOnly et gitlabReadOnly")
 }
@@ -3619,8 +3623,8 @@ extend type Mutation {
   setAgentManagers(id: ID!, managers: [AgentManagerInput!]!): Agent!
   "Convoque l'agent avec un message : dans sa session reliée à la tâche, sinon dans une nouvelle session (sur la tâche ou libre). Renvoie la session."
   summonAgent(id: ID!, text: String!, taskId: ID, attachments: [AttachmentInput!]): Session!
-  "Prête son propre compte à l'agent (delegate: true) ou retire la délégation (false) ; readOnly pour les comptes git (défaut : vrai)."
-  setAgentDelegation(id: ID!, account: AgentAccountKind!, delegate: Boolean!, readOnly: Boolean): Agent!
+  "Prête son propre compte à l'agent (delegate: true) ou retire la délégation (false) ; pour les comptes git, readOnly (défaut : vrai) et pullRequests (en lecture seule, l'agent peut quand même ouvrir des pull requests ; défaut : faux). Une option absente garde sa valeur quand le prêt ne change pas de personne."
+  setAgentDelegation(id: ID!, account: AgentAccountKind!, delegate: Boolean!, readOnly: Boolean, pullRequests: Boolean): Agent!
   "Joue une action nommée de l'agent, éventuellement sur une tâche."
   runAgentAction(id: ID!, key: String!, taskId: ID): Session!
 }
