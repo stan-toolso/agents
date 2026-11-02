@@ -29,7 +29,7 @@ export interface GoogleAccessRequest {
 
 /** Brouillons : création, modification, suppression (et envoi). */
 export const GMAIL_COMPOSE = 'https://www.googleapis.com/auth/gmail.compose';
-/** Corbeille et libellés (pas de suppression définitive des messages). */
+/** Corbeille, archivage et libellés (pas de suppression définitive des messages). */
 export const GMAIL_MODIFY = 'https://www.googleapis.com/auth/gmail.modify';
 /** Accès complet : toute opération Gmail. */
 export const GMAIL_FULL = 'https://mail.google.com/';
@@ -37,8 +37,9 @@ export const GMAIL_FULL = 'https://mail.google.com/';
 /**
  * Ce que permettent les portées accordées au-delà de la lecture et de l'envoi : les comptes reliés avant
  * l'ajout des brouillons et de la corbeille n'ont que gmail.send et doivent être reconnectés pour en profiter.
+ * `modify` (gmail.modify) couvre la corbeille, l'archivage et les libellés.
  */
-export function gmailCan(account: Pick<GoogleAccount, 'gmailAccess' | 'scopes'>, what: 'drafts' | 'trash'): boolean {
+export function gmailCan(account: Pick<GoogleAccount, 'gmailAccess' | 'scopes'>, what: 'drafts' | 'modify'): boolean {
   if (account.gmailAccess !== 'write') return false;
   const has = (s: string) => account.scopes.includes(s);
   return has(GMAIL_FULL) || (what === 'drafts' ? has(GMAIL_COMPOSE) : has(GMAIL_MODIFY));

@@ -355,7 +355,7 @@ export default function VaultItemEditor({ item, owners, initialOwner, tunnels, g
               <p className="text-secondary small mt-3 mb-0">
                 Vous serez redirigé vers Google pour accorder ces accès. Les lectures sont libres ; les écritures (envoi d'un e-mail, brouillon, suppression d'un e-mail, création d'un fichier…) demandent votre accord à chaque fois. Le jeton reste sur le serveur.
                 {editing && ' Sur Google, vous pouvez aussi choisir un autre compte : il remplacera celui-ci.'}
-                {gmailMissingScopes && ' Ce compte a été relié avant les brouillons et la suppression d\'e-mails : reconnectez-le en écriture pour les autoriser.'}
+                {gmailMissingScopes && ' Ce compte a été relié avant les brouillons, la suppression, l\'archivage et les libellés d\'e-mails : reconnectez-le en écriture pour les autoriser.'}
               </p>
             </>
           ) : (

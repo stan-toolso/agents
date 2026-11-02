@@ -127,7 +127,7 @@ export function agentToolsOf(item: VaultItem): string {
       return "browser_fill : chaque saisie vous est présentée avec la page concernée, pour accord";
     case 'google': {
       const parts: string[] = [];
-      if (item.google?.gmailAccess !== 'NONE') parts.push(`Gmail : lecture${item.google?.gmailAccess === 'WRITE' ? ', envoi, brouillons et suppression (avec approbation)' : ''}`);
+      if (item.google?.gmailAccess !== 'NONE') parts.push(`Gmail : lecture${item.google?.gmailAccess === 'WRITE' ? ', envoi, brouillons, archivage, libellés, lu / non lu et suppression (avec approbation)' : ''}`);
       if (item.google?.driveAccess !== 'NONE') parts.push(`Drive : lecture${item.google?.driveAccess === 'WRITE' ? ', écriture (avec approbation)' : ''}`);
       return parts.length ? `${parts.join(' · ')} — paramètre account = « ${item.name} »` : 'aucun accès';
     }
