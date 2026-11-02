@@ -73,6 +73,7 @@ describe('feedFor', () => {
     expect(feed).not.toBeNull();
     expect(feed!.sessionId).toBe('s1');
     expect(feed!.restart).toBe(true);
+    expect(feed!.quiet).toBe(false);
     expect(feed!.text).toContain('[Commentaire sur la tâche]');
     expect(feed!.text).toContain('dont cette session est en charge');
     expect(feed!.text).toContain('- Alice, 2026-10-10 09:30 UTC (message c1) :');
@@ -101,12 +102,16 @@ describe('feedFor', () => {
 describe('feedsFor (sessions reliées)', () => {
   it('un message est transmis à toutes les sessions reliées ; seule la session en charge est relancée', () => {
     const feeds = feedsFor({ kind: 'commented', attachments: [], parent: null, task, comment: comment() }, ['s2', 's3']);
-    expect(feeds.map((f) => [f.sessionId, f.restart]).sort()).toEqual([
-      ['s1', true],
-      ['s2', false],
-      ['s3', false],
+    expect(feeds.map((f) => [f.sessionId, f.restart, f.quiet]).sort()).toEqual([
+      ['s1', true, false],
+      ['s2', false, true],
+      ['s3', false, true],
     ]);
-    expect(feeds.find((f) => f.sessionId === 's2')!.text).toContain('à laquelle cette session est reliée');
+    const linked = feeds.find((f) => f.sessionId === 's2')!.text;
+    expect(linked).toContain('à laquelle cette session est reliée');
+    // Note discrète : l'agent n'est pas invité à répondre.
+    expect(linked).toContain('Pour information');
+    expect(linked).not.toContain('reply_to');
   });
   it('une session mentionnée reçoit le message et est relancée, même si elle n’était pas reliée', () => {
     const c = comment({ body: 'Regarde ça @session:aaaaaaaa', mentions: [{ kind: 'session', id: 'aaaaaaaa-0000', label: 'Autre', text: '@session:aaaaaaaa' }] });
@@ -114,6 +119,7 @@ describe('feedsFor (sessions reliées)', () => {
     const mentioned = feeds.find((f) => f.sessionId === 'aaaaaaaa-0000');
     expect(mentioned).toBeDefined();
     expect(mentioned!.restart).toBe(true);
+    expect(mentioned!.quiet).toBe(false);
     expect(mentioned!.text).toContain('qui mentionne cette session');
     expect(mentioned!.text).toContain('(mentionne la session « Autre » (aaaaaaaa-0000))');
   });
@@ -131,13 +137,23 @@ describe('feedsFor (sessions reliées)', () => {
     const feeds = feedsFor({ kind: 'updated', addedAttachments: [], before: { ...task, status: 'todo' }, task, actor: { type: 'agent', userId: null, name: 'S2', sessionId: 's2' } as never }, ['s2', 's3']);
     expect(feeds.map((f) => f.sessionId).sort()).toEqual(['s1', 's3']);
     expect(feeds.every((f) => !f.restart)).toBe(true);
+    // Faite par une autre session d'agent : une note, même pour la session en charge.
+    expect(feeds.every((f) => f.quiet && f.text.includes('Pour information'))).toBe(true);
+  });
+  it('une modification par une personne est un message pour la session en charge, une note pour les sessions reliées', () => {
+    const feeds = feedsFor({ kind: 'updated', addedAttachments: [], before: { ...task, status: 'todo' }, task, actor: alice }, ['s3']);
+    expect(feeds.map((f) => [f.sessionId, f.quiet]).sort()).toEqual([
+      ['s1', false],
+      ['s3', true],
+    ]);
+    expect(feeds.find((f) => f.sessionId === 's1')!.text).toContain('Tiens-en compte dans ton travail');
   });
   it('une réaction n’est signalée qu’à la session autrice du message, sans relance', () => {
     const reaction: TaskReaction = { id: 'r1', taskId: 't1', commentId: 'c1', emoji: '👍', actorType: 'human', userId: 'u1', sessionId: null, actorName: 'Alice', createdAt: new Date() };
     const target = comment({ authorType: 'agent', authorSessionId: 's2', authorName: 'Session 2', body: 'Fait.' });
     const feeds = feedsFor({ kind: 'reacted', task, reaction, comment: target, added: true }, ['s2', 's3']);
     expect(feeds).toHaveLength(1);
-    expect(feeds[0]).toMatchObject({ sessionId: 's2', restart: false });
+    expect(feeds[0]).toMatchObject({ sessionId: 's2', restart: false, quiet: true });
     expect(feeds[0].text).toContain('[Réaction sur la tâche] Alice a réagi 👍 à ton message c1');
     // Sur la tâche elle-même, ou sur le message d'une personne : rien à dire à une session.
     expect(feedsFor({ kind: 'reacted', task, reaction: { ...reaction, commentId: null }, comment: null, added: true }, ['s2'])).toEqual([]);

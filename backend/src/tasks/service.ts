@@ -463,7 +463,7 @@ export const taskService = {
     }
     if (others.length) lines.push(`Cette session est aussi reliée aux tâches : ${others.map((t) => `${t.id} (« ${t.title} », ${statusLabels[t.status]})`).join(' ; ')}.`);
     lines.push(
-      "Quand quelqu'un d'autre modifie l'une de ces tâches ou écrit dans son fil, tu reçois un message commençant par « [Mise à jour de la tâche] », « [Commentaire sur la tâche] » ou « [Réaction sur la tâche] » qui décrit le changement : tiens-en compte, et réponds à un message avec `tasks.comment` (`reply_to` pour rester dans son fil) quand il appelle une réponse ; un simple accusé se fait avec `tasks.react`.",
+      "Quand quelqu'un d'autre modifie l'une de ces tâches ou écrit dans son fil, tu reçois un texte commençant par « [Mise à jour de la tâche] », « [Commentaire sur la tâche] » ou « [Réaction sur la tâche] » qui décrit le changement. Ce qui t'est adressé (message du fil d'une tâche dont tu es en charge ou qui te mentionne, modification par une personne d'une tâche dont tu es en charge) arrive comme une instruction : tiens-en compte, et réponds à un message avec `tasks.comment` (`reply_to` pour rester dans son fil) quand il appelle une réponse ; un simple accusé se fait avec `tasks.react`. Le reste arrive comme une note discrète, jointe au résultat d'un outil ou à l'instruction suivante : prends-la en compte sans en rendre compte, sauf si elle change ton travail.",
     );
     if (tasks.length) lines.push(STATUS_TAG_HINT);
     return lines.join('\n');

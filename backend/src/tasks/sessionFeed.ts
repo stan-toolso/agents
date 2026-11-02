@@ -12,6 +12,12 @@ export interface TaskFeed {
   text: string;
   /** Le message relance une session terminée (il lui est adressé) ; sinon il n'est transmis qu'à une session en cours. */
   restart: boolean;
+  /**
+   * Note discrète : le changement ne s'adresse pas à la session. Il ne lui ouvre pas de tour (ce qui ferait répondre
+   * l'agent « rien à faire » dans le fil de la session) : il lui est remis avec le résultat de ses prochains outils ou
+   * avec sa prochaine instruction (`sessionService.notify`). Une note n'est jamais une relance.
+   */
+  quiet: boolean;
   attachments: TaskAttachment[];
 }
 
@@ -19,12 +25,19 @@ export interface TaskFeed {
 const inCharge = (task: Task, sessionId: string) => task.sessionIds.includes(sessionId);
 /** Lien d'une session avec la tâche, pour le lui rappeler : en charge, ou simplement reliée. */
 const bond = (change: TaskChange, sessionId: string) => (inCharge(change.task, sessionId) ? 'dont cette session est en charge' : 'à laquelle cette session est reliée');
+/** Fin d'une note discrète : l'agent n'a pas à en rendre compte (l'humain ne la voit qu'en détail dans la session). */
+const QUIET_HINT = "Pour information : poursuis sans en parler, sauf si cela change ton travail (l'outil `tasks.get` montre la tâche complète).";
 
 /**
+ * Pertinence d'un changement pour une session, qui décide entre message (un tour de l'agent, visible dans la session)
+ * et note discrète : un message du fil n'est adressé qu'aux sessions en charge et à celles qu'il mentionne ; une
+ * modification ne l'est qu'aux sessions en charge, et seulement quand une personne l'a faite (un statut changé par une
+ * autre session d'agent n'appelle rien). Le reste (sessions seulement reliées, réactions) passe en note.
+ *
  * Messages à transmettre aux sessions reliées à la tâche (toutes celles en charge, celles passées par la tâche ou
  * mentionnées dans son fil : `linked`) pour un changement fait par quelqu'un d'autre. Un message du fil relance les
  * sessions en charge et les sessions qu'il mentionne (il leur est adressé) ; les autres sessions reliées ne le
- * reçoivent que si elles tournent. Une modification n'est transmise qu'aux sessions en cours (une session terminée
+ * reçoivent que si elles tournent, en note discrète. Une modification n'est transmise qu'aux sessions en cours (une session terminée
  * relira la tâche à son prochain démarrage grâce à son prompt système), et pas à celle qui vient de prendre la charge
  * (elle a reçu la tâche entière). Une réaction n'est signalée qu'à la session autrice du message.
  */
@@ -37,17 +50,23 @@ export function feedsFor(change: TaskChange, linked: string[] = []): TaskFeed[] 
     for (const id of mentioned) recipients.add(id);
     return [...recipients]
       .filter((sessionId) => sessionId !== c.authorSessionId)
-      .map((sessionId) => ({
-        sessionId,
-        restart: inCharge(change.task, sessionId) || mentioned.has(sessionId),
-        attachments: change.attachments,
-        text: [
-          `[Commentaire sur la tâche] Nouveau message dans le fil de la tâche ${change.task.id} (« ${change.task.title} ») ${bond(change, sessionId)}${mentioned.has(sessionId) ? ', qui mentionne cette session' : ''} :`,
-          ...describeComment(c, change.attachments, 'instruction', { replyTo: change.parent }),
-          '',
-          `Réponds-y avec l'outil \`tasks.comment\` (reply_to : ${change.parent?.id ?? c.id} pour rester dans son fil) quand il appelle une réponse ; \`tasks.react\` pour un simple accusé.`,
-        ].join('\n'),
-      }));
+      .map((sessionId) => {
+        const addressed = inCharge(change.task, sessionId) || mentioned.has(sessionId);
+        return {
+          sessionId,
+          restart: addressed,
+          quiet: !addressed,
+          attachments: change.attachments,
+          text: [
+            `[Commentaire sur la tâche] Nouveau message dans le fil de la tâche ${change.task.id} (« ${change.task.title} ») ${bond(change, sessionId)}${mentioned.has(sessionId) ? ', qui mentionne cette session' : ''} :`,
+            ...describeComment(c, change.attachments, 'instruction', { replyTo: change.parent }),
+            '',
+            addressed
+              ? `Réponds-y avec l'outil \`tasks.comment\` (reply_to : ${change.parent?.id ?? c.id} pour rester dans son fil) quand il appelle une réponse ; \`tasks.react\` pour un simple accusé.`
+              : QUIET_HINT,
+          ].join('\n'),
+        };
+      });
   }
   if (change.kind === 'reacted') {
     const target = change.comment;
@@ -57,6 +76,7 @@ export function feedsFor(change: TaskChange, linked: string[] = []): TaskFeed[] 
       {
         sessionId: target.authorSessionId,
         restart: false,
+        quiet: true,
         attachments: [],
         text: `[Réaction sur la tâche] ${r.actorName}${r.actorType === 'agent' ? ' (agent)' : ''} ${change.added ? 'a réagi' : 'a retiré sa réaction'} ${r.emoji} ${change.added ? 'à' : 'de'} ton message ${target.id} de la tâche ${change.task.id} (« ${change.task.title} »)${change.added ? ` : « ${target.body.slice(0, 120)}${target.body.length > 120 ? '…' : ''} »` : ''}. Rien à faire, sauf si cela appelle une suite.`,
       },
@@ -70,12 +90,16 @@ export function feedsFor(change: TaskChange, linked: string[] = []): TaskFeed[] 
   return [...recipients]
     // Passation : la session qui vient de prendre la charge a reçu la tâche entière ; l'auteur du changement n'a rien à apprendre.
     .filter((sessionId) => sessionId !== change.actor?.sessionId && !(inCharge(change.task, sessionId) && !inCharge(change.before, sessionId)))
-    .map((sessionId) => ({
-      sessionId,
-      restart: false,
-      attachments: change.addedAttachments,
-      text: [`[Mise à jour de la tâche] La tâche ${change.task.id} (« ${change.task.title} ») ${bond(change, sessionId)} a été modifiée par ${by} :`, ...lines, '', "Tiens-en compte dans ton travail (l'outil `tasks.get` montre la tâche complète)."].join('\n'),
-    }));
+    .map((sessionId) => {
+      const quiet = !(inCharge(change.task, sessionId) && change.actor?.type !== 'agent');
+      return {
+        sessionId,
+        restart: false,
+        quiet,
+        attachments: change.addedAttachments,
+        text: [`[Mise à jour de la tâche] La tâche ${change.task.id} (« ${change.task.title} ») ${bond(change, sessionId)} a été modifiée par ${by} :`, ...lines, '', quiet ? QUIET_HINT : "Tiens-en compte dans ton travail (l'outil `tasks.get` montre la tâche complète)."].join('\n'),
+      };
+    });
 }
 
 /** Compatibilité : le message destiné à une session en charge (par défaut la plus récente), null s'il n'y en a pas. */
@@ -92,6 +116,11 @@ async function deliver(feed: TaskFeed): Promise<void> {
   if (!getProvider(session.provider).describe().interactive) return;
   if (session.status !== 'running' && !feed.restart) return;
   try {
+    // Note discrète : remise à l'agent sans lui ouvrir de tour (les fichiers ne l'accompagnent pas : tasks.get les liste).
+    if (feed.quiet) {
+      await sessionService.notify(session.id, feed.text);
+      return;
+    }
     // Les fichiers du commentaire (ou ajoutés à la tâche) accompagnent le message, autant qu'une instruction en porte.
     const files: AttachmentInput[] = feed.attachments.length ? await asInstructionAttachments(fitInInstruction(feed.attachments).kept) : [];
     await sessionService.sendMessage(session.id, feed.text, files.length ? files : null);

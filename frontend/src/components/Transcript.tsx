@@ -5,6 +5,7 @@ import { describeCron } from '../lib/cron';
 import { attachmentUrl, formatSize, isImageType, type AttachmentRef } from '../lib/attachments';
 import type { LocalAttachment } from '../lib/pendingInstructions';
 import { clockTime, dayLabel, describeTool, formatCost, formatDuration, permissionModeLabels } from '../lib/humanize';
+import { describeTaskFeed, type TaskFeedSummary } from '../lib/taskFeed';
 import Markdown from './Markdown';
 
 /** Fichiers joints à une instruction : vignettes pour les images, liens de téléchargement sinon. */
@@ -419,6 +420,32 @@ function Thinking({ text }: { text: string }) {
   );
 }
 
+const TASK_FEED_ICONS: Record<TaskFeedSummary['kind'], string> = { update: 'bi-pencil-square', comment: 'bi-chat-left-text', reaction: 'bi-emoji-smile' };
+
+/**
+ * Changement d'une tâche reliée transmis à l'agent, résumé en une ligne et déplié au clic (texte lu par l'agent).
+ * `quiet` : note discrète (événement `task_note`), remise sans ouvrir de tour ; sinon instruction adressée à la
+ * session (message du fil qui la concerne, modification par une personne d'une tâche dont elle est en charge).
+ */
+function TaskFeedLine({ text, feed, quiet, stamp }: { text: string; feed: TaskFeedSummary; quiet: boolean; stamp?: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`cc-task-feed${quiet ? ' quiet' : ''}`} title={quiet ? "Transmis à l'agent sans interrompre son travail" : undefined}>
+      {stamp}
+      <div className="cc-task-feed-head" role="button" tabIndex={0} aria-expanded={open} onClick={() => setOpen((v) => !v)} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setOpen((v) => !v))}>
+        <i className={`bi ${TASK_FEED_ICONS[feed.kind]}`} />
+        <span className="cc-task-feed-summary">{feed.summary}</span>
+        {feed.taskId && (
+          <Link to={`/tasks/${feed.taskId}`} className="cc-task-feed-link" onClick={(e) => e.stopPropagation()} title="Ouvrir la tâche">
+            <i className="bi bi-box-arrow-up-right" />
+          </Link>
+        )}
+      </div>
+      {open && <div className="cc-task-feed-text">{text}</div>}
+    </div>
+  );
+}
+
 /** Un élément du travail de l'agent dans un tour : un message, un appel d'outil ou une réflexion. */
 interface WorkItem {
   key: string;
@@ -428,6 +455,8 @@ interface WorkItem {
   /** Appels d'outils : nom affiché et issue. */
   tool?: { name: string; args: string; severity: Severity };
   text?: boolean;
+  /** Note discrète d'une tâche reliée (`task_note`). */
+  note?: boolean;
 }
 
 /**
@@ -439,7 +468,8 @@ function WorkGroup({ items, live }: { items: WorkItem[]; live: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const tools = items.filter((i) => i.tool).map((i) => i.tool!);
   const messages = items.filter((i) => i.text).length;
-  const thoughts = items.filter((i) => !i.tool && !i.text).length;
+  const notes = items.filter((i) => i.note).length;
+  const thoughts = items.filter((i) => !i.tool && !i.text && !i.note).length;
   // Dans l'ordre de première utilisation : les noms gardent leur place pendant que les compteurs montent.
   const counts = new Map<string, number>();
   tools.forEach((t) => counts.set(t.name, (counts.get(t.name) ?? 0) + 1));
@@ -451,6 +481,7 @@ function WorkGroup({ items, live }: { items: WorkItem[]; live: boolean }) {
     messages ? plural(messages, 'message', 'messages') : '',
     ...names.slice(0, 4).map(([name, n]) => (n > 1 ? `${name} ×${n}` : name)),
     names.length > 4 ? '…' : '',
+    notes ? plural(notes, 'note de tâche', 'notes de tâche') : '',
   ].filter(Boolean);
   if (!parts.length && thoughts) parts.push('Réflexion');
   const severity = live ? 'pending' : errors ? 'warn' : 'ok';
@@ -555,7 +586,8 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
         const key = `work-${(run.find((i) => !i.text) ?? run[0]).key}`;
         // Rien à replier dans un message seul — sauf en fin de tour en cours, où l'étape suivante le replierait
         // un instant plus tard.
-        if (!tail && run.every((i) => i.text || !i.tool) && run.filter((i) => i.text).length <= 1) out.push(...run.map((i) => i.node));
+        // Notes seules (arrivées pendant que l'agent attend) : rien à replier non plus.
+        if ((!tail && run.every((i) => i.text || !i.tool) && run.filter((i) => i.text).length <= 1) || run.every((i) => i.note)) out.push(...run.map((i) => i.node));
         else out.push(<WorkGroup key={key} items={run} live={tail} />);
         run = [];
       };
@@ -591,6 +623,12 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
       const before = nodes.length;
       switch (e.type) {
         case 'instruction': {
+          // Changement d'une tâche adressé à la session : une ligne repliée plutôt qu'un long bloc cité.
+          const feed = !p.pending ? describeTaskFeed(String(p.text ?? '')) : null;
+          if (feed) {
+            nodes.push(<TaskFeedLine key={e.id} text={String(p.text)} feed={feed} quiet={false} stamp={stamp(true)} />);
+            break;
+          }
           const attachments = Array.isArray(p.attachments) ? (p.attachments as AttachmentRef[]) : [];
           // Instruction envoyée depuis la page et pas encore journalisée : affichée aussitôt, fichiers lus en local.
           const local = Array.isArray(p.localAttachments) ? (p.localAttachments as LocalAttachment[]) : [];
@@ -632,6 +670,15 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
             if (technical) nodes.push(item.node);
             else work.push(item);
           });
+          break;
+        }
+        case 'task_note': {
+          // Note discrète : rangée avec les étapes de l'agent (repliée avec elles pendant un tour), une ligne pâle sinon.
+          const text = String(p.text ?? '');
+          const feed = describeTaskFeed(text) ?? { kind: 'update' as const, taskId: null, title: null, summary: text.split('\n')[0] };
+          const node = <TaskFeedLine key={e.id} text={text} feed={feed} quiet stamp={stamp()} />;
+          if (technical) nodes.push(node);
+          else work.push({ key: e.id, node, pinned: false, note: true });
           break;
         }
         case 'claude.user': {
