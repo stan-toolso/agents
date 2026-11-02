@@ -45,6 +45,31 @@ function EnvFilesAction({ projectId, worksessionId }: { projectId: string; works
   );
 }
 
+/** Lien vers la session, avec un bouton pour le copier (retour « copié » quelques secondes). */
+function SessionLink({ sessionId }: { sessionId: string }) {
+  const url = `${window.location.origin}/sessions/${sessionId}`;
+  const [copied, setCopied] = useState<'ok' | 'ko' | null>(null);
+  const copy = () => {
+    const done = (r: 'ok' | 'ko') => {
+      setCopied(r);
+      window.setTimeout(() => setCopied(null), 2000);
+    };
+    if (!navigator.clipboard) return done('ko');
+    navigator.clipboard.writeText(url).then(() => done('ok'), () => done('ko'));
+  };
+  return (
+    <>
+      <a href={url} className="font-monospace cc-dim" title={url}>
+        {url.replace(/^https?:\/\//, '')}
+      </a>
+      <button type="button" className="cc-link session-panel-copy" title="Copier le lien de la session" onClick={copy}>
+        <i className={`bi ${copied === 'ok' ? 'bi-check2' : 'bi-clipboard'} me-1`} />
+        {copied === 'ok' ? 'copié' : copied === 'ko' ? 'copie refusée' : 'copier'}
+      </button>
+    </>
+  );
+}
+
 /**
  * Onglet « Session » du panneau de droite, à côté d'une page de session : ce que l'en-tête de la page montrait
  * (projet, branche, personne, tâche, workflow, planification, jauge de contexte), le bandeau de contexte au-delà du
@@ -89,6 +114,12 @@ export default function SessionPanel({ sessionId }: { sessionId: string }) {
           <dt>Projet</dt>
           <dd>
             <Link to={`/projects/${session.project.id}`}>{session.project.name}</Link>
+          </dd>
+        </div>
+        <div>
+          <dt>Lien</dt>
+          <dd>
+            <SessionLink sessionId={session.id} />
           </dd>
         </div>
         {session.worksession && (
