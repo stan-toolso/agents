@@ -143,10 +143,10 @@ const patchColumns: Record<keyof SessionPatch, string> = {
 export const sessionRepository = {
   async create(input: CreateSessionInput): Promise<Session> {
     const { rows } = await pool.query<SessionRow>(
-      `INSERT INTO sessions (project_id, worksession_id, parent_session_id, owner_id, name, provider, prompt, config, workflow_run_id, kind, requested_by_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `INSERT INTO sessions (project_id, worksession_id, parent_session_id, owner_id, name, provider, prompt, config, workflow_run_id, kind, requested_by_id, cleanup)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
        RETURNING *`,
-      [input.projectId, input.worksessionId ?? null, input.parentSessionId ?? null, input.ownerId ?? null, input.name, input.provider, input.prompt ?? null, JSON.stringify(input.config ?? {}), input.workflowRunId ?? null, input.kind ?? 'session', input.requestedById ?? null],
+      [input.projectId, input.worksessionId ?? null, input.parentSessionId ?? null, input.ownerId ?? null, input.name, input.provider, input.prompt ?? null, JSON.stringify(input.config ?? {}), input.workflowRunId ?? null, input.kind ?? 'session', input.requestedById ?? null, toJson(input.cleanup ?? {})],
     );
     return toSession(rows[0]);
   },

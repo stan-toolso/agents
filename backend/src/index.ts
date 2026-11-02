@@ -11,10 +11,12 @@ import { handleTaskAttachmentRoute } from './tasks/attachmentRoute.js';
 import { handleSharedPageRoute } from './sharedPages/viewRoute.js';
 import { handleFileViewRoute } from './files/viewRoute.js';
 import { handleTasksApiRoute } from './tasks/api.js';
+import { handleExportRoute } from './exports/routes.js';
 import { handleGitHttpRoute } from './gitServer/httpRoute.js';
 import { gitServer } from './gitServer/service.js';
 import { registerTaskSessionFeed } from './tasks/sessionFeed.js';
 import { registerAgentTriggers } from './agents/triggers.js';
+import { registerTaskAutoStart } from './tasks/autoStart.js';
 import { agentService } from './agents/service.js';
 import { vaultService } from './vault/service.js';
 import { authSession, readCookie, SESSION_COOKIE } from './auth/session.js';
@@ -119,6 +121,7 @@ async function main() {
   const legacy = await migrateLegacyCredentials();
   if (legacy.length) log.info(`[settings] identifiants historiques transférés : ${legacy.join(', ')}`);
   registerTaskSessionFeed();
+  registerTaskAutoStart();
   registerWorkflowTriggers();
   registerAgentTriggers();
   const closedTerminals = await terminalService.recoverAfterRestart(liveInstances);
@@ -208,6 +211,7 @@ async function main() {
       .then((handled) => handled || handleFileViewRoute(req, res))
       .then((handled) => handled || handlePreviewOpenRoute(req, res))
       .then((handled) => handled || handleTasksApiRoute(req, res))
+      .then((handled) => handled || handleExportRoute(req, res))
       .then((handled) => handled || handleGitHttpRoute(req, res))
       .then((handled) => handled || handleInternalRoute(req, res))
       .then((handled) => {

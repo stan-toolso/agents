@@ -250,3 +250,63 @@ export async function seedWorksessionDeps(worksessionsRoot: string, dir: string)
     return 'none';
   }
 }
+
+/** Fichiers écrits par les gestionnaires de paquets à la racine de `node_modules` : présents dans toute installation. */
+const SENTINELS = ['.package-lock.json', '.modules.yaml', '.yarn-integrity', '.yarn-state.yml'];
+
+/**
+ * Les dépendances d'un dossier de travail sont-elles liées à l'instantané de son empreinte (`linked`), une copie à part de
+ * dépendances que l'instantané pourrait remplacer (`copy` : même empreinte, installées avant les instantanés ou sans
+ * eux), sans instantané pour leur empreinte (`no-snapshot`), ou sans objet (`none` : pas de projet Node, rien
+ * d'installé, ou état illisible) ? Comparé par l'inode d'un fichier que tout gestionnaire écrit dans `node_modules`.
+ */
+export async function depsShareState(store: string, root: string): Promise<{ hash: string | null; state: 'linked' | 'copy' | 'no-snapshot' | 'none' }> {
+  const { manifests, nodeModules } = await scanTree(root);
+  const hash = await depsHash(root, manifests);
+  if (!hash || !nodeModules.length) return { hash, state: 'none' };
+  const meta = await readMeta(store, hash);
+  if (!meta?.dirs.length) return { hash, state: 'no-snapshot' };
+  for (const dir of meta.dirs) {
+    for (const name of SENTINELS) {
+      const [mine, snap] = await Promise.all([stat(path.join(root, dir, name)).catch(() => null), stat(path.join(store, hash, 'tree', dir, name)).catch(() => null)]);
+      if (!snap) continue;
+      if (!mine) return { hash, state: 'none' };
+      return { hash, state: mine.ino === snap.ino && mine.dev === snap.dev ? 'linked' : 'copy' };
+    }
+  }
+  return { hash, state: 'none' };
+}
+
+/**
+ * Remplace la copie à part des dépendances d'un dossier de travail (`depsShareState` : `copy`) par l'instantané de son
+ * empreinte, lié : la place de la copie est rendue. Les anciens `node_modules` sont d'abord mis de côté (renommage) et
+ * remis en place si la liaison échoue ; ils ne sont supprimés qu'après. À ne faire que dans un dossier où rien ne tourne.
+ */
+export async function relinkDeps(store: string, root: string): Promise<boolean> {
+  const { hash, state } = await depsShareState(store, root);
+  if (state !== 'copy' || !hash) return false;
+  const meta = await readMeta(store, hash);
+  if (!meta) return false;
+  const suffix = `.skipper-old-${randomBytes(4).toString('hex')}`;
+  const moved: [string, string][] = [];
+  try {
+    for (const dir of meta.dirs) {
+      const from = path.join(root, dir);
+      if (!(await exists(from))) continue;
+      await rename(from, `${from}${suffix}`);
+      moved.push([from, `${from}${suffix}`]);
+    }
+    const { mode } = await linkSnapshot(store, root, hash);
+    if (mode !== 'snapshot') throw new Error(`instantané ${hash} non appliqué (${mode})`);
+    await writeMarker(root, hash);
+  } catch (err) {
+    for (const [from, aside] of moved) {
+      await rm(from, { recursive: true, force: true }).catch(() => undefined);
+      await rename(aside, from).catch(() => undefined);
+    }
+    throw err;
+  }
+  for (const [, aside] of moved) await rm(aside, { recursive: true, force: true });
+  log.info(`[deps] ${path.basename(root)} : node_modules remplacés par l'instantané ${hash} (liens physiques)`);
+  return true;
+}

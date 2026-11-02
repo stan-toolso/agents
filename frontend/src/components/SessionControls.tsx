@@ -20,7 +20,7 @@ export type ControlledSession = Session & { childSessions: ChildSession[] };
  * modales qu'elles ouvrent, partagées entre l'en-tête déplié de la page de session et l'onglet « Session » du
  * panneau de droite. Le hook accepte une session absente (page en cours de chargement) : il ne rend alors rien.
  */
-export function useSessionActions(session: ControlledSession | null | undefined): { buttons: ReactNode; modals: ReactNode; openSettings: () => void; openSchedule: () => void } {
+export function useSessionActions(session: ControlledSession | null | undefined): { buttons: ReactNode; modals: ReactNode; openSettings: () => void; openContextSettings: () => void; openSchedule: () => void } {
   const { showError } = useDialogs();
   const onError = (err: Error) => void showError(err);
   const [interruptSession] = useMutation(INTERRUPT_SESSION, { onError });
@@ -31,12 +31,14 @@ export function useSessionActions(session: ControlledSession | null | undefined)
   const [unarchiveSession] = useMutation(UNARCHIVE_SESSION, { refetchQueries: ['Sidebar'], onError });
   const { archiveSession, deleteSession } = useDeletions();
   const [scheduling, setScheduling] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // Réglages ouverts, et sur quelle partie : la jauge de contexte les ouvre sur « Conversation de l'agent ».
+  const [settingsOpen, setSettingsOpen] = useState<false | 'all' | 'context'>(false);
   const [relaunching, setRelaunching] = useState(false);
   const [resumingWith, setResumingWith] = useState(false);
-  const openSettings = () => setSettingsOpen(true);
+  const openSettings = () => setSettingsOpen('all');
+  const openContextSettings = () => setSettingsOpen('context');
   const openSchedule = () => setScheduling(true);
-  if (!session) return { buttons: null, modals: null, openSettings, openSchedule };
+  if (!session) return { buttons: null, modals: null, openSettings, openContextSettings, openSchedule };
 
   const id = session.id;
   const archived = Boolean(session.archivedAt);
@@ -123,7 +125,7 @@ export function useSessionActions(session: ControlledSession | null | undefined)
   const modals = (
     <>
       {scheduling && <ScheduleModal session={session} onClose={() => setScheduling(false)} />}
-      {settingsOpen && <SessionSettingsModal session={session} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SessionSettingsModal session={session} focus={settingsOpen === 'context' ? 'context' : undefined} onClose={() => setSettingsOpen(false)} />}
       {resumingWith && (
         <ResumeSessionModal
           session={session}
@@ -137,7 +139,7 @@ export function useSessionActions(session: ControlledSession | null | undefined)
       {relaunching && <RelaunchModal session={session} projectName={session.project.name} onClose={() => setRelaunching(false)} />}
     </>
   );
-  return { buttons, modals, openSettings, openSchedule };
+  return { buttons, modals, openSettings, openContextSettings, openSchedule };
 }
 
 /** Phrase d'état de la session parente (« travaille », « terminée »…), pour la note de sous-agent. */

@@ -1,6 +1,7 @@
 import { useMutation } from '@apollo/client';
 import { useEffect, useState } from 'react';
 import { COMPACT_SESSION_CONTEXT, RESET_SESSION_CONTEXT, type Session } from '../graphql/operations';
+import { limitFromCleanup } from '../lib/contextLimit';
 import { formatCost, formatTokens } from '../lib/humanize';
 import { useDialogs } from './Dialogs';
 
@@ -34,10 +35,12 @@ const shortModel = (model: string | null) =>
 
 /**
  * Jauge de contexte de l'en-tête d'une session : tokens du dernier tour, part de la fenêtre du modèle, coût
- * approximatif d'un tour « à froid » (contexte relu sans cache). Cliquer ouvre les réglages.
+ * approximatif d'un tour « à froid » (contexte relu sans cache), et la limite choisie pour la session s'il y en a une
+ * (« 84 k / limite 100 k »). Cliquer ouvre les réglages sur la conversation de l'agent.
  */
-export function ContextGauge({ context, onClick }: { context: Session['context']; onClick: () => void }) {
+export function ContextGauge({ context, cleanup, onClick }: { context: Session['context']; cleanup?: Session['cleanup']; onClick: () => void }) {
   if (context.tokens === null) return null;
+  const limit = limitFromCleanup(cleanup);
   const level = gaugeLevel(context);
   const pct = Math.round((context.share ?? 0) * 100);
   const model = shortModel(context.model);
@@ -45,14 +48,19 @@ export function ContextGauge({ context, onClick }: { context: Session['context']
     `Contexte de l'agent : ${formatTokens(context.tokens)} tokens au dernier tour`,
     `${pct} % de la fenêtre${model ? ` de ${model}` : ''} (${formatTokens(context.windowTokens)})`,
     context.coldTurnUsd !== null ? `≈ ${formatCost(context.coldTurnUsd)} pour relire ce contexte à froid au prochain tour (cache expiré après une heure d'inactivité)` : null,
-    level && context.warnTokens !== null ? `Au-delà de ${formatTokens(context.warnTokens)} : pensez à compacter ou à repartir d'une conversation neuve` : null,
-    'Cliquer : réglages de nettoyage',
+    limit.action
+      ? `Limite de la session : ${limit.action === 'compact' ? 'compaction' : "conversation neuve (avec un résumé)"} à la fin d'un tour au-delà de ${limit.maxK} k tokens`
+      : level && context.warnTokens !== null
+        ? `Au-delà de ${formatTokens(context.warnTokens)} : pensez à compacter ou à repartir d'une conversation neuve`
+        : 'Aucune limite : la session vous proposera de nettoyer quand le contexte grossit',
+    'Cliquer : régler la limite de contexte',
   ]
     .filter(Boolean)
     .join('\n');
   return (
     <button type="button" className={`cc-link cc-gauge${level ? ` ${level}` : ''}`} title={title} onClick={onClick}>
       <i className="bi bi-speedometer2" /> {formatTokens(context.tokens)}
+      {limit.action && <span className="cc-gauge-limit"> / limite {limit.maxK} k</span>}
       <span className="cc-gauge-bar" aria-hidden>
         <span style={{ width: `${Math.max(2, Math.min(100, pct))}%` }} />
       </span>

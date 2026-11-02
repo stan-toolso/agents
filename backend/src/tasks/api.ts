@@ -33,6 +33,8 @@ const createSchema = z
     tags: z.array(z.string()).optional(),
     assignee: personSchema.optional(),
     reporter: personSchema.optional(),
+    /** Tâches du même projet dont celle-ci dépend (remplace la liste complète). */
+    dependsOn: z.array(z.string()).optional(),
   })
   .strict();
 const updateSchema = createSchema.partial().strict();
@@ -63,6 +65,8 @@ function publicTask(t: Task) {
     assignee: t.assignee,
     reporter: t.reporter,
     commentCount: t.commentCount,
+    dependsOn: t.dependsOnIds,
+    blockedBy: t.blockedByIds,
     branch: t.branch,
     createdByType: t.createdByType,
     createdAt: t.createdAt.toISOString(),

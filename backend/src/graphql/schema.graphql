@@ -80,6 +80,19 @@ type ProjectMember {
   pending: Boolean!
 }
 
+"Compte rendu de l'import d'une archive de projet."
+type ProjectImportReport {
+  foldersCreated: Int!
+  instructionsCreated: Int!
+  "Instructions déjà présentes au même chemin, laissées telles quelles."
+  instructionsSkipped: [String!]!
+  tasksCreated: Int!
+  commentsCreated: Int!
+  settingsUpdated: Boolean!
+  "Connexions de l'archive : jamais recréées (leurs secrets n'y sont pas)."
+  connections: [String!]!
+}
+
 "Un projet regroupe des sessions ; chacune s'exécute dans le workspace du projet."
 type Project {
   id: ID!
@@ -97,6 +110,8 @@ type Project {
   runnerConfig: JSON!
   "Mode d'autorisation des nouvelles sessions qui n'en précisent pas (default, acceptEdits, bypassPermissions, plan)."
   defaultPermissionMode: String!
+  "Limite de contexte des nouvelles sessions qui n'en choisissent pas (tâches, sessions lancées par un agent), présélectionnée au lancement : contextAction « compact » ou « reset » au-delà de contextMaxTokens. Null : aucune limite (l'interface propose au-delà du seuil de signalement)."
+  defaultContextCleanup: SessionCleanup
   "Noms des éléments du coffre dont les usages par les agents sont soumis à l'approbation d'un humain (même en mode bypassPermissions)."
   approvalConnections: [String!]!
   "Faux quand l'utilisateur atteint le projet en tant que super administrateur sans en être membre."
@@ -125,6 +140,8 @@ type Project {
   worksessions: [Worksession!]!
   "Work sessions archivées, les plus récemment archivées d'abord."
   archivedWorksessions: [Worksession!]!
+  "Dossiers de travail sur disque (work sessions actives, archivées et orphelines) : place occupée, fusion, occupation. refresh : nouvelle mesure des tailles (sinon gardées 10 min) et fetch d'origin."
+  worksessionDisk(refresh: Boolean = false): WorksessionDiskReport!
   "Éléments du coffre à disposition des agents de ce projet (pour les sessions de l'utilisateur connecté)."
   vaultItems: [ProjectVaultItem!]!
   "Clés d'API du projet (administrateurs)."
@@ -377,6 +394,18 @@ type Task {
   pullRequest: PullRequest
   "Pull requests suivies de la tâche (objets Skipper : étape, déploiement, note), celles qui attendent une action d'abord."
   pullRequests: [TrackedPullRequest!]!
+  "Tâches du même projet dont celle-ci dépend (« bloquée par »), dans l'ordre d'ajout."
+  dependsOn: [Task!]!
+  "Celles de dependsOn qui ne sont pas terminées (une annulée bloque encore) : tant qu'il en reste, la tâche ne peut pas être confiée à un agent."
+  blockedBy: [Task!]!
+  "Vrai tant qu'au moins une dépendance n'est pas terminée."
+  blocked: Boolean!
+  "Tâches qui dépendent de celle-ci."
+  dependents: [Task!]!
+  "Confiée automatiquement à une session (configuration par défaut du projet) quand sa dernière dépendance passe à terminée ; option consommée au lancement."
+  autoStartWhenUnblocked: Boolean!
+  "Personne (ou agent) au nom de qui la session sera lancée : celle qui a armé l'option."
+  autoStartBy: User
   createdAt: DateTime!
   updatedAt: DateTime!
   completedAt: DateTime
@@ -396,6 +425,10 @@ input CreateTaskInput {
   reporter: TaskPersonInput
   "Fichiers joints à la tâche (10 au plus, 10 Mo chacun, 12 Mo au total)."
   attachments: [AttachmentInput!]
+  "Tâches du même projet dont celle-ci dépend."
+  dependsOnIds: [ID!]
+  "Lancer automatiquement quand la dernière dépendance est terminée (au nom de la personne connectée)."
+  autoStartWhenUnblocked: Boolean
 }
 
 input UpdateTaskInput {
@@ -422,6 +455,10 @@ input UpdateTaskInput {
   attachments: [AttachmentInput!]
   "Pièces jointes de la tâche (pas de ses commentaires) à retirer."
   removeAttachmentIds: [ID!]
+  "Remplace la liste complète des dépendances (refusé s'il en résulte un cycle)."
+  dependsOnIds: [ID!]
+  "Arme (au nom de la personne connectée) ou désarme le lancement automatique quand la tâche est débloquée."
+  autoStartWhenUnblocked: Boolean
 }
 
 "Clé d'API d'un projet (API REST des tâches) ; le secret n'est montré qu'à la création."
@@ -504,6 +541,78 @@ type Worksession {
   sessions: [Session!]!
   "Terminaux de l'utilisateur connecté."
   terminals: [Terminal!]!
+}
+
+"Dossiers de travail d'un projet tels qu'ils sont sur disque."
+type WorksessionDiskReport {
+  "Date de la mesure des tailles (gardées 10 min) ; null : pas encore mesurées."
+  computedAt: DateTime
+  "Une mesure des tailles tourne (une vingtaine de secondes sur un gros projet) : les tailles données sont les précédentes ; interroger à nouveau."
+  measuring: Boolean!
+  "Instantanés de dépendances partagés par liens physiques (.skipper-deps), comptés une seule fois."
+  sharedBytes: Float
+  "Place totale : dossiers et instantanés."
+  totalBytes: Float
+  entries: [WorksessionDiskEntry!]!
+  "Worktrees déclarés à git dont le dossier a disparu (retirés au prochain nettoyage)."
+  prunable: [String!]!
+}
+
+"Un dossier de travail sur disque."
+type WorksessionDiskEntry {
+  "Nom du dossier."
+  name: String!
+  path: String!
+  "Work session de Skipper ; null : dossier orphelin (créé hors de Skipper ou dont l'enregistrement a disparu)."
+  worksession: Worksession
+  branch: String
+  exists: Boolean!
+  "Le dossier est un git worktree du checkout principal."
+  gitWorktree: Boolean!
+  "Place occupée en propre : les fichiers partagés par liens physiques (dépendances) ne sont comptés qu'une fois, à l'instantané."
+  bytes: Float
+  "Commits absents de la branche principale sur origin."
+  aheadCount: Int
+  "Commits locaux absents de la branche du même nom sur origin (null : pas de branche sur origin)."
+  unpushedCount: Int
+  "Fichiers modifiés ou non suivis."
+  changes: Int
+  prMerged: Boolean!
+  "Fusionnée : PR fusionnée, ou aucun commit absent de la branche principale."
+  merged: Boolean!
+  "Sessions non archivées."
+  activeSessions: Int!
+  "Sessions qui tournent."
+  busySessions: Int!
+  lastActivityAt: DateTime
+  "Dépendances (node_modules) : LINKED liées à l'instantané partagé, COPY copie à part que l'instantané de même lockfile peut remplacer, NO_SNAPSHOT sans instantané ; null : sans objet."
+  deps: WorksessionDepsState
+  "« Nettoyer les dossiers fusionnés » le supprimerait."
+  cleanable: Boolean!
+  "Pourquoi il ne serait pas nettoyé."
+  blocker: String
+}
+
+enum WorksessionDepsState {
+  LINKED
+  COPY
+  NO_SNAPSHOT
+}
+
+type WorksessionDepsShareResult {
+  relinked: [String!]!
+  skipped: [WorksessionCleanupSkip!]!
+}
+
+type WorksessionCleanupSkip {
+  name: String!
+  reason: String!
+}
+
+type WorksessionCleanupResult {
+  removed: [String!]!
+  freedBytes: Float!
+  skipped: [WorksessionCleanupSkip!]!
 }
 
 # ---- Aperçus ---------------------------------------------------------------------------------------
@@ -1251,11 +1360,11 @@ type PullRequestReview {
   state: String!
 }
 
-"Pull request GitHub du dépôt d'un projet, ou d'un autre dépôt (lue avec le jeton de la connexion GitHub) ; pour un dépôt hébergé par Skipper, pull request de sa forge Forgejo."
+"Pull request GitHub du dépôt d'un projet, ou d'un autre dépôt (lue avec le jeton de la connexion GitHub) ; pour un dépôt hébergé par Skipper, pull request de sa forge Forgejo ; pour un dépôt GitLab, merge request (numéro = iid)."
 type PullRequest {
-  "Dépôt « owner/name » (GitHub, ou Forgejo pour un dépôt hébergé)."
+  "Dépôt « owner/name » (GitHub, ou Forgejo pour un dépôt hébergé) ; chemin complet du projet pour GitLab."
   repo: String!
-  "Forge de la PR, pour les libellés : « GitHub » ou « Forgejo »."
+  "Forge de la PR, pour les libellés : « GitHub », « GitLab » ou « Forgejo »."
   forgeName: String!
   number: Int!
   title: String!
@@ -2581,6 +2690,8 @@ input CreateProjectInput {
   gitHosted: Boolean
   runnerConfig: JSON
   defaultPermissionMode: String
+  "Limite de contexte des nouvelles sessions (contextAction « compact » ou « reset », contextMaxTokens) ; null ou objet vide : aucune."
+  defaultContextCleanup: SessionCleanupInput
   taskInstructions: String
 }
 
@@ -2594,6 +2705,8 @@ input UpdateProjectInput {
   gitHosted: Boolean
   runnerConfig: JSON
   defaultPermissionMode: String
+  "Limite de contexte des nouvelles sessions (contextAction « compact » ou « reset », contextMaxTokens) ; null ou objet vide : aucune."
+  defaultContextCleanup: SessionCleanupInput
   taskInstructions: String
 }
 
@@ -2632,6 +2745,8 @@ input CreateSessionInput {
   autoStart: Boolean
   "Agent de projet qui joue la session (propriétaire) ; l'utilisateur connecté en est le demandeur."
   agentId: ID
+  "Limite de contexte (contextAction « compact » ou « reset » au-delà de contextMaxTokens, appliquée à la fin d'un tour) ; objet vide : aucune. Absente : le défaut du projet."
+  cleanup: SessionCleanupInput
 }
 
 type Mutation {
@@ -2731,6 +2846,8 @@ type Mutation {
   resetProjectRunner(id: ID!): Project!
   "Supprime le projet et tout ce qui en dépend : sessions, terminaux, work sessions, conteneur, dossier de travail. Irréversible. Dépôt hébergé (Forgejo) : supprimé avec deleteHostedRepo, sinon conservé dans Forgejo, archivé (lecture seule) et renommé."
   deleteProject(id: ID!, deleteHostedRepo: Boolean = false): Boolean!
+  "Importe une archive d'export de projet (tar.gz encodé en base64, produite par GET /api/projects/<id>/export.tar.gz) : contexte avec ses versions, tâches avec leur fil, réglages. Administrateurs du projet."
+  importProjectArchive(projectId: ID!, archive: String!, context: Boolean = true, tasks: Boolean = true, settings: Boolean = false): ProjectImportReport!
   createSession(input: CreateSessionInput!): Session!
   "Ouvre un chat dans l'espace personnel avec un premier message (config : permissionMode, model) et le lance aussitôt."
   createChat(text: String!, attachments: [AttachmentInput!], config: JSON): Session!
@@ -2849,6 +2966,14 @@ type Mutation {
   restoreWorksession(id: ID!): Worksession!
   "Supprime la work session (dossier, terminaux fermés) ; ses sessions sont arrêtées si elles tournent puis archivées avec son souvenir, sauf deleteSessions (suppression définitive, historique compris). La branche est conservée sauf deleteBranch."
   deleteWorksession(id: ID!, deleteBranch: Boolean = false, deleteSessions: Boolean = false): Boolean!
+  "Supprime les dossiers de travail fusionnés (tous ceux qui peuvent l'être, ou ceux de names) : rien n'y tourne, rien de non commité, commits dans la branche principale ou PR fusionnée. Leurs sessions sont archivées avec leur historique, la branche locale supprimée (membres)."
+  cleanMergedWorksessions(projectId: ID!, names: [String!]): WorksessionCleanupResult!
+  "Remplace par l'instantané partagé (liens physiques) les copies à part des dépendances des dossiers où rien ne tourne (tous, ou ceux de names) : la place des copies est rendue (membres)."
+  shareWorksessionDeps(projectId: ID!, names: [String!]): WorksessionDepsShareResult!
+  "Enregistre un dossier orphelin (git worktree sur une branche) comme work session (membres)."
+  importOrphanWorksession(projectId: ID!, name: String!): Worksession!
+  "Supprime un dossier orphelin, modifications comprises ; la branche est conservée (administrateurs)."
+  deleteOrphanWorksession(projectId: ID!, name: String!): Boolean!
   "Crée un élément dans le coffre du projet (administrateurs) ou, sans projectId, dans le coffre personnel."
   createVaultItem(projectId: ID, input: VaultItemInput!): VaultItem!
   "Met à jour un élément (permission MANAGE ; les champs absents sont inchangés)."
@@ -3048,7 +3173,7 @@ extend type Mutation {
 type SessionCleanup {
   "Les événements du transcript plus vieux que N jours sont supprimés (null : jamais)."
   retentionDays: Int
-  "Conversation de l'agent avant une exécution planifiée : « compact » (compacter) ou « reset » (repartir d'une conversation neuve) quand le contexte dépasse contextMaxTokens ; « fresh » : conversation neuve à chaque exécution. Null : rien."
+  "Conversation de l'agent : « compact » (compacter) ou « reset » (repartir d'une conversation neuve, avec un résumé) quand le contexte dépasse contextMaxTokens, avant une exécution planifiée et à la fin de chaque autre tour ; « fresh » : conversation neuve avant chaque exécution planifiée. Null : rien (l'interface propose seulement)."
   contextAction: String
   contextMaxTokens: Int
 }

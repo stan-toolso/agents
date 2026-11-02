@@ -364,11 +364,13 @@
 .cc-header-main > .cc-meta-more { flex: 0 1 auto; max-width: 35%; }
 .cc-header-main > .cc-meta:empty { display: none; }
 .cc-header-gauge { flex: 0 0 auto; display: inline-flex; align-items: center; }
-.cc-header-toggle {
+/* Bouton d'export Markdown, à côté du chevron et de même allure (classe distincte : l'audit mobile clique le chevron). */
+.cc-header-toggle, .cc-header-export {
   display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 32px; height: 28px;
   background: none; border: 1px solid var(--cc-border); border-radius: 4px; color: var(--cc-dim); font-size: 13px; cursor: pointer;
 }
-.cc-header-toggle:hover { color: var(--cc-fg); border-color: var(--cc-dim); }
+.cc-header-toggle:hover, .cc-header-export:hover { color: var(--cc-fg); border-color: var(--cc-dim); }
+.cc-header-export { text-decoration: none; }
 .cc-header.open { align-items: flex-start; }
 .cc-header.open .cc-header-main { display: block; }
 .cc-header.open .cc-header-main > .cc-title, .cc-header.open .cc-header-main > .cc-meta { white-space: normal; overflow: visible; max-width: none; }

@@ -15,7 +15,7 @@ import { useDialogs } from '../components/Dialogs';
 import ChatComposer from '../components/ChatComposer';
 import TaskModal from '../components/TaskModal';
 import { PullRequestStageBadge, TrackedPullRequestIndicators } from '../components/TrackedPullRequests';
-import { prRef, type TrackedPullRequest } from '../graphql/pullRequests';
+import { forgeOfUrl, prRef, type TrackedPullRequest } from '../graphql/pullRequests';
 import './dashboard.css';
 
 /**
@@ -474,7 +474,7 @@ function PullRequestRow({ pr }: { pr: TrackedPullRequest }) {
     <li>
       <i className="bi bi-git icon" />
       <div className="main">
-        <a href={pr.url} target="_blank" rel="noreferrer" className="title" title="Ouvrir sur GitHub">
+        <a href={pr.url} target="_blank" rel="noreferrer" className="title" title={`Ouvrir sur ${forgeOfUrl(pr.url)}`}>
           <span className="text-secondary">{prRef(pr)}</span> {pr.title}
         </a>
         <div className="meta">
