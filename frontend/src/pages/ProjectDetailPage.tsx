@@ -7,6 +7,7 @@ import { useTabTitle } from '../workbench/TabsContext';
 import { useGitTarget } from '../workbench/GitTargetContext';
 import ProjectHeader from '../components/ProjectHeader';
 import TaskModal from '../components/TaskModal';
+import WorksessionDiskCard from '../components/WorksessionDiskCard';
 
 import { CREATE_PROJECT_API_KEY, DELETE_PROJECT_API_KEY, PROJECT_API_KEYS, type ProjectApiKey } from '../graphql/tasks';
 import { apiBaseUrl } from '../apollo';
@@ -775,6 +776,7 @@ export default function ProjectDetailPage() {
       {!personal && <MembersCard projectId={project.id} canManage={isAdmin} />}
       <PermissionRulesCard projectId={project.id} canManage={canWrite} />
       <RunnerCard project={project} />
+      <WorksessionDiskCard projectId={project.id} canWrite={canWrite} isAdmin={isAdmin} />
       {isAdmin && !personal && <ApiKeysCard projectId={project.id} />}
 
       <h2 className="h5 mt-4">Sessions</h2>

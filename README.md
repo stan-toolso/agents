@@ -181,6 +181,7 @@ backend/
     worksessions/
       names.ts                 # noms dérivés de la consigne (libellé, dossier, branche), uniques dans le projet
       service.ts               # work sessions (dossier de travail de chaque session) : création (git worktree ou dossier), tâche, archivage, suppression, cwd
+      disk.ts                  # dossiers sur disque : place occupée (du), fusion, orphelins ; nettoyage des fusionnés, import, partage des dépendances
       mcp.ts                   # serveur MCP `worksessions` (list, create, delete)
     envFiles/
       template.ts              # modèles : références {{vault:élément.champ}}, chemins, clés dotenv (lecture, ajout, retrait), rendu
@@ -517,7 +518,15 @@ L'hébergement ne se désactive pas.
   `origin/<branche du projet>`, pas le HEAD du checkout principal qui n'avance qu'aux fusions faites depuis
   Skipper ; le checkout principal est au passage avancé sur origin si c'est une avance rapide) ; pour un
   projet sans dépôt, un dossier vide. La
-  suppression retire le dossier et conserve la branche sauf demande contraire. Sessions et terminaux portent
+  suppression retire le dossier et conserve la branche sauf demande contraire. La carte « Dossiers de travail » de la page
+  projet (`Project.worksessionDisk`, `worksessions/disk.ts`) liste les dossiers sur disque, archivés et orphelins compris :
+  place propre (un seul `du`, les fichiers liés aux instantanés de dépendances comptés une fois ; mesure en arrière-plan,
+  gardée 10 min), commits non fusionnés dans `origin/<branche principale>`, PR, tâche, dernière activité.
+  `cleanMergedWorksessions` supprime ceux où rien ne tourne, sans modification non commitée et fusionnés (commits dans la
+  branche principale, ou PR fusionnée et tout poussé), sauf le dossier encore vierge d'une session au travail : sessions
+  archivées avec leur historique, branche locale supprimée. Un dossier inconnu de la base (créé hors de Skipper) s'importe
+  (`importOrphanWorksession`) ou se supprime (`deleteOrphanWorksession`, administrateurs) ; `shareWorksessionDeps`
+  remplace des `node_modules` installés à part par l'instantané lié de même lockfile. Sessions et terminaux portent
   un `worksessionId`, obligatoire à la création, qui fixe leur dossier de travail ; une work session
   n'héberge qu'une session active (voir « Work session » plus haut).
 - **Session** : `projectId`, `worksessionId`, `ownerId` (auteur ; hérité de la session parente pour une
