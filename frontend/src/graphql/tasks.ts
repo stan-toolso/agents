@@ -288,3 +288,14 @@ export const TASK_PROJECT_MEMBERS = gql`
     }
   }
 `;
+
+/** Tâches du projet que l'on peut choisir comme dépendances (formulaire d'une tâche). */
+export const TASK_DEPENDENCY_CHOICES = gql`
+  query TaskDependencyChoices($projectId: ID) {
+    tasks(projectId: $projectId, status: [TODO, IN_PROGRESS, DONE], limit: 500) {
+      id
+      title
+      status
+    }
+  }
+`;

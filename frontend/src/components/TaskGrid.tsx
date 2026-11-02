@@ -24,7 +24,7 @@ import {
 import { PullRequestChip } from './PullRequests';
 import { TrackedPullRequestChip } from './TrackedPullRequests';
 import TaskActions from './TaskActions';
-import { formatPerson, isOverdue, TaskPriorityBadge, TaskStatusBadge, TaskTags } from './TaskBadges';
+import { formatPerson, isOverdue, TaskBlockedBadge, TaskPriorityBadge, TaskStatusBadge, TaskTags } from './TaskBadges';
 import type { LaunchTarget } from './TaskLaunchModal';
 
 export interface TaskGridProps {
@@ -309,9 +309,12 @@ function Cell({ task: t, col, onEdit, onTag, target }: { task: Task; col: TaskCo
   switch (col.key) {
     case 'title':
       return (
-        <Link to={`/tasks/${t.id}`} className="fw-semibold text-reset text-decoration-none">
-          {t.title}
-        </Link>
+        <>
+          <TaskBlockedBadge task={t} short className="me-1" />
+          <Link to={`/tasks/${t.id}`} className="fw-semibold text-reset text-decoration-none">
+            {t.title}
+          </Link>
+        </>
       );
     case 'project':
       return <Link to={`/projects/${t.project.id}/tasks`}>{t.project.name}</Link>;

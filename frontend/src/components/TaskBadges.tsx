@@ -1,4 +1,5 @@
-import type { TaskPerson, TaskPriority, TaskStatus } from '../graphql/operations';
+import { Link } from 'react-router-dom';
+import type { TaskPerson, TaskPriority, TaskRef, TaskStatus } from '../graphql/operations';
 
 const STATUS: Record<TaskStatus, string> = { TODO: 'À faire', IN_PROGRESS: 'En cours', DONE: 'Terminée', CANCELLED: 'Annulée' };
 const PRIORITY: Record<TaskPriority, { label: string; icon: string }> = {
@@ -97,3 +98,32 @@ export function Linkified({ text }: { text: string }) {
 }
 
 export const isOverdue = (t: { dueDate: string | null; status: TaskStatus }) => Boolean(t.dueDate) && t.status !== 'DONE' && t.status !== 'CANCELLED' && t.dueDate! < new Date().toISOString().slice(0, 10);
+
+/**
+ * « Bloquée » : la tâche attend des dépendances non terminées (elle ne peut pas être confiée à un agent avant) ; le
+ * cadenas s'accompagne d'un éclair quand elle sera lancée automatiquement une fois débloquée.
+ */
+export function TaskBlockedBadge({ task, short = false, className = '' }: { task: { blockedBy: TaskRef[]; autoStartWhenUnblocked: boolean }; short?: boolean; className?: string }) {
+  if (!task.blockedBy.length) return null;
+  const title = `Bloquée par ${task.blockedBy.map((t) => `« ${t.title} » (${STATUS[t.status].toLowerCase()})`).join(', ')}${task.autoStartWhenUnblocked ? ' · lancée automatiquement une fois débloquée' : ''}`;
+  return (
+    <span className={`task-blocked ${className}`} title={title}>
+      <i className="bi bi-lock" aria-label={short ? 'bloquée' : undefined} />
+      {!short && ` bloquée${task.blockedBy.length > 1 ? ` (${task.blockedBy.length})` : ''}`}
+      {task.autoStartWhenUnblocked && <i className="bi bi-lightning-charge ms-1" aria-label="lancement automatique" />}
+    </span>
+  );
+}
+
+/** Liste de tâches liées (dépendances, tâches qui en dépendent), chacune avec son statut et un lien vers sa page. */
+export function TaskRefList({ tasks }: { tasks: TaskRef[] }) {
+  return (
+    <ul className="task-ref-list">
+      {tasks.map((t) => (
+        <li key={t.id}>
+          <TaskStatusBadge status={t.status} /> <Link to={`/tasks/${t.id}`}>{t.title}</Link>
+        </li>
+      ))}
+    </ul>
+  );
+}

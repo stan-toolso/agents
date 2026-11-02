@@ -5,6 +5,7 @@ import { projectRepository } from './repository.js';
 import { projectPermissionModes, type CreateProjectInput, type Project, type UpdateProjectInput } from './types.js';
 import { slugify } from './slug.js';
 import { ensureWorkspace } from './workspace.js';
+import { normalizeContextLimit } from '../sessions/context.js';
 
 /** Dérive un identifiant de dossier sûr à partir du nom du projet. */
 export { slugify };
@@ -59,6 +60,7 @@ export const projectService = {
     if (await projectRepository.slugExists(slug)) throw new AppError(`Le slug "${slug}" est déjà utilisé`);
     validatePermissionMode(input.defaultPermissionMode);
     validateRunnerConfig(input.runnerConfig);
+    input = { ...input, defaultContextCleanup: normalizeContextLimit(input.defaultContextCleanup) };
     const hosted = Boolean(input.gitHosted);
     if (hosted && input.gitUrl?.trim()) throw new AppError("Un dépôt hébergé par Skipper n'a pas d'adresse distante : choisissez l'un ou l'autre");
     if (hosted && !gitServer.available()) throw new AppError("L'hébergement de dépôts n'est pas configuré sur ce serveur (Forgejo)");
@@ -82,6 +84,7 @@ export const projectService = {
     validateRunnerConfig(input.runnerConfig);
     const before = await this.get(id);
     const patch: UpdateProjectInput = { ...input, name: input.name?.trim() };
+    if (input.defaultContextCleanup !== undefined) patch.defaultContextCleanup = normalizeContextLimit(input.defaultContextCleanup);
     if (before.gitHosted) {
       // L'hébergement ne se désactive pas (les dossiers de travail sont des clones du dépôt hébergé) et n'a pas d'adresse.
       if (input.gitHosted === false) throw new AppError("L'hébergement du dépôt par Skipper ne se désactive pas : supprimez le projet, ou créez-en un autre");

@@ -27,6 +27,11 @@ const task = (over: Partial<Task> & { id: string }): Task => ({
   session: null,
   createdBySession: null,
   pullRequest: null,
+  dependsOn: [],
+  blockedBy: [],
+  dependents: [],
+  autoStartWhenUnblocked: false,
+  autoStartBy: null,
   ...over,
 });
 

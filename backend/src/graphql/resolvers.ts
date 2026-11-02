@@ -42,6 +42,7 @@ import { repoBrowser, type RepoEntry, type RepoRef } from '../gitServer/browse.j
 import { gitServer } from '../gitServer/service.js';
 import type { GitBackup } from '../gitServer/backups.js';
 import { archiveSessionCascade, archiveWorksessionCascade, deleteProjectCascade, deleteSessionCascade, deleteWorksessionCascade, restoreWorksessionCascade } from '../projects/cleanup.js';
+import { importProjectArchive, MAX_IMPORT_BYTES } from '../exports/service.js';
 import { runner, type RunnerConfig } from '../runners/index.js';
 import { containerMonitor } from '../runners/monitor.js';
 import { runnerLifecycle } from '../runners/lifecycle.js';
@@ -183,6 +184,8 @@ interface GqlTaskInput {
   reporter?: TaskPersonInput | null;
   attachments?: AttachmentInput[] | null;
   removeAttachmentIds?: string[] | null;
+  dependsOnIds?: string[] | null;
+  autoStartWhenUnblocked?: boolean | null;
 }
 const toTaskInput = (i: GqlTaskInput) => ({
   title: i.title ?? undefined,
@@ -199,7 +202,11 @@ const toTaskInput = (i: GqlTaskInput) => ({
   reporter: i.reporter,
   attachments: i.attachments ?? null,
   removeAttachmentIds: i.removeAttachmentIds ?? null,
+  dependsOn: i.dependsOnIds ?? undefined,
+  autoStartWhenUnblocked: i.autoStartWhenUnblocked ?? undefined,
 });
+/** Tâches d'identifiants donnés, dans leur ordre (chargeur groupé de la requête). */
+const tasksByIds = async (ctx: Ctx, ids: string[]) => (await Promise.all(ids.map((id) => loadersOf(ctx).task(id)))).filter((t): t is Task => Boolean(t));
 const actorOf = (user: User) => ({ type: 'human' as const, userId: user.id, name: user.name || user.email });
 const fromGqlPermission = (p: string): VaultPermission => p.toLowerCase() as VaultPermission;
 const fromGqlScope = (sc: string): VaultLinkScope => sc.toLowerCase() as VaultLinkScope;
@@ -396,6 +403,11 @@ export const resolvers = {
     pullRequests: (t: Task) => trackedPullRequestService.forTask(t.id),
     worksession: async (t: Task) => (await worksessionRepository.findByTask(t.id))[0] ?? null,
     attachments: (t: Task) => (t.attachmentCount ? taskService.attachments(t.id, null) : []),
+    dependsOn: (t: Task, _: unknown, ctx: Ctx) => tasksByIds(ctx, t.dependsOnIds),
+    blockedBy: (t: Task, _: unknown, ctx: Ctx) => tasksByIds(ctx, t.blockedByIds),
+    blocked: (t: Task) => t.blockedByIds.length > 0,
+    dependents: (t: Task, _: unknown, ctx: Ctx) => tasksByIds(ctx, t.dependentIds),
+    autoStartBy: (t: Task, _: unknown, ctx: Ctx) => userOrNull(ctx, t.autoStartById),
   },
 
   TaskComment: {
@@ -1528,6 +1540,13 @@ export const resolvers = {
       await personalService.assertNotPersonal(args.id, 'Supprimer');
       return deleteProjectCascade(args.id, { deleteHostedRepo: Boolean(args.deleteHostedRepo) });
     },
+    importProjectArchive: async (_: unknown, args: { projectId: string; archive: string; context?: boolean | null; tasks?: boolean | null; settings?: boolean | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'admin');
+      const archive = Buffer.from(args.archive, 'base64');
+      if (!archive.length) throw new AppError('Archive vide');
+      if (archive.length > MAX_IMPORT_BYTES) throw new AppError(`Archive trop volumineuse (${Math.round(MAX_IMPORT_BYTES / 1024 / 1024)} Mo au plus)`);
+      return importProjectArchive(args.projectId, archive, { context: args.context !== false, tasks: args.tasks !== false, settings: Boolean(args.settings) });
+    },
     createSession: async (
       _: unknown,
       { input }: { input: CreateSessionInput & { autoStart?: boolean | null } },
@@ -1645,7 +1664,7 @@ export const resolvers = {
     markAllNotificationsRead: async (_: unknown, __: unknown, ctx: Ctx) => notificationService.markAllRead({ projectIds: await accessibleProjectIds(ctx), admin: requireUser(ctx).isAdmin }),
     createTask: async (_: unknown, { input }: { input: GqlTaskInput & { projectId: string; title: string } }, ctx: Ctx) => {
       await requireProject(ctx, input.projectId, 'member');
-      return taskService.create(input.projectId, { ...toTaskInput(input), title: input.title }, HUMAN);
+      return taskService.create(input.projectId, { ...toTaskInput(input), title: input.title }, actorOf(requireUser(ctx)));
     },
     updateTask: async (_: unknown, { id, input }: { id: string; input: GqlTaskInput }, ctx: Ctx) => {
       await guardTask(ctx, id, 'member');

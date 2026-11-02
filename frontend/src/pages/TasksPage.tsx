@@ -17,7 +17,7 @@ import TaskActions from '../components/TaskActions';
 import TaskDashboard from '../components/TaskDashboard';
 import TaskGrid from '../components/TaskGrid';
 import type { TaskColumnKey, TaskFilters } from '../lib/taskTable';
-import { isOverdue, PersonChip, TaskPriorityBadge, TaskStatusBadge, TaskTags } from '../components/TaskBadges';
+import { isOverdue, PersonChip, TaskBlockedBadge, TaskPriorityBadge, TaskStatusBadge, TaskTags } from '../components/TaskBadges';
 import TaskModal from '../components/TaskModal';
 import type { LaunchTarget } from '../components/TaskLaunchModal';
 
@@ -50,8 +50,9 @@ function TaskCard({ task, showProject, onEdit, target, onTag }: { task: Task; sh
           </Link>
           <TaskPriorityBadge priority={task.priority} />
         </div>
-        {(task.statusTag || task.tags.length > 0) && (
+        {(task.statusTag || task.tags.length > 0 || task.blockedBy.length > 0) && (
           <div className="mt-1 d-flex flex-wrap gap-1 align-items-center">
+            <TaskBlockedBadge task={task} />
             {task.statusTag && <TaskStatusBadge status={task.status} statusTag={task.statusTag} />}
             <TaskTags tags={task.tags} onSelect={onTag} />
           </div>

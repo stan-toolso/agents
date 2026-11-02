@@ -8,7 +8,7 @@ import { worksessionRepository } from '../worksessions/repository.js';
 import { namesFromText, uniqueName } from '../worksessions/names.js';
 import { worksessionService } from '../worksessions/service.js';
 import type { Worksession } from '../worksessions/types.js';
-import { taskService } from './service.js';
+import { assertUnblocked, taskService } from './service.js';
 import { asInstructionAttachments, describeAttachment, fitInInstruction } from './attachments.js';
 import type { Task, TaskAttachment, TaskComment } from './types.js';
 
@@ -82,6 +82,7 @@ export async function taskWorksession(task: Task, actorId?: string | null): Prom
 export async function startTaskSession(taskId: string, options: StartTaskOptions = {}): Promise<Session> {
   const task = await taskService.get(taskId);
   if (!task) throw new NotFoundError('Tâche introuvable');
+  await assertUnblocked(task);
   const project = await projectService.get(task.projectId);
 
   let worksession: Worksession;
@@ -150,6 +151,7 @@ export async function resumeTaskSession(taskId: string, text: string): Promise<S
   if (!text.trim()) throw new AppError('Le message est vide');
   const task = await taskService.get(taskId);
   if (!task) throw new NotFoundError('Tâche introuvable');
+  await assertUnblocked(task);
   const session = await resumableTaskSession(task);
   if (!session) throw new AppError('Aucune session de cette tâche à reprendre : confiez-la à une nouvelle session');
   await worksessionService.forTask(task.id); // restaurée si elle était archivée

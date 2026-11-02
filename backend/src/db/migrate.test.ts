@@ -126,3 +126,42 @@ describe.skipIf(!adminUrl)('runMigrations : migration en échec (PostgreSQL)', (
     expect(partial.rows[0].t).toBeNull();
   });
 });
+
+describe.skipIf(!adminUrl)('runMigrations : migration hors ordre (PostgreSQL)', () => {
+  let db: { name: string; url: string };
+  let migrate: Awaited<ReturnType<typeof loadMigrate>>;
+
+  beforeAll(async () => {
+    db = await createDatabase('late');
+    migrate = await loadMigrate(db.url);
+    await migrate.runMigrations();
+    await migrate.pool.end();
+    // Une branche fusionnée après coup : sa migration se classe avant la dernière appliquée.
+    vi.doMock('node:fs/promises', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('node:fs/promises')>();
+      return {
+        ...actual,
+        readdir: (async (dir: string) => [...(await actual.readdir(dir)), '000_late.sql']) as typeof actual.readdir,
+        readFile: (async (file: string, encoding: BufferEncoding) =>
+          path.basename(file) === '000_late.sql' ? 'SELECT 1;' : actual.readFile(file, encoding)) as typeof actual.readFile,
+      };
+    });
+    migrate = await loadMigrate(db.url);
+  });
+
+  afterEach(() => {
+    vi.doUnmock('node:fs/promises');
+  });
+
+  afterAll(async () => {
+    await migrate?.pool.end();
+    if (db) await dropDatabase(db.name);
+  });
+
+  it('l’applique quand même, avec un avertissement', async () => {
+    const { log } = await import('../log.js');
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    await expect(migrate.runMigrations()).resolves.toEqual(['000_late.sql']);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/migration 000_late\.sql appliquée hors ordre/));
+  });
+});
