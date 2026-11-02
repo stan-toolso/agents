@@ -314,3 +314,42 @@ export function openItemsOf(paths: string[]): { projectIds: string[]; sessionIds
     taskIds: pick(/\/tasks\/([0-9a-fA-F-]{36})/g),
   };
 }
+
+/** Sessions d'une personne ou d'un agent, rangées sous une ligne repliable de la sidebar. */
+export interface OwnerGroup<T> {
+  /** Identifiant du propriétaire (personne ou agent) : clé de l'état déplié. */
+  key: string;
+  owner: NonNullable<SidebarSession['owner']>;
+  agent: SidebarSession['agent'] | null;
+  items: T[];
+}
+
+/**
+ * Sépare les dossiers d'un projet : ceux auxquels la personne participe (et le checkout principal) restent à plat,
+ * ceux des autres sont rangés par propriétaire, une personne ou un agent par groupe, pour ne pas noyer les siens sous
+ * le travail des autres. Les groupes qui attendent une réponse ou travaillent passent devant, puis par nom.
+ */
+export function ownerGroups<T extends { session: Pick<SidebarSession, 'owner' | 'requestedBy' | 'agent' | 'status' | 'activity' | 'pendingRequestCount'> | null }>(
+  items: T[],
+  userId: string | null,
+): { mine: T[]; groups: OwnerGroup<T>[] } {
+  const mine: T[] = [];
+  const byOwner = new Map<string, OwnerGroup<T>>();
+  for (const item of items) {
+    const s = item.session;
+    if (!s || !s.owner || participates(s, userId)) {
+      mine.push(item);
+      continue;
+    }
+    const group = byOwner.get(s.owner.id) ?? { key: s.owner.id, owner: s.owner, agent: s.agent ?? null, items: [] };
+    group.items.push(item);
+    byOwner.set(s.owner.id, group);
+  }
+  const RANK: Record<NonNullable<WorkspaceState>, number> = { ask: 0, busy: 1, idle: 2 };
+  const rank = (g: OwnerGroup<T>) => {
+    const state = workspaceState(g.items.map((i) => i.session!));
+    return state ? RANK[state] : 3;
+  };
+  const groups = [...byOwner.values()].sort((a, b) => rank(a) - rank(b) || (a.agent?.name ?? a.owner.name).localeCompare(b.agent?.name ?? b.owner.name, 'fr'));
+  return { mine, groups };
+}

@@ -37,6 +37,24 @@ async function line(s: Session, sessionId: string, project: Project, scope: Proj
   return `- ${s.id} · ${s.name} · ${stateOf(s)}${wt}${where}${relation}`;
 }
 
+/**
+ * Quand une session peut s'archiver elle-même (outil `sessions.archive`). `agent` : session jouée par un agent du
+ * projet, qui range ses sessions sans qu'on le lui demande ; `child` : session lancée par une autre session, qui la
+ * range ; sinon la session est pilotée par une personne, dont elle attend l'accord.
+ */
+export function archivePromptSummary(opts: { agent?: boolean; child?: boolean } = {}): string {
+  const own = opts.child
+    ? "Cette session a été lancée par une autre session : c'est elle qui l'archivera une fois ta réponse lue ; ne l'archive pas toi-même."
+    : opts.agent
+      ? "Tu es un agent : range tes sessions toi-même. Archive cette session quand ton travail y est fini, c'est-à-dire quand tout ceci est vrai : ce qu'on t'a demandé est fait ou rendu (tâche passée au bon statut ou à la bonne étiquette d'état, PR ouverte, compte rendu posté dans le fil de la tâche ou réponse donnée) ; rien n'est en attente dans le dossier (modifications commitées et poussées, ou sans valeur) ; aucune session que tu as lancée ne tourne encore ; et tu n'attends pas de réponse dans cette session même (conversation en cours avec la personne qui l'a demandée). Une réponse attendue dans le fil d'une tâche (question, retour d'essai, revue, accord) ne retient pas la session : le message te convoquera à nouveau. Avant d'archiver, écris dans le fil de la tâche ce qu'il faut savoir pour la suite : si on te convoque plus tard sur cette tâche, une nouvelle session repartira de là."
+      : "Cette session est pilotée par une personne : ne l'archive que si elle le demande.";
+  return [
+    "Archiver une session (outil `sessions.archive`, sans `id` pour cette session) la range : elle disparaît des sessions actives, son dossier de travail est archivé (terminaux fermés, fichiers et branche conservés) ; transcript, coût et liens de tâche restent consultables, et on la restaure ou la relance depuis l'historique. Pour cette session, l'archivage a lieu à la fin de ton tour : appelle l'outil en dernier, puis termine ta réponse.",
+    own,
+    "Archive les sessions que tu as lancées (`sessions.archive` avec leur `id`) dès que tu as lu leur réponse et qu'elles n'ont plus rien à faire.",
+  ].join('\n');
+}
+
 /** Paragraphe du prompt système décrivant ces outils aux agents. */
 export function sessionsPromptSummary(project: Pick<Project, 'gitUrl'>, opts: { chat?: boolean } = {}): string {
   return [
@@ -181,6 +199,22 @@ export function createSessionsMcpServer(project: Project, sessionId: string, sco
           const s = await sessionService.end(child.id);
           return `Fin demandée :\n${await describe(s)}`;
         }),
+      ),
+      tool(
+        'archive',
+        "Archive une session : cette session sans id (à la fin de ton tour : termine d'abord ta réponse), ou une session que tu as lancée (id). Elle disparaît des sessions actives avec son dossier de travail (fichiers et branche conservés) ; son historique reste consultable et elle peut être restaurée. N'archive que du travail fini, rendu, et qui n'attend la réponse de personne.",
+        {
+          id: z.string().optional().describe("Session que tu as lancée ; sans id : cette session"),
+          reason: z.string().optional().describe('Pourquoi elle peut être rangée (une phrase, gardée dans son transcript)'),
+        },
+        async ({ id, reason }) =>
+          run(async () => {
+            const target = id && id !== sessionId ? await getChild(id) : await getInScope(sessionId);
+            if (target.archivedAt) return 'La session est déjà archivée.';
+            const deferred = await sessionService.archiveWhenDone(target.id, reason?.trim() || null);
+            if (target.id === sessionId) return deferred ? "Cette session sera archivée à la fin de ce tour : termine ta réponse maintenant, sans autre outil." : 'Session archivée.';
+            return deferred ? `La session termine son tour, puis sera archivée :\n${await describe(target)}` : 'Session archivée.';
+          }),
       ),
     ],
   });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { WorkspaceIndex, attachedElsewhere, sessionGroups, sessionTree, subagentsSummary } from './workspaces';
+import { WorkspaceIndex, attachedElsewhere, ownerGroups, sessionGroups, sessionTree, subagentsSummary } from './workspaces';
 
 const s = (id: string, parent: string | null = null) => ({ id, name: `Session ${id}`, parentSession: parent ? { id: parent } : null });
 
@@ -142,5 +142,26 @@ describe('WorkspaceIndex', () => {
     const index = new WorkspaceIndex([project([session('a', { id: 'w1', branch: 'x' }), session('b', { id: 'w1', branch: 'x' })], [{ id: 't1', name: 'T1', status: 'RUNNING', worksession: { id: 'w1' } }])]);
     expect(index.get('/sessions/a')!.terminals.map((t) => t.id)).toEqual(['t1']);
     expect(index.get('/sessions/b')!.terminals).toEqual([]);
+  });
+});
+
+describe('ownerGroups', () => {
+  const ws = (id: string, owner: string | null, over: Record<string, unknown> = {}) => ({
+    key: id,
+    session: { owner: owner ? { id: owner, name: owner === 'a1' ? 'Chris' : `Personne ${owner}`, avatarUrl: null } : null, requestedBy: null, agent: owner === 'a1' ? { id: 'a1', name: 'Chris', avatar: { emoji: null, color: null } } : null, status: 'COMPLETED' as const, activity: null, pendingRequestCount: 0, ...over },
+  });
+
+  it('garde à plat les dossiers de la personne et range les autres par propriétaire', () => {
+    const { mine, groups } = ownerGroups([ws('m1', 'me'), ws('x1', 'u2'), ws('c1', 'a1'), ws('c2', 'a1'), ws('legacy', null), ws('asked', 'a1', { requestedBy: { id: 'me' } })], 'me');
+    expect(mine.map((w) => w.key)).toEqual(['m1', 'legacy', 'asked']);
+    expect(groups.map((g) => [g.key, g.agent?.name ?? null, g.items.map((w) => w.key)])).toEqual([
+      ['a1', 'Chris', ['c1', 'c2']],
+      ['u2', null, ['x1']],
+    ]);
+  });
+
+  it('fait passer devant les groupes qui attendent une réponse ou travaillent', () => {
+    const { groups } = ownerGroups([ws('c1', 'a1'), ws('x1', 'u2', { status: 'RUNNING', activity: 'BUSY' })], 'me');
+    expect(groups.map((g) => g.key)).toEqual(['u2', 'a1']);
   });
 });

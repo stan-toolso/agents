@@ -15,6 +15,7 @@ import { handleGitHttpRoute } from './gitServer/httpRoute.js';
 import { gitServer } from './gitServer/service.js';
 import { registerTaskSessionFeed } from './tasks/sessionFeed.js';
 import { registerAgentTriggers } from './agents/triggers.js';
+import { archiveSessionCascade } from './projects/cleanup.js';
 import { agentService } from './agents/service.js';
 import { vaultService } from './vault/service.js';
 import { authSession, readCookie, SESSION_COOKIE } from './auth/session.js';
@@ -121,6 +122,8 @@ async function main() {
   registerTaskSessionFeed();
   registerWorkflowTriggers();
   registerAgentTriggers();
+  // Une session qui s'archive elle-même (outil sessions.archive) l'est en fin de tour, avec son dossier de travail.
+  sessionService.onArchiveWhenDone(archiveSessionCascade);
   const closedTerminals = await terminalService.recoverAfterRestart(liveInstances);
   if (closedTerminals) log.info(`[terminals] ${closedTerminals} terminal(aux) fermé(s)`);
   // Conteneurs créés avec d'anciens paramètres (ou une image depuis reconstruite) : supprimés maintenant que rien n'y

@@ -44,7 +44,7 @@ import { taskService } from '../../tasks/service.js';
 import { createWorksessionsMcpServer } from '../../worksessions/mcp.js';
 import { createEnvMcpServer } from '../../envFiles/mcp.js';
 import { envFileService } from '../../envFiles/service.js';
-import { createSessionsMcpServer, sessionsPromptSummary } from '../mcp.js';
+import { archivePromptSummary, createSessionsMcpServer, sessionsPromptSummary } from '../mcp.js';
 import { claudeSettings, cliEnv } from '../../settings/claude.js';
 import { usageService } from '../../settings/usage.js';
 import { describeRejection, rateLimitService } from '../../settings/rateLimits.js';
@@ -259,6 +259,7 @@ export class ClaudeProvider implements SessionProvider {
         vaultService.promptSummary(vaultItems, ctx.project),
         chat ? '' : await envFileService.promptSummary(ctx.project.id),
         sessionsPromptSummary(ctx.project, { chat }),
+        archivePromptSummary({ agent: Boolean(agent), child: Boolean(ctx.session.parentSessionId) }),
         googleAccountService.promptSummary(googleAccounts),
         chat ? '' : sharedPagesPrompt(),
         ctx.session.worksessionId && !chat ? previewPrompt(previewsEnabled(), ctx.session.worksessionId) : '',
@@ -359,7 +360,7 @@ export class ClaudeProvider implements SessionProvider {
       // Fichiers d'environnement : libres (modèles du projet en base, écriture dans le seul dossier de travail ; une valeur
       // du coffre n'y arrive que si l'élément le permet, choix de qui le gère).
       // Aperçu : libre (le même bouton que l'onglet « Aperçu », dans le conteneur du projet, sans coût ni effet extérieur).
-      allowedTools: review ? REVIEW_ALLOWED_TOOLS : [...allowedTools, ...projectRules.map(formatRule), 'mcp__context', ...TASKS_FREE_TOOLS, 'mcp__vault', 'mcp__worksessions__list', 'mcp__worksessions__create', 'mcp__sessions__list', 'mcp__sessions__get', 'mcp__sessions__wait', 'mcp__sessions__end', 'mcp__pages__list', 'mcp__projects', ...AGENTS_FREE_TOOLS, ...(chat ? [] : ['mcp__env']), ...(previewWorksession ? ['mcp__preview'] : []), ...(browserServer ? browserReadTools : []), ...(googleAccounts.length ? googleReadTools(googleAccounts) : [])],
+      allowedTools: review ? REVIEW_ALLOWED_TOOLS : [...allowedTools, ...projectRules.map(formatRule), 'mcp__context', ...TASKS_FREE_TOOLS, 'mcp__vault', 'mcp__worksessions__list', 'mcp__worksessions__create', 'mcp__sessions__list', 'mcp__sessions__get', 'mcp__sessions__wait', 'mcp__sessions__end', 'mcp__sessions__archive', 'mcp__pages__list', 'mcp__projects', ...AGENTS_FREE_TOOLS, ...(chat ? [] : ['mcp__env']), ...(previewWorksession ? ['mcp__preview'] : []), ...(browserServer ? browserReadTools : []), ...(googleAccounts.length ? googleReadTools(googleAccounts) : [])],
       ...(review ? { disallowedTools: REVIEW_DISALLOWED_TOOLS } : {}),
       // Le coffre saisit des secrets dans le navigateur : les outils qui pourraient relire la valeur sont retirés à l'agent.
       ...(browserServer && vaultBrowser ? { disallowedTools: ['mcp__playwright__browser_evaluate', 'mcp__playwright__browser_run_code'] } : {}),

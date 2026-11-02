@@ -11,7 +11,7 @@ import type { Session } from '../sessions/types.js';
 const { projectService, userService, sessionService, sessionRepository, taskService, worksessionService } = vi.hoisted(() => ({
   projectService: { listForUser: vi.fn(), get: vi.fn() },
   userService: { memberRoleFor: vi.fn(), get: vi.fn() },
-  sessionService: { list: vi.fn(), get: vi.fn(), create: vi.fn(), waitForIdle: vi.fn(), sendMessage: vi.fn(), end: vi.fn(), isRunning: vi.fn() },
+  sessionService: { list: vi.fn(), get: vi.fn(), create: vi.fn(), waitForIdle: vi.fn(), sendMessage: vi.fn(), end: vi.fn(), isRunning: vi.fn(), archiveWhenDone: vi.fn() },
   sessionRepository: { list: vi.fn(async () => []), findById: vi.fn(), findLastEvent: vi.fn(async () => null) },
   taskService: { list: vi.fn(async () => []), get: vi.fn(), create: vi.fn(), update: vi.fn(), comments: vi.fn(async () => []), attachments: vi.fn(async () => []), addComment: vi.fn() },
   worksessionService: { listByProject: vi.fn(async () => []), get: vi.fn(), gitInfo: vi.fn(async () => null), exists: vi.fn(async () => true), create: vi.fn() },
@@ -129,6 +129,23 @@ describe('paramètre project des serveurs sessions, tasks et worksessions', () =
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toContain('rôle membre');
     expect(taskService.create).not.toHaveBeenCalled();
+  });
+
+  it('archive cette session en fin de tour, une session lancée par elle, jamais une autre', async () => {
+    const mine = { id: 's1', name: 'Moi', status: 'running', activity: 'busy', projectId: 'p1', worksessionId: null, parentSessionId: null, archivedAt: null, error: null };
+    const child = { ...mine, id: 's2', name: 'Fille', status: 'completed', parentSessionId: 's1' };
+    const other = { ...mine, id: 's3', name: 'Autre', status: 'completed' };
+    sessionService.get.mockImplementation(async (id: string) => ({ s1: mine, s2: child, s3: other })[id]);
+    sessionService.archiveWhenDone.mockReset().mockImplementation(async (id: string) => id === 's1');
+    const client = await connect(createSessionsMcpServer(curso, 's1'));
+    const self = (await client.callTool({ name: 'archive', arguments: { reason: 'PR ouverte, compte rendu posté' } })) as ToolResult;
+    expect(self.content[0].text).toContain('fin de ce tour');
+    expect(sessionService.archiveWhenDone).toHaveBeenCalledWith('s1', 'PR ouverte, compte rendu posté');
+    expect(((await client.callTool({ name: 'archive', arguments: { id: 's2' } })) as ToolResult).isError).toBeFalsy();
+    expect(sessionService.archiveWhenDone).toHaveBeenCalledWith('s2', null);
+    const refused = (await client.callTool({ name: 'archive', arguments: { id: 's3' } })) as ToolResult;
+    expect(refused.isError).toBe(true);
+    expect(sessionService.archiveWhenDone).toHaveBeenCalledTimes(2);
   });
 
   it("ignore un paramètre project hors d'un espace personnel : le schéma ne le déclare pas, l'outil reste dans son projet", async () => {

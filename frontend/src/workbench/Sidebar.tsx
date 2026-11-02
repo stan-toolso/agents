@@ -20,7 +20,7 @@ import AddMenu from './AddMenu';
 import { useDeletions } from './useDeletions';
 import { useTabs } from './TabsContext';
 import { SubagentsCount, initialsOf, sessionDotClass } from './WorkspaceTabs';
-import { attachedElsewhere, mineFirst, openItemsOf, participates, sessionGroups, subagentsSummary, workspaceState, type SessionNode, type SidebarProject, type SidebarSession, type SidebarTerminal, type Workspace } from './workspaces';
+import { attachedElsewhere, mineFirst, openItemsOf, ownerGroups, participates, sessionGroups, subagentsSummary, workspaceState, type SessionNode, type SidebarProject, type SidebarSession, type OwnerGroup, type SidebarTerminal, type Workspace } from './workspaces';
 
 const EXPANDED_KEY = 'skipper.workbench.expanded';
 const FILTER_KEY = 'skipper.workbench.sessionFilter';
@@ -286,6 +286,30 @@ function SessionRow({ s, indent, depth = 0, byAgent = false, parentName = null, 
       {children.length > 0 && <SubagentsRow children={children.map((c) => c.session)} indent={left + CHILD_INDENT} expanded={expanded} onToggle={() => setOpen(!expanded)} />}
       {expanded && children.map((c) => <SessionRow key={c.session.id} s={c.session} indent={indent} depth={c.depth} byAgent parentName={c.parentName} elsewhere={c.session.wsKey !== wsKey ? (c.session.wsDeleted ? 'dossier supprimé' : c.session.wsBranch ?? c.session.wsName) : null} />)}
     </>
+  );
+}
+
+/**
+ * Ligne repliable des sessions d'une autre personne ou d'un agent dans un projet : pastille (avatar de l'agent ou
+ * initiales), nom, nombre de sessions et leur état (réponse attendue, au travail…).
+ */
+function OwnerGroupRow({ group, expanded, onToggle }: { group: OwnerGroup<Workspace>; expanded: boolean; onToggle: () => void }) {
+  const sessions = group.items.map((ws) => ws.session!);
+  const sum = subagentsSummary(sessions);
+  const who = group.agent ? `l'agent ${group.agent.name}` : group.owner.name;
+  const count = `${sessions.length} session${sessions.length > 1 ? 's' : ''}`;
+  return (
+    <button type="button" className={`wb-row wb-row-btn wb-owner-group${expanded ? ' open' : ''}`} style={{ paddingLeft: 18 }} title={`${count} de ${who} · cliquer pour ${expanded ? 'replier' : 'déplier'}`} onClick={onToggle}>
+      {group.agent ? (
+        <AgentAvatar agent={group.agent} size={16} className="wb-owner wb-owner-agent" />
+      ) : (
+        <span className="wb-owner">{initialsOf(group.owner.name)}</span>
+      )}
+      <span className="wb-row-label">{group.agent?.name ?? group.owner.name}</span>
+      {sum.state && <span className={`wb-dot ${sum.state}`} />}
+      {sum.pending > 0 ? <span className="wb-badge">{sum.pending}</span> : <span className="wb-state">{sessions.length}</span>}
+      <i className={`bi bi-chevron-${expanded ? 'down' : 'right'} wb-subagents-chevron`} />
+    </button>
   );
 }
 
@@ -773,26 +797,43 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
                   // Un sous-agent dont la parente (ou une aïeule) est dans le projet n'a pas sa carte : il est listé sous elle.
                   return !attachedElsewhere(ws.session!, new Set([ws.session!.id]), poolById);
                 });
-                const visible = cards.filter((ws) => ws.primary || !(filter === 'mine' && !showOthers) || participates(ws.session!, userId) || location.pathname.startsWith(`/sessions/${ws.session!.id}`));
-                const hiddenOthers = cards.length - visible.length;
+                // Les dossiers de la personne restent à plat ; ceux des autres sont rangés par personne ou agent, sous une
+                // ligne repliable. Avec le filtre « les miennes », ces groupes sont cachés (comptés), sauf celui de la page affichée.
+                const isShown = (ws: Workspace) => location.pathname.startsWith(`/sessions/${ws.session!.id}`);
+                const { mine: mineCards, groups } = ownerGroups(cards, userId);
+                const othersVisible = !(filter === 'mine' && !showOthers);
+                const shownGroups = othersVisible ? groups : groups.filter((g) => g.items.some(isShown));
+                const hiddenOthers = groups.filter((g) => !shownGroups.includes(g)).reduce((n, g) => n + g.items.length, 0);
+                const card = (ws: Workspace) => (
+                  <WorkspaceCard
+                    key={ws.key}
+                    ws={ws}
+                    pr={ws.worksessionId ? prByWorksession.get(ws.worksessionId) : null}
+                    expanded={expanded[ws.key] ?? false}
+                    onToggle={() => toggle(ws.key, false)}
+                    tabUrl={tabs.find((t) => t.key === ws.key)?.url ?? null}
+                    filterMine={filter === 'mine'}
+                    showOthers={showOthers}
+                    onShowOthers={() => setOthersShown((prev) => new Set([...prev, p.id]))}
+                  />
+                );
                 return (
                   <>
-                    {visible.map((ws) => (
-                      <WorkspaceCard
-                        key={ws.key}
-                        ws={ws}
-                        pr={ws.worksessionId ? prByWorksession.get(ws.worksessionId) : null}
-                        expanded={expanded[ws.key] ?? false}
-                        onToggle={() => toggle(ws.key, false)}
-                        tabUrl={tabs.find((t) => t.key === ws.key)?.url ?? null}
-                        filterMine={filter === 'mine'}
-                        showOthers={showOthers}
-                        onShowOthers={() => setOthersShown((prev) => new Set([...prev, p.id]))}
-                      />
-                    ))}
+                    {mineCards.map(card)}
+                    {shownGroups.map((g) => {
+                      const groupKey = `owner:${p.id}:${g.key}`;
+                      const defaultOpen = g.items.some((ws) => isShown(ws) || ws.session!.pendingRequestCount > 0);
+                      const groupOpen = expanded[groupKey] ?? defaultOpen;
+                      return (
+                        <div key={groupKey} className="wb-owner-block">
+                          <OwnerGroupRow group={g} expanded={groupOpen} onToggle={() => toggle(groupKey, defaultOpen)} />
+                          {groupOpen && g.items.map(card)}
+                        </div>
+                      );
+                    })}
                     {hiddenOthers > 0 && (
-                      <button type="button" className="wb-row wb-empty wb-row-btn" style={{ paddingLeft: 18 }} title="Afficher les sessions d'autres personnes" onClick={() => setOthersShown((prev) => new Set([...prev, p.id]))}>
-                        <i className="bi bi-people me-1" /> + {hiddenOthers} session{hiddenOthers > 1 ? 's' : ''} d'autres personnes
+                      <button type="button" className="wb-row wb-empty wb-row-btn" style={{ paddingLeft: 18 }} title="Afficher les sessions des autres personnes et des agents, rangées par personne ou agent" onClick={() => setOthersShown((prev) => new Set([...prev, p.id]))}>
+                        <i className="bi bi-people me-1" /> + {hiddenOthers} session{hiddenOthers > 1 ? 's' : ''} des autres
                       </button>
                     )}
                     {cards.length === 0 && (
