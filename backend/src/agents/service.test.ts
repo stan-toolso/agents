@@ -41,7 +41,10 @@ const agent = (over: Partial<Agent> = {}): Agent =>
     instructions: '',
     taskFolder: false,
     defaults: { permissionMode: 'acceptEdits', provider: 'claude', allowedTools: 'Read' },
-    contextFolder: 'agents/lea',
+    inheritContext: true,
+    claudeDelegateId: null,
+    gitDelegateId: null,
+    gitDelegateReadOnly: true,
     triggers: { taskCreated: true, taskCreatedTag: null, threadFollowed: true, prMerged: false, taskReady: false, taskReadyTag: null },
     actions: [],
     enabled: true,
@@ -116,14 +119,13 @@ describe('prepareActions', () => {
 });
 
 describe('create', () => {
-  it('crée l’utilisateur agent, l’appartenance, le profil d’après le modèle, le propriétaire et le dossier de contexte', async () => {
+  it('crée l’utilisateur agent, l’appartenance, le profil d’après le modèle et le propriétaire', async () => {
     repo.findById = vi.fn(async (id: string) => agent({ id, userId: id, name: 'Max' }));
     const created = await agentService.create('p1', { kind: 'developer', name: 'Max' }, { id: 'u1', name: 'Alice' } as never);
     expect(users.create).toHaveBeenCalledWith(expect.objectContaining({ name: 'Max', kind: 'agent', email: expect.stringMatching(/^agent-.*@agents\.skipper$/) }));
     expect(users.upsertMembership).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p1', role: 'member', invitedById: 'u1' }));
-    expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({ kind: 'developer', taskFolder: true, contextFolder: 'agents/max', createdById: 'u1', triggers: expect.objectContaining({ taskReadyTag: 'prête' }) }));
+    expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({ kind: 'developer', taskFolder: true, inheritContext: true, createdById: 'u1', triggers: expect.objectContaining({ taskReadyTag: 'prête' }) }));
     expect(repo.setManagers).toHaveBeenCalledWith(created.id, [{ userId: 'u1', role: 'owner' }]);
-    expect(context.ensureFolderPath).toHaveBeenCalledWith('p1', 'agents/max', { type: 'human' });
   });
 
   it('refuse un nom déjà porté par un membre, un nom vide ou avec @, et un espace personnel', async () => {
@@ -189,6 +191,30 @@ describe('syncActionSchedules', () => {
     await agentService.syncActionSchedules(agent({ actions: [] }), b.actions);
     expect(schedules.remove).toHaveBeenCalledWith('sched-1');
     expect(sessions.archive).toHaveBeenCalledWith('sched-1');
+  });
+});
+
+describe('comptes et délégation', () => {
+  it('accounts : les comptes propres de l’agent, ou ceux prêtés (git en lecture seule par défaut)', async () => {
+    expect(agentService.accounts(agent())).toEqual({ claudeUserId: 'a1', gitUserId: 'a1', gitReadOnly: false });
+    expect(agentService.accounts(agent({ claudeDelegateId: 'u1', gitDelegateId: 'u2', gitDelegateReadOnly: true }))).toEqual({ claudeUserId: 'u1', gitUserId: 'u2', gitReadOnly: true });
+    expect(agentService.accounts(agent({ gitDelegateId: 'u2', gitDelegateReadOnly: false })).gitReadOnly).toBe(false);
+    expect(await agentService.accountsForOwner('u1')).toEqual({ claudeUserId: 'u1', gitUserId: 'u1', gitReadOnly: false });
+    expect(await agentService.accountsForOwner(null)).toBeNull();
+  });
+
+  it('setDelegation : seule une personne membre du projet prête son compte ; null retire la délégation', async () => {
+    await agentService.setDelegation('a1', 'git', 'u1', { readOnly: false });
+    expect(repo.update).toHaveBeenLastCalledWith('a1', { gitDelegateId: 'u1', gitDelegateReadOnly: false });
+    await agentService.setDelegation('a1', 'claude', 'u1');
+    expect(repo.update).toHaveBeenLastCalledWith('a1', { claudeDelegateId: 'u1' });
+    await agentService.setDelegation('a1', 'git', null);
+    expect(repo.update).toHaveBeenLastCalledWith('a1', { gitDelegateId: null, gitDelegateReadOnly: true });
+    users.findById = vi.fn(async (id: string) => ({ id, name: 'Léa', kind: 'agent' }));
+    await expect(agentService.setDelegation('a1', 'git', 'a2')).rejects.toThrow('Seule une personne');
+    users.findById = vi.fn(async (id: string) => ({ id, name: 'Alice', kind: 'person' }));
+    userSvc.roleFor = vi.fn(async () => 'viewer');
+    await expect(agentService.setDelegation('a1', 'claude', 'u1')).rejects.toThrow('membre du projet');
   });
 });
 

@@ -18,6 +18,9 @@ const m = vi.hoisted(() => ({
 vi.mock('./service.js', () => ({ taskService: m.tasks, describeThread: () => ['Fil de discussion :'], summarizeReactions: () => '', formatPerson: () => '', statusTagText: () => '' }));
 vi.mock('./attachments.js', () => ({ describeAttachments: () => [], imageBlocks: async () => [] }));
 vi.mock('../pullRequests/service.js', () => ({ trackedPullRequestService: m.prs }));
+// Comptes du propriétaire (délégation d'un agent de projet) : une personne utilise les siens ; un agent en lecture seule ne pousse pas.
+const accounts = { gitUserId: 'u1', claudeUserId: 'u1', gitReadOnly: false };
+vi.mock('../agents/service.js', () => ({ agentService: { accountsForOwner: async () => accounts } }));
 vi.mock('../sessions/service.js', () => ({ sessionService: { get: async () => m.session } }));
 vi.mock('../personal/scope.js', () => ({
   inScope: async (_p: Project, _s: unknown, projectId: string) => projectId === 'p',
@@ -253,5 +256,12 @@ describe('serveur MCP tasks', () => {
     const res = await client.callTool({ name: 'pr_open', arguments: { task_id: 't1', title: 'x' } });
     expect(res.isError).toBe(true);
     expect(textOf(res)).toContain('dossier principal');
+    // Comptes git prêtés en lecture seule : ni push ni PR.
+    m.session = { ...m.session, worksessionId: 'w1' } as typeof m.session;
+    accounts.gitReadOnly = true;
+    const ro = await client.callTool({ name: 'pr_open', arguments: { task_id: 't1', title: 'x' } });
+    expect(ro.isError).toBe(true);
+    expect(textOf(ro)).toContain('lecture seule');
+    accounts.gitReadOnly = false;
   });
 });
