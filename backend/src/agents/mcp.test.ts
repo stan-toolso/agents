@@ -1,6 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ProjectScope } from '../personal/scope.js';
 import type { Project } from '../projects/types.js';
 import type { Agent } from './types.js';
 
@@ -15,8 +16,8 @@ const project = { id: 'p1', name: 'Skipper' } as Project;
 const agent = (over: Partial<Agent> = {}): Agent =>
   ({ id: 'a1', userId: 'a1', name: 'Léa', email: 'agent-a1@agents.skipper', projectId: 'p1', kind: 'product_manager', description: 'Cadre les demandes', enabled: true, archivedAt: null, triggers: {}, actions: [], defaults: {}, ...over }) as unknown as Agent;
 
-async function connect() {
-  const server = createAgentsMcpServer(project, 's1');
+async function connect(scope?: ProjectScope) {
+  const server = createAgentsMcpServer(project, 's1', scope);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.instance.connect(serverTransport);
   const client = new Client({ name: 'test', version: '1.0.0' });
@@ -62,5 +63,55 @@ describe('serveur MCP agents', () => {
     expect(res.isError).toBe(true);
     expect(textOf(res)).toContain("C'est toi");
     expect(service.summon).not.toHaveBeenCalled();
+  });
+});
+
+describe('serveur MCP agents depuis un espace personnel (chat)', () => {
+  const home = { id: 'me', name: 'Mon espace' } as Project;
+  const other = { id: 'p2', name: 'Girco' } as Project;
+  let scope: ProjectScope;
+
+  beforeEach(() => {
+    service.listActive = vi.fn(async (ids: string[]) =>
+      [agent({ id: 'a1', name: 'Chris', projectId: 'p1' }), agent({ id: 'a2', name: 'Max', kind: 'developer', projectId: 'p2' }), agent({ id: 'a3', name: 'Max', kind: 'developer', projectId: 'p1' })].filter((a) => ids.includes(a.projectId)),
+    );
+    service.forUser = vi.fn(async () => null);
+    service.resolve = vi.fn(async (projectId: string) => agent({ id: projectId === 'p2' ? 'a2' : 'a3', name: 'Max', kind: 'developer', projectId }));
+    service.summon = vi.fn(async () => ({ id: 'new', name: 'Chris · Derniers devs' }));
+    sessions.findById = vi.fn(async () => ({ id: 's1', ownerId: 'u1', requestedById: null }));
+    scope = {
+      ownerId: 'u1',
+      home,
+      projects: vi.fn(async () => [home, project, other]),
+      resolve: vi.fn(async (ref?: string | null) => (ref === 'Girco' ? other : project)),
+      canRead: vi.fn(async () => true),
+      assertWritable: vi.fn(async () => undefined),
+    };
+  });
+
+  it('expose le paramètre project et liste les agents de tous les projets avec leur projet', async () => {
+    const client = await connect(scope);
+    const { tools } = await client.listTools();
+    for (const t of tools) expect(Object.keys(t.inputSchema.properties ?? {})).toContain('project');
+    const text = textOf(await client.callTool({ name: 'list', arguments: {} }));
+    expect(text).toContain('a1 · Chris · Product Manager · projet Skipper');
+    expect(text).toContain('a2 · Max · Developer · projet Girco');
+  });
+
+  it('summon trouve l\'agent par son nom dans tous les projets, au nom de la personne', async () => {
+    const client = await connect(scope);
+    const text = textOf(await client.callTool({ name: 'summon', arguments: { agent: '@chris', text: 'Les derniers développements ?' } }));
+    expect(scope.assertWritable).toHaveBeenCalledWith('p1');
+    expect(service.summon).toHaveBeenCalledWith('a1', expect.objectContaining({ text: 'Les derniers développements ?', requestedById: 'u1' }));
+    expect(text).toContain('sessions.wait');
+  });
+
+  it('summon refuse un nom ambigu sans projet, et le résout avec project', async () => {
+    const client = await connect(scope);
+    const res = await client.callTool({ name: 'summon', arguments: { agent: 'max', text: 'go' } });
+    expect(res.isError).toBe(true);
+    expect(textOf(res)).toContain('Plusieurs agents');
+    await client.callTool({ name: 'summon', arguments: { agent: 'Max', text: 'go', project: 'Girco' } });
+    expect(service.summon).toHaveBeenCalledWith('a2', expect.anything());
   });
 });

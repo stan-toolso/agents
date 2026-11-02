@@ -1193,7 +1193,8 @@ le provider Claude lance le CLI du serveur (`CLAUDE_BIN`, sinon celui du SDK, co
 identifiants) avec `tools: []` (aucun outil intégré : ni fichiers, ni commandes, ni web), `settingSources: []`
 (aucun réglage lu sur le disque), un dossier de configuration propre à l'espace
 (`CLAUDE_CONFIG_DIR = WORKSPACES_ROOT/.runners/<slug>/chat-home`, où ses conversations sont reprises) et
-les serveurs MCP `context`, `tasks`, `sessions`, `worksessions`, `projects`, `vault` et `google`
+les serveurs MCP `context`, `tasks`, `sessions`, `worksessions`, `projects`, `vault`, `google` et `agents` (quand un
+de ses projets a des agents)
 (pas de `pages` ni de navigateur). Les chats sont exclus des listes de sessions (`SessionFilter.kind`,
 « session » par défaut ; « all » pour une liste par identifiants ou par session parente), de la sidebar,
 du tableau de bord et de la recherche ; ils se listent par `chats(limit)` (page `/chats`) et s'ouvrent
@@ -1274,7 +1275,12 @@ nouvelle session dans son propre dossier, nommée d'après le message. Quatre fa
   identifiant) ;
 - depuis une session (serveur MCP `agents` : `list` libre, `summon` soumis à autorisation ; `mcp__agents` pour le
   pré-autoriser). Un agent convoqué par une session n'en est pas le sous-agent : c'est un collègue, qui répond dans le
-  fil de la tâche.
+  fil de la tâche ;
+- depuis un **chat** ou une session de l'espace personnel : le prompt système liste les agents de **tous les projets**
+  de la personne avec leur rôle et leur projet (`scopedAgentsPromptSummary`), et le serveur `agents` reçoit la portée
+  (`list` sur tous les projets ou `project`, `summon` qui cherche l'agent par nom ou « @Nom » dans tous les projets,
+  rôle membre exigé, nom ambigu refusé sans `project`). Interpeller un agent dans le chat (« @Chris : … ») le convoque
+  au nom de la personne (`requestedById`) ; le chat attend sa réponse avec `sessions.wait` et la rapporte.
 
 **Déclencheurs** (`triggers`, écouteurs du service des tâches et des PR suivies, garde anti-boucle : rien de ce qu'une
 session d'agent fait ne déclenche les agents) : `taskCreated` (tâche créée par une personne ou l'API, filtrable par
