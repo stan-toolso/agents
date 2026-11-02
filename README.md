@@ -109,7 +109,12 @@ npm run dev                 # backend (http://localhost:4000/graphql) + frontend
 ```
 
 Les migrations SQL (`backend/src/db/migrations/*.sql`) sont appliquées automatiquement au démarrage
-du backend, ou à la main avec `npm run db:migrate`.
+du backend, ou à la main avec `npm run db:migrate`. Une nouvelle migration se crée avec
+`npm run migration:new <nom>` : le fichier est préfixé par un horodatage UTC à la minute
+(`20261102T0715_nom.sql`), si bien que deux branches qui en ajoutent chacune une fusionnent sans
+renumérotation. Les fichiers numérotés `001_` à `055_` gardent leur nom (il est enregistré dans
+`schema_migrations`) ; aucun nouveau `NNN_` n'est accepté. Une migration plus ancienne que la dernière
+appliquée passe quand même, avec un avertissement au démarrage (« appliquée hors ordre »).
 
 ### Tests
 
@@ -133,7 +138,9 @@ les migrations deux fois (le second passage ne doit rien faire), vérifie qu'une
 est annulée, puis supprime la base. Sans `TEST_DATABASE_URL` il est ignoré en local et échoue en CI.
 Ne jamais y mettre l'URL de la base de production.
 
-**CI** : `.github/workflows/ci.yml` lance `npm ci`, `npm run typecheck`, `npm run build` et
+**CI** : `.github/workflows/ci.yml` lance `npm ci`, `npm run check:migrations -w backend` (échec sur
+un nom de migration invalide ou un préfixe en double, avertissement si la branche ajoute une migration
+plus ancienne que la dernière de main), `npm run typecheck`, `npm run build` et
 `npm test` à chaque push et pull request, avec un service PostgreSQL 16 pour le test des migrations.
 Le déploiement reste manuel (`DEPLOY.md`).
 
