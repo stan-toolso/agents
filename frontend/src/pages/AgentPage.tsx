@@ -6,7 +6,8 @@ import { createActAsClient } from '../apollo';
 import AgentAvatar from '../components/AgentAvatar';
 import { useDialogs } from '../components/Dialogs';
 import PageLoading from '../components/PageLoading';
-import { AGENT, AGENT_ACTIVITY, DELETE_AGENT, SET_AGENT_ENABLED, SET_AGENT_MANAGERS, UPDATE_AGENT, agentKindLabels, type Agent, type AgentActionInput, type AgentActivityData, type AgentKind, type AgentManagerRole } from '../graphql/agents';
+import { AGENT, AGENT_ACTIVITY, DELETE_AGENT, SET_AGENT_DELEGATION, SET_AGENT_ENABLED, SET_AGENT_MANAGERS, UPDATE_AGENT, agentKindLabels, type Agent, type AgentActionInput, type AgentActivityData, type AgentKind, type AgentManagerRole } from '../graphql/agents';
+import { useAuth } from '../auth/AuthContext';
 import { PROJECT_MEMBERS, PROVIDERS, type ProjectMember, type Provider } from '../graphql/operations';
 import { formatCost, sessionStatusLabels, taskStatusLabels, timeAgo } from '../lib/humanize';
 import { usePollingQuery } from '../lib/usePollingQuery';
@@ -36,6 +37,7 @@ function ProfileForm({ agent }: { agent: Agent }) {
   const [description, setDescription] = useState(agent.description);
   const [instructions, setInstructions] = useState(agent.instructions);
   const [taskFolder, setTaskFolder] = useState(agent.taskFolder);
+  const [inheritContext, setInheritContext] = useState(agent.inheritContext);
   const [permissionMode, setPermissionMode] = useState(String(agent.defaults.permissionMode ?? ''));
   const [model, setModel] = useState(String(agent.defaults.model ?? ''));
   const [allowedTools, setAllowedTools] = useState(String(agent.defaults.allowedTools ?? ''));
@@ -62,6 +64,7 @@ function ProfileForm({ agent }: { agent: Agent }) {
             description,
             instructions,
             taskFolder,
+            inheritContext,
             defaults,
             triggers: { taskCreated: triggers.taskCreated, taskCreatedTag: triggers.taskCreatedTag, threadFollowed: triggers.threadFollowed, prMerged: triggers.prMerged, taskReady: triggers.taskReady, taskReadyTag: triggers.taskReadyTag },
             actions: actions.map((a) => ({ key: a.key || null, label: a.label, instruction: a.instruction, cron: a.cron || null, timezone: a.timezone || null })),
@@ -202,14 +205,22 @@ function ProfileForm({ agent }: { agent: Agent }) {
             <Card.Header>Instructions</Card.Header>
             <Card.Body>
               <Form.Control as="textarea" rows={22} className="font-monospace small" value={instructions} onChange={(e) => setInstructions(e.target.value)} placeholder="Qui il est, ce qu'il fait, comment il travaille, ce qu'il ne fait jamais…" />
-              <Form.Text>
-                Markdown, ajouté au prompt système de ses sessions après le prompt du projet.{agent.contextFolder && (
-                  <>
-                    {' '}
-                    Sa mémoire durable est le dossier <code>{agent.contextFolder}</code> de la <Link to={`/projects/${agent.project.id}/context`}>bibliothèque de contexte</Link>.
-                  </>
-                )}
-              </Form.Text>
+              <Form.Text>Markdown, ajouté au prompt système de ses sessions après le prompt du projet.</Form.Text>
+            </Card.Body>
+          </Card>
+          <Card className="mb-3">
+            <Card.Header className="d-flex justify-content-between align-items-center">
+              Contexte
+              <Link to={`/projects/${agent.project.id}/context?library=${agent.id}`} className="small">
+                <i className="bi bi-journal-text me-1" /> Ouvrir sa bibliothèque
+              </Link>
+            </Card.Header>
+            <Card.Body>
+              <p className="small text-secondary mb-2">
+                {agent.name} a sa propre bibliothèque de contexte, distincte de celle du projet : sa mémoire durable (décisions, conventions, glossaire). Ses sessions y lisent et y écrivent par défaut ; toute session du projet peut la consulter et la modifier (outils <code>context</code>, paramètre <code>library</code>).
+              </p>
+              <Form.Check type="switch" id="agent-inherit-context" checked={inheritContext} onChange={(e) => setInheritContext(e.target.checked)} label="Hérite aussi de la bibliothèque de contexte du projet" />
+              <Form.Text>Décoché : ses sessions ne reçoivent que sa bibliothèque (celle du projet reste lisible à la demande).</Form.Text>
             </Card.Body>
           </Card>
           <Card className="mb-3">
@@ -262,6 +273,76 @@ function ProfileForm({ agent }: { agent: Agent }) {
         {saved && <span className="text-success small">Enregistré.</span>}
       </div>
     </Form>
+  );
+}
+
+/**
+ * Délégation de comptes : la personne connectée peut prêter son propre compte Claude et/ou ses comptes git à l'agent, les
+ * comptes git en lecture seule (ni push ni pull request) ou non ; un gestionnaire peut retirer une délégation.
+ */
+function DelegationCard({ agent }: { agent: Agent }) {
+  const { user } = useAuth();
+  const { showError } = useDialogs();
+  const [setDelegation, { loading }] = useMutation(SET_AGENT_DELEGATION, { refetchQueries: ['Agent'] });
+  const run = (account: 'CLAUDE' | 'GIT', delegate: boolean, readOnly?: boolean) => void setDelegation({ variables: { id: agent.id, account, delegate, readOnly: readOnly ?? null } }).catch(showError);
+  const d = agent.delegations;
+  const mine = (u: { id: string } | null) => Boolean(u && user && u.id === user.id);
+  return (
+    <Card className="mb-3">
+      <Card.Header>Comptes prêtés</Card.Header>
+      <Card.Body className="small">
+        <p className="text-secondary">Plutôt que de régler des comptes propres à {agent.name}, vous pouvez lui prêter les vôtres : ses sessions tournent alors avec votre compte Claude, ou avec vos comptes git (GitHub, GitLab, forge), en lecture seule si vous le souhaitez.</p>
+        <Table size="sm" className="align-middle mb-0 table-stack">
+          <tbody>
+            <tr>
+              <td style={{ width: 120 }}>
+                <strong>Claude</strong>
+              </td>
+              <td>{d.claude ? <>Compte de <b>{d.claude.name}</b>{mine(d.claude) ? ' (vous)' : ''}</> : <span className="text-secondary">Les réglages Claude propres de {agent.name} (ci-dessous)</span>}</td>
+              <td className="text-end" style={{ width: 220 }}>
+                {d.claude ? (
+                  <Button size="sm" variant="outline-secondary" disabled={loading} onClick={() => run('CLAUDE', false)}>
+                    Retirer
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="outline-primary" disabled={loading} onClick={() => run('CLAUDE', true)}>
+                    Prêter mon compte Claude
+                  </Button>
+                )}
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <strong>Git</strong>
+              </td>
+              <td>
+                {d.git ? (
+                  <>
+                    Comptes de <b>{d.git.name}</b>{mine(d.git) ? ' (vous)' : ''}, {d.gitReadOnly ? 'en lecture seule (ni push, ni pull request)' : 'en lecture et écriture'}
+                    {mine(d.git) && (
+                      <Form.Check type="switch" id="agent-git-ro" className="mt-1" checked={d.gitReadOnly} disabled={loading} onChange={(e) => run('GIT', true, e.target.checked)} label="Lecture seule" />
+                    )}
+                  </>
+                ) : (
+                  <span className="text-secondary">Les comptes GitHub / GitLab propres de {agent.name} (ci-dessous)</span>
+                )}
+              </td>
+              <td className="text-end">
+                {d.git ? (
+                  <Button size="sm" variant="outline-secondary" disabled={loading} onClick={() => run('GIT', false)}>
+                    Retirer
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="outline-primary" disabled={loading} onClick={() => run('GIT', true, true)}>
+                    Prêter mes comptes git (lecture seule)
+                  </Button>
+                )}
+              </td>
+            </tr>
+          </tbody>
+        </Table>
+      </Card.Body>
+    </Card>
   );
 }
 
@@ -512,12 +593,15 @@ export default function AgentPage() {
         ))}
       {section === 'accounts' &&
         (agent.canManage && actAsClient ? (
-          <ApolloProvider client={actAsClient}>
-            <Alert variant="light" className="border small">
-              Ces comptes sont ceux de <b>{agent.name}</b> : ses sessions tournent avec, sa consommation lui est imputée, ses commits et pull requests sont signés de lui. Ils se règlent comme les vôtres dans Paramètres ; les éléments de coffre créés ici lui appartiennent.
-            </Alert>
-            <AgentAccountSettings agentName={agent.name} />
-          </ApolloProvider>
+          <>
+            <DelegationCard agent={agent} />
+            <ApolloProvider client={actAsClient}>
+              <Alert variant="light" className="border small">
+                Comptes propres de <b>{agent.name}</b>{agent.delegations.claude || agent.delegations.git ? ' (utilisés là où aucun compte n’est prêté)' : ''} : ses sessions tournent avec, sa consommation lui est imputée, ses commits et pull requests sont signés de lui. Ils se règlent comme les vôtres dans Paramètres ; les éléments de coffre créés ici lui appartiennent.
+              </Alert>
+              <AgentAccountSettings agentName={agent.name} />
+            </ApolloProvider>
+          </>
         ) : (
           <Alert variant="light" className="border small">
             Seuls les gestionnaires de l'agent et les administrateurs du projet voient et règlent ses comptes.

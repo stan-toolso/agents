@@ -6,9 +6,20 @@ export interface Actor {
   sessionId?: string | null;
 }
 
+/**
+ * Une bibliothèque de contexte : celle du projet (`agentId` null) ou celle, propre, d'un agent de projet (`agentId` = son
+ * identifiant d'utilisateur). Même structure, mêmes outils ; un agent peut hériter de la bibliothèque du projet en plus de la sienne.
+ */
+export interface Library {
+  projectId: string;
+  agentId: string | null;
+}
+
 export interface ContextFolder {
   id: string;
   projectId: string;
+  /** Bibliothèque propre d'un agent (null : bibliothèque du projet). */
+  agentId: string | null;
   parentId: string | null;
   name: string;
   slug: string;
@@ -21,6 +32,8 @@ export interface ContextFolder {
 export interface ContextInstruction {
   id: string;
   projectId: string;
+  /** Bibliothèque propre d'un agent (null : bibliothèque du projet). */
+  agentId: string | null;
   folderId: string | null;
   name: string;
   slug: string;
@@ -60,6 +73,7 @@ export type ContextChangeKind =
 export interface ContextChange {
   id: string;
   projectId: string;
+  agentId: string | null;
   kind: ContextChangeKind;
   path: string;
   details: Record<string, unknown>;

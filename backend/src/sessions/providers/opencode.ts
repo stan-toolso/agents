@@ -5,6 +5,9 @@ import { createInterface } from 'node:readline';
 import { createOpencodeClient, type Event as OpencodeEvent, type OpencodeClient, type Part, type PermissionRequest, type QuestionRequest } from '@opencode-ai/sdk/v2';
 import { liveBrowserService } from '../../browser/live.js';
 import { createContextMcpServer } from '../../context/mcp.js';
+import { agentService } from '../../agents/service.js';
+import { agentIdentityPrompt } from '../../agents/prompt.js';
+import { isPersonalProject } from '../../projects/types.js';
 import { contextService } from '../../context/service.js';
 import { materializeSkills } from '../../context/skills.js';
 import { AppError } from '../../errors.js';
@@ -297,10 +300,17 @@ class OpencodeRun {
     const vaultTools = vaultItems.some((i) => i.kind !== 'google');
     const vaultBrowser = vaultItems.some((i) => i.kind === 'website' || i.kind === 'secret');
     const googleAccounts = await googleAccountService.accountsFor(ctx.project.id, this.ownerId);
+    // Session jouée par un agent de projet : son identité, sa bibliothèque propre (et celle du projet s'il en hérite), ses comptes prêtés.
+    const agent = await agentService.forUser(this.ownerId);
+    const accounts = (await agentService.accountsForOwner(this.ownerId)) ?? { claudeUserId: this.ownerId ?? '', gitUserId: this.ownerId ?? '', gitReadOnly: false };
+    const agentLibraries = isPersonalProject(ctx.project) ? [] : await agentService.libraries(ctx.project.id);
+    const projectContext = !agent || agent.inheritContext;
     this.systemPrompt = [
       ctx.project.systemPrompt.trim(),
+      agent ? agentIdentityPrompt(agent, ctx.project, null, { gitReadOnly: accounts.gitReadOnly }) : '',
       sessionIdentityPrompt(ctx.session, ctx.project),
-      await contextService.promptSummary(ctx.project.id),
+      agent ? await contextService.promptSummary(ctx.project.id, agent.id, { own: true }) : '',
+      projectContext ? await contextService.promptSummary(ctx.project.id) : '',
       await taskService.linkedTaskPrompt(ctx.session.id),
       await taskService.promptSummary(ctx.project.id, ctx.session.id),
       ctx.project.gitUrl ? trackedPullRequestService.promptSummary() : '',
@@ -316,7 +326,7 @@ class OpencodeRun {
     ]
       .filter(Boolean)
       .join('\n\n');
-    const pluginDir = await materializeSkills(ctx.project);
+    const pluginDir = await materializeSkills(ctx.project, agent && !projectContext ? agent.id : null);
     this.ruleUsage.rules = await permissionRuleService.list(ctx.project.id);
 
     const vaultContext = {
@@ -332,8 +342,8 @@ class OpencodeRun {
       approve: (approval: VaultApproval) => this.approveVaultUse(approval),
     };
     const factories: Record<string, McpFactory> = {
-      context: () => createContextMcpServer(ctx.project, ctx.session.id),
-      tasks: () => createTasksMcpServer(ctx.project, ctx.session.id, ctx.session.name),
+      context: () => createContextMcpServer(ctx.project, ctx.session.id, { agentLibraries, defaultAgentId: agent?.id ?? null }),
+      tasks: () => createTasksMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name),
       ...(vaultTools ? { vault: () => createVaultMcpServer(vaultContext) } : {}),
       worksessions: () => createWorksessionsMcpServer(ctx.project, ctx.session.id),
       sessions: () => createSessionsMcpServer(ctx.project, ctx.session.id),
@@ -383,7 +393,7 @@ class OpencodeRun {
       OPENCODE_DISABLE_PROJECT_CONFIG: '1',
       OPENCODE_ENABLE_QUESTION_TOOL: '1',
       OPENCODE_SERVER_PASSWORD: password,
-      ...(await agentGitEnv(this.ownerId, ctx.project.gitUrl, actor)),
+      ...(await agentGitEnv(this.ownerId ? accounts.gitUserId : null, ctx.project.gitUrl, actor, { readOnly: accounts.gitReadOnly })),
     };
 
     // Session connue de Skipper mais absente de ce conteneur (recréé) : sa conversation est réimportée d'abord.

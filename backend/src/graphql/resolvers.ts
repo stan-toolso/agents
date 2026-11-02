@@ -1,7 +1,7 @@
 import { DateTimeResolver, JSONResolver } from 'graphql-scalars';
 import { accessibleProjectIds, canAccessProject, filterAsync, memberRoleFor, requireAdmin, requireProject, requireSuperAdmin, requireUser, roleFor, settingsUser, type AuthContext } from '../auth/access.js';
 import { agentService } from '../agents/service.js';
-import type { Agent, AgentAction, AgentActionInput, AgentInput, AgentKind, AgentManager, AgentManagerRole, AgentTemplate } from '../agents/types.js';
+import type { Agent, AgentAccountKind, AgentAction, AgentActionInput, AgentInput, AgentKind, AgentManager, AgentManagerRole, AgentTemplate } from '../agents/types.js';
 import { slugify } from '../projects/slug.js';
 import { liveBrowserService } from '../browser/live.js';
 import { liveDraftService } from '../sessions/live.js';
@@ -232,6 +232,13 @@ async function guardAgentManager(ctx: Ctx, agentId: string): Promise<Agent> {
   await agentService.assertCanManage(requireUser(ctx).id, agent);
   return agent;
 }
+/** Bibliothèque visée par `agentId` : la bibliothèque propre d'un agent du projet (vérifié), sinon celle du projet. */
+async function projectAgentLibrary(projectId: string, agentId: string | null | undefined): Promise<string | null> {
+  if (!agentId) return null;
+  const agent = await agentService.get(agentId);
+  if (agent.projectId !== projectId) throw new AppError("Cet agent n'appartient pas au projet");
+  return agent.id;
+}
 /** Propriétaire d'une session lancée par l'utilisateur connecté : lui-même, ou un agent du projet (il en est alors le demandeur). */
 async function sessionOwnerFor(ctx: Ctx, agentId: string | null | undefined, projectId: string): Promise<{ ownerId: string; requestedById: string | null }> {
   const user = requireUser(ctx);
@@ -414,7 +421,7 @@ export const resolvers = {
   },
 
   PullRequest: {
-    forgeName: (pr: PullRequest) => (config.forgejo.url && pr.url.startsWith(`${config.forgejo.url}/`) ? 'Forgejo' : 'GitHub'),
+    forgeName: (pr: PullRequest) => (pr.forge === 'gitlab' ? 'GitLab' : config.forgejo.url && pr.url.startsWith(`${config.forgejo.url}/`) ? 'Forgejo' : 'GitHub'),
     worksession: async (pr: PullRequest) => (pr.isCrossRepository ? null : (await worksessionService.listByProject(pr.projectId)).find((w) => w.branch === pr.headRefName) ?? null),
     tasks: async (pr: PullRequest) => (pr.isCrossRepository ? [] : (await taskService.list({ projectId: pr.projectId, limit: 1000 })).filter((t) => t.branch === pr.headRefName)),
   },
@@ -666,9 +673,9 @@ export const resolvers = {
     apiKeys: async (project: Project, _: unknown, ctx: Ctx) => ((await roleFor(ctx, project.id)) === 'admin' ? apiKeyService.list(project.id) : []),
     approvalConnections: async (project: Project, _: unknown, ctx: Ctx) => vaultService.approvalNames(await vaultService.agentItems(project.id, ctx.user?.id ?? null)),
     tasks: (project: Project, args: { status?: GqlTaskStatus[] | null }) => taskService.list({ projectId: project.id, status: fromGqlTaskStatuses(args.status) }),
-    contextFolders: async (project: Project) => (await contextService.tree(project.id)).folders,
-    contextInstructions: async (project: Project) => (await contextService.tree(project.id)).instructions,
-    contextChanges: (project: Project, args: { limit?: number | null }) => contextService.changes(project.id, args.limit ?? undefined),
+    contextFolders: async (project: Project, args: { agentId?: string | null }) => (await contextService.tree(project.id, await projectAgentLibrary(project.id, args.agentId))).folders,
+    contextInstructions: async (project: Project, args: { agentId?: string | null }) => (await contextService.tree(project.id, await projectAgentLibrary(project.id, args.agentId))).instructions,
+    contextChanges: async (project: Project, args: { limit?: number | null; agentId?: string | null }) => contextService.changes(project.id, args.limit ?? undefined, await projectAgentLibrary(project.id, args.agentId)),
     workspaceExists: (project: Project) => workspaceExists(project),
     git: (project: Project) => workspaceGitInfo(project),
     gitHosted: (project: Project) => project.gitHosted,
@@ -738,6 +745,7 @@ export const resolvers = {
     user: (a: Agent, _: unknown, ctx: Ctx) => userOrNull(ctx, a.id),
     project: async (a: Agent, _: unknown, ctx: Ctx) => (await loadersOf(ctx).project(a.projectId)) ?? null,
     kind: (a: Agent) => a.kind.toUpperCase(),
+    delegations: async (a: Agent, _: unknown, ctx: Ctx) => ({ claude: await userOrNull(ctx, a.claudeDelegateId), git: await userOrNull(ctx, a.gitDelegateId), gitReadOnly: Boolean(a.gitDelegateId && a.gitDelegateReadOnly) }),
     managers: (a: Agent) => agentService.managers(a.id),
     canManage: (a: Agent, _: unknown, ctx: Ctx) => agentService.canManage(requireUser(ctx).id, a),
     stats: (a: Agent) => agentService.stats(a.id),
@@ -1116,9 +1124,9 @@ export const resolvers = {
       await guardInstruction(ctx, args.id, 'viewer');
       return contextService.getInstruction(args.id);
     },
-    searchContext: async (_: unknown, args: { projectId: string; query: string }, ctx: Ctx) => {
+    searchContext: async (_: unknown, args: { projectId: string; query: string; agentId?: string | null }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId);
-      return contextService.search(args.projectId, args.query);
+      return contextService.search(args.projectId, args.query, await projectAgentLibrary(args.projectId, args.agentId));
     },
   },
 
@@ -1147,6 +1155,11 @@ export const resolvers = {
       const agent = await agentService.get(args.id);
       await requireProject(ctx, agent.projectId, 'member');
       return agentService.summon(agent.id, { taskId: args.taskId ?? null, text: args.text, attachments: args.attachments ?? null, requestedById: requireUser(ctx).id });
+    },
+    setAgentDelegation: async (_: unknown, args: { id: string; account: string; delegate: boolean; readOnly?: boolean | null }, ctx: Ctx) => {
+      const agent = await guardAgentManager(ctx, args.id);
+      // On ne prête que son propre compte : la personne connectée est la délégante ; retirer une délégation est ouvert aux gestionnaires.
+      return agentService.setDelegation(agent.id, args.account.toLowerCase() as AgentAccountKind, args.delegate ? requireUser(ctx).id : null, { readOnly: args.readOnly ?? null });
     },
     runAgentAction: async (_: unknown, args: { id: string; key: string; taskId?: string | null }, ctx: Ctx) => {
       const agent = await agentService.get(args.id);
@@ -1791,9 +1804,9 @@ export const resolvers = {
       await guardTerminal(ctx, args.id, 'member');
       return terminalService.delete(args.id);
     },
-    createContextFolder: async (_: unknown, args: { projectId: string; parentId?: string | null; name: string }, ctx: Ctx) => {
+    createContextFolder: async (_: unknown, args: { projectId: string; parentId?: string | null; name: string; agentId?: string | null }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId, 'member');
-      return contextService.createFolder(args.projectId, { parentId: args.parentId ?? null, name: args.name }, HUMAN);
+      return contextService.createFolder(args.projectId, { parentId: args.parentId ?? null, name: args.name, agentId: await projectAgentLibrary(args.projectId, args.agentId) }, HUMAN);
     },
     renameContextFolder: async (_: unknown, args: { id: string; name: string }, ctx: Ctx) => {
       await guardFolder(ctx, args.id, 'member');
@@ -1809,11 +1822,11 @@ export const resolvers = {
     },
     createContextInstruction: async (
       _: unknown,
-      { input }: { input: { projectId: string; folderId?: string | null; name: string; description?: string | null; content?: string | null; changeNote?: string | null } },
+      { input }: { input: { projectId: string; agentId?: string | null; folderId?: string | null; name: string; description?: string | null; content?: string | null; changeNote?: string | null } },
       ctx: Ctx,
     ) => {
       await requireProject(ctx, input.projectId, 'member');
-      return contextService.createInstruction(input.projectId, input, HUMAN);
+      return contextService.createInstruction(input.projectId, { ...input, agentId: await projectAgentLibrary(input.projectId, input.agentId) }, HUMAN);
     },
     updateContextInstruction: async (
       _: unknown,

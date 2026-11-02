@@ -5,7 +5,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import PageLoading from '../components/PageLoading';
 import { PullRequestChip } from '../components/PullRequests';
 import { RegisterPullRequestModal, TrackedPullRequestActions, TrackedPullRequestIndicators, PullRequestStageBadge } from '../components/TrackedPullRequests';
-import { prRef, PULL_REQUESTS, type TrackedPullRequest } from '../graphql/pullRequests';
+import { forgeOfUrl, prRef, PULL_REQUESTS, type TrackedPullRequest } from '../graphql/pullRequests';
 import StatusBadge from '../components/StatusBadge';
 import TaskActions from '../components/TaskActions';
 import { isOverdue, Linkified, TaskPriorityBadge, TaskStatusBadge, TaskTags } from '../components/TaskBadges';
@@ -284,7 +284,7 @@ export default function TaskPage() {
                       <div key={pr.id} className="tracked-pr-item border rounded p-2">
                         <div className="d-flex align-items-center gap-2 flex-wrap">
                           {pr.number != null ? (
-                            <a href={pr.url} target="_blank" rel="noreferrer" className="text-reset text-decoration-none fw-semibold" title="Ouvrir sur GitHub">
+                            <a href={pr.url} target="_blank" rel="noreferrer" className="text-reset text-decoration-none fw-semibold" title={`Ouvrir sur ${forgeOfUrl(pr.url)}`}>
                               <span className="text-secondary">{prRef(pr)}</span> {pr.title}
                             </a>
                           ) : (

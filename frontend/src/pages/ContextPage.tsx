@@ -1,3 +1,5 @@
+import AgentAvatar from '../components/AgentAvatar';
+import { agentKindLabels, type AgentRef } from '../graphql/agents';
 import { useMutation, useQuery } from '@apollo/client';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import PageLoading, { ProjectPageLoading } from '../components/PageLoading';
@@ -33,6 +35,9 @@ interface ProjectContext {
   name: string;
   description: string | null;
   myRole: 'ADMIN' | 'MEMBER' | 'VIEWER';
+  isPersonal: boolean;
+  /** Agents du projet : chacun a sa propre bibliothèque, à côté de celle du projet. */
+  agents: (AgentRef & { inheritContext: boolean })[];
   contextFolders: ContextFolder[];
   contextInstructions: ContextInstruction[];
   contextChanges: ContextChange[];
@@ -444,6 +449,9 @@ export default function ContextPage() {
   const { id = '' } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedId = searchParams.get('instruction');
+  // Bibliothèque affichée : celle du projet, ou la bibliothèque propre d'un agent (`?library=<id de l'agent>`).
+  const libraryId = searchParams.get('library');
+  const agentId = libraryId || null;
   const [tab, setTab] = useState<'library' | 'changes'>('library');
   const [filter, setFilter] = useState('');
   const dirtyRef = useRef(false);
@@ -451,17 +459,18 @@ export default function ContextPage() {
     dirtyRef.current = d;
   }, []);
 
-  const { data, loading, error } = usePollingQuery<{ project: ProjectContext | null }>(PROJECT_CONTEXT, { variables: { id }, pollInterval: 5000 });
+  const { data, loading, error } = usePollingQuery<{ project: ProjectContext | null }>(PROJECT_CONTEXT, { variables: { id, agentId }, pollInterval: 5000 });
   const [createFolder, { error: folderError }] = useMutation(CREATE_CONTEXT_FOLDER, { refetchQueries: ['ProjectContext'] });
   const [renameFolder] = useMutation(RENAME_CONTEXT_FOLDER, { refetchQueries: ['ProjectContext'] });
   const { confirm, prompt } = useDialogs();
   const [deleteFolder] = useMutation(DELETE_CONTEXT_FOLDER, { refetchQueries: ['ProjectContext'] });
   const [createInstruction, { error: instructionError }] = useMutation<{ createContextInstruction: ContextInstruction }>(CREATE_CONTEXT_INSTRUCTION, {
     refetchQueries: ['ProjectContext'],
-    onCompleted: (res) => setSearchParams({ instruction: res.createContextInstruction.id }),
+    onCompleted: (res) => setSearchParams({ ...(agentId ? { library: agentId } : {}), instruction: res.createContextInstruction.id }),
   });
 
   const project = data?.project;
+  const libraryAgent = project?.agents.find((a) => a.id === agentId) ?? null;
   useTabTitle(project ? `Contexte · ${project.name}` : null);
   useGitTarget(project ? { projectId: project.id, worksessionId: null, label: project.name } : null);
   const folders = useMemo(() => project?.contextFolders ?? [], [project]);
@@ -472,16 +481,21 @@ export default function ContextPage() {
   const select = async (iid: string | null) => {
     if (iid === selectedId) return;
     if (dirtyRef.current && !(await confirm({ title: 'Modifications non enregistrées', message: "Changer d'instruction sans enregistrer ? Les modifications en cours seront perdues.", confirmLabel: 'Changer', danger: true }))) return;
-    setSearchParams(iid ? { instruction: iid } : {});
+    setSearchParams({ ...(agentId ? { library: agentId } : {}), ...(iid ? { instruction: iid } : {}) });
+  };
+  const selectLibrary = async (lib: string | null) => {
+    if ((lib ?? null) === agentId) return;
+    if (dirtyRef.current && !(await confirm({ title: 'Modifications non enregistrées', message: 'Changer de bibliothèque sans enregistrer ? Les modifications en cours seront perdues.', confirmLabel: 'Changer', danger: true }))) return;
+    setSearchParams(lib ? { library: lib } : {});
   };
   const newFolder = async (parentId: string | null) => {
     const name = await prompt({ title: 'Nouveau dossier', message: 'Nom du dossier', confirmLabel: 'Créer' });
-    if (name) createFolder({ variables: { projectId: id, parentId, name } });
+    if (name) createFolder({ variables: { projectId: id, parentId, name, agentId } });
   };
   const newInstruction = async (folderId: string | null) => {
     if (dirtyRef.current && !(await confirm({ title: 'Modifications non enregistrées', message: 'Créer une autre instruction sans enregistrer ? Les modifications en cours seront perdues.', confirmLabel: 'Créer', danger: true }))) return;
     const name = await prompt({ title: 'Nouvelle instruction', message: "Nom de l'instruction", confirmLabel: 'Créer' });
-    if (name) createInstruction({ variables: { input: { projectId: id, folderId, name, content: '' } } });
+    if (name) createInstruction({ variables: { input: { projectId: id, agentId, folderId, name, content: '' } } });
   };
 
   if (loading && !data) return <ProjectPageLoading id={id} />;
@@ -492,9 +506,35 @@ export default function ContextPage() {
   return (
     <>
       <ProjectHeader project={project} active="context" />
+      {project.agents.length > 0 && (
+        <Nav variant="pills" activeKey={agentId ?? 'project'} onSelect={(k) => void selectLibrary(k === 'project' ? null : k)} className="mb-2 small ctx-libraries">
+          <Nav.Item>
+            <Nav.Link eventKey="project" title="Bibliothèque commune du projet">
+              <i className="bi bi-journal-text me-1" /> Projet
+            </Nav.Link>
+          </Nav.Item>
+          {project.agents.map((a) => (
+            <Nav.Item key={a.id}>
+              <Nav.Link eventKey={a.id} title={`Bibliothèque propre de ${a.name} (${agentKindLabels[a.kind]})${a.inheritContext ? ', qui reçoit aussi celle du projet' : ''}`} className="d-flex align-items-center gap-1">
+                <AgentAvatar agent={a} size={16} /> {a.name}
+              </Nav.Link>
+            </Nav.Item>
+          ))}
+        </Nav>
+      )}
       <p className="text-secondary small" style={{ maxWidth: 760 }}>
-        La mémoire du projet : les règles, décisions et connaissances que les agents consultent avant d'agir et complètent au fil de leur travail. Chaque
-        modification est conservée, vous pouvez revenir à une version précédente à tout moment.
+        {libraryAgent ? (
+          <>
+            La mémoire propre de <b>{libraryAgent.name}</b> : ce que l'agent retient (décisions, conventions, glossaire), distinct de la bibliothèque du projet
+            {libraryAgent.inheritContext ? ', qu’il reçoit aussi' : ', qu’il ne reçoit pas'}. Toute session du projet peut la lire et la modifier (outils <code>context</code>, paramètre <code>library</code>) ; chaque modification est conservée.{' '}
+            <Link to={`/projects/${project.id}/agents/${libraryAgent.id}`}>Fiche de l'agent</Link>
+          </>
+        ) : (
+          <>
+            La mémoire du projet : les règles, décisions et connaissances que les agents consultent avant d'agir et complètent au fil de leur travail. Chaque
+            modification est conservée, vous pouvez revenir à une version précédente à tout moment.
+          </>
+        )}
       </p>
       {mutationError && <Alert variant="danger">{mutationError.message}</Alert>}
 

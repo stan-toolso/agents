@@ -109,7 +109,12 @@ npm run dev                 # backend (http://localhost:4000/graphql) + frontend
 ```
 
 Les migrations SQL (`backend/src/db/migrations/*.sql`) sont appliquées automatiquement au démarrage
-du backend, ou à la main avec `npm run db:migrate`.
+du backend, ou à la main avec `npm run db:migrate`. Une nouvelle migration se crée avec
+`npm run migration:new <nom>` : le fichier est préfixé par un horodatage UTC à la minute
+(`20261102T0715_nom.sql`), si bien que deux branches qui en ajoutent chacune une fusionnent sans
+renumérotation. Les fichiers numérotés `001_` à `055_` gardent leur nom (il est enregistré dans
+`schema_migrations`) ; aucun nouveau `NNN_` n'est accepté. Une migration plus ancienne que la dernière
+appliquée passe quand même, avec un avertissement au démarrage (« appliquée hors ordre »).
 
 ### Tests
 
@@ -133,7 +138,9 @@ les migrations deux fois (le second passage ne doit rien faire), vérifie qu'une
 est annulée, puis supprime la base. Sans `TEST_DATABASE_URL` il est ignoré en local et échoue en CI.
 Ne jamais y mettre l'URL de la base de production.
 
-**CI** : `.github/workflows/ci.yml` lance `npm ci`, `npm run typecheck`, `npm run build` et
+**CI** : `.github/workflows/ci.yml` lance `npm ci`, `npm run check:migrations -w backend` (échec sur
+un nom de migration invalide ou un préfixe en double, avertissement si la branche ajoute une migration
+plus ancienne que la dernière de main), `npm run typecheck`, `npm run build` et
 `npm test` à chaque push et pull request, avec un service PostgreSQL 16 pour le test des migrations.
 Le déploiement reste manuel (`DEPLOY.md`).
 
@@ -852,7 +859,7 @@ bouton **Fusionner la base** (`gitMergeBase` : fetch puis `git merge --no-edit <
 en cours au lieu d'échouer) ; le pull reste en avance rapide seulement.
 
 **Pull requests GitHub** (section du panneau git, `backend/src/git/pullRequests.ts`), pour un projet
-dont le dépôt est sur GitHub, avec le compte GitHub de la personne qui agit (Paramètres → GitHub ;
+dont le dépôt est sur GitHub (sur GitLab : merge requests, voir « GitLab » plus bas ; hébergé : Forgejo), avec le compte GitHub de la personne qui agit (Paramètres → GitHub ;
 compte choisi d'après le propriétaire du dépôt, sinon le compte par défaut) : la PR de la branche courante, ou
 « Créer une pull request » (titre et description pré-remplis avec la tâche liée à la branche et les
 commits, base = branche du projet sinon celle du dépôt ; la branche est poussée au besoin), puis les
@@ -1193,7 +1200,8 @@ le provider Claude lance le CLI du serveur (`CLAUDE_BIN`, sinon celui du SDK, co
 identifiants) avec `tools: []` (aucun outil intégré : ni fichiers, ni commandes, ni web), `settingSources: []`
 (aucun réglage lu sur le disque), un dossier de configuration propre à l'espace
 (`CLAUDE_CONFIG_DIR = WORKSPACES_ROOT/.runners/<slug>/chat-home`, où ses conversations sont reprises) et
-les serveurs MCP `context`, `tasks`, `sessions`, `worksessions`, `projects`, `vault` et `google`
+les serveurs MCP `context`, `tasks`, `sessions`, `worksessions`, `projects`, `vault`, `google` et `agents` (quand un
+de ses projets a des agents)
 (pas de `pages` ni de navigateur). Les chats sont exclus des listes de sessions (`SessionFilter.kind`,
 « session » par défaut ; « all » pour une liste par identifiants ou par session parente), de la sidebar,
 du tableau de bord et de la recherche ; ils se listent par `chats(limit)` (page `/chats`) et s'ouvrent
@@ -1232,8 +1240,31 @@ plus `sessions.requested_by_id` : la personne qui l'a demandée (le client qui p
 confie la tâche), à qui l'agent répond d'abord ; « Mes sessions » inclut celles qu'on a demandées. Le provider Claude
 ouvre le prompt système d'une telle session par l'identité et les instructions de l'agent (`agents/prompt.ts`),
 applique ses réglages par défaut (`defaults`, sous ceux demandés explicitement), signe ses messages de fil de son nom,
-et décrit à toute session du projet les agents qui existent et comment les convoquer. Chaque agent a un dossier
-`agents/<slug>` dans la bibliothèque de contexte : sa mémoire durable.
+et décrit à toute session du projet les agents qui existent et comment les convoquer.
+
+**Bibliothèque de contexte propre à chaque agent** (migration `055_agent_libraries.sql`). Les tables du contexte
+(`context_folders`, `context_instructions`, `context_changes`) portent un `agent_id` : null pour la bibliothèque du
+projet, l'identifiant de l'agent pour la sienne (mêmes chemins, mêmes versions, mêmes outils ; `contextService` prend
+un `agentId` sur ses entrées par bibliothèque, `tree`, `resolve`, `createFolder`, `createInstruction`,
+`writeInstructionAtPath`, `search`, `changes`, `promptSummary`). Les sessions d'un agent reçoivent sa bibliothèque
+(skills `memoire:<chemin>`, cible par défaut de leurs outils `context`) et, si `inherit_context` (réglage « Hérite
+aussi de la bibliothèque du projet », vrai par défaut), celle du projet (skills `context:`). **Toute session du
+projet** (personne ou agent) lit et modifie n'importe quelle bibliothèque par le paramètre `library` des outils
+`context` (« projet », ou le nom ou l'identifiant d'un agent ; outil `libraries` pour la liste). Dans
+l'application, la page Contexte d'un projet a un sélecteur de bibliothèque (Projet, puis un onglet par agent ;
+`?library=<id>`) et les entrées GraphQL prennent `agentId` (`Project.contextFolders`, `contextInstructions`,
+`contextChanges`, `searchContext`, `createContextFolder`, `CreateContextInstructionInput`).
+
+**Comptes prêtés (délégation).** Plutôt que de régler des comptes propres à l'agent, la personne qui le configure peut
+lui **prêter son propre compte** Claude (`claude_delegate_id` : identifiants, modèle par défaut, budgets de cette
+personne) et/ou ses comptes git (`git_delegate_id` : GitHub, GitLab, forge ; **en lecture seule** par défaut,
+`git_delegate_read_only`). On ne prête que son propre compte (mutation `setAgentDelegation(id, account, delegate,
+readOnly)`, carte « Comptes prêtés » de l'onglet Comptes) ; un gestionnaire peut retirer une délégation.
+`agentService.accounts(agent)` / `accountsForOwner(ownerId)` donnent les comptes effectifs (`OwnerAccounts`) :
+le provider Claude lit les réglages Claude du délégant (`claudeSettings.forSession`), passe ses comptes git à
+`agentGitEnv` et, en lecture seule, pose une adresse de push inexistante sur `origin` (`remote.origin.pushurl`) ;
+`tasks.pr_open` refuse alors d'ouvrir une PR, et le prompt de l'agent le lui dit. La consommation reste imputée à
+l'agent (propriétaire des sessions) ; le plafond mensuel vérifié est celui du délégant.
 
 **Convoquer un agent** (`agentService.summon`) : avec une tâche, sa session non archivée reliée à la tâche reçoit le
 message (relancée si elle était terminée) ; sinon une session s'ouvre pour lui sur la tâche — dans le **dossier de la
@@ -1251,7 +1282,12 @@ nouvelle session dans son propre dossier, nommée d'après le message. Quatre fa
   identifiant) ;
 - depuis une session (serveur MCP `agents` : `list` libre, `summon` soumis à autorisation ; `mcp__agents` pour le
   pré-autoriser). Un agent convoqué par une session n'en est pas le sous-agent : c'est un collègue, qui répond dans le
-  fil de la tâche.
+  fil de la tâche ;
+- depuis un **chat** ou une session de l'espace personnel : le prompt système liste les agents de **tous les projets**
+  de la personne avec leur rôle et leur projet (`scopedAgentsPromptSummary`), et le serveur `agents` reçoit la portée
+  (`list` sur tous les projets ou `project`, `summon` qui cherche l'agent par nom ou « @Nom » dans tous les projets,
+  rôle membre exigé, nom ambigu refusé sans `project`). Interpeller un agent dans le chat (« @Chris : … ») le convoque
+  au nom de la personne (`requestedById`) ; le chat attend sa réponse avec `sessions.wait` et la rapporte.
 
 **Déclencheurs** (`triggers`, écouteurs du service des tâches et des PR suivies, garde anti-boucle : rien de ce qu'une
 session d'agent fait ne déclenche les agents) : `taskCreated` (tâche créée par une personne ou l'API, filtrable par
@@ -1671,7 +1707,23 @@ retenu est celui de l'instance dont l'identifiant ou un groupe de premier niveau
 sinon le compte par défaut. Il sert aux actions git de la personne (`gitAuthFor` : en-tête `oauth2:<jeton>`),
 à la liste des dépôts du formulaire de projet (`gitlabRepositories`) et aux agents : credential helper pour
 l'instance, `GITLAB_TOKEN` et `GITLAB_HOST` (lus par `glab`), identité des commits du compte GitLab quand le
-dépôt du projet est sur GitLab. Les merge requests ne sont pas encore suivies comme les pull requests GitHub.
+dépôt du projet est sur GitLab.
+
+**Merge requests GitLab** (`git/gitlabMergeRequests.ts`, API v4 `/projects/:id/merge_requests`) : un projet dont le
+dépôt est sur GitLab (gitlab.com, ou une instance où **une personne du serveur** a connecté un compte : liste
+`user_gitlab_accounts.host` relue au plus une fois par minute, `refreshKnownGitlabHosts`) a ses merge requests
+traitées comme les pull requests GitHub, au même format (`PullRequest.forge = 'gitlab'`, `forgeName` « GitLab ») :
+panneau git (liste, création, fusion et nettoyage), `tasks.pr_open` / `pr_register` (URL
+`https://<instance>/<groupe>/<projet>/-/merge_requests/<n>`, groupes imbriqués compris), synchronisation des PR
+suivies (de fond comprise : `syncTargets` préfère un membre qui a un compte de la forge du dépôt) et commentaire
+de la revue de code. Le numéro est l'`iid` de la MR, le dépôt (`repo`) le chemin complet du projet. Les MR
+ouvertes sont détaillées : pipeline du dernier commit (`head_pipeline` → `checksState`) et ses jobs (checks ; un
+job `allow_failure` en échec est neutre), approbations (`reviewDecision` : APPROVED, REVIEW_REQUIRED ;
+`detailed_merge_status` donne conflits, rebase nécessaire, blocages). La fenêtre de détail lit aussi commits et
+diff. Brouillon = préfixe « Draft: ». Fusion merge ou squash (`PUT …/merge`, `squash`) ; pas de rebase à la
+demande (refusé, l'option est masquée). Jeton : compte GitLab de la personne qui agit sur l'instance du dépôt
+(`gitlabService.apiToken`), sinon « GitLab non connecté ». Limites : seules les MR du dépôt du projet sont suivies
+(pas d'autre projet GitLab), `pr_open` avec `path` reste réservé aux clones GitHub.
 
 **OpenCode** (`settings/opencode.ts`) : modèle par défaut (`fournisseur/modèle`), budget par session,
 et la clé de chaque fournisseur de modèles (OpenAI, Anthropic, Google, OpenRouter, OpenCode Zen,
