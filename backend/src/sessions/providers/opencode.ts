@@ -28,6 +28,8 @@ import { createSharedPagesMcpServer, sharedPagesPrompt } from '../../sharedPages
 import { previewPrompt } from '../../previews/config.js';
 import { previewsEnabled } from '../../previews/hosts.js';
 import { createTasksMcpServer, TASKS_FREE_TOOLS } from '../../tasks/mcp.js';
+import { CONVERSATIONS_FREE_TOOLS, conversationsMcpPrompt, createConversationsMcpServer } from '../../conversations/mcp.js';
+import { conversationService, linkedThreadsPrompt } from '../../conversations/service.js';
 import { trackedPullRequestService } from '../../pullRequests/service.js';
 import { taskService } from '../../tasks/service.js';
 import { createVaultMcpServer, type VaultApproval } from '../../vault/mcp.js';
@@ -75,7 +77,7 @@ const BROWSER_READ_TOOLS = ['browser_snapshot', 'browser_take_screenshot', 'brow
 const BROWSER_FIELD_READERS = ['browser_evaluate', 'browser_run_code'];
 
 /** Outils des serveurs MCP de Skipper autorisés d'office (mêmes règles que pour une session Claude). */
-const SKIPPER_FREE_TOOLS = ['mcp__context', ...TASKS_FREE_TOOLS, 'mcp__vault', 'mcp__worksessions__list', 'mcp__worksessions__create', 'mcp__sessions__list', 'mcp__sessions__get', 'mcp__sessions__wait', 'mcp__sessions__end', 'mcp__pages__list', 'mcp__env'];
+const SKIPPER_FREE_TOOLS = ['mcp__context', ...TASKS_FREE_TOOLS, ...CONVERSATIONS_FREE_TOOLS, 'mcp__vault', 'mcp__worksessions__list', 'mcp__worksessions__create', 'mcp__sessions__list', 'mcp__sessions__get', 'mcp__sessions__wait', 'mcp__sessions__end', 'mcp__pages__list', 'mcp__env'];
 
 /** Autorisations d'OpenCode lui-même : lectures et recherches libres, tout le reste demande — à cet exécuteur, qui applique le mode et les règles de la session puis interroge l'humain. */
 const BASE_PERMISSION: Record<string, string> = { '*': 'ask', read: 'allow', glob: 'allow', grep: 'allow', list: 'allow', lsp: 'allow', todowrite: 'allow', todoread: 'allow', question: 'allow', skill: 'allow', task: 'allow' };
@@ -304,6 +306,7 @@ class OpencodeRun {
     const agent = await agentService.forUser(this.ownerId);
     const accounts = await agentService.accountsForOwner(this.ownerId);
     const agentLibraries = isPersonalProject(ctx.project) ? [] : await agentService.libraries(ctx.project.id);
+    const channels = isPersonalProject(ctx.project) ? [] : await conversationService.list(ctx.project.id);
     const projectContext = !agent || agent.inheritContext;
     this.systemPrompt = [
       ctx.project.systemPrompt.trim(),
@@ -313,6 +316,7 @@ class OpencodeRun {
       projectContext ? await contextService.promptSummary(ctx.project.id) : '',
       await taskService.linkedTaskPrompt(ctx.session.id),
       await taskService.promptSummary(ctx.project.id, ctx.session.id),
+      channels.length ? [conversationsMcpPrompt(channels), await linkedThreadsPrompt(ctx.session.id)].filter(Boolean).join('\n\n') : '',
       ctx.project.gitUrl ? trackedPullRequestService.promptSummary() : '',
       vaultService.promptSummary(vaultItems, ctx.project),
       await envFileService.promptSummary(ctx.project.id),
@@ -344,6 +348,7 @@ class OpencodeRun {
     const factories: Record<string, McpFactory> = {
       context: () => createContextMcpServer(ctx.project, ctx.session.id, { agentLibraries, defaultAgentId: agent?.id ?? null }),
       tasks: () => createTasksMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name),
+      ...(channels.length ? { conversations: () => createConversationsMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name) } : {}),
       ...(vaultTools ? { vault: () => createVaultMcpServer(vaultContext) } : {}),
       worksessions: () => createWorksessionsMcpServer(ctx.project, ctx.session.id),
       sessions: () => createSessionsMcpServer(ctx.project, ctx.session.id),

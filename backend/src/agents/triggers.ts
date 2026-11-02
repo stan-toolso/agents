@@ -1,4 +1,6 @@
 import type { Actor } from '../context/types.js';
+import { channelRef, conversationService, threadTitle } from '../conversations/service.js';
+import type { ConversationChange } from '../conversations/types.js';
 import { log } from '../log.js';
 import { trackedPullRequestService } from '../pullRequests/service.js';
 import type { TrackedPullRequest } from '../pullRequests/types.js';
@@ -8,7 +10,7 @@ import { taskService } from '../tasks/service.js';
 import type { Task, TaskActor, TaskChange } from '../tasks/types.js';
 import { userRepository } from '../users/repository.js';
 import { agentRepository } from './repository.js';
-import { agentService } from './service.js';
+import { agentService, type SummonOptions } from './service.js';
 import type { Agent } from './types.js';
 
 /**
@@ -31,7 +33,7 @@ async function actorName(actor: TaskActor | Actor | null | undefined): Promise<s
 const tagMatches = (task: Task, tag: string | null): boolean => !tag || task.tags.some((t) => fold(t) === fold(tag));
 
 /** Convoque sans jamais lever (l'action d'origine ne doit pas en dépendre). */
-async function summonQuietly(agent: Agent, opts: { taskId: string; text: string; requestedById?: string | null }, why: string): Promise<void> {
+async function summonQuietly(agent: Agent, opts: Omit<SummonOptions, 'actor'>, why: string): Promise<void> {
   try {
     const session = await agentService.summon(agent.id, { ...opts, actor: { type: 'human' } });
     log.info(`[agents] ${agent.name} convoqué (${why}) : session ${session.id}`);
@@ -130,6 +132,48 @@ export async function onTaskChanged(change: TaskChange): Promise<void> {
   else if (change.kind === 'updated') await onUpdated(change);
 }
 
+/**
+ * Sessions reliées à un fil de canal auxquelles un message s'adresse parce qu'un agent les joue : un message d'une
+ * personne revient comme instruction à la session d'un agent qui suit les fils où il est intervenu (`threadFollowed`),
+ * ou d'un agent que le message mentionne. Utilisé par `conversations/feed.ts`.
+ */
+export async function agentConversationFeedTargets(change: ConversationChange, linked: string[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (change.kind !== 'posted' || change.message.authorType !== 'human') return out;
+  const mentioned = new Set(change.message.mentions.filter((m) => m.kind === 'user').map((m) => m.id));
+  for (const { sessionId, agent } of await agentSessions(linked)) {
+    if (!agent.enabled || agent.archivedAt) continue;
+    if (agent.triggers.threadFollowed || mentioned.has(agent.id)) out.add(sessionId);
+  }
+  return out;
+}
+
+/** Un message d'une personne dans un canal qui mentionne un agent sans session reliée au fil : l'agent est convoqué sur le fil. */
+async function onMessagePosted(change: Extract<ConversationChange, { kind: 'posted' }>): Promise<void> {
+  const m = change.message;
+  if (m.authorType !== 'human') return;
+  const mentionedIds = m.mentions.filter((x) => x.kind === 'user').map((x) => x.id);
+  if (!mentionedIds.length) return;
+  const agents = (await agentRepository.findByIds(mentionedIds)).filter((a) => a.enabled && !a.archivedAt && a.projectId === change.conversation.projectId);
+  for (const agent of agents) {
+    if (await agentService.sessionOnThread(agent, change.root.id)) continue; // sa session reliée reçoit le message par le fil
+    const excerpt = m.body.length > 2000 ? `${m.body.slice(0, 2000)}…` : m.body;
+    await summonQuietly(
+      agent,
+      {
+        thread: { conversationId: change.conversation.id, rootMessageId: change.root.id },
+        requestedById: m.authorUserId,
+        text: `[Mention] ${m.authorName} te mentionne dans le canal ${channelRef(change.conversation)}, fil « ${threadTitle(change.root)} » :\n\n${excerpt}\n\nRéponds dans le fil (\`conversations.post\`, channel « ${change.conversation.slug} », reply_to ${change.root.id}) et agis selon tes instructions.`,
+      },
+      'mention dans un canal',
+    );
+  }
+}
+
+export async function onConversationChanged(change: ConversationChange): Promise<void> {
+  if (change.kind === 'posted') await onMessagePosted(change);
+}
+
 /** La pull request d'une tâche est fusionnée : les agents qui suivent les fusions sont prévenus. */
 export async function onPullRequestMerged(pr: TrackedPullRequest): Promise<void> {
   if (!pr.taskId) return;
@@ -150,4 +194,5 @@ export function registerAgentTriggers(): void {
   taskService.onTaskCreated('agents', onTaskCreated);
   taskService.onTaskChanged('agents', onTaskChanged);
   trackedPullRequestService.onMerged('agents', onPullRequestMerged);
+  conversationService.onChanged('agents', onConversationChanged);
 }

@@ -66,6 +66,8 @@ const project = (id, name, slug, description, gitUrl, extra = {}) => ({
   contextChanges: [],
   vaultItems: () => (id === 'p-perso' ? [] : vaultItems.filter((v) => v.ownerProject === P[key(id)] || v.shared).map((item) => ({ __typename: 'ProjectVaultItem', item, via: item.ownerProject ? 'PROJECT' : 'OWN', link: null, forAgents: true }))),
   apiKeys: [],
+  conversations: () => conversations.filter((c) => c.project.id === id),
+  unreadMessages: () => conversations.filter((c) => c.project.id === id).reduce((n, c) => n + c.unreadCount, 0),
   permissionRules: [],
   ...extra,
 });
@@ -325,6 +327,57 @@ comment(T.relances, U.me, 60 * 20, 'Bloqué tant qu’on n’a pas le modèle d�
 comment(T.pdf, U.nora, 20, 'Revue de la PR #118 : le calcul des totaux arrondit ligne par ligne, ce qui peut décaler d’un centime le total TTC. Voir `InvoicePdf.ts:84`.');
 comment(T.cotis, U.max, 30, 'PR ouverte : échéancier calculé côté serveur, trois prélèvements Stripe programmés. Les tests passent.');
 
+// ---- Conversations d'équipe (canaux) ------------------------------------------------------------------------------
+
+let msgSeq = 0;
+const messages = [];
+const conversations = [];
+const channel = (p, slug, name, topic, extra = {}) => {
+  const c = {
+    __typename: 'Conversation', id: `c-${p.id}-${slug}`, slug, name, topic, archivedAt: null, createdAt: ago(60 * 24 * 40), lastMessageAt: null,
+    project: p, unreadCount: 0, messageCount: () => messages.filter((m) => m.conversationId === c.id).length,
+    mentionables: () => [...people, ...agents.map((a) => a.user)].map((u) => ({ __typename: 'TaskMentionable', kind: 'user', id: u.id, label: u.name, detail: u.kind === 'AGENT' ? 'agent' : u.email, text: `@${u.name}` })),
+    messages: () => messages.filter((m) => m.conversationId === c.id),
+    ...extra,
+  };
+  conversations.push(c);
+  return c;
+};
+const message = (c, author, minutesAgo, body, extra = {}) => {
+  const m = {
+    __typename: 'Message', id: `msg-${++msgSeq}`, conversationId: c.id, parentId: null, authorType: author.kind === 'AGENT' ? 'agent' : 'human',
+    authorName: author.name, author, authorSession: null, agent: author.agent ?? null, body, mentions: [], reactions: [], editable: author === U.me,
+    deletable: author === U.me, replyCount: () => messages.filter((r) => r.parentId === m.id).length, lastReplyAt: () => messages.filter((r) => r.parentId === m.id).at(-1)?.createdAt ?? null,
+    respondingSessions: [], createdAt: ago(minutesAgo), updatedAt: ago(minutesAgo), ...extra,
+  };
+  if (!c.lastMessageAt || m.createdAt > c.lastMessageAt) c.lastMessageAt = m.createdAt;
+  messages.push(m);
+  return m;
+};
+const C = {
+  siteGeneral: channel(P.site, 'general', 'général', 'Pilotage du site vitrine', { unreadCount: 2 }),
+  siteLivraisons: channel(P.site, 'livraisons', 'livraisons', 'Mises en production et releases'),
+  siteIdees: channel(P.site, 'idees', 'idées', ''),
+  apiGeneral: channel(P.api, 'general', 'général', ''),
+  mobileGeneral: channel(P.mobile, 'general', 'général', ''),
+  dataGeneral: channel(P.data, 'general', 'général', ''),
+};
+const mention = (u) => ({ __typename: 'TaskMention', kind: 'user', id: u.id, label: u.name, text: `@${u.name}` });
+const m1 = message(C.siteGeneral, U.me, 60 * 3, '@Chris @Léa Fontaine on vise la mise en ligne de la nouvelle page tarifs ce soir. Qu’est-ce qui bloque encore ?', {
+  mentions: [mention(U.chris), mention(U.lea)], reactions: [{ __typename: 'TaskReaction', emoji: '👀', count: 2, actors: ['Chris', 'Léa Fontaine'], mine: false }],
+  respondingSessions: () => [S.tarifs],
+});
+message(C.siteGeneral, U.chris, 60 * 3 - 2, 'Trois choses : la PR #142 attend une relecture, la tâche « Formulaire de contact sur mobile » n’est pas cadrée, et le test de la FAQ échoue sur Safari. Je propose de livrer sans le formulaire : je le cadre pour la suite.', { parentId: m1.id });
+message(C.siteGeneral, U.lea, 60 * 3 - 20, 'OK pour moi. @Chris tu passes la tâche à « prête » une fois cadrée ?', { parentId: m1.id, mentions: [mention(U.chris)] });
+message(C.siteGeneral, U.chris, 60 * 9, 'Point du matin : 2 PR fusionnées hier, 1 à relire (#142), aucune tâche bloquée. Les demandes du blog sont triées.', {
+  reactions: [{ __typename: 'TaskReaction', emoji: '👍', count: 1, actors: ['Camille Laurent'], mine: true }],
+});
+message(C.siteGeneral, U.hugo, 60 * 26, 'Le support signale que la page tarifs n’affiche pas l’offre annuelle sur mobile. Quelqu’un peut jeter un œil ?');
+message(C.siteLivraisons, U.me, 60 * 24 * 2, 'v1.7 en production. Rien à signaler sur les métriques.', { reactions: [{ __typename: 'TaskReaction', emoji: '🎉', count: 3, actors: ['Hugo Bernard', 'Léa Fontaine', 'Chris'], mine: false }] });
+message(C.siteLivraisons, U.chris, 60 * 24 * 2 + 30, 'Notes de version préparées dans le contexte (`releases/v1.7`).');
+message(C.apiGeneral, U.hugo, 60 * 5, '@Nora peux-tu relire la PR #118 ? Le calcul des totaux me semble fragile.', { mentions: [mention(U.nora)] });
+message(C.apiGeneral, U.nora, 60 * 5 - 10, 'Relecture faite : l’arrondi ligne par ligne peut décaler le total TTC d’un centime. Détail dans la tâche « Export des factures en PDF ».', { parentId: messages.at(-1).id });
+
 const filterTasks = (a = {}) =>
   tasks.filter(
     (t) =>
@@ -540,6 +593,35 @@ const providers = [
   },
 ];
 
+
+/** Tableau de bord d'un projet : la vue d'ensemble restreinte au projet, plus l'équipe, le canal général, les planifications. */
+const projectDashboard = (id) => {
+  const p = byId(allProjects, id);
+  const d = dashboard();
+  const ps = live().filter((s) => s.project === p);
+  const members = p.members();
+  return {
+    __typename: 'ProjectDashboard',
+    generatedAt: d.generatedAt,
+    counts: { ...d.counts, pendingRequests: pending().filter((r) => r.session.project === p).length, busySessions: ps.filter((s) => s.activity === 'BUSY').length, idleSessions: ps.filter((s) => s.status === 'RUNNING' && s.activity === 'IDLE').length, todoTasks: tasks.filter((t) => t.project === p && t.status === 'TODO').length, inProgressTasks: tasks.filter((t) => t.project === p && t.status === 'IN_PROGRESS').length },
+    usage: { ...d.usage, monthUsd: 24.1 },
+    pendingRequests: pending().filter((r) => r.session.project === p),
+    runningSessions: ps.filter((s) => s.status === 'RUNNING'),
+    recentSessions: [...ps].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)).slice(0, 5),
+    attentionTasks: tasks.filter((t) => t.project === p && ['URGENT', 'HIGH'].includes(t.priority) && t.status !== 'DONE'),
+    pullRequests: pullRequests.filter((x) => x.project === p && x.stage !== 'MERGED'),
+    mergedPullRequests: pullRequests.filter((x) => x.project === p && x.stage === 'MERGED'),
+    staleTasks: tasks.filter((t) => t.project === p && t.status === 'IN_PROGRESS' && !(t.sessionIds ?? []).some((sid) => ps.some((s) => s.id === sid && s.status === 'RUNNING'))),
+    schedules: sessions.filter((s) => s.schedule && s.project === p).map((s) => s.schedule),
+    general: conversations.find((c) => c.project === p && c.slug === 'general') ?? null,
+    team: members.map((m) => {
+      const ms = ps.filter((s) => s.status === 'RUNNING' && s.owner === m.user);
+      return { __typename: 'ProjectTeamMember', user: m.user, agent: m.user.agent ?? null, sessions: ms, tasks: tasks.filter((t) => t.project === p && (t.sessionIds ?? []).some((sid) => ms.some((s) => s.id === sid))), lastActivityAt: ms[0]?.updatedAt ?? m.user.lastLoginAt };
+    }),
+    tasks: tasks.filter((t) => t.project === p),
+  };
+};
+
 export const demoRoot = {
   me: U.me,
   users: Object.values(U),
@@ -557,6 +639,8 @@ export const demoRoot = {
   sessionOwners: () => [U.me, U.hugo, U.lea, U.chris, U.max, U.nora],
   tasks: (a = {}) => filterTasks({ ...a, status: a.status ?? undefined }),
   task: (a) => byId(tasks, a.id),
+  conversation: (a) => byId(conversations, a.id),
+  conversationBySlug: (a) => conversations.find((c) => c.project.id === a.projectId && c.slug === a.slug) ?? null,
   taskTags: () => [...new Set(tasks.flatMap((t) => t.tags))],
   taskPeople: () => people.map(person),
   requests: (a = {}) => requests.filter((r) => (a.status === null || r.status === (a.status ?? 'PENDING')) && (!a.sessionId || r.session.id === a.sessionId)),
@@ -564,6 +648,7 @@ export const demoRoot = {
   notifications: (a = {}) => notifications.filter((n) => !a.unreadOnly || !n.readAt).slice(0, a.limit ?? 50),
   unreadNotificationCount: () => notifications.filter((n) => !n.readAt).length,
   dashboard,
+  projectDashboard: (a) => projectDashboard(a.id),
   inbox: () => ({
     __typename: 'Inbox', generatedAt: new Date().toISOString(), counts: inboxCounts(), requests: pending(),
     sessions: live().filter((s) => ['FAILED', 'INTERRUPTED'].includes(s.status) || (s.status === 'RUNNING' && s.activity === 'IDLE' && s.owner === U.me)),

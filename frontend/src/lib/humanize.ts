@@ -85,6 +85,18 @@ export function describeTool(rawName: string, input: Record<string, unknown> = {
         const [label, action] = verbs[op] ?? [`Tâches : ${op}`, `utiliser les tâches (${op})`];
         return { label, action };
       }
+      if (name.startsWith('mcp__conversations__')) {
+        const op = name.slice('mcp__conversations__'.length);
+        const channel = str(input, 'channel') ? `#${String(str(input, 'channel')).replace(/^#/, '')}` : 'un canal';
+        const verbs: Record<string, [string, string]> = {
+          list: [`Consultation des canaux de conversation${inProject}`, `consulter les canaux de conversation${inProject}`],
+          read: [`Lecture du canal ${channel}`, `lire le canal ${channel}`],
+          post: [str(input, 'reply_to') ? `Réponse dans un fil de ${channel}` : `Message dans ${channel}`, `écrire dans ${channel}`],
+          react: [`Réaction ${str(input, 'emoji') ?? ''} sur un message`, 'réagir sur un message'],
+        };
+        const [label, action] = verbs[op] ?? [`Conversations : ${op}`, `utiliser les conversations (${op})`];
+        return { label, action };
+      }
       if (name.startsWith('mcp__context__')) {
         const op = name.slice('mcp__context__'.length);
         const path = str(input, 'path') ?? str(input, 'query') ?? '';

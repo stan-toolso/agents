@@ -1135,6 +1135,49 @@ Le prompt système d'une session cite la tâche dont elle a la charge et celles 
 tâches ouvertes qu'il embarque (relue à chaque tour) est plafonnée à 15 (`tasks/promptList.ts`) : celles de la session,
 puis les tâches en cours, puis les plus prioritaires ; un décompte par priorité renvoie vers `tasks.list` pour le reste.
 
+## Conversations d'équipe (canaux)
+
+Chaque projet a des **canaux de conversation** (onglet « Conversations », route `/projects/:id/conversations/:slug?`) :
+`#général` est créé d'office, les membres en créent d'autres (nom, sujet ; un administrateur archive, le général ne
+s'archive pas). Un canal se lit comme le fil d'une tâche : des **messages** en Markdown, des **réponses en fil** (un
+niveau), des **réactions**, des **mentions**. Même vocabulaire et même moteur de rendu (`components/Thread.tsx`,
+partagé avec `TaskThread`), mais des tables à part (`conversations`, `messages`, `message_reactions`,
+`conversation_sessions`, `conversation_reads` ; module `backend/src/conversations`). L'espace personnel n'a pas de
+canaux (ses chats en tiennent lieu).
+
+- **Mentionner une personne** (`@Nom`, `@e-mail`) la notifie (`conversation.mentioned`, famille « Mentions et
+  réponses ») ; l'auteur d'un message auquel on répond reçoit `conversation.replied`. Le lien
+  `/projects/<id>/conversations/<slug>#m-<id>` amène au message.
+- **Mentionner un agent du projet** (`@Chris`) le **convoque** sur le fil (`agentService.summon` avec `thread`) : sa
+  session reçoit le fil complet et répond dedans avec l'outil `conversations.post` ; le fil montre « Chris répond… »
+  tant que sa session travaille, puis sa réponse avec son avatar et le lien vers la session. La session reste reliée au
+  fil (`conversation_sessions`) : les messages suivants lui parviennent — comme instruction s'ils la mentionnent ou si
+  l'agent suit les fils où il intervient (`threadFollowed`), en note discrète sinon (`conversations/feed.ts`, mêmes
+  règles que le fil des tâches). Un message écrit par une session d'agent ne convoque jamais un autre agent.
+- **Mentionner une session** (`@session:<id>`) lui transmet le message et la relie au fil.
+- **Les sessions écrivent aussi d'elles-mêmes** : serveur MCP `conversations` (`list`, `read` d'un canal ou d'un fil,
+  `post` avec `reply_to`, `react`), autorisé d'office, présent dans toute session d'un projet qui a des canaux (et dans
+  les chats de l'espace personnel, avec le paramètre `project`). Le prompt système nomme les canaux et explique les
+  textes `[Message dans un canal]`.
+- **Non-lus** par personne et par canal (`conversation_reads`, marqué lu à l'affichage) : pastille sur l'onglet
+  Conversations et dans la liste des canaux. Le canal affiché est sondé toutes les 4 s (`ChannelThread`).
+- Pas encore : fichiers joints aux messages d'un canal, messages directs, canaux privés, recherche, export dans
+  l'archive du projet.
+
+## Tableau de bord et réglages d'un projet
+
+La page d'un projet (`/projects/:id`, `pages/ProjectDetailPage.tsx`) est son **tableau de bord** (query
+`projectDashboard`, `dashboard/service.ts` : la vue d'ensemble de l'accueil restreinte au projet, plus l'équipe, les
+tâches abandonnées, les planifications et les tâches des 13 dernières semaines) : tuiles de santé (demandes, agents,
+tâches, consommation ou pull requests), le canal `#général` embarqué pour parler à l'équipe, « À traiter » (demandes,
+sessions qui attendent ou en erreur, tâches en cours sans agent dessus, tâches « à valider », PR à fusionner),
+« L'équipe en ce moment » (chaque membre, ses sessions et les tâches qu'elles ont en charge), les tâches à
+surveiller, le **flux des tâches** par étiquette d'état (vocabulaire des agents : à cadrer → prête → en dev → à
+valider → à livrer), le **débit hebdomadaire** (créées / terminées, `lib/taskStats.ts`), les prochaines échéances et
+planifications, l'activité récente (sessions terminées, PR fusionnées, tâches terminées). Les réglages (dossier de
+travail, instructions permanentes, membres, autorisations mémorisées, conteneur, disque, clés d'API, suppression)
+sont dans l'onglet **Réglages** (`/projects/:id/settings`, `pages/ProjectSettingsPage.tsx`).
+
 ## Lancer des sessions
 
 **Depuis l'interface.** « Nouvelle session » (sidebar, pages Projets, Sessions, projet, accueil) ouvre la

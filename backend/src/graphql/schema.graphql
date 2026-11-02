@@ -3647,3 +3647,126 @@ extend type TaskComment {
   "Agent dont la session a écrit le message (null sinon)."
   agent: Agent
 }
+
+# ---- Conversations d'équipe (canaux) ----------------------------------------------------------------
+
+"Canal de conversation d'un projet (« général », « livraisons »…) : des messages en fil, à la Slack, où l'on mentionne personnes et agents."
+type Conversation {
+  id: ID!
+  project: Project!
+  "Nom technique, unique dans le projet (« general »)."
+  slug: String!
+  name: String!
+  topic: String!
+  lastMessageAt: DateTime
+  archivedAt: DateTime
+  createdAt: DateTime!
+  "Messages des autres postés après la dernière lecture de l'utilisateur connecté."
+  unreadCount: Int!
+  messageCount: Int!
+  "Les derniers messages racines (limit, défaut 50 ; before : plus anciens que cette date) avec toutes leurs réponses, à plat, du plus ancien au plus récent."
+  messages(before: DateTime, limit: Int): [Message!]!
+  "Qui l'on peut mentionner : membres du projet (dont les agents), puis sessions d'agent non archivées."
+  mentionables: [TaskMentionable!]!
+}
+
+"Message d'un canal : racine, ou réponse dans le fil d'une racine (parentId)."
+type Message {
+  id: ID!
+  conversationId: ID!
+  parentId: ID
+  "'human' ou 'agent'."
+  authorType: String!
+  authorName: String!
+  author: User
+  authorSession: Session
+  "Agent de projet dont la session a écrit le message (null sinon)."
+  agent: Agent
+  body: String!
+  mentions: [TaskMention!]!
+  reactions: [TaskReaction!]!
+  editable: Boolean!
+  deletable: Boolean!
+  "Pour un message racine : nombre de réponses et date de la dernière."
+  replyCount: Int!
+  lastReplyAt: DateTime
+  "Sessions reliées au fil (message racine) dont l'agent travaille en ce moment : « X répond… »."
+  respondingSessions: [Session!]!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+extend type Project {
+  "Canaux du projet (le général d'abord, créé au besoin)."
+  conversations(includeArchived: Boolean): [Conversation!]!
+  "Messages non lus par l'utilisateur connecté, tous canaux confondus."
+  unreadMessages: Int!
+}
+
+extend type Query {
+  conversation(id: ID!): Conversation
+  "Canal d'un projet par son nom technique."
+  conversationBySlug(projectId: ID!, slug: String!): Conversation
+}
+
+extend type Mutation {
+  "Crée un canal (membres du projet)."
+  createConversation(projectId: ID!, name: String!, topic: String): Conversation!
+  updateConversation(id: ID!, name: String, topic: String): Conversation!
+  "Archive ou rouvre un canal (administrateurs) ; le canal général ne s'archive pas."
+  setConversationArchived(id: ID!, archived: Boolean!): Conversation!
+  "Poste un message (Markdown) ; parentId : réponse dans le fil d'un message. Les mentions (@Nom, @e-mail, @session:<id>) sont résolues : personnes notifiées, agents convoqués, sessions reliées au fil."
+  postMessage(conversationId: ID!, body: String!, parentId: ID): Message!
+  "Ses propres messages seulement."
+  updateMessage(id: ID!, body: String!): Message!
+  "Ses propres messages, ou administrateur du projet (les réponses partent avec une racine)."
+  deleteMessage(id: ID!): Boolean!
+  "Pose une réaction, ou la retire si l'utilisateur l'avait déjà posée. Renvoie true si elle est posée."
+  toggleMessageReaction(messageId: ID!, emoji: String!): Boolean!
+  "Marque le canal lu jusqu'à maintenant pour l'utilisateur connecté."
+  markConversationRead(id: ID!): Boolean!
+}
+
+# ---- Tableau de bord d'un projet --------------------------------------------------------------------
+
+"Un membre du projet (personne ou agent) et ce qu'il fait en ce moment."
+type ProjectTeamMember {
+  user: User!
+  "Fiche de l'agent, pour un membre agent."
+  agent: Agent
+  "Sessions en cours qu'il joue (agent) ou qu'il pilote (personne)."
+  sessions: [Session!]!
+  "Tâches dont ses sessions en cours ont la charge."
+  tasks: [Task!]!
+  "Dernière activité connue : sa dernière session, sinon sa dernière connexion."
+  lastActivityAt: DateTime
+}
+
+"Tableau de bord d'un projet : la vue d'ensemble de l'accueil restreinte au projet, plus l'équipe, le canal général, les planifications et les tâches pour le flux."
+type ProjectDashboard {
+  generatedAt: DateTime!
+  counts: DashboardCounts!
+  usage: DashboardUsage!
+  pendingRequests: [Request!]!
+  runningSessions: [Session!]!
+  recentSessions: [Session!]!
+  attentionTasks: [Task!]!
+  "Pull requests qui attendent une action (à fusionner, brouillons)."
+  pullRequests: [TrackedPullRequest!]!
+  "Pull requests fusionnées récemment."
+  mergedPullRequests: [TrackedPullRequest!]!
+  "Tâches en cours dont aucune session en charge ne tourne : l'agent s'est arrêté sans les terminer."
+  staleTasks: [Task!]!
+  "Planifications du projet, prochaine échéance d'abord."
+  schedules: [SessionSchedule!]!
+  "Le canal général du projet (null pour un espace personnel)."
+  general: Conversation
+  "Membres (agents d'abord) et ce qu'ils font."
+  team: [ProjectTeamMember!]!
+  "Tâches du projet, tous statuts, créées ou mises à jour depuis 13 semaines (flux par étiquette d'état, débit, dernières terminées)."
+  tasks: [Task!]!
+}
+
+extend type Query {
+  projectDashboard(id: ID!): ProjectDashboard!
+}
