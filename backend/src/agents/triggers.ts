@@ -152,25 +152,29 @@ export async function agentConversationFeedTargets(change: ConversationChange, l
   return out;
 }
 
-/** Un message d'une personne dans un canal qui mentionne un agent sans session reliée au fil : l'agent est convoqué sur le fil. */
+/**
+ * Un message d'une personne dans un canal pour un agent sans session active reliée au fil : l'agent mentionné est
+ * convoqué sur le fil, et celui qui suit le fil (`threadFollowed`) aussi quand ses sessions sur le fil ont été
+ * archivées (par lui-même sitôt sa réponse postée, ou par une personne qui range ses sessions) : une réponse dans le
+ * fil sans « @Nom » doit pouvoir le rappeler. `agentService.summon` restaure alors sa dernière session sur le fil.
+ */
 async function onMessagePosted(change: Extract<ConversationChange, { kind: 'posted' }>): Promise<void> {
   const m = change.message;
   if (m.authorType !== 'human') return;
-  const mentionedIds = m.mentions.filter((x) => x.kind === 'user').map((x) => x.id);
-  if (!mentionedIds.length) return;
-  const agents = (await agentRepository.findByIds(mentionedIds)).filter((a) => a.enabled && !a.archivedAt && a.projectId === change.conversation.projectId);
+  const mentionedIds = new Set(m.mentions.filter((x) => x.kind === 'user').map((x) => x.id));
+  const followers = (await agentSessions(await conversationService.sessionIdsOnThread(change.root.id).catch(() => [] as string[]))).map((x) => x.agent).filter((a) => a.triggers.threadFollowed);
+  const mentioned = mentionedIds.size ? await agentRepository.findByIds([...mentionedIds]) : [];
+  const agents = [...new Map([...mentioned, ...followers].map((a) => [a.id, a])).values()].filter((a) => a.enabled && !a.archivedAt && a.projectId === change.conversation.projectId);
+  const excerpt = m.body.length > 2000 ? `${m.body.slice(0, 2000)}…` : m.body;
+  const where = `le canal ${channelRef(change.conversation)}, fil « ${threadTitle(change.root)} »`;
+  const reply = `\`conversations.post\`, channel « ${change.conversation.slug} », reply_to ${change.root.id}`;
   for (const agent of agents) {
     if (await agentService.sessionOnThread(agent, change.root.id)) continue; // sa session reliée reçoit le message par le fil
-    const excerpt = m.body.length > 2000 ? `${m.body.slice(0, 2000)}…` : m.body;
-    await summonQuietly(
-      agent,
-      {
-        thread: { conversationId: change.conversation.id, rootMessageId: change.root.id },
-        requestedById: m.authorUserId,
-        text: `[Mention] ${m.authorName} te mentionne dans le canal ${channelRef(change.conversation)}, fil « ${threadTitle(change.root)} » :\n\n${excerpt}\n\nRéponds dans le fil (\`conversations.post\`, channel « ${change.conversation.slug} », reply_to ${change.root.id}) et agis selon tes instructions.`,
-      },
-      'mention dans un canal',
-    );
+    const isMention = mentionedIds.has(agent.id);
+    const text = isMention
+      ? `[Mention] ${m.authorName} te mentionne dans ${where} :\n\n${excerpt}\n\nRéponds dans le fil (${reply}) et agis selon tes instructions.`
+      : `[Fil suivi] ${m.authorName} a écrit dans ${where}, que tu suis (ta session sur ce fil était archivée) :\n\n${excerpt}\n\nRelis le fil s'il le faut (\`conversations.read\`, thread ${change.root.id}). Si le message t'est adressé ou relève de ton rôle, réponds dans le fil (${reply}) et agis selon tes instructions ; sinon ne réponds pas. Puis archive cette session (\`sessions.archive\`) si tu n'as plus rien à y faire : le prochain message du fil la restaurera.`;
+    await summonQuietly(agent, { thread: { conversationId: change.conversation.id, rootMessageId: change.root.id }, requestedById: m.authorUserId, text }, isMention ? 'mention dans un canal' : 'fil suivi dans un canal');
   }
 }
 

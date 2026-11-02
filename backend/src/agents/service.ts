@@ -18,6 +18,7 @@ import type { Task } from '../tasks/types.js';
 import { userRepository } from '../users/repository.js';
 import { userService } from '../users/service.js';
 import { ROLE_RANK, type User } from '../users/types.js';
+import { worksessionRepository } from '../worksessions/repository.js';
 import { agentRepository } from './repository.js';
 import { AGENT_TEMPLATES, templateFor } from './templates.js';
 import { AGENT_KINDS, AGENT_PROVIDERS, type Agent, type AgentAccountKind, type AgentAction, type AgentActionInput, type AgentInput, type AgentManagerRole, type AgentStats, type AgentTemplate, type OwnerAccounts, normalizeAvatar, ownAccounts, normalizeTriggers } from './types.js';
@@ -446,7 +447,7 @@ export const agentService = {
     if (opts.thread) {
       const conversation = await conversationService.get(opts.thread.conversationId);
       if (conversation.projectId !== agent.projectId) throw new AppError(`Le canal n'appartient pas au projet de ${agent.name}`);
-      const existing = await this.sessionOnThread(agent, opts.thread.rootMessageId);
+      const existing = (await this.sessionOnThread(agent, opts.thread.rootMessageId)) ?? (await this.restoreOnThread(agent, opts.thread.rootMessageId));
       if (existing && existing.status !== 'queued') {
         return sessionService.sendMessage(existing.id, text, opts.attachments ?? null);
       }
@@ -479,6 +480,27 @@ export const agentService = {
   },
 
   /**
+   * Restaure la dernière session archivée de l'agent sur un fil de canal (et son dossier) : l'agent range sa session
+   * sitôt sa réponse postée, le message suivant du fil la reprend avec son contexte plutôt que d'en ouvrir une autre.
+   * Renvoie null si elle ne peut pas l'être (dossier supprimé, autre session active dans le dossier…) : une nouvelle
+   * session est alors ouverte sur le fil.
+   */
+  async restoreOnThread(agent: Agent, rootMessageId: string): Promise<Session | null> {
+    const [id] = await conversationService.agentSessionIdsOnThread(agent.id, rootMessageId, { archived: true });
+    if (!id) return null;
+    const s = await sessionRepository.findById(id);
+    if (!s?.worksessionId || !(await worksessionRepository.findById(s.worksessionId))) return null;
+    try {
+      const restored = await sessionService.unarchive(id);
+      log.info(`[agents] session ${id} de ${agent.name} restaurée sur le fil ${rootMessageId}`);
+      return restored;
+    } catch (err) {
+      log.warn(`[agents] session ${id} de ${agent.name} non restaurée : ${(err as Error).message}`);
+      return null;
+    }
+  },
+
+  /**
    * Session de l'agent sur un fil de canal : nouveau dossier à elle, le fil complet en contexte, reliée au fil (elle en
    * reçoit les messages suivants). La réponse de l'agent se fait dans le fil, par `conversations.post`.
    */
@@ -492,7 +514,7 @@ export const agentService = {
       '',
       text,
       '',
-      `Réponds dans ce fil avec \`conversations.post\` (channel « ${conversation.slug} », reply_to ${rootMessageId}) : c'est là que l'équipe te lit. Tu recevras les messages suivants du fil ; \`conversations.read\` avec \`thread\` le relit en entier.`,
+      `Réponds dans ce fil avec \`conversations.post\` (channel « ${conversation.slug} », reply_to ${rootMessageId}) : c'est là que l'équipe te lit. Tu recevras les messages suivants du fil ; \`conversations.read\` avec \`thread\` le relit en entier. Une fois ta réponse postée, si tu n'as plus rien à faire ici (rien en cours, rien à commiter), archive cette session (\`sessions.archive\`) même si tu attends une réponse : le prochain message du fil la restaurera.`,
     ].join('\n');
     const name = `${agent.name} · ${channelRef(conversation)} · ${title}`;
     const session = await sessionService.create(

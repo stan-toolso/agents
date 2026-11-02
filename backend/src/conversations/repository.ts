@@ -241,10 +241,10 @@ export const conversationRepository = {
     return rows.map(toMessage);
   },
 
-  /** Sessions non archivées de l'agent (propriétaire) reliées au fil, la plus récente d'abord. */
-  async agentSessionIdsOnThread(agentId: string, rootMessageId: string): Promise<string[]> {
+  /** Sessions de l'agent (propriétaire) reliées au fil, la plus récente d'abord : non archivées, ou archivées seulement (`archived`). */
+  async agentSessionIdsOnThread(agentId: string, rootMessageId: string, opts: { archived?: boolean } = {}): Promise<string[]> {
     const { rows } = await pool.query<{ id: string }>(
-      'SELECT s.id FROM conversation_sessions cs JOIN sessions s ON s.id = cs.session_id WHERE cs.root_message_id = $1 AND s.owner_id = $2 AND s.archived_at IS NULL ORDER BY cs.linked_at DESC',
+      `SELECT s.id FROM conversation_sessions cs JOIN sessions s ON s.id = cs.session_id WHERE cs.root_message_id = $1 AND s.owner_id = $2 AND s.archived_at IS ${opts.archived ? 'NOT NULL' : 'NULL'} ORDER BY cs.linked_at DESC`,
       [rootMessageId, agentId],
     );
     return rows.map((r) => r.id);
