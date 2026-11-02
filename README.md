@@ -109,7 +109,12 @@ npm run dev                 # backend (http://localhost:4000/graphql) + frontend
 ```
 
 Les migrations SQL (`backend/src/db/migrations/*.sql`) sont appliquées automatiquement au démarrage
-du backend, ou à la main avec `npm run db:migrate`.
+du backend, ou à la main avec `npm run db:migrate`. Une nouvelle migration se crée avec
+`npm run migration:new <nom>` : le fichier est préfixé par un horodatage UTC à la minute
+(`20261102T0715_nom.sql`), si bien que deux branches qui en ajoutent chacune une fusionnent sans
+renumérotation. Les fichiers numérotés `001_` à `055_` gardent leur nom (il est enregistré dans
+`schema_migrations`) ; aucun nouveau `NNN_` n'est accepté. Une migration plus ancienne que la dernière
+appliquée passe quand même, avec un avertissement au démarrage (« appliquée hors ordre »).
 
 ### Tests
 
@@ -133,7 +138,9 @@ les migrations deux fois (le second passage ne doit rien faire), vérifie qu'une
 est annulée, puis supprime la base. Sans `TEST_DATABASE_URL` il est ignoré en local et échoue en CI.
 Ne jamais y mettre l'URL de la base de production.
 
-**CI** : `.github/workflows/ci.yml` lance `npm ci`, `npm run typecheck`, `npm run build` et
+**CI** : `.github/workflows/ci.yml` lance `npm ci`, `npm run check:migrations -w backend` (échec sur
+un nom de migration invalide ou un préfixe en double, avertissement si la branche ajoute une migration
+plus ancienne que la dernière de main), `npm run typecheck`, `npm run build` et
 `npm test` à chaque push et pull request, avec un service PostgreSQL 16 pour le test des migrations.
 Le déploiement reste manuel (`DEPLOY.md`).
 
@@ -852,7 +859,7 @@ bouton **Fusionner la base** (`gitMergeBase` : fetch puis `git merge --no-edit <
 en cours au lieu d'échouer) ; le pull reste en avance rapide seulement.
 
 **Pull requests GitHub** (section du panneau git, `backend/src/git/pullRequests.ts`), pour un projet
-dont le dépôt est sur GitHub, avec le compte GitHub de la personne qui agit (Paramètres → GitHub ;
+dont le dépôt est sur GitHub (sur GitLab : merge requests, voir « GitLab » plus bas ; hébergé : Forgejo), avec le compte GitHub de la personne qui agit (Paramètres → GitHub ;
 compte choisi d'après le propriétaire du dépôt, sinon le compte par défaut) : la PR de la branche courante, ou
 « Créer une pull request » (titre et description pré-remplis avec la tâche liée à la branche et les
 commits, base = branche du projet sinon celle du dépôt ; la branche est poussée au besoin), puis les
@@ -1722,7 +1729,23 @@ retenu est celui de l'instance dont l'identifiant ou un groupe de premier niveau
 sinon le compte par défaut. Il sert aux actions git de la personne (`gitAuthFor` : en-tête `oauth2:<jeton>`),
 à la liste des dépôts du formulaire de projet (`gitlabRepositories`) et aux agents : credential helper pour
 l'instance, `GITLAB_TOKEN` et `GITLAB_HOST` (lus par `glab`), identité des commits du compte GitLab quand le
-dépôt du projet est sur GitLab. Les merge requests ne sont pas encore suivies comme les pull requests GitHub.
+dépôt du projet est sur GitLab.
+
+**Merge requests GitLab** (`git/gitlabMergeRequests.ts`, API v4 `/projects/:id/merge_requests`) : un projet dont le
+dépôt est sur GitLab (gitlab.com, ou une instance où **une personne du serveur** a connecté un compte : liste
+`user_gitlab_accounts.host` relue au plus une fois par minute, `refreshKnownGitlabHosts`) a ses merge requests
+traitées comme les pull requests GitHub, au même format (`PullRequest.forge = 'gitlab'`, `forgeName` « GitLab ») :
+panneau git (liste, création, fusion et nettoyage), `tasks.pr_open` / `pr_register` (URL
+`https://<instance>/<groupe>/<projet>/-/merge_requests/<n>`, groupes imbriqués compris), synchronisation des PR
+suivies (de fond comprise : `syncTargets` préfère un membre qui a un compte de la forge du dépôt) et commentaire
+de la revue de code. Le numéro est l'`iid` de la MR, le dépôt (`repo`) le chemin complet du projet. Les MR
+ouvertes sont détaillées : pipeline du dernier commit (`head_pipeline` → `checksState`) et ses jobs (checks ; un
+job `allow_failure` en échec est neutre), approbations (`reviewDecision` : APPROVED, REVIEW_REQUIRED ;
+`detailed_merge_status` donne conflits, rebase nécessaire, blocages). La fenêtre de détail lit aussi commits et
+diff. Brouillon = préfixe « Draft: ». Fusion merge ou squash (`PUT …/merge`, `squash`) ; pas de rebase à la
+demande (refusé, l'option est masquée). Jeton : compte GitLab de la personne qui agit sur l'instance du dépôt
+(`gitlabService.apiToken`), sinon « GitLab non connecté ». Limites : seules les MR du dépôt du projet sont suivies
+(pas d'autre projet GitLab), `pr_open` avec `path` reste réservé aux clones GitHub.
 
 **OpenCode** (`settings/opencode.ts`) : modèle par défaut (`fournisseur/modèle`), budget par session,
 et la clé de chaque fournisseur de modèles (OpenAI, Anthropic, Google, OpenRouter, OpenCode Zen,
