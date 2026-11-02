@@ -184,9 +184,11 @@ export class ClaudeProvider implements SessionProvider {
     const cfg = ctx.session.config as ClaudeConfig;
     if (!ctx.initialMessage) throw new AppError('Une session Claude nécessite une première instruction');
 
-    // Réglages du PROPRIÉTAIRE de la session : identifiants (coffre), modèle par défaut, budgets, plafond mensuel.
+    // Réglages du PROPRIÉTAIRE de la session : identifiants (coffre), modèle par défaut, budgets, plafond mensuel. Pour un
+    // agent de projet, les comptes qu'une personne lui a prêtés (délégation) remplacent les siens.
     const ownerId = ctx.session.ownerId;
-    const owner = await claudeSettings.forSession(ownerId);
+    const accounts = (await agentService.accountsForOwner(ownerId)) ?? { claudeUserId: ownerId ?? '', gitUserId: ownerId ?? '', gitReadOnly: false };
+    const owner = await claudeSettings.forSession(ownerId ? accounts.claudeUserId : null);
     owner.assertCredentials();
     await owner.assertBudgetAvailable();
     const general = owner.settings;
@@ -207,6 +209,10 @@ export class ClaudeProvider implements SessionProvider {
     const agent = chat || review ? null : await agentService.forUser(ownerId);
     const requestedBy = agent && ctx.session.requestedById ? await userRepository.findById(ctx.session.requestedById) : null;
     const projectAgents = chat || review || isPersonalProject(ctx.project) ? [] : await agentService.listByProject(ctx.project.id);
+    // Bibliothèques de contexte : celle du projet (sauf pour un agent qui n'en hérite pas), la bibliothèque propre d'un agent
+    // qui joue la session (cible par défaut de ses outils `context`), et celles des autres agents (paramètre `library`).
+    const agentLibraries = projectAgents.map((a) => ({ id: a.id, name: a.name }));
+    const projectContext = !agent || agent.inheritContext;
     // Chat ou session d'un espace personnel : les agents de tous les projets de la personne, à qui elle peut s'adresser.
     const scopeProjects = scope && !review ? await scope.projects() : [];
     const scopedAgents = scopeProjects.length ? await agentService.listActive(scopeProjects.map((p) => p.id)) : [];
@@ -216,7 +222,7 @@ export class ClaudeProvider implements SessionProvider {
     // de configuration propre à l'espace (conversations reprises) et aucune variable git ; une session, ses seuls identifiants.
     const env: Record<string, string | undefined> = chat
       ? { ...cliEnv(credentials), CLAUDE_CONFIG_DIR: chatConfigDir(ctx.project), [SESSION_ENV]: ctx.session.id }
-      : { ...credentials, ...(await agentGitEnv(ownerId, ctx.project.gitUrl, actor)), [SESSION_ENV]: ctx.session.id };
+      : { ...credentials, ...(await agentGitEnv(ownerId ? accounts.gitUserId : null, ctx.project.gitUrl, actor, { readOnly: accounts.gitReadOnly })), [SESSION_ENV]: ctx.session.id };
     if (chat) await mkdir(chatConfigDir(ctx.project), { recursive: true });
     // Script de relais qui exécute le CLI dans le conteneur du projet (avant le navigateur : rien à nettoyer s'il échoue) ;
     // un chat utilise le CLI du serveur (CLAUDE_BIN, sinon celui du SDK), comme la vérification des identifiants.
@@ -238,12 +244,14 @@ export class ClaudeProvider implements SessionProvider {
       ? [ctx.project.systemPrompt.trim(), sessionIdentityPrompt(ctx.session, ctx.project), await contextService.promptSummary(ctx.project.id), REVIEW_SYSTEM_PROMPT]
       : [
         ctx.project.systemPrompt.trim(),
-        agent ? agentIdentityPrompt(agent, ctx.project, requestedBy) : '',
+        agent ? agentIdentityPrompt(agent, ctx.project, requestedBy, { gitReadOnly: accounts.gitReadOnly }) : '',
         sessionIdentityPrompt(ctx.session, ctx.project),
         projectAgents.length ? [agentsPromptSummary(projectAgents, agent), agentsMcpPrompt()].filter(Boolean).join('\n') : '',
         scope ? await personalService.promptSummary(scope, await userService.get(scope.ownerId)) : '',
         scopedAgents.length ? [scopedAgentsPromptSummary(scopedAgents, scopeProjects), agentsMcpPrompt({ scoped: true })].join('\n') : '',
-        await contextService.promptSummary(ctx.project.id),
+        agent ? await contextService.promptSummary(ctx.project.id, agent.id, { own: true }) : '',
+        projectContext ? await contextService.promptSummary(ctx.project.id) : "Tu n'hérites pas de la bibliothèque de contexte du projet : seule la tienne t'est transmise (la bibliothèque « projet » reste lisible avec l'outil `context`, paramètre `library: \"projet\"`).",
+        agentLibraries.filter((l) => l.id !== agent?.id).length ? `Les autres agents du projet ont chacun leur bibliothèque de contexte, lisible et modifiable avec les outils \`context\` (paramètre \`library\` : ${agentLibraries.filter((l) => l.id !== agent?.id).map((l) => `« ${l.name} »`).join(', ')}).` : '',
         await taskService.linkedTaskPrompt(ctx.session.id),
         await taskService.promptSummary(ctx.project.id, ctx.session.id),
         ctx.project.gitUrl && !chat ? trackedPullRequestService.promptSummary() : '',
@@ -264,7 +272,8 @@ export class ClaudeProvider implements SessionProvider {
       .join('\n\n');
     // La bibliothèque de contexte est exposée deux fois : outils MCP (lecture/écriture) et skills (plugin local). Un chat n'a
     // pas l'outil Skill (aucun outil intégré) : il lit le contexte par les outils MCP.
-    const pluginDir = chat || review ? null : await materializeSkills(ctx.project);
+    const pluginDir = chat || review || !projectContext ? null : await materializeSkills(ctx.project);
+    const agentPluginDir = chat || review || !agent ? null : await materializeSkills(ctx.project, agent.id);
     const allowedTools = cfg.allowedTools ? String(cfg.allowedTools).split(',').map((t) => t.trim()).filter(Boolean) : [];
     // Autorisations mémorisées pour le projet (« ne plus demander dans ce projet »).
     const projectRules = await permissionRuleService.list(ctx.project.id);
@@ -306,7 +315,7 @@ export class ClaudeProvider implements SessionProvider {
       cwd: ctx.cwd,
       systemPrompt: { type: 'preset', preset: 'claude_code', append: systemPrompt },
       mcpServers: review ? { context: createContextMcpServer(ctx.project, ctx.session.id) } : {
-        context: createContextMcpServer(ctx.project, ctx.session.id),
+        context: createContextMcpServer(ctx.project, ctx.session.id, { agentLibraries, defaultAgentId: agent?.id ?? null }),
         tasks: createTasksMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name, scope),
         ...(projectAgents.length ? { agents: createAgentsMcpServer(ctx.project, ctx.session.id) } : {}),
         ...(scopedAgents.length ? { agents: createAgentsMcpServer(ctx.project, ctx.session.id, scope) } : {}),
@@ -325,7 +334,7 @@ export class ClaudeProvider implements SessionProvider {
         // de commande du CLI, visible de tout utilisateur du serveur (ps) : l'environnement du backend n'y figure jamais.
         ...(browserServer ? { playwright: { type: 'stdio' as const, command: browserServer.command, args: browserServer.args, ...(browserServer.env ? { env: browserServer.env } : {}) } } : {}),
       },
-      plugins: pluginDir ? [{ type: 'local', path: pluginDir, skipMcpDiscovery: true }] : [],
+      plugins: [...(pluginDir ? [{ type: 'local' as const, path: pluginDir, skipMcpDiscovery: true }] : []), ...(agentPluginDir ? [{ type: 'local' as const, path: agentPluginDir, skipMcpDiscovery: true }] : [])],
       // Chat : aucun outil intégré (ni fichiers, ni commandes, ni web) et aucun réglage lu sur le disque du serveur.
       ...(chat ? { tools: [], settingSources: [] } : {}),
       ...(review ? { tools: REVIEW_TOOLS, settingSources: [] } : {}),

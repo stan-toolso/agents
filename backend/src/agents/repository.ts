@@ -11,7 +11,10 @@ interface Row {
   instructions: string;
   task_folder: boolean;
   defaults: Record<string, unknown> | null;
-  context_folder: string | null;
+  inherit_context: boolean;
+  claude_delegate_id: string | null;
+  git_delegate_id: string | null;
+  git_delegate_read_only: boolean;
   triggers: Partial<AgentTriggers> | null;
   actions: AgentAction[] | null;
   enabled: boolean;
@@ -51,7 +54,10 @@ const toAgent = (r: Row): Agent => ({
   instructions: r.instructions ?? '',
   taskFolder: Boolean(r.task_folder),
   defaults: r.defaults ?? {},
-  contextFolder: r.context_folder,
+  inheritContext: r.inherit_context ?? true,
+  claudeDelegateId: r.claude_delegate_id ?? null,
+  gitDelegateId: r.git_delegate_id ?? null,
+  gitDelegateReadOnly: r.git_delegate_read_only ?? true,
   triggers: normalizeTriggers(r.triggers),
   actions: (r.actions ?? []).map(normalizeAction),
   enabled: Boolean(r.enabled),
@@ -72,7 +78,10 @@ export interface AgentProfilePatch {
   instructions?: string;
   taskFolder?: boolean;
   defaults?: Record<string, unknown>;
-  contextFolder?: string | null;
+  inheritContext?: boolean;
+  claudeDelegateId?: string | null;
+  gitDelegateId?: string | null;
+  gitDelegateReadOnly?: boolean;
   triggers?: AgentTriggers;
   actions?: AgentAction[];
   enabled?: boolean;
@@ -86,7 +95,10 @@ const patchColumns: Record<keyof AgentProfilePatch, string> = {
   instructions: 'instructions',
   taskFolder: 'task_folder',
   defaults: 'defaults',
-  contextFolder: 'context_folder',
+  inheritContext: 'inherit_context',
+  claudeDelegateId: 'claude_delegate_id',
+  gitDelegateId: 'git_delegate_id',
+  gitDelegateReadOnly: 'git_delegate_read_only',
   triggers: 'triggers',
   actions: 'actions',
   enabled: 'enabled',
@@ -95,11 +107,11 @@ const patchColumns: Record<keyof AgentProfilePatch, string> = {
 const jsonColumns = new Set(['avatar', 'defaults', 'triggers', 'actions']);
 
 export const agentRepository = {
-  async create(input: { userId: string; projectId: string; kind: AgentKind; avatar: AgentAvatar; description: string; instructions: string; taskFolder: boolean; defaults: Record<string, unknown>; contextFolder: string | null; triggers: AgentTriggers; actions: AgentAction[]; createdById: string | null }): Promise<Agent> {
+  async create(input: { userId: string; projectId: string; kind: AgentKind; avatar: AgentAvatar; description: string; instructions: string; taskFolder: boolean; defaults: Record<string, unknown>; inheritContext: boolean; triggers: AgentTriggers; actions: AgentAction[]; createdById: string | null }): Promise<Agent> {
     await pool.query(
-      `INSERT INTO agent_profiles (user_id, project_id, kind, avatar, description, instructions, task_folder, defaults, context_folder, triggers, actions, created_by)
+      `INSERT INTO agent_profiles (user_id, project_id, kind, avatar, description, instructions, task_folder, defaults, inherit_context, triggers, actions, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-      [input.userId, input.projectId, input.kind, toJson(input.avatar), input.description, input.instructions, input.taskFolder, toJson(input.defaults), input.contextFolder, toJson(input.triggers), toJson(input.actions), input.createdById],
+      [input.userId, input.projectId, input.kind, toJson(input.avatar), input.description, input.instructions, input.taskFolder, toJson(input.defaults), input.inheritContext, toJson(input.triggers), toJson(input.actions), input.createdById],
     );
     return (await this.findById(input.userId))!;
   },

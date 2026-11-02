@@ -58,8 +58,14 @@ export interface AgentProfile {
   taskFolder: boolean;
   /** Réglages par défaut de ses sessions (même forme que `sessions.config`). */
   defaults: Record<string, unknown>;
-  /** Dossier de la bibliothèque de contexte réservé à l'agent (sa mémoire durable). */
-  contextFolder: string | null;
+  /** En plus de sa propre bibliothèque de contexte, l'agent lit (et ses sessions reçoivent) celle du projet. */
+  inheritContext: boolean;
+  /** Personne qui prête son compte Claude à l'agent (null : les réglages Claude propres de l'agent). */
+  claudeDelegateId: string | null;
+  /** Personne qui prête ses comptes git (GitHub, GitLab, forge) à l'agent (null : les comptes propres de l'agent). */
+  gitDelegateId: string | null;
+  /** Comptes git prêtés en lecture seule : ni push, ni pull request. */
+  gitDelegateReadOnly: boolean;
   triggers: AgentTriggers;
   actions: AgentAction[];
   enabled: boolean;
@@ -105,7 +111,20 @@ export interface AgentInput {
   triggers?: Partial<AgentTriggers> | null;
   /** Remplace la liste complète (les sessions planifiées des actions retirées sont supprimées). */
   actions?: AgentActionInput[] | null;
+  inheritContext?: boolean | null;
 }
+
+/** Comptes qui servent aux sessions d'un propriétaire : les siens, ou ceux qu'une personne lui a prêtés (agent). */
+export interface OwnerAccounts {
+  /** Dont les réglages Claude (identifiants, modèle par défaut, budgets) font tourner la session. */
+  claudeUserId: string;
+  /** Dont les comptes GitHub / GitLab / forge servent le dépôt. */
+  gitUserId: string;
+  /** Comptes git prêtés en lecture seule : la session ne pousse pas et n'ouvre pas de pull request. */
+  gitReadOnly: boolean;
+}
+
+export type AgentAccountKind = 'claude' | 'git';
 
 export interface AgentStats {
   activeSessions: number;
