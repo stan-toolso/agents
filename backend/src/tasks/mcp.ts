@@ -7,7 +7,7 @@ import { trackedPullRequestService } from '../pullRequests/service.js';
 import { describePullRequest, PR_STAGES, SETTABLE_PR_STATUSES, type PullRequestStage, type TrackedPullRequest, type TrackedPullRequestStatus } from '../pullRequests/types.js';
 import { sessionService } from '../sessions/service.js';
 import { describeAttachments, imageBlocks, type McpContent } from './attachments.js';
-import { describeThread, formatPerson, statusTagText, summarizeReactions, taskService } from './service.js';
+import { assertUnblocked, dependencyText, describeThread, formatPerson, statusTagText, summarizeReactions, taskService } from './service.js';
 import { TASK_PRIORITIES, TASK_STATUSES, type Task, type TaskActor, type TaskAttachment, type TaskComment, type TaskReaction } from './types.js';
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
@@ -21,12 +21,32 @@ const failure = (t: string) => ({ content: [{ type: 'text' as const, text: t }],
 export const TASKS_FREE_TOOLS = ['list', 'get', 'create', 'update', 'claim', 'release', 'comment', 'react', 'people', 'pr_list', 'pr_register', 'pr_update'].map((t) => `mcp__tasks__${t}`);
 
 const line = (t: Task, sessionId: string) =>
-  `- ${t.id} · [${t.status}${statusTagText(t)}] [${t.priority}] ${t.title}${t.tags.length ? ` · étiquettes ${t.tags.join(', ')}` : ''}${t.sessionIds.includes(sessionId) ? (t.sessionIds.length > 1 ? ' (assignée à cette session et à d’autres)' : ' (assignée à cette session)') : t.sessionIds.length ? ' (prise par une autre session)' : ''}${t.dueDate ? ` · échéance ${t.dueDate}` : ''}${t.assignee ? ` · responsable ${formatPerson(t.assignee)}` : ''}${t.commentCount ? ` · ${t.commentCount} commentaire${t.commentCount > 1 ? 's' : ''}` : ''}`;
+  `- ${t.id} · [${t.status}${statusTagText(t)}] [${t.priority}] ${t.title}${t.tags.length ? ` · étiquettes ${t.tags.join(', ')}` : ''}${t.sessionIds.includes(sessionId) ? (t.sessionIds.length > 1 ? ' (assignée à cette session et à d’autres)' : ' (assignée à cette session)') : t.sessionIds.length ? ' (prise par une autre session)' : ''}${t.dueDate ? ` · échéance ${t.dueDate}` : ''}${t.assignee ? ` · responsable ${formatPerson(t.assignee)}` : ''}${t.commentCount ? ` · ${t.commentCount} commentaire${t.commentCount > 1 ? 's' : ''}` : ''}${dependencyText(t)}`;
 
 
-function detail(t: Task, comments: TaskComment[], attachments: TaskAttachment[], pullRequests: TrackedPullRequest[] = [], reactions: TaskReaction[] = [], projectRepo = ''): string {
+/** Dépendances d'une tâche, et tâches qui dépendent d'elle, avec leur titre et leur statut. */
+function dependencyLines(t: Task, related: Task[]): string[] {
+  const describe = (id: string) => {
+    const r = related.find((x) => x.id === id);
+    return r ? `- ${r.id} · [${r.status}] ${r.title}` : `- ${id}`;
+  };
+  const parts: string[] = [];
+  if (t.dependsOnIds.length) {
+    parts.push(
+      t.blockedByIds.length
+        ? `Bloquée par (dépendances non terminées : elle ne peut pas être prise ni confiée à un agent avant)${t.autoStartWhenUnblocked ? ' ; lancée automatiquement une fois débloquée' : ''} :`
+        : 'Dépendances (toutes terminées) :',
+      ...t.dependsOnIds.map(describe),
+    );
+  }
+  if (t.dependentIds.length) parts.push('Tâches qui en dépendent :', ...t.dependentIds.map(describe));
+  return parts;
+}
+
+function detail(t: Task, comments: TaskComment[], attachments: TaskAttachment[], pullRequests: TrackedPullRequest[] = [], reactions: TaskReaction[] = [], projectRepo = '', related: Task[] = []): string {
   const own = attachments.filter((a) => !a.commentId);
   const parts = [t.description || '(pas de description)'];
+  parts.push(...dependencyLines(t, related));
   if (own.length) parts.push(...describeAttachments(own, 'tool'));
   if (t.assignee) parts.push(`Responsable : ${formatPerson(t.assignee)}`);
   if (t.reporter) parts.push(`Rapporteur : ${formatPerson(t.reporter)}`);
@@ -46,6 +66,8 @@ const prStageSchema = z.enum(PR_STAGES as [string, ...string[]]);
 const fieldSchema = z.object({ key: z.string(), value: z.string() });
 const tagsSchema = z.array(z.string()).optional();
 const personSchema = z.object({ name: z.string().optional(), email: z.string().optional() }).nullable();
+const dependsOnSchema = z.array(z.string()).optional();
+const autoStartSchema = z.boolean().optional();
 
 /**
  * Serveur MCP in-process : gestion des tâches du projet par une session d'agent. Avec une portée (session d'un
@@ -72,6 +94,8 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
   const prActor = { type: 'agent' as const, sessionId };
   /** Dépôt GitHub du projet (« owner/name »), pour ne nommer le dépôt d'une PR que quand il est ailleurs. */
   const projectRepo = trackedPullRequestService.projectRepo(project);
+  /** Au nom de qui une tâche débloquée sera lancée quand l'agent arme l'option : la personne qui pilote la session (ou l'agent de projet propriétaire). */
+  const autoStartOwner = async () => (await sessionContext()).ownerId ?? null;
   /** Dossier de travail et personne de la session, pour ouvrir une PR sur GitHub avec son compte. */
   const sessionContext = async () => {
     const s = await sessionService.get(sessionId);
@@ -82,7 +106,7 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
   return createSdkMcpServer({
     name: 'tasks',
     version: '1.0.0',
-    instructions: `Tableau de tâches ${scope ? `de tes projets (par défaut : l'espace personnel "${project.name}" ; paramètre project pour un autre projet)` : `du projet "${project.name}"`}. Statuts : todo, in_progress, done, cancelled ; une étiquette d'état (court libellé libre, ex. « en revue », « bloquée ») dit où en est le travail dans le statut. Les tâches peuvent porter des étiquettes libres. Priorités : low, medium, high, urgent. Prends une tâche avec claim avant de t'en occuper (plusieurs sessions peuvent se partager une tâche, et une session en mener plusieurs ; release la rend), passe-la en done quand elle est terminée (travail fini, poussé, PR prête : pas avant), repasse-la en in_progress si tu la reprends ensuite (nouvelle instruction, corrections), commente-la pour rendre compte, et crée des tâches pour le travail à faire plus tard. Une tâche créée directement en in_progress ou done t'est rattachée (assign_to_me) ; passer en in_progress ou done une tâche que personne n'a prise te la rattache aussi. Le fil d'une tâche est une conversation : comment poste un message (reply_to pour répondre dans le fil d'un message), react pose ou retire un emoji, une mention (« @Nom » ou « @e-mail » d'un membre, « @session:<id> » d'une session d'agent ; people liste qui l'on peut mentionner) prévient la personne ou transmet le message à la session, qui est alors reliée à la tâche. Les pull requests d'une tâche se suivent avec pr_open (ouvre la PR sur GitHub depuis la branche courante, ou depuis un autre dépôt cloné dans un sous-dossier), pr_register (déclare une PR déjà ouverte, dans le dépôt du projet ou un autre), pr_update (statut open/merged/closed, note, tâche) et pr_list (par étape : pending = en préparation, c'est-à-dire une branche avec des modifications sans PR ouverte, draft, to_merge, merged, cancelled).`,
+    instructions: `Tableau de tâches ${scope ? `de tes projets (par défaut : l'espace personnel "${project.name}" ; paramètre project pour un autre projet)` : `du projet "${project.name}"`}. Statuts : todo, in_progress, done, cancelled ; une étiquette d'état (court libellé libre, ex. « en revue », « bloquée ») dit où en est le travail dans le statut. Les tâches peuvent porter des étiquettes libres. Priorités : low, medium, high, urgent. Prends une tâche avec claim avant de t'en occuper (plusieurs sessions peuvent se partager une tâche, et une session en mener plusieurs ; release la rend), passe-la en done quand elle est terminée (travail fini, poussé, PR prête : pas avant), repasse-la en in_progress si tu la reprends ensuite (nouvelle instruction, corrections), commente-la pour rendre compte, et crée des tâches pour le travail à faire plus tard. Une tâche peut dépendre d'autres tâches du projet (depends_on de create et update, pas de cycle) : tant qu'une dépendance n'est pas terminée, elle est bloquée (claim et le lancement d'un agent sont refusés) ; auto_start la confie à une session dès que sa dernière dépendance passe à done. Une tâche créée directement en in_progress ou done t'est rattachée (assign_to_me) ; passer en in_progress ou done une tâche que personne n'a prise te la rattache aussi. Le fil d'une tâche est une conversation : comment poste un message (reply_to pour répondre dans le fil d'un message), react pose ou retire un emoji, une mention (« @Nom » ou « @e-mail » d'un membre, « @session:<id> » d'une session d'agent ; people liste qui l'on peut mentionner) prévient la personne ou transmet le message à la session, qui est alors reliée à la tâche. Les pull requests d'une tâche se suivent avec pr_open (ouvre la PR sur GitHub depuis la branche courante, ou depuis un autre dépôt cloné dans un sous-dossier), pr_register (déclare une PR déjà ouverte, dans le dépôt du projet ou un autre), pr_update (statut open/merged/closed, note, tâche) et pr_list (par étape : pending = en préparation, c'est-à-dire une branche avec des modifications sans PR ouverte, draft, to_merge, merged, cancelled).`,
     tools: [
       tool(
         'list',
@@ -107,8 +131,14 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
         // Les images jointes à la tâche ou à ses commentaires suivent le texte, en blocs image, dans l'ordre où elles sont nommées.
         try {
           const t = await own(id, { write: false });
-          const [comments, attachments, pullRequests, reactions] = await Promise.all([taskService.comments(id), taskService.attachments(id), trackedPullRequestService.forTask(id), taskService.reactions(id)]);
-          const content: McpContent[] = [{ type: 'text', text: `${line(t, sessionId)}\n\n${detail(t, comments, attachments, pullRequests, reactions, projectRepo)}` }, ...(await imageBlocks([...attachments.filter((a) => !a.commentId), ...attachments.filter((a) => a.commentId)]))];
+          const [comments, attachments, pullRequests, reactions, related] = await Promise.all([
+            taskService.comments(id),
+            taskService.attachments(id),
+            trackedPullRequestService.forTask(id),
+            taskService.reactions(id),
+            taskService.findByIds([...t.dependsOnIds, ...t.dependentIds]),
+          ]);
+          const content: McpContent[] = [{ type: 'text', text: `${line(t, sessionId)}\n\n${detail(t, comments, attachments, pullRequests, reactions, projectRepo, related)}` }, ...(await imageBlocks([...attachments.filter((a) => !a.commentId), ...attachments.filter((a) => a.commentId)]))];
           return { content };
         } catch (err) {
           return failure(`Erreur : ${(err as Error).message}`);
@@ -129,14 +159,30 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
           assignee: personSchema.optional().describe('Responsable : nom et/ou e-mail'),
           reporter: personSchema.optional().describe('Rapporteur : nom et/ou e-mail'),
           assign_to_me: z.boolean().optional().describe("Cette session prend la charge de la tâche ; défaut : oui si le statut est in_progress ou done (c'est ton travail), non pour une tâche todo (travail pour plus tard)"),
+          depends_on: dependsOnSchema.describe('Identifiants des tâches du même projet dont celle-ci dépend (« bloquée par ») : elle ne pourra être confiée à un agent qu’une fois toutes terminées'),
+          auto_start: autoStartSchema.describe('Confier automatiquement la tâche à une session (configuration par défaut du projet, au nom de la personne qui pilote cette session) quand sa dernière dépendance passe à done'),
         }, scope),
-        async ({ title, description, priority, status, due_date, custom_fields, tags, status_tag, assignee, reporter, assign_to_me, project: ref }) =>
+        async ({ title, description, priority, status, due_date, custom_fields, tags, status_tag, assignee, reporter, assign_to_me, depends_on, auto_start, project: ref }) =>
           run(async () => {
             const p = await targetProject(project, scope, ref, { write: true });
             const mine = assign_to_me ?? (status === 'in_progress' || status === 'done');
             const t = await taskService.create(
               p.id,
-              { title, description, priority: priority as Task['priority'] | undefined, status: status as Task['status'] | undefined, dueDate: due_date, customFields: custom_fields, tags, statusTag: status_tag, assignee, reporter, sessionId: mine ? sessionId : null },
+              {
+                title,
+                description,
+                priority: priority as Task['priority'] | undefined,
+                status: status as Task['status'] | undefined,
+                dueDate: due_date,
+                customFields: custom_fields,
+                tags,
+                statusTag: status_tag,
+                assignee,
+                reporter,
+                sessionId: mine ? sessionId : null,
+                dependsOn: depends_on,
+                ...(auto_start != null ? { autoStartWhenUnblocked: auto_start, autoStartById: await autoStartOwner() } : {}),
+              },
               actor,
             );
             return `Tâche créée : ${line(t, sessionId)}`;
@@ -160,23 +206,39 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
           tags: tagsSchema.describe('Remplace TOUTES les étiquettes : envoie la liste complète (lis-la d\'abord avec get)'),
           assignee: personSchema.optional().describe('null pour retirer'),
           reporter: personSchema.optional().describe('null pour retirer'),
+          depends_on: dependsOnSchema.describe('Remplace TOUTES les dépendances (tâches du même projet dont celle-ci dépend) : envoie la liste complète, [] pour les retirer'),
+          auto_start: autoStartSchema.describe('Arme (true) ou désarme (false) le lancement automatique quand la dernière dépendance passe à done'),
         },
-        async ({ id, status, status_tag, priority, title, description, due_date, tags, custom_fields, assignee, reporter }) =>
+        async ({ id, status, status_tag, priority, title, description, due_date, tags, custom_fields, assignee, reporter, depends_on, auto_start }) =>
           run(async () => {
             const current = await own(id);
-            // Claim implicite : avancer une tâche que personne n'a prise, c'est la prendre.
-            const takes = (status === 'in_progress' || status === 'done') && current.sessionIds.length === 0 && current.projectId === project.id;
+            // Claim implicite : avancer une tâche que personne n'a prise, c'est la prendre (pas une tâche bloquée).
+            const takes = (status === 'in_progress' || status === 'done') && current.sessionIds.length === 0 && current.projectId === project.id && !current.blockedByIds.length;
             const t = await taskService.update(
               id,
-              { status: status as Task['status'] | undefined, statusTag: status_tag, priority: priority as Task['priority'] | undefined, title, description, dueDate: due_date, tags, customFields: custom_fields, assignee, reporter, ...(takes ? { sessionId } : {}) },
+              {
+                status: status as Task['status'] | undefined,
+                statusTag: status_tag,
+                priority: priority as Task['priority'] | undefined,
+                title,
+                description,
+                dueDate: due_date,
+                tags,
+                customFields: custom_fields,
+                assignee,
+                reporter,
+                dependsOn: depends_on,
+                ...(auto_start != null ? { autoStartWhenUnblocked: auto_start, autoStartById: auto_start ? await autoStartOwner() : null } : {}),
+                ...(takes ? { sessionId } : {}),
+              },
               actor,
             );
             return `Tâche mise à jour : ${line(t, sessionId)}`;
           }),
       ),
-      tool('claim', "Prend une tâche en charge : l'assigne à cette session (en plus des sessions déjà en charge, s'il y en a) et la passe en in_progress.", { id: z.string() }, async ({ id }) =>
+      tool('claim', "Prend une tâche en charge : l'assigne à cette session (en plus des sessions déjà en charge, s'il y en a) et la passe en in_progress. Refusé tant que la tâche est bloquée par des dépendances non terminées.", { id: z.string() }, async ({ id }) =>
         run(async () => {
-          await own(id);
+          await assertUnblocked(await own(id));
           const t = await taskService.update(id, { status: 'in_progress', sessionId }, actor);
           return `Tâche prise en charge : ${line(t, sessionId)}`;
         }),

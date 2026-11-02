@@ -1072,3 +1072,9 @@ a.task-mention:hover { background: rgba(var(--cc-accent-rgb), 0.24); color: var(
 .preview-qr { width: 220px; height: 220px; max-width: 100%; }
 .preview-qr-bg { fill: var(--cc-qr-light); }
 .preview-qr-fg { fill: var(--cc-qr-dark); }
+/* Tâche bloquée par des dépendances non terminées (TaskBlockedBadge), et listes de tâches liées (TaskRefList). */
+.task-blocked { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 600; white-space: nowrap; color: var(--cc-yellow); }
+.task-ref-list { list-style: none; padding: 0; margin: 0; }
+.task-ref-list li { display: flex; align-items: center; gap: 6px; padding: 1px 0; min-width: 0; }
+.task-ref-list li .task-status { flex: 0 0 auto; }
+.task-ref-list li a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

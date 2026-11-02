@@ -377,6 +377,18 @@ type Task {
   pullRequest: PullRequest
   "Pull requests suivies de la tâche (objets Skipper : étape, déploiement, note), celles qui attendent une action d'abord."
   pullRequests: [TrackedPullRequest!]!
+  "Tâches du même projet dont celle-ci dépend (« bloquée par »), dans l'ordre d'ajout."
+  dependsOn: [Task!]!
+  "Celles de dependsOn qui ne sont pas terminées (une annulée bloque encore) : tant qu'il en reste, la tâche ne peut pas être confiée à un agent."
+  blockedBy: [Task!]!
+  "Vrai tant qu'au moins une dépendance n'est pas terminée."
+  blocked: Boolean!
+  "Tâches qui dépendent de celle-ci."
+  dependents: [Task!]!
+  "Confiée automatiquement à une session (configuration par défaut du projet) quand sa dernière dépendance passe à terminée ; option consommée au lancement."
+  autoStartWhenUnblocked: Boolean!
+  "Personne (ou agent) au nom de qui la session sera lancée : celle qui a armé l'option."
+  autoStartBy: User
   createdAt: DateTime!
   updatedAt: DateTime!
   completedAt: DateTime
@@ -396,6 +408,10 @@ input CreateTaskInput {
   reporter: TaskPersonInput
   "Fichiers joints à la tâche (10 au plus, 10 Mo chacun, 12 Mo au total)."
   attachments: [AttachmentInput!]
+  "Tâches du même projet dont celle-ci dépend."
+  dependsOnIds: [ID!]
+  "Lancer automatiquement quand la dernière dépendance est terminée (au nom de la personne connectée)."
+  autoStartWhenUnblocked: Boolean
 }
 
 input UpdateTaskInput {
@@ -422,6 +438,10 @@ input UpdateTaskInput {
   attachments: [AttachmentInput!]
   "Pièces jointes de la tâche (pas de ses commentaires) à retirer."
   removeAttachmentIds: [ID!]
+  "Remplace la liste complète des dépendances (refusé s'il en résulte un cycle)."
+  dependsOnIds: [ID!]
+  "Arme (au nom de la personne connectée) ou désarme le lancement automatique quand la tâche est débloquée."
+  autoStartWhenUnblocked: Boolean
 }
 
 "Clé d'API d'un projet (API REST des tâches) ; le secret n'est montré qu'à la création."

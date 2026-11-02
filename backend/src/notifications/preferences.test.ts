@@ -24,6 +24,8 @@ const KNOWN_TYPES = [
   'session.created',
   'task.created',
   'task.completed',
+  'task.unblocked',
+  'task.autostart_failed',
   'task.mentioned',
   'task.replied',
   'pull_request.opened',

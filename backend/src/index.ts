@@ -15,6 +15,7 @@ import { handleGitHttpRoute } from './gitServer/httpRoute.js';
 import { gitServer } from './gitServer/service.js';
 import { registerTaskSessionFeed } from './tasks/sessionFeed.js';
 import { registerAgentTriggers } from './agents/triggers.js';
+import { registerTaskAutoStart } from './tasks/autoStart.js';
 import { agentService } from './agents/service.js';
 import { vaultService } from './vault/service.js';
 import { authSession, readCookie, SESSION_COOKIE } from './auth/session.js';
@@ -119,6 +120,7 @@ async function main() {
   const legacy = await migrateLegacyCredentials();
   if (legacy.length) log.info(`[settings] identifiants historiques transférés : ${legacy.join(', ')}`);
   registerTaskSessionFeed();
+  registerTaskAutoStart();
   registerWorkflowTriggers();
   registerAgentTriggers();
   const closedTerminals = await terminalService.recoverAfterRestart(liveInstances);

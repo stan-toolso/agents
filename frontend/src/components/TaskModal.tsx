@@ -2,13 +2,14 @@ import { useMutation, useQuery } from '@apollo/client';
 import { useState } from 'react';
 import { Alert, Button, Col, Form, Modal, Row } from 'react-bootstrap';
 import { useAuth } from '../auth/AuthContext';
-import { CREATE_TASK, UPDATE_TASK, type Task, type TaskField, type TaskPerson, type TaskPriority, type TaskStatus } from '../graphql/operations';
-import { TASK_PEOPLE, TASK_PROJECT_MEMBERS, TASK_TAGS } from '../graphql/tasks';
+import { CREATE_TASK, UPDATE_TASK, type Task, type TaskField, type TaskPerson, type TaskPriority, type TaskRef, type TaskStatus } from '../graphql/operations';
+import { TASK_DEPENDENCY_CHOICES, TASK_PEOPLE, TASK_PROJECT_MEMBERS, TASK_TAGS } from '../graphql/tasks';
 import { canAutoFocus } from '../lib/device';
 import { taskPriorityLabels, taskStatusLabels } from '../lib/humanize';
 import { toAttachmentInputs, usePendingAttachments } from '../lib/attachments';
 import AttachmentChips from './AttachmentChips';
 import TagsInput from './TagsInput';
+import { TaskStatusBadge } from './TaskBadges';
 import TaskAttachments from './TaskAttachments';
 import DictationButton from './DictationButton';
 import TaskThread from './TaskThread';
@@ -26,6 +27,8 @@ interface TaskForm {
   assignee: { name: string; email: string };
   reporter: { name: string; email: string };
   customFields: TaskField[];
+  dependsOn: TaskRef[];
+  autoStart: boolean;
 }
 
 const personForm = (p: TaskPerson | null | undefined) => ({ name: p?.name ?? '', email: p?.email ?? '' });
@@ -91,6 +94,76 @@ function PersonFields({ label, value, onChange, people, members }: { label: stri
   );
 }
 
+/**
+ * « Bloquée par » : les tâches du projet dont celle-ci dépend (puces retirables, liste pour en ajouter), et l'option de
+ * lancement automatique quand la dernière se termine. Les cycles sont refusés par le serveur (message dans la fenêtre).
+ */
+function DependencyFields({ projectId, taskId, value, autoStart, onChange, onAutoStart }: { projectId: string; taskId: string | null; value: TaskRef[]; autoStart: boolean; onChange: (v: TaskRef[]) => void; onAutoStart: (v: boolean) => void }) {
+  const { data } = useQuery<{ tasks: TaskRef[] }>(TASK_DEPENDENCY_CHOICES, { variables: { projectId }, skip: !projectId });
+  const choices = (data?.tasks ?? []).filter((t) => t.id !== taskId && !value.some((v) => v.id === t.id));
+  const open = choices.filter((t) => t.status !== 'DONE');
+  const done = choices.filter((t) => t.status === 'DONE');
+  const waiting = value.some((t) => t.status !== 'DONE');
+  return (
+    <div className="mb-3">
+      <Form.Label htmlFor="task-depends-on">Bloquée par</Form.Label>
+      {value.length > 0 && (
+        <div className="d-flex flex-wrap gap-1 mb-1">
+          {value.map((t) => (
+            <span key={t.id} className="task-tag d-inline-flex align-items-center gap-1">
+              <TaskStatusBadge status={t.status} />
+              {t.title}
+              <button type="button" className="btn btn-link btn-sm p-0 text-secondary" title="Retirer cette dépendance" aria-label={`Retirer « ${t.title} »`} onClick={() => onChange(value.filter((x) => x.id !== t.id))}>
+                <i className="bi bi-x" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <Form.Select
+        id="task-depends-on"
+        size="sm"
+        value=""
+        onChange={(e) => {
+          const t = choices.find((c) => c.id === e.target.value);
+          if (t) onChange([...value, t]);
+        }}
+      >
+        <option value="">{choices.length ? 'Ajouter une tâche dont celle-ci dépend…' : 'Aucune autre tâche dans le projet'}</option>
+        {open.length > 0 && (
+          <optgroup label="Ouvertes">
+            {open.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.title}
+              </option>
+            ))}
+          </optgroup>
+        )}
+        {done.length > 0 && (
+          <optgroup label="Terminées">
+            {done.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.title}
+              </option>
+            ))}
+          </optgroup>
+        )}
+      </Form.Select>
+      <Form.Text>Tant qu'une de ces tâches n'est pas terminée, celle-ci ne peut pas être confiée à un agent.</Form.Text>
+      <Form.Check
+        id="task-auto-start"
+        className="mt-1"
+        type="switch"
+        disabled={!waiting}
+        checked={autoStart && waiting}
+        onChange={(e) => onAutoStart(e.target.checked)}
+        label="Lancer automatiquement quand elle est débloquée"
+      />
+      <Form.Text>{waiting ? 'Quand la dernière dépendance passe à « terminée », une session est lancée à votre nom avec la configuration par défaut du projet, et vous êtes notifié.' : 'Possible quand au moins une dépendance reste à terminer.'}</Form.Text>
+    </div>
+  );
+}
+
 /** Fenêtre de création / édition d'une tâche : titre, description, priorité, statut, échéance, personnes, champs libres, commentaires. */
 /**
  * Création ou modification d'une tâche. À la création, `projects` (ceux où l'on peut écrire) ajoute le choix du
@@ -113,6 +186,8 @@ export default function TaskModal({ task, projectId: initialProjectId, projects,
     assignee: personForm(task ? task.assignee : me),
     reporter: personForm(task ? task.reporter : me),
     customFields: task?.customFields.map((f) => ({ key: f.key, value: f.value })) ?? [],
+    dependsOn: task?.dependsOn ?? [],
+    autoStart: task?.autoStartWhenUnblocked ?? false,
   });
   const { data: peopleData } = useQuery<{ taskPeople: TaskPerson[] }>(TASK_PEOPLE, { variables: { projectId }, skip: !projectId });
   const people = peopleData?.taskPeople ?? [];
@@ -149,6 +224,11 @@ export default function TaskModal({ task, projectId: initialProjectId, projects,
       reporter: personInput(form.reporter),
       attachments,
     };
+    // Dépendances et lancement automatique envoyés seulement s'ils changent : réarmer l'option la mettrait au nom de qui enregistre.
+    const ids = form.dependsOn.map((t) => t.id);
+    const autoStart = form.autoStart && form.dependsOn.some((t) => t.status !== 'DONE');
+    if (!task || ids.join() !== task.dependsOn.map((t) => t.id).join()) Object.assign(input, { dependsOnIds: ids });
+    if (task ? autoStart !== task.autoStartWhenUnblocked : autoStart) Object.assign(input, { autoStartWhenUnblocked: autoStart });
     if (task) updateTask({ variables: { id: task.id, input: { ...input, removeAttachmentIds: removedFiles.length ? removedFiles : null } } });
     else createTask({ variables: { input: { ...input, projectId } } });
   };
@@ -163,7 +243,10 @@ export default function TaskModal({ task, projectId: initialProjectId, projects,
           {chooseProject && (
             <Form.Group className="mb-3">
               <Form.Label htmlFor="task-project">Projet</Form.Label>
-              <Form.Select id="task-project" value={projectId} onChange={(e) => setProjectId(e.target.value)} required>
+              <Form.Select id="task-project" value={projectId} onChange={(e) => {
+                setProjectId(e.target.value);
+                setForm((f) => ({ ...f, dependsOn: [], autoStart: false }));
+              }} required>
                 {!projects.some((p) => p.id === projectId) && <option value="">Choisir un projet…</option>}
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -237,6 +320,14 @@ export default function TaskModal({ task, projectId: initialProjectId, projects,
             <PersonFields label="Responsable" value={form.assignee} onChange={(assignee) => setForm((f) => ({ ...f, assignee }))} people={people} members={members} />
             <PersonFields label="Rapporteur" value={form.reporter} onChange={(reporter) => setForm((f) => ({ ...f, reporter }))} people={people} members={members} />
           </Row>
+          <DependencyFields
+            projectId={projectId}
+            taskId={task?.id ?? null}
+            value={form.dependsOn}
+            autoStart={form.autoStart}
+            onChange={(dependsOn) => setForm((f) => ({ ...f, dependsOn }))}
+            onAutoStart={(autoStart) => setForm((f) => ({ ...f, autoStart }))}
+          />
           <div className="mb-2">
             <div className="d-flex justify-content-between align-items-center">
               <Form.Label className="mb-0">Champs personnalisés</Form.Label>

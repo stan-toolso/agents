@@ -391,6 +391,22 @@ export interface Task {
   pullRequests?: TrackedPullRequestSummary[];
   /** Sessions en charge (TASK_PAGE). */
   sessionsInCharge?: { id: string }[];
+  /** Tâches dont celle-ci dépend (« bloquée par »). */
+  dependsOn: TaskRef[];
+  /** Celles de dependsOn qui ne sont pas terminées : la tâche ne peut pas être confiée à un agent tant qu'il en reste. */
+  blockedBy: TaskRef[];
+  /** Tâches qui dépendent de celle-ci. */
+  dependents: TaskRef[];
+  /** Confiée automatiquement à une session quand sa dernière dépendance est terminée. */
+  autoStartWhenUnblocked: boolean;
+  autoStartBy: { id: string; name: string } | null;
+}
+
+/** Tâche citée par une autre (dépendance). */
+export interface TaskRef {
+  id: string;
+  title: string;
+  status: TaskStatus;
 }
 
 export interface AppNotification {
@@ -1588,6 +1604,26 @@ export const TASK_FIELDS = gql`
       }
     }
     createdBySession {
+      id
+      name
+    }
+    dependsOn {
+      id
+      title
+      status
+    }
+    blockedBy {
+      id
+      title
+      status
+    }
+    dependents {
+      id
+      title
+      status
+    }
+    autoStartWhenUnblocked
+    autoStartBy {
       id
       name
     }

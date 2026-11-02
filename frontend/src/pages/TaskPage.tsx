@@ -8,7 +8,7 @@ import { RegisterPullRequestModal, TrackedPullRequestActions, TrackedPullRequest
 import { prRef, PULL_REQUESTS, type TrackedPullRequest } from '../graphql/pullRequests';
 import StatusBadge from '../components/StatusBadge';
 import TaskActions from '../components/TaskActions';
-import { isOverdue, Linkified, TaskPriorityBadge, TaskStatusBadge, TaskTags } from '../components/TaskBadges';
+import { isOverdue, Linkified, TaskBlockedBadge, TaskPriorityBadge, TaskRefList, TaskStatusBadge, TaskTags } from '../components/TaskBadges';
 import TaskThread from '../components/TaskThread';
 import type { LaunchTarget } from '../components/TaskLaunchModal';
 import TaskModal from '../components/TaskModal';
@@ -94,7 +94,7 @@ export default function TaskPage() {
       <div className="d-flex align-items-start justify-content-between gap-3 flex-wrap">
         <div>
           <h1 className="h3 mb-1">
-            {task.title} <TaskStatusBadge status={task.status} statusTag={task.statusTag} /> <TaskPriorityBadge priority={task.priority} />
+            {task.title} <TaskStatusBadge status={task.status} statusTag={task.statusTag} /> <TaskPriorityBadge priority={task.priority} /> <TaskBlockedBadge task={task} />
           </h1>
           <div className="small text-secondary">
             <Link to={`/projects/${task.project.id}`}>{task.project.name}</Link>
@@ -233,6 +233,28 @@ export default function TaskPage() {
                     <dt className="col-4">Étiquettes</dt>
                     <dd className="col-8">
                       <TaskTags tags={task.tags} />
+                    </dd>
+                  </>
+                )}
+                {task.dependsOn.length > 0 && (
+                  <>
+                    <dt className="col-4">Bloquée par</dt>
+                    <dd className="col-8">
+                      <TaskRefList tasks={task.dependsOn} />
+                      {task.autoStartWhenUnblocked && (
+                        <div className="text-secondary mt-1">
+                          <i className="bi bi-lightning-charge me-1" />
+                          Lancée automatiquement quand la dernière sera terminée{task.autoStartBy ? `, au nom de ${task.autoStartBy.name}` : ''}.
+                        </div>
+                      )}
+                    </dd>
+                  </>
+                )}
+                {task.dependents.length > 0 && (
+                  <>
+                    <dt className="col-4">Bloque</dt>
+                    <dd className="col-8">
+                      <TaskRefList tasks={task.dependents} />
                     </dd>
                   </>
                 )}
