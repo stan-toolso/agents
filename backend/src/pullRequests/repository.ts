@@ -176,7 +176,7 @@ export const pullRequestRepository = {
 
   /**
    * Projets git à synchroniser en fond : ceux qui ont une PR suivie ouverte ou en préparation, ou une work session
-   * active (une PR en préparation peut y naître). Pour chacun, le membre dont le compte GitHub servira à lire le dépôt :
+   * active (une PR en préparation peut y naître). Pour chacun, le membre dont le compte GitHub ou GitLab (celui de la forge du dépôt de préférence) servira à lire le dépôt :
    * l'auteur de la PR ouverte la plus récente s'il a un compte, sinon un administrateur, sinon un autre membre ; null
    * si personne n'a de compte (seul le travail local des branches est alors relu).
    */
@@ -184,8 +184,14 @@ export const pullRequestRepository = {
     const { rows } = await pool.query<{ project_id: string; user_id: string | null }>(
       `SELECT p.id AS project_id,
               (SELECT m.user_id FROM project_members m
-               WHERE m.project_id = p.id AND EXISTS (SELECT 1 FROM user_github_accounts a WHERE a.user_id = m.user_id)
-               ORDER BY m.user_id = (SELECT pr.created_by_user_id FROM pull_requests pr
+               WHERE m.project_id = p.id
+                 AND (EXISTS (SELECT 1 FROM user_github_accounts a WHERE a.user_id = m.user_id)
+                      OR EXISTS (SELECT 1 FROM user_gitlab_accounts a WHERE a.user_id = m.user_id))
+               -- Un compte de la forge du dépôt d'abord : GitHub pour un dépôt GitHub, GitLab sinon.
+               ORDER BY CASE WHEN p.git_url ~* '[@/.]github[.-]'
+                             THEN EXISTS (SELECT 1 FROM user_github_accounts a WHERE a.user_id = m.user_id)
+                             ELSE EXISTS (SELECT 1 FROM user_gitlab_accounts a WHERE a.user_id = m.user_id) END DESC,
+                        m.user_id = (SELECT pr.created_by_user_id FROM pull_requests pr
                                      WHERE pr.project_id = p.id AND pr.status = 'open' AND pr.created_by_user_id IS NOT NULL
                                      ORDER BY pr.opened_at DESC NULLS LAST LIMIT 1) DESC NULLS LAST,
                         m.role = 'admin' DESC, m.created_at
