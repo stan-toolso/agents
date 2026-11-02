@@ -8,6 +8,7 @@ import { canAutoFocus } from '../lib/device';
 import { branchFromName, namesFromText, suggestWorksessionName } from '../lib/worksessions';
 import { bypassConnectionsWarning } from '../lib/humanize';
 import { toAttachmentInputs, usePendingAttachments } from '../lib/attachments';
+import { agentConfigFields, agentConfigValues, agentProvider } from '../lib/agentSessions';
 import AttachmentChips from './AttachmentChips';
 import DictationButton from './DictationButton';
 import ContextLimitField from './ContextLimitField';
@@ -139,7 +140,7 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
 
   const [createSession, { loading: busy }] = useMutation<{ createSession: Session }>(CREATE_SESSION, { refetchQueries: ['Sidebar', 'Sessions'] });
   // « En tant que » : la session peut être jouée par un agent du projet (ses comptes, ses instructions) ; par défaut, par la personne.
-  const { data: agentsData } = useQuery<{ project: { id: string; agents: (AgentRef & { description: string; enabled: boolean })[] } | null }>(PROJECT_AGENT_REFS, { variables: { id: projectId }, skip: !projectId || Boolean(project?.isPersonal) });
+  const { data: agentsData } = useQuery<{ project: { id: string; agents: (AgentRef & { description: string; enabled: boolean; defaults: Record<string, unknown>; allowedModels: string[] })[] } | null }>(PROJECT_AGENT_REFS, { variables: { id: projectId }, skip: !projectId || Boolean(project?.isPersonal) });
   const agents = agentsData?.project?.id === projectId ? agentsData.project.agents.filter((a) => a.enabled) : [];
   const [agentId, setAgentId] = useState('');
   const asAgent = agents.find((a) => a.id === agentId) ?? null;
@@ -169,6 +170,15 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
     const mode = saved && (field.options ?? []).some((o) => o.value === saved) ? saved : projectDefaultMode;
     setValues((prev) => ({ ...prev, permissionMode: mode }));
   }, [provider, projectId, projectDefaultMode]);
+
+  // En tant qu'agent : son type de session, puis son modèle (parmi ses modèles autorisés) et ses autorisations par défaut.
+  useEffect(() => {
+    const type = asAgent ? agentProvider(asAgent, providers.map((p) => p.type)) : null;
+    if (type) setProviderType(type);
+  }, [asAgent?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (asAgent && provider) setValues((prev) => ({ ...prev, ...agentConfigValues(asAgent, provider.configFields) }));
+  }, [asAgent?.id, provider, projectDefaultMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Limite de contexte : la dernière choisie dans ce formulaire pour le projet, sinon le défaut du projet (aucune par défaut).
   const { data: warnData } = useQuery<{ settings: { claude: { contextWarnTokens: number | null } } }>(CONTEXT_WARN_SETTING, { fetchPolicy: 'no-cache' });
@@ -228,7 +238,7 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
     }
   };
 
-  const configFields = provider?.configFields ?? [];
+  const configFields = agentConfigFields(asAgent, provider?.configFields ?? []);
   const setValue = (key: string) => (v: string) => setValues((prev) => ({ ...prev, [key]: v }));
   const bypassWarning = values.permissionMode === 'bypassPermissions' ? bypassConnectionsWarning(info?.approvalConnections ?? []) : null;
   const optionSummary = [asAgent ? `en tant que ${asAgent.name}` : null, provider && providers.length > 1 ? provider.label : null, ...configFields.filter((f) => !f.advanced && values[f.key]).map((f) => f.options?.find((o) => o.value === values[f.key])?.label ?? values[f.key]), limitable ? `contexte : ${limitLabel(contextLimit, warnK)}${isProjectLimit ? ' (défaut du projet)' : ''}` : null].filter(Boolean).join(' · ');

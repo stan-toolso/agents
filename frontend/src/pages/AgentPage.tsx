@@ -19,6 +19,9 @@ type Section = 'profile' | 'accounts' | 'activity';
 
 const KINDS: AgentKind[] = ['PRODUCT_MANAGER', 'DEVELOPER', 'CUSTOM'];
 
+/** Types de session qu'un agent peut jouer (le terminal n'en est pas un). */
+const AGENT_PROVIDERS = ['claude', 'opencode'];
+
 interface ActionDraft extends AgentActionInput {
   key: string;
 }
@@ -27,9 +30,10 @@ interface ActionDraft extends AgentActionInput {
 function ProfileForm({ agent }: { agent: Agent }) {
   const { showError } = useDialogs();
   const { data: providersData } = useQuery<{ providers: Provider[] }>(PROVIDERS);
-  const claude = providersData?.providers.find((p) => p.type === 'claude');
-  const modeOptions = claude?.configFields.find((f) => f.key === 'permissionMode')?.options ?? [];
-  const modelOptions = claude?.configFields.find((f) => f.key === 'model')?.options ?? [];
+  const providers = (providersData?.providers ?? []).filter((p) => AGENT_PROVIDERS.includes(p.type));
+  const [providerType, setProviderType] = useState(String(agent.defaults.provider ?? '') || 'claude');
+  const provider = providers.find((p) => p.type === providerType) ?? providers.find((p) => p.type === 'claude');
+  const modeOptions = provider?.configFields.find((f) => f.key === 'permissionMode')?.options ?? [];
   const [name, setName] = useState(agent.name);
   const [kind, setKind] = useState<AgentKind>(agent.kind);
   const [emoji, setEmoji] = useState(agent.avatar.emoji ?? '');
@@ -41,6 +45,24 @@ function ProfileForm({ agent }: { agent: Agent }) {
   const [permissionMode, setPermissionMode] = useState(String(agent.defaults.permissionMode ?? ''));
   const [model, setModel] = useState(String(agent.defaults.model ?? ''));
   const [allowedTools, setAllowedTools] = useState(String(agent.defaults.allowedTools ?? ''));
+  const [allowedModels, setAllowedModels] = useState<string[]>(agent.allowedModels);
+  const [otherModel, setOtherModel] = useState('');
+  // Modèles proposés par le type de session choisi (ceux de vos réglages), plus ceux déjà retenus pour l'agent.
+  const modelOptions = useMemo(() => {
+    const listed = (provider?.configFields.find((f) => f.key === 'model')?.options ?? []).filter((o) => o.value);
+    const extra = [...allowedModels, model].filter((v) => v && !listed.some((o) => o.value === v)).map((v) => ({ value: v, label: v }));
+    return [...listed, ...extra.filter((o, i) => extra.findIndex((x) => x.value === o.value) === i)];
+  }, [provider, allowedModels, model]);
+  const toggleAllowed = (value: string, on: boolean) => {
+    setAllowedModels((list) => (on ? [...list.filter((v) => v !== value), value] : list.filter((v) => v !== value)));
+    if (!on && model === value) setModel('');
+  };
+  const addOtherModel = () => {
+    const v = otherModel.trim();
+    if (v) toggleAllowed(v, true);
+    setOtherModel('');
+  };
+  const defaultModelChoices = allowedModels.length ? modelOptions.filter((o) => allowedModels.includes(o.value)) : modelOptions;
   const [triggers, setTriggers] = useState(agent.triggers);
   const [actions, setActions] = useState<ActionDraft[]>(agent.actions.map((a) => ({ key: a.key, label: a.label, instruction: a.instruction, cron: a.cron, timezone: a.timezone })));
   const [saved, setSaved] = useState(false);
@@ -49,7 +71,7 @@ function ProfileForm({ agent }: { agent: Agent }) {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const defaults: Record<string, unknown> = { ...agent.defaults };
-    for (const [k, v] of Object.entries({ permissionMode, model, allowedTools })) {
+    for (const [k, v] of Object.entries({ provider: providerType, permissionMode, model, allowedTools })) {
       if (v.trim()) defaults[k] = v.trim();
       else delete defaults[k];
     }
@@ -66,6 +88,7 @@ function ProfileForm({ agent }: { agent: Agent }) {
             taskFolder,
             inheritContext,
             defaults,
+            allowedModels,
             triggers: { taskCreated: triggers.taskCreated, taskCreatedTag: triggers.taskCreatedTag, threadFollowed: triggers.threadFollowed, prMerged: triggers.prMerged, taskReady: triggers.taskReady, taskReadyTag: triggers.taskReadyTag },
             actions: actions.map((a) => ({ key: a.key || null, label: a.label, instruction: a.instruction, cron: a.cron || null, timezone: a.timezone || null })),
           },
@@ -146,6 +169,19 @@ function ProfileForm({ agent }: { agent: Agent }) {
               <Row className="g-2">
                 <Col sm={6}>
                   <Form.Group>
+                    <Form.Label>Type de session par défaut</Form.Label>
+                    <Form.Select value={providerType} onChange={(e) => setProviderType(e.target.value)}>
+                      {(providers.length ? providers : [{ type: 'claude', label: 'Claude Code' }]).map((p) => (
+                        <option key={p.type} value={p.type}>
+                          {p.label}
+                        </option>
+                      ))}
+                    </Form.Select>
+                    <Form.Text>Celui de ses sessions lancées par une mention, un déclencheur ou une action ; proposé quand on lance une session en son nom.</Form.Text>
+                  </Form.Group>
+                </Col>
+                <Col sm={6}>
+                  <Form.Group>
                     <Form.Label>Autorisations par défaut</Form.Label>
                     <Form.Select value={permissionMode} onChange={(e) => setPermissionMode(e.target.value)}>
                       <option value="">Celles du projet</option>
@@ -159,19 +195,51 @@ function ProfileForm({ agent }: { agent: Agent }) {
                 </Col>
                 <Col sm={6}>
                   <Form.Group>
-                    <Form.Label>Modèle</Form.Label>
-                    {modelOptions.length ? (
+                    <Form.Label>Modèle par défaut</Form.Label>
+                    {defaultModelChoices.length ? (
                       <Form.Select value={model} onChange={(e) => setModel(e.target.value)}>
-                        <option value="">Celui de ses réglages Claude</option>
-                        {modelOptions.map((o) => (
+                        <option value="">{allowedModels.length ? `Le premier autorisé (${allowedModels[0]})` : `Celui de ses réglages ${provider?.label ?? 'Claude'}`}</option>
+                        {defaultModelChoices.map((o) => (
                           <option key={o.value} value={o.value}>
                             {o.label}
                           </option>
                         ))}
                       </Form.Select>
                     ) : (
-                      <Form.Control value={model} onChange={(e) => setModel(e.target.value)} placeholder="Celui de ses réglages Claude" />
+                      <Form.Control value={model} onChange={(e) => setModel(e.target.value)} placeholder="Celui de ses réglages" />
                     )}
+                  </Form.Group>
+                </Col>
+                <Col xs={12}>
+                  <Form.Group>
+                    <Form.Label>Modèles autorisés</Form.Label>
+                    <div className="d-flex flex-wrap gap-3">
+                      {modelOptions.map((o) => (
+                        <Form.Check key={o.value} id={`agent-model-${o.value}`} checked={allowedModels.includes(o.value)} onChange={(e) => toggleAllowed(o.value, e.target.checked)} label={o.label} />
+                      ))}
+                    </div>
+                    <div className="d-flex gap-2 mt-2" style={{ maxWidth: 420 }}>
+                      <Form.Control
+                        size="sm"
+                        value={otherModel}
+                        onChange={(e) => setOtherModel(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            addOtherModel();
+                          }
+                        }}
+                        placeholder={providerType === 'opencode' ? 'Autre modèle (fournisseur/modèle)' : 'Autre modèle (identifiant)'}
+                      />
+                      <Button size="sm" variant="outline-secondary" onClick={addOtherModel} disabled={!otherModel.trim()}>
+                        Ajouter
+                      </Button>
+                    </div>
+                    <Form.Text>
+                      {allowedModels.length
+                        ? `Ses sessions n'utilisent que ${allowedModels.length > 1 ? 'ces modèles' : 'ce modèle'} : un autre est refusé au lancement, et une session dont le modèle n'est plus autorisé reprend le modèle par défaut.`
+                        : 'Aucun coché : tous les modèles sont permis.'}
+                    </Form.Text>
                   </Form.Group>
                 </Col>
                 <Col xs={12}>
@@ -277,21 +345,55 @@ function ProfileForm({ agent }: { agent: Agent }) {
 }
 
 /**
- * Délégation de comptes : la personne connectée peut prêter son propre compte Claude et/ou ses comptes git à l'agent, les
- * comptes git en lecture seule (ni push ni pull request) ou non ; un gestionnaire peut retirer une délégation.
+ * Délégation de comptes : la personne connectée peut prêter son propre compte Claude, son compte GitHub et/ou son compte
+ * GitLab à l'agent, chacun séparément ; GitHub et GitLab en lecture seule (ni push ni pull request) ou non. Un
+ * gestionnaire peut retirer une délégation.
  */
 function DelegationCard({ agent }: { agent: Agent }) {
   const { user } = useAuth();
   const { showError } = useDialogs();
   const [setDelegation, { loading }] = useMutation(SET_AGENT_DELEGATION, { refetchQueries: ['Agent'] });
-  const run = (account: 'CLAUDE' | 'GIT', delegate: boolean, readOnly?: boolean) => void setDelegation({ variables: { id: agent.id, account, delegate, readOnly: readOnly ?? null } }).catch(showError);
+  const run = (account: 'CLAUDE' | 'GITHUB' | 'GITLAB', delegate: boolean, readOnly?: boolean) => void setDelegation({ variables: { id: agent.id, account, delegate, readOnly: readOnly ?? null } }).catch(showError);
   const d = agent.delegations;
   const mine = (u: { id: string } | null) => Boolean(u && user && u.id === user.id);
+  const gitRow = (account: 'GITHUB' | 'GITLAB', label: string, lent: { id: string; name: string } | null, readOnly: boolean) => (
+    <tr>
+      <td>
+        <strong>{label}</strong>
+      </td>
+      <td>
+        {lent ? (
+          <>
+            Compte de <b>{lent.name}</b>
+            {mine(lent) ? ' (vous)' : ''}, {readOnly ? `en lecture seule (ni push, ni ${account === 'GITLAB' ? 'merge' : 'pull'} request)` : 'en lecture et écriture'}
+            {mine(lent) && <Form.Check type="switch" id={`agent-${account.toLowerCase()}-ro`} className="mt-1" checked={readOnly} disabled={loading} onChange={(e) => run(account, true, e.target.checked)} label="Lecture seule" />}
+          </>
+        ) : (
+          <span className="text-secondary">
+            Les comptes {label} propres de {agent.name} (ci-dessous)
+          </span>
+        )}
+      </td>
+      <td className="text-end">
+        {lent ? (
+          <Button size="sm" variant="outline-secondary" disabled={loading} onClick={() => run(account, false)}>
+            Retirer
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline-primary" disabled={loading} onClick={() => run(account, true, true)}>
+            Prêter mon compte {label} (lecture seule)
+          </Button>
+        )}
+      </td>
+    </tr>
+  );
   return (
     <Card className="mb-3">
       <Card.Header>Comptes prêtés</Card.Header>
       <Card.Body className="small">
-        <p className="text-secondary">Plutôt que de régler des comptes propres à {agent.name}, vous pouvez lui prêter les vôtres : ses sessions tournent alors avec votre compte Claude, ou avec vos comptes git (GitHub, GitLab, forge), en lecture seule si vous le souhaitez.</p>
+        <p className="text-secondary">
+          Plutôt que de régler des comptes propres à {agent.name}, vous pouvez lui prêter les vôtres, chacun séparément : ses sessions tournent alors avec votre compte Claude, votre compte GitHub et/ou votre compte GitLab (ces deux-là en lecture seule si vous le souhaitez). Un dépôt hébergé par Skipper utilise toujours le compte de l'agent.
+        </p>
         <Table size="sm" className="align-middle mb-0 table-stack">
           <tbody>
             <tr>
@@ -299,7 +401,7 @@ function DelegationCard({ agent }: { agent: Agent }) {
                 <strong>Claude</strong>
               </td>
               <td>{d.claude ? <>Compte de <b>{d.claude.name}</b>{mine(d.claude) ? ' (vous)' : ''}</> : <span className="text-secondary">Les réglages Claude propres de {agent.name} (ci-dessous)</span>}</td>
-              <td className="text-end" style={{ width: 220 }}>
+              <td className="text-end" style={{ width: 240 }}>
                 {d.claude ? (
                   <Button size="sm" variant="outline-secondary" disabled={loading} onClick={() => run('CLAUDE', false)}>
                     Retirer
@@ -311,34 +413,8 @@ function DelegationCard({ agent }: { agent: Agent }) {
                 )}
               </td>
             </tr>
-            <tr>
-              <td>
-                <strong>Git</strong>
-              </td>
-              <td>
-                {d.git ? (
-                  <>
-                    Comptes de <b>{d.git.name}</b>{mine(d.git) ? ' (vous)' : ''}, {d.gitReadOnly ? 'en lecture seule (ni push, ni pull request)' : 'en lecture et écriture'}
-                    {mine(d.git) && (
-                      <Form.Check type="switch" id="agent-git-ro" className="mt-1" checked={d.gitReadOnly} disabled={loading} onChange={(e) => run('GIT', true, e.target.checked)} label="Lecture seule" />
-                    )}
-                  </>
-                ) : (
-                  <span className="text-secondary">Les comptes GitHub / GitLab propres de {agent.name} (ci-dessous)</span>
-                )}
-              </td>
-              <td className="text-end">
-                {d.git ? (
-                  <Button size="sm" variant="outline-secondary" disabled={loading} onClick={() => run('GIT', false)}>
-                    Retirer
-                  </Button>
-                ) : (
-                  <Button size="sm" variant="outline-primary" disabled={loading} onClick={() => run('GIT', true, true)}>
-                    Prêter mes comptes git (lecture seule)
-                  </Button>
-                )}
-              </td>
-            </tr>
+            {gitRow('GITHUB', 'GitHub', d.github, d.githubReadOnly)}
+            {gitRow('GITLAB', 'GitLab', d.gitlab, d.gitlabReadOnly)}
           </tbody>
         </Table>
       </Card.Body>
@@ -597,7 +673,7 @@ export default function AgentPage() {
             <DelegationCard agent={agent} />
             <ApolloProvider client={actAsClient}>
               <Alert variant="light" className="border small">
-                Comptes propres de <b>{agent.name}</b>{agent.delegations.claude || agent.delegations.git ? ' (utilisés là où aucun compte n’est prêté)' : ''} : ses sessions tournent avec, sa consommation lui est imputée, ses commits et pull requests sont signés de lui. Ils se règlent comme les vôtres dans Paramètres ; les éléments de coffre créés ici lui appartiennent.
+                Comptes propres de <b>{agent.name}</b>{agent.delegations.claude || agent.delegations.github || agent.delegations.gitlab ? ' (utilisés là où aucun compte n’est prêté)' : ''} : ses sessions tournent avec, sa consommation lui est imputée, ses commits et pull requests sont signés de lui. Ils se règlent comme les vôtres dans Paramètres ; les éléments de coffre créés ici lui appartiennent.
               </Alert>
               <AgentAccountSettings agentName={agent.name} />
             </ApolloProvider>

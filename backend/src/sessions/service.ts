@@ -506,6 +506,9 @@ export const sessionService = {
     if (!(initialMessage ?? session.prompt)) throw new AppError('Envoyez une première instruction pour démarrer la session');
     const provider = getProvider(session.provider);
     const project = await projectService.get(session.projectId);
+    // Session d'un agent : un modèle qui n'est plus parmi ses modèles autorisés (fiche modifiée depuis) est remplacé.
+    const agentOwner = await agentService.forUser(session.ownerId);
+    const constrainedConfig = agentOwner ? agentService.constrainModel(agentOwner, session.config) : null;
 
     // Pas d'await entre la vérification et la réservation de la place (une place déjà prise : démarrage concurrent).
     if (slots.has(id)) throw new AppError('La session est déjà en cours');
@@ -522,7 +525,7 @@ export const sessionService = {
         await emit('system', { message: `Place libérée : la session démarre après ${formatWait(Date.now() - (session.queuedAt?.getTime() ?? Date.now()))} d'attente`, notice: true, reason: 'queue_start' });
       }
       started = await publishSession(
-        await sessionRepository.update(id, { status: 'running', activity: 'busy', startedAt: new Date(), endedAt: null, exitCode: null, error: null, queuedAt: null, queuedStart: null, resumeDigest: null, instanceId: instanceRegistry.id, parkedAt: null }),
+        await sessionRepository.update(id, { status: 'running', activity: 'busy', startedAt: new Date(), endedAt: null, exitCode: null, error: null, queuedAt: null, queuedStart: null, resumeDigest: null, instanceId: instanceRegistry.id, parkedAt: null, ...(constrainedConfig ? { config: constrainedConfig } : {}) }),
       );
     } catch (err) {
       slots.delete(id);
@@ -770,6 +773,13 @@ export const sessionService = {
       else config[key] = value;
     }
     if (!Object.keys(changes).length) return session;
+    // Session d'un agent : seulement ses modèles autorisés ; revenir au modèle « par défaut » prend le sien.
+    const agentOwner = 'model' in changes ? await agentService.forUser(session.ownerId) : null;
+    if (agentOwner) {
+      agentService.assertModelAllowed(agentOwner, changes.model);
+      const constrained = agentService.constrainModel(agentOwner, config);
+      if (constrained) config.model = changes.model = constrained.model;
+    }
     getProvider(session.provider).validateConfig?.(config);
     const forwarded = await forwardToHolder(id, 'session.config', { patch });
     if (forwarded) return forwarded;

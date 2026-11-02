@@ -7,6 +7,7 @@ import { TASK_LAUNCH_INFO, TASK_PROMPT } from '../graphql/tasks';
 import { PROJECT_AGENT_REFS, agentKindLabels, type AgentRef } from '../graphql/agents';
 import AgentAvatar from './AgentAvatar';
 import { bypassConnectionsWarning } from '../lib/humanize';
+import { agentConfigFields, agentConfigValues, agentProvider } from '../lib/agentSessions';
 import { buildConfig, FieldGroup, lastPermissionMode, rememberPermissionMode } from './SessionLauncher';
 
 export interface LaunchTarget {
@@ -158,15 +159,17 @@ function TaskNewSessionModal({ task, target, info: infoData, onClose }: { task: 
   const { data: providersData } = useQuery<{ providers: Provider[] }>(PROVIDERS);
   const providers = providersData?.providers ?? [];
   const [providerType, setProviderType] = useState('');
-  const provider = providers.find((p) => p.type === (providerType || providers[0]?.type));
   const [prompt, setPrompt] = useState<string | null>(null);
   // Agents du projet : la tâche peut être confiée à l'un d'eux (le Developer du projet par défaut) plutôt qu'à une session anonyme.
-  const { data: agentsData } = useQuery<{ project: { id: string; agents: (AgentRef & { description: string; enabled: boolean; taskFolder: boolean })[] } | null }>(PROJECT_AGENT_REFS, { variables: { id: task.project.id } });
+  const { data: agentsData } = useQuery<{ project: { id: string; agents: (AgentRef & { description: string; enabled: boolean; taskFolder: boolean; defaults: Record<string, unknown>; allowedModels: string[] })[] } | null }>(PROJECT_AGENT_REFS, { variables: { id: task.project.id } });
   const agents = (agentsData?.project?.agents ?? []).filter((a) => a.enabled);
   const [agentId, setAgentId] = useState<string | null>(null);
   const [agentChosen, setAgentChosen] = useState(false);
   const effectiveAgentId = agentChosen ? agentId : (agents.find((a) => a.kind === 'DEVELOPER')?.id ?? null);
   const agent = agents.find((a) => a.id === effectiveAgentId) ?? null;
+  // Type de session : celui choisi, sinon celui de l'agent, sinon le premier proposé.
+  const agentType = agent ? agentProvider(agent, providers.map((p) => p.type)) : null;
+  const provider = providers.find((p) => p.type === (providerType || agentType || providers[0]?.type));
   const own = infoData?.task?.worksession ?? null;
   const branch = own?.branch ?? infoData?.task?.branch ?? null;
   // Session active déjà en charge de la tâche : elle sera archivée au profit de la nouvelle.
@@ -187,8 +190,8 @@ function TaskNewSessionModal({ task, target, info: infoData, onClose }: { task: 
       const valid = (v: string | null) => v && modeField.options?.some((o) => o.value === v);
       defaults.permissionMode = (valid(remembered) ? remembered : valid(target?.defaultPermissionMode ?? null) ? target!.defaultPermissionMode : defaults.permissionMode) ?? '';
     }
-    setValues(defaults);
-  }, [provider?.type]); // eslint-disable-line react-hooks/exhaustive-deps
+    setValues(agent ? { ...defaults, ...agentConfigValues(agent, provider.configFields) } : defaults);
+  }, [provider?.type, agent?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [start, { loading, error }] = useMutation<{ startTaskSession: { id: string } }>(START_TASK_SESSION, {
     refetchQueries: ['Tasks', 'TaskPage', 'TaskDetail', 'Sidebar'],
@@ -197,7 +200,7 @@ function TaskNewSessionModal({ task, target, info: infoData, onClose }: { task: 
       onClose();
     },
   });
-  const fields = useMemo(() => provider?.configFields ?? [], [provider]);
+  const fields = useMemo(() => agentConfigFields(agent, provider?.configFields ?? []), [provider, agent]);
   const basic = fields.filter((f) => !f.advanced);
   const extra = fields.filter((f) => f.advanced);
   const warning = values.permissionMode === 'bypassPermissions' ? bypassConnectionsWarning(target?.approvalConnections ?? []) : null;

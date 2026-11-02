@@ -10,16 +10,24 @@ export const agentLink = (agent: Pick<Agent, 'id' | 'projectId'>) => `${config.a
  * Section du prompt système d'une session jouée par un agent : qui il est, ses instructions, sa mémoire (dossier du
  * contexte), et qui l'a convoqué. Placée juste après le prompt du projet, avant l'identité de la session.
  */
-export function agentIdentityPrompt(agent: Agent, project: Pick<Project, 'name'>, requestedBy: Pick<User, 'name' | 'email'> | null, opts: { gitReadOnly?: boolean } = {}): string {
+export function agentIdentityPrompt(agent: Agent, project: Pick<Project, 'name'>, requestedBy: Pick<User, 'name' | 'email'> | null, opts: { githubReadOnly?: boolean; gitlabReadOnly?: boolean } = {}): string {
   const role = AGENT_KIND_LABELS[agent.kind];
   const lines = [
     `Tu es **${agent.name}**, ${role} du projet ${project.name}${agent.description ? ` : ${agent.description}` : ''}. Tu es un membre du projet à part entière : tes sessions, tes messages dans les fils de tâches, tes commits et tes pull requests sont à ton nom (les outils signent pour toi). Les personnes du projet peuvent te convoquer en te mentionnant (« @${agent.name} ») dans le fil d'une tâche, ou en te confiant une tâche ; tu reçois alors leur message dans cette session ou dans une nouvelle.`,
     requestedBy ? `- Cette session a été demandée par ${requestedBy.name} (${requestedBy.email}) : c'est à cette personne que tu réponds d'abord.` : '',
     `- Ta fiche : ${agentLink(agent)}`,
-    opts.gitReadOnly ? "- Tes comptes git sont prêtés en lecture seule : tu peux lire et récupérer le dépôt, mais ni pousser une branche ni ouvrir de pull request. Laisse tes commits en local et demande dans le fil de la tâche à une personne de pousser, ou signale-le." : '',
+    readOnlyLine(opts),
     agent.instructions.trim() ? `\nInstructions de ${agent.name} :\n\n${agent.instructions.trim()}` : '',
   ];
   return lines.filter(Boolean).join('\n');
+}
+
+/** Phrase sur les comptes git prêtés en lecture seule (GitHub, GitLab ou les deux). */
+function readOnlyLine(opts: { githubReadOnly?: boolean; gitlabReadOnly?: boolean }): string {
+  const hosts = [opts.githubReadOnly ? 'GitHub' : null, opts.gitlabReadOnly ? 'GitLab' : null].filter(Boolean);
+  if (!hosts.length) return '';
+  const which = hosts.length === 2 ? 'Tes comptes GitHub et GitLab sont prêtés' : `Ton compte ${hosts[0]} est prêté`;
+  return `- ${which} en lecture seule : sur ${hosts.join(' et ')}, tu peux lire et récupérer les dépôts, mais ni pousser une branche ni ouvrir de pull request (ou merge request). Laisse tes commits en local et demande dans le fil de la tâche à une personne de pousser, ou signale-le.`;
 }
 
 /**

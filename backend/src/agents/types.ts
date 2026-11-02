@@ -7,6 +7,8 @@
 
 export type AgentKind = 'product_manager' | 'developer' | 'custom';
 export const AGENT_KINDS: AgentKind[] = ['product_manager', 'developer', 'custom'];
+/** Types de session (providers) qu'un agent peut jouer : les sessions de code interactives, pas le terminal. */
+export const AGENT_PROVIDERS = ['claude', 'opencode'];
 export const AGENT_KIND_LABELS: Record<AgentKind, string> = { product_manager: 'Product Manager', developer: 'Developer', custom: 'Agent' };
 
 export interface AgentAvatar {
@@ -56,16 +58,22 @@ export interface AgentProfile {
   instructions: string;
   /** Ses sessions sur une tâche travaillent dans le dossier de la tâche (branche task/…) ; sinon un dossier par session. */
   taskFolder: boolean;
-  /** Réglages par défaut de ses sessions (même forme que `sessions.config`). */
+  /** Réglages par défaut de ses sessions (même forme que `sessions.config`, plus `provider` : le type de session). */
   defaults: Record<string, unknown>;
+  /** Modèles que ses sessions peuvent utiliser (vide : tous) ; le modèle par défaut (`defaults.model`) en fait partie. */
+  allowedModels: string[];
   /** En plus de sa propre bibliothèque de contexte, l'agent lit (et ses sessions reçoivent) celle du projet. */
   inheritContext: boolean;
   /** Personne qui prête son compte Claude à l'agent (null : les réglages Claude propres de l'agent). */
   claudeDelegateId: string | null;
-  /** Personne qui prête ses comptes git (GitHub, GitLab, forge) à l'agent (null : les comptes propres de l'agent). */
-  gitDelegateId: string | null;
-  /** Comptes git prêtés en lecture seule : ni push, ni pull request. */
-  gitDelegateReadOnly: boolean;
+  /** Personne qui prête son compte GitHub à l'agent (null : les comptes GitHub propres de l'agent). */
+  githubDelegateId: string | null;
+  /** Compte GitHub prêté en lecture seule : ni push, ni pull request. */
+  githubDelegateReadOnly: boolean;
+  /** Personne qui prête son compte GitLab à l'agent (null : les comptes GitLab propres de l'agent). */
+  gitlabDelegateId: string | null;
+  /** Compte GitLab prêté en lecture seule : ni push, ni merge request. */
+  gitlabDelegateReadOnly: boolean;
   triggers: AgentTriggers;
   actions: AgentAction[];
   enabled: boolean;
@@ -108,6 +116,7 @@ export interface AgentInput {
   instructions?: string | null;
   taskFolder?: boolean | null;
   defaults?: Record<string, unknown> | null;
+  allowedModels?: string[] | null;
   triggers?: Partial<AgentTriggers> | null;
   /** Remplace la liste complète (les sessions planifiées des actions retirées sont supprimées). */
   actions?: AgentActionInput[] | null;
@@ -118,13 +127,23 @@ export interface AgentInput {
 export interface OwnerAccounts {
   /** Dont les réglages Claude (identifiants, modèle par défaut, budgets) font tourner la session. */
   claudeUserId: string;
-  /** Dont les comptes GitHub / GitLab / forge servent le dépôt. */
-  gitUserId: string;
-  /** Comptes git prêtés en lecture seule : la session ne pousse pas et n'ouvre pas de pull request. */
-  gitReadOnly: boolean;
+  /** Dont les comptes GitHub servent les dépôts GitHub. */
+  githubUserId: string;
+  /** Compte GitHub prêté en lecture seule : la session ne pousse pas vers GitHub et n'y ouvre pas de pull request. */
+  githubReadOnly: boolean;
+  /** Dont les comptes GitLab servent les dépôts GitLab. */
+  gitlabUserId: string;
+  /** Compte GitLab prêté en lecture seule. */
+  gitlabReadOnly: boolean;
+  /** Dont le compte de la forge de Skipper (dépôt hébergé) sert le dépôt : toujours le propriétaire lui-même. */
+  forgeUserId: string;
 }
 
-export type AgentAccountKind = 'claude' | 'git';
+/** Comptes d'une personne : les siens partout, en écriture. */
+export const ownAccounts = (userId: string): OwnerAccounts => ({ claudeUserId: userId, githubUserId: userId, githubReadOnly: false, gitlabUserId: userId, gitlabReadOnly: false, forgeUserId: userId });
+
+/** Ce qu'un agent peut emprunter : le compte Claude, le compte GitHub ou le compte GitLab d'une personne. */
+export type AgentAccountKind = 'claude' | 'github' | 'gitlab';
 
 export interface AgentStats {
   activeSessions: number;

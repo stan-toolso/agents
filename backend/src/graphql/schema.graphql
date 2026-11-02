@@ -3492,8 +3492,10 @@ type Agent {
   instructions: String!
   "Ses sessions sur une tâche travaillent dans le dossier de la tâche (branche task/…) ; sinon un dossier à part par session."
   taskFolder: Boolean!
-  "Réglages par défaut de ses sessions (même forme que la configuration d'une session : permissionMode, allowedTools, model…)."
+  "Réglages par défaut de ses sessions (même forme que la configuration d'une session : permissionMode, allowedTools, model…, plus provider : le type de session)."
   defaults: JSON!
+  "Modèles que ses sessions peuvent utiliser (vide : tous) ; le modèle par défaut en fait partie."
+  allowedModels: [String!]!
   "En plus de sa propre bibliothèque de contexte, l'agent reçoit celle du projet."
   inheritContext: Boolean!
   "Comptes prêtés à l'agent par une personne (sinon ses comptes propres)."
@@ -3560,7 +3562,10 @@ input AgentInput {
   description: String
   instructions: String
   taskFolder: Boolean
+  "Réglages par défaut : provider (type de session : claude, opencode), model, permissionMode, allowedTools…"
   defaults: JSON
+  "Remplace la liste des modèles autorisés (vide : tous)."
+  allowedModels: [String!]
   triggers: AgentTriggersInput
   "Remplace la liste complète (les sessions planifiées des actions retirées sont supprimées)."
   actions: [AgentActionInput!]
@@ -3574,17 +3579,27 @@ input AgentManagerInput {
 enum AgentAccountKind {
   "Réglages Claude (identifiants, modèle par défaut, budgets)."
   CLAUDE
-  "Comptes GitHub, GitLab et forge."
-  GIT
+  "Comptes GitHub."
+  GITHUB
+  "Comptes GitLab."
+  GITLAB
+  "GitHub et GitLab ensemble (ancienne forme, gardée pour les clients pas encore rechargés)."
+  GIT @deprecated(reason: "Prêter GITHUB et GITLAB séparément")
 }
 
 type AgentDelegations {
   "Personne qui prête son compte Claude (null : les réglages Claude propres de l'agent)."
   claude: User
-  "Personne qui prête ses comptes git (null : les comptes propres de l'agent)."
-  git: User
-  "Comptes git prêtés en lecture seule : ni push, ni pull request."
-  gitReadOnly: Boolean!
+  "Personne qui prête son compte GitHub (null : les comptes GitHub propres de l'agent)."
+  github: User
+  "Compte GitHub prêté en lecture seule : ni push, ni pull request."
+  githubReadOnly: Boolean!
+  "Personne qui prête son compte GitLab (null : les comptes GitLab propres de l'agent)."
+  gitlab: User
+  "Compte GitLab prêté en lecture seule : ni push, ni merge request."
+  gitlabReadOnly: Boolean!
+  git: User @deprecated(reason: "Utiliser github et gitlab")
+  gitReadOnly: Boolean! @deprecated(reason: "Utiliser githubReadOnly et gitlabReadOnly")
 }
 
 extend type Query {

@@ -765,7 +765,12 @@ export const resolvers = {
     user: (a: Agent, _: unknown, ctx: Ctx) => userOrNull(ctx, a.id),
     project: async (a: Agent, _: unknown, ctx: Ctx) => (await loadersOf(ctx).project(a.projectId)) ?? null,
     kind: (a: Agent) => a.kind.toUpperCase(),
-    delegations: async (a: Agent, _: unknown, ctx: Ctx) => ({ claude: await userOrNull(ctx, a.claudeDelegateId), git: await userOrNull(ctx, a.gitDelegateId), gitReadOnly: Boolean(a.gitDelegateId && a.gitDelegateReadOnly) }),
+    delegations: async (a: Agent, _: unknown, ctx: Ctx) => {
+      const acc = agentService.accounts(a);
+      const github = await userOrNull(ctx, a.githubDelegateId);
+      const gitlab = await userOrNull(ctx, a.gitlabDelegateId);
+      return { claude: await userOrNull(ctx, a.claudeDelegateId), github, githubReadOnly: acc.githubReadOnly, gitlab, gitlabReadOnly: acc.gitlabReadOnly, git: github ?? gitlab, gitReadOnly: acc.githubReadOnly || acc.gitlabReadOnly };
+    },
     managers: (a: Agent) => agentService.managers(a.id),
     canManage: (a: Agent, _: unknown, ctx: Ctx) => agentService.canManage(requireUser(ctx).id, a),
     stats: (a: Agent) => agentService.stats(a.id),
@@ -1179,7 +1184,11 @@ export const resolvers = {
     setAgentDelegation: async (_: unknown, args: { id: string; account: string; delegate: boolean; readOnly?: boolean | null }, ctx: Ctx) => {
       const agent = await guardAgentManager(ctx, args.id);
       // On ne prête que son propre compte : la personne connectée est la délégante ; retirer une délégation est ouvert aux gestionnaires.
-      return agentService.setDelegation(agent.id, args.account.toLowerCase() as AgentAccountKind, args.delegate ? requireUser(ctx).id : null, { readOnly: args.readOnly ?? null });
+      const delegateId = args.delegate ? requireUser(ctx).id : null;
+      const kinds: AgentAccountKind[] = args.account === 'GIT' ? ['github', 'gitlab'] : [args.account.toLowerCase() as AgentAccountKind];
+      let updated = agent;
+      for (const kind of kinds) updated = await agentService.setDelegation(agent.id, kind, delegateId, { readOnly: args.readOnly ?? null });
+      return updated;
     },
     runAgentAction: async (_: unknown, args: { id: string; key: string; taskId?: string | null }, ctx: Ctx) => {
       const agent = await agentService.get(args.id);

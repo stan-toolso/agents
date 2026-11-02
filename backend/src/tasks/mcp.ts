@@ -1,4 +1,5 @@
 import { agentService } from '../agents/service.js';
+import { gitAccountFor } from '../git/agentEnv.js';
 import { createSdkMcpServer, tool, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { inScope, targetProject, withProjectParam, type ProjectScope } from '../personal/scope.js';
@@ -323,10 +324,11 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
             if (t.projectId !== project.id) throw new Error('pr_open ouvre une PR du projet de cette session seulement');
             const s = await sessionContext();
             if (!s.worksessionId) throw new Error("Cette session travaille dans le dossier principal : ouvre une PR depuis une work session (branche dédiée)");
-            // Agent de projet : les comptes git prêtés servent la PR ; prêtés en lecture seule, pas de push ni de PR.
+            // Agent de projet : le compte prêté pour l'hébergeur du dépôt (GitHub, GitLab) sert la PR ; prêté en lecture seule, pas de push ni de PR.
             const accounts = await agentService.accountsForOwner(s.ownerId);
-            if (accounts?.gitReadOnly) throw new Error("Tes comptes git sont prêtés en lecture seule : tu ne peux ni pousser ni ouvrir de pull request. Demande dans le fil de la tâche à une personne de le faire.");
-            const pr = await trackedPullRequestService.open({ projectId: project.id, worksessionId: s.worksessionId }, accounts?.gitUserId ?? s.ownerId, { title, body, base, draft, path }, { taskId: task_id, note }, prActor);
+            const account = accounts ? await gitAccountFor(accounts, path?.trim() ? null : project.gitUrl) : null;
+            if (account?.readOnly) throw new Error(`Ton compte ${account.host === 'gitlab' ? 'GitLab' : 'GitHub'} est prêté en lecture seule : tu ne peux ni pousser ni ouvrir de pull request. Demande dans le fil de la tâche à une personne de le faire.`);
+            const pr = await trackedPullRequestService.open({ projectId: project.id, worksessionId: s.worksessionId }, account?.userId ?? s.ownerId, { title, body, base, draft, path }, { taskId: task_id, note }, prActor);
             return `Pull request ouverte et suivie :\n${describePullRequest(pr, projectRepo)}`;
           }),
       ),
