@@ -144,6 +144,8 @@ export const reviewService = {
         prompt: reviewPrompt({ review, task, pr, stat: diff.stat, patch: inline ? diff.patch : null }),
         attachments,
         config: { permissionMode: 'dontAsk', review },
+        // Relecture d'un seul tour : la limite de contexte du projet ne la concerne pas.
+        cleanup: {},
       });
     } catch (err) {
       if (createdWorksession) await worksessionService.delete(ws.id).catch(() => undefined);

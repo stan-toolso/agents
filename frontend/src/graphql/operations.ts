@@ -158,6 +158,8 @@ export interface Project {
   runnerConfig: { image?: string; memory?: string; cpus?: string; browser?: boolean; maxSessions?: number };
   /** Mode d'autorisation des nouvelles sessions : default, acceptEdits, bypassPermissions ou plan. */
   defaultPermissionMode: string;
+  /** Limite de contexte des nouvelles sessions (compact / reset au-delà d'un seuil) ; null : aucune. */
+  defaultContextCleanup: Pick<SessionCleanup, 'contextAction' | 'contextMaxTokens'> | null;
   /** Éléments du coffre soumis à approbation (requête PROJECT seulement). */
   approvalConnections?: string[];
   /** Faux quand le projet est atteint en tant que super administrateur sans en être membre. */
@@ -510,6 +512,10 @@ export const PROJECT_FIELDS = gql`
     gitHosted
     runnerConfig
     defaultPermissionMode
+    defaultContextCleanup {
+      contextAction
+      contextMaxTokens
+    }
     runnerStatus {
       kind
       ready
@@ -1472,6 +1478,10 @@ export const PROJECT_LAUNCH_INFO = gql`
       id
       gitUrl
       defaultPermissionMode
+      defaultContextCleanup {
+        contextAction
+        contextMaxTokens
+      }
       approvalConnections
       git {
         branch

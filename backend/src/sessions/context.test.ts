@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../db/pool.js', () => ({ pool: { query: vi.fn() } }));
-const { CONTEXT_WARN_TOKENS, contextEstimate, contextModel, modelProfile } = await import('./context.js');
+const { CONTEXT_WARN_TOKENS, contextEstimate, contextModel, modelProfile, normalizeContextLimit } = await import('./context.js');
+const { AppError } = await import('../errors.js');
 const { pool } = await import('../db/pool.js');
 
 describe('modelProfile', () => {
@@ -49,5 +50,24 @@ describe('contextModel', () => {
     expect(await contextModel(session('sonnet'))).toBe('sonnet');
     vi.mocked(pool.query).mockResolvedValueOnce({ rows: [] } as never);
     expect(await contextModel(session())).toBeNull();
+  });
+});
+
+describe('normalizeContextLimit (défaut du projet, choix du lancement)', () => {
+  it('garde une limite « compact » ou « reset » et retire le reste', () => {
+    expect(normalizeContextLimit({ contextAction: 'compact', contextMaxTokens: 100_000, retentionDays: 3 })).toEqual({ contextAction: 'compact', contextMaxTokens: 100_000 });
+    expect(normalizeContextLimit({ contextAction: 'reset', contextMaxTokens: 50_000 })).toEqual({ contextAction: 'reset', contextMaxTokens: 50_000 });
+  });
+
+  it('sans action : aucune limite', () => {
+    expect(normalizeContextLimit(null)).toBeNull();
+    expect(normalizeContextLimit({})).toBeNull();
+    expect(normalizeContextLimit({ contextAction: null, contextMaxTokens: 100_000 })).toBeNull();
+  });
+
+  it("refuse « fresh » (réservé aux planifications) et un seuil trop bas", () => {
+    expect(() => normalizeContextLimit({ contextAction: 'fresh' })).toThrow(AppError);
+    expect(() => normalizeContextLimit({ contextAction: 'compact', contextMaxTokens: 5_000 })).toThrow(AppError);
+    expect(() => normalizeContextLimit({ contextAction: 'compact' })).toThrow(AppError);
   });
 });

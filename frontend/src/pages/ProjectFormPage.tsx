@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Col, Collapse, Form, Row, Spinner } from 'react-bootstrap';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { bypassConnectionsWarning, permissionModeLabels } from '../lib/humanize';
+import ContextLimitField from '../components/ContextLimitField';
+import { NO_CONTEXT_LIMIT, cleanupFromLimit, limitFromCleanup, validLimit, type ContextLimit } from '../lib/contextLimit';
 import { CREATE_PROJECT, GITHUB_REPOSITORIES, GITHUB_STATUS, GITLAB_REPOSITORIES, GITLAB_STATUS, PROJECT, PROJECTS, UPDATE_PROJECT, type GithubAuthStatus, type GithubRepository, type GitlabAuthStatus, type GitlabRepository, type Project } from '../graphql/operations';
 
 /** Modes proposés comme réglage de projet (même liste que le backend, projects/types.ts). */
@@ -116,6 +118,7 @@ export default function ProjectFormPage() {
   const [runnerBrowser, setRunnerBrowser] = useState(false);
   const [maxSessions, setMaxSessions] = useState('');
   const [permissionMode, setPermissionMode] = useState('default');
+  const [contextLimit, setContextLimit] = useState<ContextLimit>(NO_CONTEXT_LIMIT);
   const [showAdvanced, setShowAdvanced] = useState(isEdit);
 
   useEffect(() => {
@@ -135,10 +138,12 @@ export default function ProjectFormPage() {
     setRunnerBrowser(Boolean(p.runnerConfig?.browser));
     setMaxSessions(p.runnerConfig?.maxSessions ? String(p.runnerConfig.maxSessions) : '');
     setPermissionMode(p.defaultPermissionMode ?? 'default');
+    setContextLimit(limitFromCleanup(p.defaultContextCleanup));
   }, [data]);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!validLimit(contextLimit)) return;
     const runnerConfig: Record<string, unknown> = Object.fromEntries(Object.entries({ image: runnerImage.trim(), memory: runnerMemory.trim(), cpus: runnerCpus.trim() }).filter(([, v]) => v));
     if (runnerBrowser) runnerConfig.browser = true;
     const max = Math.round(Number(maxSessions));
@@ -153,6 +158,7 @@ export default function ProjectFormPage() {
       gitBranch: gitBranch || null,
       runnerConfig,
       defaultPermissionMode: permissionMode,
+      defaultContextCleanup: cleanupFromLimit(contextLimit),
     };
     if (isEdit) updateProject({ variables: { id, input: common } });
     else createProject({ variables: { input: { ...common, slug: slug || null } } });
@@ -239,6 +245,14 @@ export default function ProjectFormPage() {
                 </Alert>
               )}
             </Form.Group>
+
+            <ContextLimitField
+              id="projectContextLimit"
+              label="Contexte des nouvelles sessions"
+              value={contextLimit}
+              onChange={setContextLimit}
+              hint="Présélectionné dans le formulaire de nouvelle session (qui retient ensuite votre dernier choix) et appliqué aux sessions lancées depuis une tâche ou par un agent. Les sessions existantes ne changent pas. Recommandé : compacter au-delà de 100 k tokens."
+            />
 
             <div className="mb-3">
               <Button variant="link" size="sm" className="p-0 text-secondary" onClick={() => setShowAdvanced((v) => !v)} aria-expanded={showAdvanced}>
@@ -344,7 +358,7 @@ export default function ProjectFormPage() {
 
             {mutationError && <Alert variant="danger">{mutationError.message}</Alert>}
 
-            <Button type="submit" disabled={creating || updating}>
+            <Button type="submit" disabled={creating || updating || !validLimit(contextLimit)}>
               {creating || updating ? 'Enregistrement…' : isEdit ? 'Enregistrer' : 'Créer le projet'}
             </Button>
           </Form>

@@ -7,6 +7,7 @@ import { projectService } from '../projects/service.js';
 import { describeAttachment, describeAttachments, fitInInstruction, removeAllTaskAttachments, removeAttachmentFiles, removeTaskAttachments, storeTaskAttachments, validateTaskAttachments, type AttachmentDelivery } from './attachments.js';
 import { findMentions, sessionMentionable, userMentionable, type Mentionable } from './mentions.js';
 import { taskRepository } from './repository.js';
+import { promptTasks } from './promptList.js';
 import {
   OPEN_STATUSES,
   TASK_PRIORITIES,
@@ -440,11 +441,17 @@ export const taskService = {
       THREAD_HINT,
     ].join(' ');
     if (open.length === 0) return `${intro}\nAucune tâche ouverte pour le moment.`;
-    const lines = open.map(
+    // Liste plafonnée (relue à chaque tour) : tâches de la session, en cours, puis les plus prioritaires.
+    const { shown, hidden } = promptTasks(open, sessionId);
+    const lines = shown.map(
       (t) =>
         `- [${statusLabels[t.status]}${statusTagText(t)}, priorité ${priorityLabels[t.priority]}${sessionId && t.sessionIds.includes(sessionId) ? ', assignée à cette session' : t.sessionIds.length ? ', prise par une autre session' : ''}${t.assignee ? `, responsable ${formatPerson(t.assignee)}` : ''}${tagsText(t)}] ${t.title} (id ${t.id})`,
     );
-    return [intro, 'Tâches ouvertes :', ...lines].join('\n');
+    if (hidden.length) {
+      const byPriority = [...TASK_PRIORITIES].reverse().map((p) => [p, hidden.filter((t) => t.priority === p).length] as const).filter(([, n]) => n > 0);
+      lines.push(`… et ${hidden.length} autre(s) tâche(s) ouverte(s) (${byPriority.map(([p, n]) => `${n} de priorité ${priorityLabels[p]}`).join(', ')}) : \`tasks.list\` pour les voir.`);
+    }
+    return [intro, `Tâches ouvertes (${open.length}${hidden.length ? `, les ${shown.length} plus utiles ici` : ''}) :`, ...lines].join('\n');
   },
 
   /**

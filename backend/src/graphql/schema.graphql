@@ -97,6 +97,8 @@ type Project {
   runnerConfig: JSON!
   "Mode d'autorisation des nouvelles sessions qui n'en précisent pas (default, acceptEdits, bypassPermissions, plan)."
   defaultPermissionMode: String!
+  "Limite de contexte des nouvelles sessions qui n'en choisissent pas (tâches, sessions lancées par un agent), présélectionnée au lancement : contextAction « compact » ou « reset » au-delà de contextMaxTokens. Null : aucune limite (l'interface propose au-delà du seuil de signalement)."
+  defaultContextCleanup: SessionCleanup
   "Noms des éléments du coffre dont les usages par les agents sont soumis à l'approbation d'un humain (même en mode bypassPermissions)."
   approvalConnections: [String!]!
   "Faux quand l'utilisateur atteint le projet en tant que super administrateur sans en être membre."
@@ -2581,6 +2583,8 @@ input CreateProjectInput {
   gitHosted: Boolean
   runnerConfig: JSON
   defaultPermissionMode: String
+  "Limite de contexte des nouvelles sessions (contextAction « compact » ou « reset », contextMaxTokens) ; null ou objet vide : aucune."
+  defaultContextCleanup: SessionCleanupInput
   taskInstructions: String
 }
 
@@ -2594,6 +2598,8 @@ input UpdateProjectInput {
   gitHosted: Boolean
   runnerConfig: JSON
   defaultPermissionMode: String
+  "Limite de contexte des nouvelles sessions (contextAction « compact » ou « reset », contextMaxTokens) ; null ou objet vide : aucune."
+  defaultContextCleanup: SessionCleanupInput
   taskInstructions: String
 }
 
@@ -2632,6 +2638,8 @@ input CreateSessionInput {
   autoStart: Boolean
   "Agent de projet qui joue la session (propriétaire) ; l'utilisateur connecté en est le demandeur."
   agentId: ID
+  "Limite de contexte (contextAction « compact » ou « reset » au-delà de contextMaxTokens, appliquée à la fin d'un tour) ; objet vide : aucune. Absente : le défaut du projet."
+  cleanup: SessionCleanupInput
 }
 
 type Mutation {
@@ -3048,7 +3056,7 @@ extend type Mutation {
 type SessionCleanup {
   "Les événements du transcript plus vieux que N jours sont supprimés (null : jamais)."
   retentionDays: Int
-  "Conversation de l'agent avant une exécution planifiée : « compact » (compacter) ou « reset » (repartir d'une conversation neuve) quand le contexte dépasse contextMaxTokens ; « fresh » : conversation neuve à chaque exécution. Null : rien."
+  "Conversation de l'agent : « compact » (compacter) ou « reset » (repartir d'une conversation neuve, avec un résumé) quand le contexte dépasse contextMaxTokens, avant une exécution planifiée et à la fin de chaque autre tour ; « fresh » : conversation neuve avant chaque exécution planifiée. Null : rien (l'interface propose seulement)."
   contextAction: String
   contextMaxTokens: Int
 }
