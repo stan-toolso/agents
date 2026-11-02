@@ -101,6 +101,13 @@ export function describeTool(rawName: string, input: Record<string, unknown> = {
         const [label, action] = verbs[op] ?? [`Contexte : ${op}`, `utiliser le contexte (${op})`];
         return { label, action };
       }
+      if (name.startsWith('mcp__agents__')) {
+        const op = name.slice('mcp__agents__'.length);
+        const who = str(input, 'agent') ?? 'un agent';
+        const short = (t: string, n = 160) => (t.length > n ? `${t.slice(0, n - 3)}…` : t);
+        if (op === 'summon') return { label: `Convocation de l'agent ${who}${str(input, 'task_id') ? ' sur une tâche' : ''}`, detail: short(str(input, 'text') ?? ''), action: `convoquer l'agent ${who} (lance ou relance une de ses sessions)` };
+        return { label: 'Consultation des agents du projet', action: 'consulter les agents du projet' };
+      }
       if (name.startsWith('mcp__sessions__')) {
         const op = name.slice('mcp__sessions__'.length);
         const short = (t: string, n = 160) => (t.length > n ? `${t.slice(0, n - 3)}…` : t);

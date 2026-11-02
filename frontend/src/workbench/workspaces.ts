@@ -33,7 +33,11 @@ export interface SidebarSession {
   browserActive: boolean;
   /** Contexte de l'agent : au-delà du seuil serveur, une pastille invite à le nettoyer. */
   context: { tokens: number | null; overThreshold: boolean };
-  owner: { id: string; name: string; avatarUrl: string | null } | null;
+  owner: { id: string; name: string; avatarUrl: string | null; kind?: 'PERSON' | 'AGENT' } | null;
+  /** Personne qui a demandé la session quand son propriétaire est un agent de projet. */
+  requestedBy?: { id: string } | null;
+  /** Agent de projet qui joue la session (pastille à la place des initiales du propriétaire). */
+  agent?: { id: string; name: string; avatar: { emoji: string | null; color: string | null } } | null;
   /** Session d'agent qui a lancé celle-ci (outil MCP sessions.create) ; null pour une session lancée par un humain. */
   parentSession: { id: string } | null;
   /** Planification de la session (pictogramme d'alarme dans la sidebar). */
@@ -109,7 +113,7 @@ export function mineFirst<T extends { owner: { id: string } | null }>(sessions: 
   return [...mine, ...sessions.filter((s) => !mine.includes(s))];
 }
 
-export const participates = (s: { owner: { id: string } | null }, userId: string | null) => !s.owner || s.owner.id === userId;
+export const participates = (s: { owner: { id: string } | null; requestedBy?: { id: string } | null }, userId: string | null) => !s.owner || s.owner.id === userId || (Boolean(userId) && s.requestedBy?.id === userId);
 
 /** Une session dans l'arborescence d'un dossier : sa profondeur sous sa session parente, et le nom de celle-ci si elle est dans la même liste. */
 export interface SessionNode<T> {

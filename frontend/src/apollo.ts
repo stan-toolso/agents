@@ -99,3 +99,16 @@ export async function logoutRequest(): Promise<void> {
   forgetCachedUser();
   await fetch(`${apiBaseUrl}/auth/logout`, { method: 'POST', credentials: 'include' });
 }
+
+/**
+ * Client GraphQL qui agit pour le compte d'un agent de projet (page de l'agent, onglet Comptes) : les réglages par
+ * personne (Claude, OpenCode, GitHub, GitLab, coffre personnel) lus et écrits sont les siens (`?actAs=<id>`, réservé
+ * à ses gestionnaires). Cache à part : la requête `settings` n'a pas d'argument et ne doit pas écraser celle de la
+ * personne connectée.
+ */
+export function createActAsClient(agentId: string): ApolloClient<unknown> {
+  return new ApolloClient({
+    link: from([sessionLink, new HttpLink({ uri: `${graphqlUrl}?actAs=${encodeURIComponent(agentId)}`, credentials: 'include' })]),
+    cache: new InMemoryCache(),
+  });
+}

@@ -1,0 +1,153 @@
+import type { Actor } from '../context/types.js';
+import { log } from '../log.js';
+import { trackedPullRequestService } from '../pullRequests/service.js';
+import type { TrackedPullRequest } from '../pullRequests/types.js';
+import { sessionRepository } from '../sessions/repository.js';
+import { fold } from '../tasks/mentions.js';
+import { taskService } from '../tasks/service.js';
+import type { Task, TaskActor, TaskChange } from '../tasks/types.js';
+import { userRepository } from '../users/repository.js';
+import { agentRepository } from './repository.js';
+import { agentService } from './service.js';
+import type { Agent } from './types.js';
+
+/**
+ * Déclencheurs des agents : ce qui les convoque sans qu'une personne les mentionne. Branchés sur les écouteurs du
+ * service des tâches (création, changements) et sur les fusions de pull requests. Chaque convocation est une
+ * session de l'agent (voir `agentService.summon`) ; les erreurs sont journalisées, jamais propagées à l'action
+ * d'origine. Garde anti-boucle : ce qu'une session d'agent fait ne déclenche pas les agents (une tâche créée par un
+ * agent, un message d'un agent) ; seules les actions des personnes (et de l'API) comptent.
+ */
+
+const taskLink = (task: Pick<Task, 'id' | 'title'>) => `la tâche ${task.id} (« ${task.title} »)`;
+
+async function actorName(actor: TaskActor | Actor | null | undefined): Promise<string> {
+  const a = actor as TaskActor | null | undefined;
+  if (a?.name) return a.name;
+  if (a?.userId) return (await userRepository.findById(a.userId))?.name ?? 'quelqu’un';
+  return 'quelqu’un';
+}
+
+const tagMatches = (task: Task, tag: string | null): boolean => !tag || task.tags.some((t) => fold(t) === fold(tag));
+
+/** Convoque sans jamais lever (l'action d'origine ne doit pas en dépendre). */
+async function summonQuietly(agent: Agent, opts: { taskId: string; text: string; requestedById?: string | null }, why: string): Promise<void> {
+  try {
+    const session = await agentService.summon(agent.id, { ...opts, actor: { type: 'human' } });
+    log.info(`[agents] ${agent.name} convoqué (${why}) : session ${session.id}`);
+  } catch (err) {
+    log.warn(`[agents] ${agent.name} non convoqué (${why}) : ${(err as Error).message}`);
+  }
+}
+
+/** Une tâche créée par une personne : les agents dont l'interrupteur « tâche créée » accepte la tâche interviennent. */
+export async function onTaskCreated(task: Task, actor: Actor): Promise<void> {
+  if (actor.type === 'agent') return;
+  const agents = (await agentRepository.listActive([task.projectId])).filter((a) => a.triggers.taskCreated && tagMatches(task, a.triggers.taskCreatedTag));
+  if (!agents.length) return;
+  const by = await actorName(actor);
+  const requestedById = (actor as TaskActor).userId ?? null;
+  for (const agent of agents) {
+    await summonQuietly(
+      agent,
+      {
+        taskId: task.id,
+        requestedById,
+        text: `[Tâche créée] ${by} vient de créer ${taskLink(task)}. Interviens selon tes instructions : relis-la (\`tasks.get\`), pose dans son fil les questions nécessaires en mentionnant ${by} (\`tasks.comment\`), complète sa description quand le besoin est clair, et tiens son étiquette d'état.`,
+      },
+      'tâche créée',
+    );
+  }
+}
+
+/** Sessions de `linked` jouées par un agent, avec l'agent (une requête par lot). */
+async function agentSessions(linked: string[]): Promise<{ sessionId: string; agent: Agent }[]> {
+  if (!linked.length) return [];
+  const sessions = await sessionRepository.findByIds(linked);
+  const ownerIds = [...new Set(sessions.map((s) => s.ownerId).filter((id): id is string => Boolean(id)))];
+  const agents = ownerIds.length ? await agentRepository.findByIds(ownerIds) : [];
+  const byOwner = new Map(agents.map((a) => [a.id, a]));
+  return sessions.flatMap((s) => {
+    const agent = s.ownerId ? byOwner.get(s.ownerId) : undefined;
+    return agent ? [{ sessionId: s.id, agent }] : [];
+  });
+}
+
+/**
+ * Sessions reliées à la tâche auxquelles un changement s'adresse parce qu'un agent les joue : un message d'une
+ * personne revient comme instruction à la session d'un agent qui suit les fils où il est intervenu
+ * (`threadFollowed`), ou d'un agent que le message mentionne. Utilisé par `tasks/sessionFeed.ts`.
+ */
+export async function agentFeedTargets(change: TaskChange, linked: string[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (change.kind !== 'commented' || change.comment.authorType !== 'human') return out;
+  const mentioned = new Set(change.comment.mentions.filter((m) => m.kind === 'user').map((m) => m.id));
+  for (const { sessionId, agent } of await agentSessions(linked)) {
+    if (!agent.enabled || agent.archivedAt) continue;
+    if (agent.triggers.threadFollowed || mentioned.has(agent.id)) out.add(sessionId);
+  }
+  return out;
+}
+
+/** Un message d'une personne qui mentionne un agent sans session reliée à la tâche : l'agent est convoqué. */
+async function onCommented(change: Extract<TaskChange, { kind: 'commented' }>): Promise<void> {
+  const c = change.comment;
+  if (c.authorType !== 'human') return;
+  const mentionedIds = c.mentions.filter((m) => m.kind === 'user').map((m) => m.id);
+  if (!mentionedIds.length) return;
+  const agents = (await agentRepository.findByIds(mentionedIds)).filter((a) => a.enabled && !a.archivedAt && a.projectId === change.task.projectId);
+  for (const agent of agents) {
+    if (await agentService.sessionOnTask(agent, change.task.id)) continue; // sa session reliée reçoit le message par le fil
+    const excerpt = c.body.length > 2000 ? `${c.body.slice(0, 2000)}…` : c.body;
+    await summonQuietly(
+      agent,
+      { taskId: change.task.id, requestedById: c.authorUserId, text: `[Mention] ${c.authorName} te mentionne dans le fil de ${taskLink(change.task)} :\n\n${excerpt}\n\nRéponds dans le fil (\`tasks.comment\`, \`reply_to\` ${c.id} pour rester dans son fil) et agis selon tes instructions.` },
+      'mention',
+    );
+  }
+}
+
+/** Une tâche passée par une personne à l'étiquette d'état attendue par un agent (« prête ») : il démarre dessus. */
+async function onUpdated(change: Extract<TaskChange, { kind: 'updated' }>): Promise<void> {
+  if (change.actor?.type === 'agent') return;
+  const tag = change.task.statusTag?.trim();
+  if (!tag || fold(change.before.statusTag ?? '') === fold(tag)) return;
+  const agents = (await agentRepository.listActive([change.task.projectId])).filter((a) => a.triggers.taskReady && a.triggers.taskReadyTag && fold(a.triggers.taskReadyTag) === fold(tag));
+  if (!agents.length) return;
+  const by = await actorName(change.actor);
+  for (const agent of agents) {
+    if ((await agentRepository.sessionIdsOnTask(agent.id, change.task.id)).some((id) => change.task.sessionIds.includes(id))) continue;
+    await summonQuietly(
+      agent,
+      { taskId: change.task.id, requestedById: change.actor?.userId ?? null, text: `[Tâche prête] ${by} a passé ${taskLink(change.task)} à l'état « ${tag} » : démarre dessus selon tes instructions.` },
+      'tâche prête',
+    );
+  }
+}
+
+export async function onTaskChanged(change: TaskChange): Promise<void> {
+  if (change.kind === 'commented') await onCommented(change);
+  else if (change.kind === 'updated') await onUpdated(change);
+}
+
+/** La pull request d'une tâche est fusionnée : les agents qui suivent les fusions sont prévenus. */
+export async function onPullRequestMerged(pr: TrackedPullRequest): Promise<void> {
+  if (!pr.taskId) return;
+  const task = await taskService.get(pr.taskId).catch(() => null);
+  if (!task) return;
+  const agents = (await agentRepository.listActive([task.projectId])).filter((a) => a.triggers.prMerged);
+  for (const agent of agents) {
+    await summonQuietly(
+      agent,
+      { taskId: task.id, text: `[PR fusionnée] La pull request #${pr.number} (« ${pr.title} »${pr.url ? `, ${pr.url}` : ''}) de ${taskLink(task)} vient d'être fusionnée. Agis selon tes instructions (étiquette d'état, rapporteur prévenu dans le fil, suite à donner).` },
+      'PR fusionnée',
+    );
+  }
+}
+
+/** Branche les déclencheurs (au démarrage du serveur). */
+export function registerAgentTriggers(): void {
+  taskService.onTaskCreated('agents', onTaskCreated);
+  taskService.onTaskChanged('agents', onTaskChanged);
+  trackedPullRequestService.onMerged('agents', onPullRequestMerged);
+}

@@ -10,6 +10,8 @@ import type { Session } from '../sessions/types.js';
 import { taskCosts, type TaskCost } from '../tasks/cost.js';
 import { taskRepository } from '../tasks/repository.js';
 import type { Task } from '../tasks/types.js';
+import { agentRepository } from '../agents/repository.js';
+import type { Agent } from '../agents/types.js';
 import { userRepository } from '../users/repository.js';
 import type { User } from '../users/types.js';
 import { worksessionRepository } from '../worksessions/repository.js';
@@ -75,6 +77,8 @@ export const branchKey = (k: { projectId: string; branch: string }): string => `
 export function createLoaders() {
   return {
     user: createBatcher<string, User>(async (ids) => byId(await userRepository.findByIds(ids))),
+    /** Profil d'agent d'un utilisateur (absent : une personne). */
+    agent: createBatcher<string, Agent>(async (ids) => byId(await agentRepository.findByIds(ids))),
     project: createBatcher<string, Project>(async (ids) => byId(await projectRepository.findByIds(ids))),
     session: createBatcher<string, Session>(async (ids) => byId(await sessionRepository.findByIds(ids))),
     worksession: createBatcher<string, Worksession>(async (ids) => byId(await worksessionRepository.findByIds(ids))),

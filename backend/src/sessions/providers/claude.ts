@@ -15,7 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { config } from '../../config.js';
 import { createProjectsMcpServer } from '../../personal/mcp.js';
-import type { Project } from '../../projects/types.js';
+import { isPersonalProject, type Project } from '../../projects/types.js';
 import { personalService } from '../../personal/service.js';
 import { userService } from '../../users/service.js';
 import { createContextMcpServer } from '../../context/mcp.js';
@@ -58,6 +58,10 @@ import { liveDraftService } from '../live.js';
 import { SESSION_ENV } from '../../runners/stats.js';
 import { log } from '../../log.js';
 import { REVIEW_ALLOWED_TOOLS, REVIEW_DISALLOWED_TOOLS, REVIEW_SYSTEM_PROMPT, REVIEW_TOOLS, reviewOf } from '../../reviews/types.js';
+import { agentService } from '../../agents/service.js';
+import { agentIdentityPrompt, agentsPromptSummary } from '../../agents/prompt.js';
+import { AGENTS_FREE_TOOLS, agentsMcpPrompt, createAgentsMcpServer } from '../../agents/mcp.js';
+import { userRepository } from '../../users/repository.js';
 
 interface ClaudeConfig {
   model?: string;
@@ -198,6 +202,11 @@ export class ClaudeProvider implements SessionProvider {
     const review = !chat && reviewOf(ctx.session) !== null;
     // Session d'un espace personnel : portée sur tous les projets de la personne (outils sessions, tasks, worksessions, projects).
     const scope = personalService.scopeFor(ctx.project, ownerId);
+    // Session jouée par un agent de projet (propriétaire agent) : son identité et ses instructions ouvrent le prompt système,
+    // ses messages dans les fils de tâches sont signés de son nom. Les autres agents du projet sont présentés à toute session.
+    const agent = chat || review ? null : await agentService.forUser(ownerId);
+    const requestedBy = agent && ctx.session.requestedById ? await userRepository.findById(ctx.session.requestedById) : null;
+    const projectAgents = chat || review || isPersonalProject(ctx.project) ? [] : await agentService.listByProject(ctx.project.id);
     const actor = { sessionId: ctx.session.id, projectId: ctx.project.id };
     const credentials = await owner.credentialEnv(general.authMode, actor);
     // Un chat reçoit l'environnement du serveur sans ses secrets Anthropic (comme la vérification des identifiants), un dossier
@@ -226,7 +235,9 @@ export class ClaudeProvider implements SessionProvider {
       ? [ctx.project.systemPrompt.trim(), sessionIdentityPrompt(ctx.session, ctx.project), await contextService.promptSummary(ctx.project.id), REVIEW_SYSTEM_PROMPT]
       : [
         ctx.project.systemPrompt.trim(),
+        agent ? agentIdentityPrompt(agent, ctx.project, requestedBy) : '',
         sessionIdentityPrompt(ctx.session, ctx.project),
+        projectAgents.length ? [agentsPromptSummary(projectAgents, agent), agentsMcpPrompt()].filter(Boolean).join('\n') : '',
         scope ? await personalService.promptSummary(scope, await userService.get(scope.ownerId)) : '',
         await contextService.promptSummary(ctx.project.id),
         await taskService.linkedTaskPrompt(ctx.session.id),
@@ -292,7 +303,8 @@ export class ClaudeProvider implements SessionProvider {
       systemPrompt: { type: 'preset', preset: 'claude_code', append: systemPrompt },
       mcpServers: review ? { context: createContextMcpServer(ctx.project, ctx.session.id) } : {
         context: createContextMcpServer(ctx.project, ctx.session.id),
-        tasks: createTasksMcpServer(ctx.project, ctx.session.id, ctx.session.name, scope),
+        tasks: createTasksMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name, scope),
+        ...(projectAgents.length ? { agents: createAgentsMcpServer(ctx.project, ctx.session.id) } : {}),
         ...(vaultTools ? { vault: createVaultMcpServer(vaultContext) } : {}),
         worksessions: createWorksessionsMcpServer(ctx.project, ctx.session.id, scope),
         sessions: createSessionsMcpServer(ctx.project, ctx.session.id, scope),
@@ -333,7 +345,7 @@ export class ClaudeProvider implements SessionProvider {
       // Fichiers d'environnement : libres (modèles du projet en base, écriture dans le seul dossier de travail ; une valeur
       // du coffre n'y arrive que si l'élément le permet, choix de qui le gère).
       // Aperçu : libre (le même bouton que l'onglet « Aperçu », dans le conteneur du projet, sans coût ni effet extérieur).
-      allowedTools: review ? REVIEW_ALLOWED_TOOLS : [...allowedTools, ...projectRules.map(formatRule), 'mcp__context', ...TASKS_FREE_TOOLS, 'mcp__vault', 'mcp__worksessions__list', 'mcp__worksessions__create', 'mcp__sessions__list', 'mcp__sessions__get', 'mcp__sessions__wait', 'mcp__sessions__end', 'mcp__pages__list', 'mcp__projects', ...(chat ? [] : ['mcp__env']), ...(previewWorksession ? ['mcp__preview'] : []), ...(browserServer ? browserReadTools : []), ...(googleAccounts.length ? googleReadTools(googleAccounts) : [])],
+      allowedTools: review ? REVIEW_ALLOWED_TOOLS : [...allowedTools, ...projectRules.map(formatRule), 'mcp__context', ...TASKS_FREE_TOOLS, 'mcp__vault', 'mcp__worksessions__list', 'mcp__worksessions__create', 'mcp__sessions__list', 'mcp__sessions__get', 'mcp__sessions__wait', 'mcp__sessions__end', 'mcp__pages__list', 'mcp__projects', ...AGENTS_FREE_TOOLS, ...(chat ? [] : ['mcp__env']), ...(previewWorksession ? ['mcp__preview'] : []), ...(browserServer ? browserReadTools : []), ...(googleAccounts.length ? googleReadTools(googleAccounts) : [])],
       ...(review ? { disallowedTools: REVIEW_DISALLOWED_TOOLS } : {}),
       // Le coffre saisit des secrets dans le navigateur : les outils qui pourraient relire la valeur sont retirés à l'agent.
       ...(browserServer && vaultBrowser ? { disallowedTools: ['mcp__playwright__browser_evaluate', 'mcp__playwright__browser_run_code'] } : {}),

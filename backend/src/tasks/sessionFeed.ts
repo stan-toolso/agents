@@ -1,3 +1,4 @@
+import { agentFeedTargets } from '../agents/triggers.js';
 import { sessionService } from '../sessions/service.js';
 import { getProvider } from '../sessions/providers/registry.js';
 import type { AttachmentInput } from '../sessions/types.js';
@@ -41,17 +42,19 @@ const QUIET_HINT = "Pour information : poursuis sans en parler, sauf si cela cha
  * relira la tâche à son prochain démarrage grâce à son prompt système), et pas à celle qui vient de prendre la charge
  * (elle a reçu la tâche entière). Une réaction n'est signalée qu'à la session autrice du message.
  */
-export function feedsFor(change: TaskChange, linked: string[] = []): TaskFeed[] {
+export function feedsFor(change: TaskChange, linked: string[] = [], alsoAddressed: Set<string> = new Set()): TaskFeed[] {
   const recipients = new Set<string>(linked);
   for (const id of change.task.sessionIds) recipients.add(id);
   if (change.kind === 'commented') {
     const c = change.comment;
     const mentioned = new Set(c.mentions.filter((m) => m.kind === 'session').map((m) => m.id));
     for (const id of mentioned) recipients.add(id);
+    for (const id of alsoAddressed) recipients.add(id);
     return [...recipients]
       .filter((sessionId) => sessionId !== c.authorSessionId)
       .map((sessionId) => {
-        const addressed = inCharge(change.task, sessionId) || mentioned.has(sessionId);
+        // Une session d'agent qui suit le fil (ou dont l'agent est mentionné) reçoit le message comme une instruction (agents/triggers.ts).
+        const addressed = inCharge(change.task, sessionId) || mentioned.has(sessionId) || alsoAddressed.has(sessionId);
         return {
           sessionId,
           restart: addressed,
@@ -132,7 +135,8 @@ async function deliver(feed: TaskFeed): Promise<void> {
 /** Transmet le changement à toutes les sessions reliées à la tâche qui peuvent le recevoir. */
 export async function deliverTaskChange(change: TaskChange): Promise<void> {
   const linked = await taskService.sessionIds(change.task.id).catch(() => [] as string[]);
-  await Promise.all(feedsFor(change, linked).map(deliver));
+  const addressed = await agentFeedTargets(change, linked).catch(() => new Set<string>());
+  await Promise.all(feedsFor(change, linked, addressed).map(deliver));
 }
 
 /** Branche l'écouteur sur le service des tâches (au démarrage du serveur). */

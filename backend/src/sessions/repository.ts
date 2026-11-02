@@ -9,6 +9,7 @@ interface SessionRow {
   kind: SessionKind;
   parent_session_id: string | null;
   owner_id: string | null;
+  requested_by_id: string | null;
   workflow_run_id: string | null;
   archived_at: Date | null;
   former_worksession: FormerWorksession | null;
@@ -53,6 +54,7 @@ function toSession(row: SessionRow): Session {
     kind: row.kind ?? 'session',
     parentSessionId: row.parent_session_id,
     ownerId: row.owner_id ?? null,
+    requestedById: row.requested_by_id ?? null,
     workflowRunId: row.workflow_run_id ?? null,
     archivedAt: row.archived_at ?? null,
     formerWorksession: row.former_worksession ?? null,
@@ -141,10 +143,10 @@ const patchColumns: Record<keyof SessionPatch, string> = {
 export const sessionRepository = {
   async create(input: CreateSessionInput): Promise<Session> {
     const { rows } = await pool.query<SessionRow>(
-      `INSERT INTO sessions (project_id, worksession_id, parent_session_id, owner_id, name, provider, prompt, config, workflow_run_id, kind)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO sessions (project_id, worksession_id, parent_session_id, owner_id, name, provider, prompt, config, workflow_run_id, kind, requested_by_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
-      [input.projectId, input.worksessionId ?? null, input.parentSessionId ?? null, input.ownerId ?? null, input.name, input.provider, input.prompt ?? null, JSON.stringify(input.config ?? {}), input.workflowRunId ?? null, input.kind ?? 'session'],
+      [input.projectId, input.worksessionId ?? null, input.parentSessionId ?? null, input.ownerId ?? null, input.name, input.provider, input.prompt ?? null, JSON.stringify(input.config ?? {}), input.workflowRunId ?? null, input.kind ?? 'session', input.requestedById ?? null],
     );
     return toSession(rows[0]);
   },

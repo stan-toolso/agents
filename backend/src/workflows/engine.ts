@@ -9,6 +9,7 @@ import { taskService } from '../tasks/service.js';
 import { TASK_PRIORITIES, TASK_STATUSES, type Task, type TaskPriority, type TaskStatus } from '../tasks/types.js';
 import { userRepository } from '../users/repository.js';
 import { userService } from '../users/service.js';
+import { fold } from '../tasks/mentions.js';
 import { ROLE_RANK, type User } from '../users/types.js';
 import { worksessionService } from '../worksessions/service.js';
 import { conditionHolds, describeCondition } from './conditions.js';
@@ -447,11 +448,23 @@ class Execution {
 
   /** Un membre du projet désigné par un e-mail ou un identifiant, ou pourquoi il ne peut pas lancer la session. */
   private async projectMember(ref: string): Promise<{ user: User | null; problem: string | null }> {
-    const user = ref.includes('@') ? await userRepository.findByEmail(ref) : UUID_RE.test(ref) ? await userRepository.findById(ref) : null;
+    // E-mail, identifiant, ou nom d'un membre du projet (un agent de projet, notamment : « Max »).
+    const user = ref.includes('@') ? await userRepository.findByEmail(ref) : UUID_RE.test(ref) ? await userRepository.findById(ref) : await this.memberByName(ref);
     if (!user) return { user: null, problem: `aucun utilisateur « ${ref} »` };
     const role = await userService.roleFor(user.id, this.workflow.projectId);
     if (!role || ROLE_RANK[role] < ROLE_RANK.member) return { user: null, problem: `${user.name} ne peut pas lancer de session dans ce projet (rôle membre requis)` };
     return { user, problem: null };
+  }
+
+  /** Membre du projet dont le nom correspond (sans casse ni accents), null sinon ou si plusieurs portent ce nom. */
+  private async memberByName(ref: string): Promise<User | null> {
+    const wanted = fold(ref);
+    const hits: User[] = [];
+    for (const m of await userService.members(this.workflow.projectId)) {
+      const u = await userRepository.findById(m.userId);
+      if (u && fold(u.name) === wanted) hits.push(u);
+    }
+    return hits.length === 1 ? hits[0] : null;
   }
 
   /** Propriétaire de la session d'un nœud « tâche » ou « session », d'après son modèle ; introuvable : le propriétaire de l'exécution (avertissement). */

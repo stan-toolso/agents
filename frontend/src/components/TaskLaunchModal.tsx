@@ -4,6 +4,8 @@ import { Alert, Button, Collapse, Form, Modal } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import { PROVIDERS, RESUME_TASK_SESSION, START_TASK_SESSION, type ConfigField, type Provider, type SessionStatus, type Task } from '../graphql/operations';
 import { TASK_LAUNCH_INFO, TASK_PROMPT } from '../graphql/tasks';
+import { PROJECT_AGENT_REFS, agentKindLabels, type AgentRef } from '../graphql/agents';
+import AgentAvatar from './AgentAvatar';
 import { bypassConnectionsWarning } from '../lib/humanize';
 import { buildConfig, FieldGroup, lastPermissionMode, rememberPermissionMode } from './SessionLauncher';
 
@@ -158,6 +160,13 @@ function TaskNewSessionModal({ task, target, info: infoData, onClose }: { task: 
   const [providerType, setProviderType] = useState('');
   const provider = providers.find((p) => p.type === (providerType || providers[0]?.type));
   const [prompt, setPrompt] = useState<string | null>(null);
+  // Agents du projet : la tâche peut être confiée à l'un d'eux (le Developer du projet par défaut) plutôt qu'à une session anonyme.
+  const { data: agentsData } = useQuery<{ project: { id: string; agents: (AgentRef & { description: string; enabled: boolean; taskFolder: boolean })[] } | null }>(PROJECT_AGENT_REFS, { variables: { id: task.project.id } });
+  const agents = (agentsData?.project?.agents ?? []).filter((a) => a.enabled);
+  const [agentId, setAgentId] = useState<string | null>(null);
+  const [agentChosen, setAgentChosen] = useState(false);
+  const effectiveAgentId = agentChosen ? agentId : (agents.find((a) => a.kind === 'DEVELOPER')?.id ?? null);
+  const agent = agents.find((a) => a.id === effectiveAgentId) ?? null;
   const own = infoData?.task?.worksession ?? null;
   const branch = own?.branch ?? infoData?.task?.branch ?? null;
   // Session active déjà en charge de la tâche : elle sera archivée au profit de la nouvelle.
@@ -203,6 +212,7 @@ function TaskNewSessionModal({ task, target, info: infoData, onClose }: { task: 
         provider: provider.type,
         config: buildConfig(fields, values),
         prompt: edited ? text : null,
+        agentId: effectiveAgentId,
       },
     });
   };
@@ -238,9 +248,32 @@ function TaskNewSessionModal({ task, target, info: infoData, onClose }: { task: 
               </>
             )}
           </div>
+          {agents.length > 0 && (
+            <Form.Group className="mb-3">
+              <Form.Label className="d-flex align-items-center gap-2">
+                Confier à {agent && <AgentAvatar agent={agent} size={18} />}
+              </Form.Label>
+              <Form.Select
+                value={effectiveAgentId ?? ''}
+                onChange={(e) => {
+                  setAgentChosen(true);
+                  setAgentId(e.target.value || null);
+                }}
+              >
+                {agents.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} · {agentKindLabels[a.kind]}
+                    {a.description ? ` · ${a.description}` : ''}
+                  </option>
+                ))}
+                <option value="">Une session sans agent (mes comptes)</option>
+              </Form.Select>
+              <Form.Text>{agent ? `La session appartient à ${agent.name} (ses comptes, ses instructions, son budget) ; vous en êtes le demandeur.${agent.taskFolder ? '' : ` ${agent.name} travaille dans un dossier à part, sans prendre la branche de la tâche.`}` : 'La session tourne avec vos comptes.'}</Form.Text>
+            </Form.Group>
+          )}
           {providers.length > 1 && (
             <Form.Group className="mb-3">
-              <Form.Label>Agent</Form.Label>
+              <Form.Label>Type d'agent</Form.Label>
               <Form.Select value={provider?.type ?? ''} onChange={(e) => setProviderType(e.target.value)}>
                 {providers.map((p) => (
                   <option key={p.type} value={p.type}>

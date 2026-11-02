@@ -54,8 +54,10 @@ export interface Session {
   projectId: string;
   kind: SessionKind;
   worksessionId: string | null;
-  /** Utilisateur qui a lancé la session (hérité de la session parente pour une session lancée par un agent) ; null : ouverte à tous les membres. */
+  /** Utilisateur qui a lancé la session (hérité de la session parente pour une session lancée par un agent) ; null : ouverte à tous les membres. Un agent de projet pour une session qu'il joue. */
   ownerId: string | null;
+  /** Personne qui a demandé la session quand le propriétaire est un agent de projet (chat avec l'agent, tâche confiée) ; null : le propriétaire lui-même. */
+  requestedById: string | null;
   /** Archivée : cachée des listes actives, consultable et relançable depuis l'historique du projet. */
   archivedAt: Date | null;
   /** Work session supprimée où la session a travaillé (nom, branche, libellé) ; null si elle n'en a pas perdu. */
@@ -131,6 +133,7 @@ export interface CreateSessionInput {
   newWorksession?: NewWorksessionInput | null;
   parentSessionId?: string | null;
   ownerId?: string | null;
+  requestedById?: string | null;
   /** Session lancée par une exécution de workflow. */
   workflowRunId?: string | null;
   name: string;

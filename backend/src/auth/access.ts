@@ -8,9 +8,21 @@ export interface AuthContext {
   /** Rôles d'appartenance (null : pas membre), par projet. */
   roles: Map<string, ProjectRole | null>;
   projectIds?: string[];
+  /**
+   * Agent de projet pour le compte duquel la personne règle des comptes (page de l'agent : `?actAs=<id>` sur l'URL
+   * GraphQL, réservé à ses gestionnaires). Seuls les réglages par personne (Claude, OpenCode, GitHub, GitLab, coffre
+   * personnel) le suivent (`settingsUser`) ; les droits sur les projets restent ceux de la personne connectée.
+   */
+  actAs?: User | null;
 }
 
-export const createAuthContext = (user: User | null): AuthContext => ({ user, roles: new Map() });
+export const createAuthContext = (user: User | null, actAs: User | null = null): AuthContext => ({ user, roles: new Map(), actAs });
+
+/** Personne dont on lit ou règle les comptes : l'agent pour le compte duquel on agit, sinon la personne connectée. */
+export function settingsUser(ctx: AuthContext): User {
+  const user = requireUser(ctx);
+  return ctx.actAs ?? user;
+}
 
 const roleLabels: Record<ProjectRole, string> = { viewer: 'lecteur', member: 'membre', admin: 'administrateur' };
 

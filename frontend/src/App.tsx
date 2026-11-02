@@ -42,6 +42,8 @@ const WorkflowRunPage = lazy(() => import('./pages/WorkflowRunPage'));
 const ChatsPage = lazy(() => import('./pages/ChatsPage'));
 const ProjectPullRequestsPage = lazy(() => import('./pages/ProjectPullRequestsPage'));
 const RepoPage = lazy(() => import('./pages/RepoPage'));
+const ProjectAgentsPage = lazy(() => import('./pages/ProjectAgentsPage'));
+const AgentPage = lazy(() => import('./pages/AgentPage'));
 
 /** Routes des pages ; `location` est celle de l'onglet rendu (figée pour un onglet caché). */
 function PageRoutes({ location, isAdmin }: { location: Location; isAdmin: boolean }) {
@@ -55,6 +57,8 @@ function PageRoutes({ location, isAdmin }: { location: Location; isAdmin: boolea
       <Route path="/projects/:id/edit" element={<ProjectFormPage />} />
       <Route path="/projects/:id/context" element={<ContextPage />} />
       <Route path="/projects/:id/tasks" element={<TasksPage />} />
+      <Route path="/projects/:id/agents" element={<ProjectAgentsPage />} />
+      <Route path="/projects/:id/agents/:agentId" element={<AgentPage />} />
       <Route path="/projects/:id/pull-requests" element={<ProjectPullRequestsPage />} />
       <Route path="/projects/:id/repo" element={<RepoPage />} />
       <Route path="/projects/:id/vault" element={<ProjectVaultPage />} />

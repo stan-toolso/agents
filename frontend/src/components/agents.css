@@ -1,0 +1,44 @@
+/* ---- Agents de projet : avatars, cartes, fiche ------------------------------------------------- */
+
+.agent-avatar {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  border-radius: 50%; color: #fff; /* texte blanc sur la couleur choisie par l’agent, quel que soit le thème */ font-weight: 700; line-height: 1; user-select: none;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25); overflow: hidden;
+}
+.agent-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.agent-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.agent-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.agent-card { border: 1px solid var(--cc-border); border-radius: 10px; background: var(--cc-bg-elevated); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.agent-card.paused { opacity: 0.65; }
+.agent-card-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.agent-card-title { min-width: 0; flex: 1; }
+.agent-card-title .agent-card-name { font-weight: 600; font-size: 1.05rem; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.agent-card-role { color: var(--cc-dim); font-size: 0.85rem; }
+.agent-card-desc { color: var(--cc-dim); font-size: 0.9rem; min-height: 1.2em; overflow-wrap: anywhere; }
+.agent-card-stats { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.82rem; color: var(--cc-dim); }
+.agent-card-stats b { color: var(--cc-fg); font-weight: 600; }
+.agent-card-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; }
+
+.agent-template { border: 1px solid var(--cc-border); border-radius: 10px; padding: 12px 14px; cursor: pointer; display: flex; gap: 12px; align-items: flex-start; background: var(--cc-bg); }
+.agent-template:hover { background: var(--cc-bg-hover); }
+.agent-template.active { border-color: var(--cc-accent); box-shadow: 0 0 0 1px var(--cc-accent); }
+.agent-template-label { font-weight: 600; }
+.agent-template-desc { color: var(--cc-dim); font-size: 0.88rem; }
+
+.agent-page-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 8px; }
+.agent-page-head h1 { margin: 0; }
+.agent-stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.agent-stat-tile { border: 1px solid var(--cc-border); border-radius: 8px; padding: 10px 12px; }
+.agent-stat-tile .value { font-size: 1.3rem; font-weight: 600; }
+.agent-stat-tile .label { color: var(--cc-dim); font-size: 0.82rem; }
+.agent-action-row { border: 1px solid var(--cc-border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+.agent-inline-avatar { vertical-align: -3px; margin-right: 4px; }
+
+/* Pastille d'agent à la place des initiales du propriétaire dans la sidebar et les onglets. */
+.wb-owner.wb-owner-agent { background: none; padding: 0; width: auto; height: auto; }
+.tt-avatar.tt-avatar-agent-named { background: none; padding: 0; }
+
+@media (max-width: 640px) {
+  .agent-cards { grid-template-columns: 1fr; }
+}

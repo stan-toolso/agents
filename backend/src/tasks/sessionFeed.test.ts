@@ -4,6 +4,8 @@ import type { Task, TaskComment, TaskReaction } from './types.js';
 // Le fil des sessions importe le service des sessions et le registre des providers : inutiles ici.
 vi.mock('../sessions/service.js', () => ({ sessionService: {} }));
 vi.mock('../sessions/providers/registry.js', () => ({ getProvider: () => ({ describe: () => ({ interactive: true }) }) }));
+// Les déclencheurs des agents (sessions d'agent qui suivent le fil) importent les services des PR et des agents : simulés.
+vi.mock('../agents/triggers.js', () => ({ agentFeedTargets: async () => new Set<string>() }));
 const { feedFor, feedsFor } = await import('./sessionFeed.js');
 
 const task: Task = {
@@ -122,6 +124,16 @@ describe('feedsFor (sessions reliées)', () => {
     expect(mentioned!.quiet).toBe(false);
     expect(mentioned!.text).toContain('qui mentionne cette session');
     expect(mentioned!.text).toContain('(mentionne la session « Autre » (aaaaaaaa-0000))');
+  });
+  it('une session d’agent qui suit le fil (alsoAddressed) reçoit le message comme une instruction et est relancée', () => {
+    const feeds = feedsFor({ kind: 'commented', attachments: [], parent: null, task, comment: comment() }, ['s2', 's3'], new Set(['s3', 's4']));
+    expect(feeds.map((f) => [f.sessionId, f.restart, f.quiet]).sort()).toEqual([
+      ['s1', true, false],
+      ['s2', false, true],
+      ['s3', true, false],
+      ['s4', true, false],
+    ]);
+    expect(feeds.find((f) => f.sessionId === 's3')!.text).toContain('reply_to');
   });
   it('une réponse rappelle le message auquel elle répond et propose de rester dans son fil', () => {
     const parent = comment({ id: 'c0', authorName: 'Bob', authorUserId: 'u2' });

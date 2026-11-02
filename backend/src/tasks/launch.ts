@@ -17,8 +17,10 @@ export interface StartTaskOptions {
   config?: Record<string, unknown> | null;
   /** Consigne relue par l'humain ; sinon le texte de la tâche. */
   prompt?: string | null;
-  /** Utilisateur qui lance la session (propriétaire). */
+  /** Utilisateur qui lance la session (propriétaire) ; un agent de projet quand la tâche lui est confiée. */
   ownerId?: string | null;
+  /** Personne qui a demandé la session quand le propriétaire est un agent. */
+  requestedById?: string | null;
   /** Automatisation : instruction ajoutée après le texte de la tâche (ou seule si `includeTask` est faux). */
   instructions?: string | null;
   includeTask?: boolean | null;
@@ -109,6 +111,7 @@ export async function startTaskSession(taskId: string, options: StartTaskOptions
     attachments: files?.kept.length ? await asInstructionAttachments(files.kept) : null,
     config: options.config ?? {},
     ownerId: options.ownerId ?? null,
+    requestedById: options.requestedById ?? null,
     workflowRunId: options.workflowRunId ?? null,
     autoStart: false,
   });

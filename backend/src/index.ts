@@ -14,6 +14,8 @@ import { handleTasksApiRoute } from './tasks/api.js';
 import { handleGitHttpRoute } from './gitServer/httpRoute.js';
 import { gitServer } from './gitServer/service.js';
 import { registerTaskSessionFeed } from './tasks/sessionFeed.js';
+import { registerAgentTriggers } from './agents/triggers.js';
+import { agentService } from './agents/service.js';
 import { vaultService } from './vault/service.js';
 import { authSession, readCookie, SESSION_COOKIE } from './auth/session.js';
 import { config } from './config.js';
@@ -118,6 +120,7 @@ async function main() {
   if (legacy.length) log.info(`[settings] identifiants historiques transférés : ${legacy.join(', ')}`);
   registerTaskSessionFeed();
   registerWorkflowTriggers();
+  registerAgentTriggers();
   const closedTerminals = await terminalService.recoverAfterRestart(liveInstances);
   if (closedTerminals) log.info(`[terminals] ${closedTerminals} terminal(aux) fermé(s)`);
   // Conteneurs créés avec d'anciens paramètres (ou une image depuis reconstruite) : supprimés maintenant que rien n'y
@@ -185,7 +188,12 @@ async function main() {
       return isAllowedOrigin(origin) ? { origin, credentials: true } : { origin: appOrigin, credentials: true };
     },
     // Utilisateur connecté, lu dans le cookie de session ; les résolveurs vérifient ses droits.
-    context: async ({ request }) => createAuthContext(await authSession.resolve(readCookie(request.headers.get('cookie'), SESSION_COOKIE))),
+    context: async ({ request }) => {
+      const user = await authSession.resolve(readCookie(request.headers.get('cookie'), SESSION_COOKIE));
+      // Page d'un agent : la personne règle les comptes de l'agent (`?actAs=<id>`, réservé à ses gestionnaires).
+      const actAs = new URL(request.url).searchParams.get('actAs');
+      return createAuthContext(user, user && actAs ? await agentService.actAsFor(user, actAs) : null);
+    },
     // Les erreurs métier (AppError) sont renvoyées au client avec leur message et leur code, les autres masquées.
     maskedErrors: { maskError: maskGraphQLError },
   });

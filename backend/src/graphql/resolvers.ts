@@ -1,5 +1,8 @@
 import { DateTimeResolver, JSONResolver } from 'graphql-scalars';
-import { accessibleProjectIds, canAccessProject, filterAsync, memberRoleFor, requireAdmin, requireProject, requireSuperAdmin, requireUser, roleFor, type AuthContext } from '../auth/access.js';
+import { accessibleProjectIds, canAccessProject, filterAsync, memberRoleFor, requireAdmin, requireProject, requireSuperAdmin, requireUser, roleFor, settingsUser, type AuthContext } from '../auth/access.js';
+import { agentService } from '../agents/service.js';
+import type { Agent, AgentAction, AgentActionInput, AgentInput, AgentKind, AgentManager, AgentManagerRole, AgentTemplate } from '../agents/types.js';
+import { slugify } from '../projects/slug.js';
 import { liveBrowserService } from '../browser/live.js';
 import { liveDraftService } from '../sessions/live.js';
 import { createLoaders, type Loaders } from './loaders.js';
@@ -200,7 +203,7 @@ const toTaskInput = (i: GqlTaskInput) => ({
 const actorOf = (user: User) => ({ type: 'human' as const, userId: user.id, name: user.name || user.email });
 const fromGqlPermission = (p: string): VaultPermission => p.toLowerCase() as VaultPermission;
 const fromGqlScope = (sc: string): VaultLinkScope => sc.toLowerCase() as VaultLinkScope;
-const vaultActor = (ctx: Ctx) => ({ userId: requireUser(ctx).id });
+const vaultActor = (ctx: Ctx) => ({ userId: settingsUser(ctx).id });
 /**
  * Chargeurs groupés de la requête en cours (voir loaders.ts) : les résolveurs de champ appelés une fois par objet
  * (propriétaire, work session, projet, tâche, demandes en attente) sont servis en une requête SQL par lot.
@@ -215,6 +218,28 @@ const loadersOf = (ctx: Ctx): Loaders => {
   return loaders;
 };
 const userOrNull = async (ctx: Ctx, id: string | null | undefined) => (id ? ((await loadersOf(ctx).user(id)) ?? null) : null);
+
+// ---- Agents de projet ---------------------------------------------------------------------------
+interface GqlAgentInput extends Omit<AgentInput, 'kind' | 'actions'> {
+  kind?: string | null;
+  actions?: AgentActionInput[] | null;
+}
+const fromGqlAgentInput = (input: GqlAgentInput): AgentInput => ({ ...input, kind: input.kind ? (input.kind.toLowerCase() as AgentKind) : null, actions: input.actions ?? null });
+/** Membre du projet de l'agent et gestionnaire de l'agent (ou administrateur du projet). */
+async function guardAgentManager(ctx: Ctx, agentId: string): Promise<Agent> {
+  const agent = await agentService.get(agentId);
+  await requireProject(ctx, agent.projectId, 'member');
+  await agentService.assertCanManage(requireUser(ctx).id, agent);
+  return agent;
+}
+/** Propriétaire d'une session lancée par l'utilisateur connecté : lui-même, ou un agent du projet (il en est alors le demandeur). */
+async function sessionOwnerFor(ctx: Ctx, agentId: string | null | undefined, projectId: string): Promise<{ ownerId: string; requestedById: string | null }> {
+  const user = requireUser(ctx);
+  if (!agentId) return { ownerId: user.id, requestedById: null };
+  const agent = await agentService.get(agentId);
+  if (agent.projectId !== projectId) throw new AppError(`L'agent ${agent.name} n'appartient pas à ce projet`);
+  return { ownerId: agent.id, requestedById: user.id };
+}
 /** État du dépôt hébergé pour le client, avec l'adresse de téléchargement de chaque sauvegarde. */
 async function hostedGitView(project: Project) {
   const status = await gitServer.status(project);
@@ -259,7 +284,7 @@ const fromGqlStatus = (s?: GqlStatus | null): SessionStatus | undefined =>
 
 /** Paramètres de la personne connectée (Claude, OpenCode, GitHub, GitLab, consommation) ; les champs du serveur sont réservés aux administrateurs. */
 const appSettings = (ctx: Ctx) => {
-  const user = requireUser(ctx);
+  const user = settingsUser(ctx);
   const claude = () => claudeSettings.forUser(user.id);
   return {
     claude: async () => (await claude()).settings,
@@ -370,6 +395,11 @@ export const resolvers = {
     reactions: async (c: TaskComment & { reactionRows?: TaskReaction[] }, _: unknown, ctx: Ctx) => groupReactions(c.reactionRows ?? (await taskService.reactions(c.taskId)).filter((r) => r.commentId === c.id), ctx.user?.id),
     attachments: (c: TaskComment) => taskService.attachments(c.taskId, c.id),
     author: (c: TaskComment, _: unknown, ctx: Ctx) => userOrNull(ctx, c.authorUserId),
+    agent: async (c: TaskComment, _: unknown, ctx: Ctx) => {
+      if (!c.authorSessionId) return null;
+      const session = await loadersOf(ctx).session(c.authorSessionId);
+      return session?.ownerId ? ((await loadersOf(ctx).agent(session.ownerId)) ?? null) : null;
+    },
     authorSession: (c: TaskComment) => (c.authorSessionId ? sessionService.get(c.authorSessionId) : null),
     editable: (c: TaskComment, _: unknown, ctx: Ctx) => c.authorType === 'human' && c.authorUserId === ctx.user?.id,
     deletable: async (c: TaskComment, _: unknown, ctx: Ctx) => {
@@ -632,6 +662,7 @@ export const resolvers = {
     worksessions: (project: Project) => worksessionService.listByProject(project.id),
     archivedWorksessions: (project: Project) => worksessionService.listByProject(project.id, { archived: 'only' }),
     vaultItems: (project: Project, _: unknown, ctx: Ctx) => vaultService.projectRows(project.id, requireUser(ctx).id),
+    agents: (project: Project) => (isPersonalProject(project) ? [] : agentService.listByProject(project.id)),
     apiKeys: async (project: Project, _: unknown, ctx: Ctx) => ((await roleFor(ctx, project.id)) === 'admin' ? apiKeyService.list(project.id) : []),
     approvalConnections: async (project: Project, _: unknown, ctx: Ctx) => vaultService.approvalNames(await vaultService.agentItems(project.id, ctx.user?.id ?? null)),
     tasks: (project: Project, args: { status?: GqlTaskStatus[] | null }) => taskService.list({ projectId: project.id, status: fromGqlTaskStatuses(args.status) }),
@@ -665,6 +696,8 @@ export const resolvers = {
     project: (session: Session, _: unknown, ctx: Ctx) => projectOf(ctx, session.projectId),
     worksession: (session: Session, _: unknown, ctx: Ctx) => worksessionOrNull(ctx, session.worksessionId),
     owner: (session: Session, _: unknown, ctx: Ctx) => userOrNull(ctx, session.ownerId),
+    requestedBy: (session: Session, _: unknown, ctx: Ctx) => userOrNull(ctx, session.requestedById),
+    agent: async (session: Session, _: unknown, ctx: Ctx) => (session.ownerId ? ((await loadersOf(ctx).agent(session.ownerId)) ?? null) : null),
     task: (session: Session) => taskService.forSession(session.id),
     tasks: (session: Session) => taskService.tasksInCharge(session.id),
     parentSession: async (session: Session, _: unknown, ctx: Ctx) => (session.parentSessionId ? ((await loadersOf(ctx).session(session.parentSessionId)) ?? null) : null),
@@ -701,7 +734,43 @@ export const resolvers = {
     coldTurnUsd: async (p: ContextParent) => contextEstimate(p.session.contextTokens, await modelOfContext(p)).coldTurnUsd,
   },
 
+  Agent: {
+    user: (a: Agent, _: unknown, ctx: Ctx) => userOrNull(ctx, a.id),
+    project: async (a: Agent, _: unknown, ctx: Ctx) => (await loadersOf(ctx).project(a.projectId)) ?? null,
+    kind: (a: Agent) => a.kind.toUpperCase(),
+    managers: (a: Agent) => agentService.managers(a.id),
+    canManage: (a: Agent, _: unknown, ctx: Ctx) => agentService.canManage(requireUser(ctx).id, a),
+    stats: (a: Agent) => agentService.stats(a.id),
+    sessions: (a: Agent, args: { limit?: number | null }) => agentService.sessions(a.id, args.limit ?? 50),
+    tasks: (a: Agent, args: { limit?: number | null }) => agentService.tasks(a.id, args.limit ?? 50),
+  },
+  AgentAction: {
+    scheduleSession: async (a: AgentAction, _: unknown, ctx: Ctx) => (a.scheduleSessionId ? ((await loadersOf(ctx).session(a.scheduleSessionId)) ?? null) : null),
+  },
+  AgentManager: {
+    user: (m: AgentManager, _: unknown, ctx: Ctx) => userOrNull(ctx, m.userId),
+    role: (m: AgentManager) => m.role.toUpperCase(),
+  },
+  AgentTemplate: {
+    kind: (t: AgentTemplate) => t.kind.toUpperCase(),
+    actions: (t: AgentTemplate) => t.actions.map((a, i) => ({ key: a.key ?? slugify(a.label) ?? `action-${i + 1}`, label: a.label, instruction: a.instruction, cron: a.cron ?? null, timezone: a.timezone ?? null, scheduleSessionId: null })),
+  },
+  User: {
+    kind: (u: User) => (u.kind ?? 'person').toUpperCase(),
+    agent: async (u: User, _: unknown, ctx: Ctx) => (u.kind === 'agent' ? ((await loadersOf(ctx).agent(u.id)) ?? null) : null),
+  },
+
   Query: {
+    agent: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      const agent = await agentService.get(args.id);
+      await requireProject(ctx, agent.projectId, 'viewer');
+      return agent;
+    },
+    agentTemplates: (_: unknown, __: unknown, ctx: Ctx) => {
+      requireUser(ctx);
+      return agentService.templates();
+    },
+    myAgents: async (_: unknown, __: unknown, ctx: Ctx) => agentService.listActive(await accessibleProjectIds(ctx)),
     preview: async (_: unknown, args: { worksessionId: string }, ctx: Ctx) => {
       await guardWorksession(ctx, args.worksessionId, 'viewer');
       return previewService.get(args.worksessionId);
@@ -795,10 +864,10 @@ export const resolvers = {
       return fileService.read(args, args.path);
     },
     githubRepositories: (_: unknown, args: { query?: string | null }, ctx: Ctx) => {
-      requireUser(ctx);
-      return githubService.listRepositories(requireUser(ctx).id, args.query);
+      settingsUser(ctx);
+      return githubService.listRepositories(settingsUser(ctx).id, args.query);
     },
-    gitlabRepositories: (_: unknown, args: { query?: string | null }, ctx: Ctx) => gitlabService.listRepositories(requireUser(ctx).id, args.query),
+    gitlabRepositories: (_: unknown, args: { query?: string | null }, ctx: Ctx) => gitlabService.listRepositories(settingsUser(ctx).id, args.query),
     me: (_: unknown, __: unknown, ctx: Ctx) => ctx.user,
     users: (_: unknown, __: unknown, ctx: Ctx) => {
       requireAdmin(ctx);
@@ -838,8 +907,8 @@ export const resolvers = {
       await requireProject(ctx, args.projectId);
       return gitService.branchDiff(args, args.path, args.origPath);
     },
-    vaultItems: (_: unknown, args: { kind?: VaultItemKind | null }, ctx: Ctx) => vaultService.listAccessible(requireUser(ctx).id, args.kind),
-    vaultItem: (_: unknown, args: { id: string }, ctx: Ctx) => vaultService.findFor(requireUser(ctx).id, args.id),
+    vaultItems: (_: unknown, args: { kind?: VaultItemKind | null }, ctx: Ctx) => vaultService.listAccessible(settingsUser(ctx).id, args.kind),
+    vaultItem: (_: unknown, args: { id: string }, ctx: Ctx) => vaultService.findFor(settingsUser(ctx).id, args.id),
     vaultShareCandidates: (_: unknown, __: unknown, ctx: Ctx) => userService.listColleagues(requireUser(ctx).id),
     vaultGoogleAvailable: (_: unknown, __: unknown, ctx: Ctx) => {
       requireUser(ctx);
@@ -1054,6 +1123,36 @@ export const resolvers = {
   },
 
   Mutation: {
+    createAgent: async (_: unknown, args: { projectId: string; input: GqlAgentInput }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'member');
+      return agentService.create(args.projectId, fromGqlAgentInput(args.input), requireUser(ctx));
+    },
+    updateAgent: async (_: unknown, args: { id: string; input: GqlAgentInput }, ctx: Ctx) => {
+      await guardAgentManager(ctx, args.id);
+      return agentService.update(args.id, fromGqlAgentInput(args.input));
+    },
+    setAgentEnabled: async (_: unknown, args: { id: string; enabled: boolean }, ctx: Ctx) => {
+      await guardAgentManager(ctx, args.id);
+      return agentService.setEnabled(args.id, args.enabled);
+    },
+    deleteAgent: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      await guardAgentManager(ctx, args.id);
+      return agentService.remove(args.id);
+    },
+    setAgentManagers: async (_: unknown, args: { id: string; managers: { userId: string; role: string }[] }, ctx: Ctx) => {
+      await guardAgentManager(ctx, args.id);
+      return agentService.setManagers(args.id, args.managers.map((m) => ({ userId: m.userId, role: m.role.toLowerCase() as AgentManagerRole })));
+    },
+    summonAgent: async (_: unknown, args: { id: string; text: string; taskId?: string | null; attachments?: AttachmentInput[] | null }, ctx: Ctx) => {
+      const agent = await agentService.get(args.id);
+      await requireProject(ctx, agent.projectId, 'member');
+      return agentService.summon(agent.id, { taskId: args.taskId ?? null, text: args.text, attachments: args.attachments ?? null, requestedById: requireUser(ctx).id });
+    },
+    runAgentAction: async (_: unknown, args: { id: string; key: string; taskId?: string | null }, ctx: Ctx) => {
+      const agent = await agentService.get(args.id);
+      await requireProject(ctx, agent.projectId, 'member');
+      return agentService.runAction(agent.id, args.key, { taskId: args.taskId ?? null, requestedById: requireUser(ctx).id });
+    },
     gitStage: async (_: unknown, args: WorkspaceRef & { paths: string[] }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId, 'member');
       await gitService.stage(args, args.paths);
@@ -1215,38 +1314,38 @@ export const resolvers = {
     },
     updateClaudeSettings: async (_: unknown, { input }: { input: ClaudeSettingsPatch }, ctx: Ctx) => {
       const rate = await costRate(ctx);
-      await (await claudeSettings.forUser(requireUser(ctx).id)).update({ ...input, monthlyBudgetUsd: toStoredUsd(input.monthlyBudgetUsd, rate), sessionBudgetUsd: toStoredUsd(input.sessionBudgetUsd, rate) });
+      await (await claudeSettings.forUser(settingsUser(ctx).id)).update({ ...input, monthlyBudgetUsd: toStoredUsd(input.monthlyBudgetUsd, rate), sessionBudgetUsd: toStoredUsd(input.sessionBudgetUsd, rate) });
       return appSettings(ctx);
     },
     setClaudeApiKeyItem: async (_: unknown, args: { itemId?: string | null }, ctx: Ctx) => {
-      await (await claudeSettings.forUser(requireUser(ctx).id)).setApiKeyItem(args.itemId ?? null);
+      await (await claudeSettings.forUser(settingsUser(ctx).id)).setApiKeyItem(args.itemId ?? null);
       return appSettings(ctx);
     },
     setClaudeOauthItem: async (_: unknown, args: { itemId?: string | null }, ctx: Ctx) => {
-      await (await claudeSettings.forUser(requireUser(ctx).id)).setOauthItem(args.itemId ?? null);
+      await (await claudeSettings.forUser(settingsUser(ctx).id)).setOauthItem(args.itemId ?? null);
       return appSettings(ctx);
     },
     clearClaudeOauthToken: async (_: unknown, __: unknown, ctx: Ctx) => {
-      await (await claudeSettings.forUser(requireUser(ctx).id)).clearOauthToken();
+      await (await claudeSettings.forUser(settingsUser(ctx).id)).clearOauthToken();
       return appSettings(ctx);
     },
-    startClaudeLogin: (_: unknown, __: unknown, ctx: Ctx) => loginService.start(requireUser(ctx).id),
-    completeClaudeLogin: (_: unknown, args: { id: string; code: string }, ctx: Ctx) => loginService.complete(args.id, args.code, requireUser(ctx).id),
-    cancelClaudeLogin: (_: unknown, args: { id: string }, ctx: Ctx) => loginService.cancel(args.id, requireUser(ctx).id),
+    startClaudeLogin: (_: unknown, __: unknown, ctx: Ctx) => loginService.start(settingsUser(ctx).id),
+    completeClaudeLogin: (_: unknown, args: { id: string; code: string }, ctx: Ctx) => loginService.complete(args.id, args.code, settingsUser(ctx).id),
+    cancelClaudeLogin: (_: unknown, args: { id: string }, ctx: Ctx) => loginService.cancel(args.id, settingsUser(ctx).id),
     verifyClaudeAuth: async (_: unknown, args: { mode?: ClaudeAuthMode | null }, ctx: Ctx) => {
-      await claudeSettings.verify(requireUser(ctx).id, args.mode ?? null);
+      await claudeSettings.verify(settingsUser(ctx).id, args.mode ?? null);
       return appSettings(ctx);
     },
     updateOpencodeSettings: async (_: unknown, { input }: { input: OpencodeSettingsPatch }, ctx: Ctx) => {
-      await (await opencodeSettings.forUser(requireUser(ctx).id)).update({ ...input, sessionBudgetUsd: toStoredUsd(input.sessionBudgetUsd, await costRate(ctx)) });
+      await (await opencodeSettings.forUser(settingsUser(ctx).id)).update({ ...input, sessionBudgetUsd: toStoredUsd(input.sessionBudgetUsd, await costRate(ctx)) });
       return appSettings(ctx);
     },
     setOpencodeKeyItem: async (_: unknown, args: { provider: string; itemId?: string | null }, ctx: Ctx) => {
-      await (await opencodeSettings.forUser(requireUser(ctx).id)).setKeyItem(args.provider, args.itemId ?? null);
+      await (await opencodeSettings.forUser(settingsUser(ctx).id)).setKeyItem(args.provider, args.itemId ?? null);
       return appSettings(ctx);
     },
     refreshOpencodeModels: async (_: unknown, __: unknown, ctx: Ctx) => {
-      await (await opencodeSettings.forUser(requireUser(ctx).id)).listModels();
+      await (await opencodeSettings.forUser(settingsUser(ctx).id)).listModels();
       return appSettings(ctx);
     },
     startAwsLogin: (_: unknown, args: { id: string }, ctx: Ctx) => awsService.startLogin(vaultActor(ctx), args.id),
@@ -1254,26 +1353,26 @@ export const resolvers = {
       const r = await awsService.pollLogin(vaultActor(ctx), args.id);
       return { ...r, status: r.status.toUpperCase(), item: r.item ? { ...r.item, permission: 'manage' } : null };
     },
-    startGithubDeviceLogin: (_: unknown, __: unknown, ctx: Ctx) => githubDeviceService.start(requireUser(ctx).id),
-    pollGithubDeviceLogin: (_: unknown, args: { id: string }, ctx: Ctx) => githubDeviceService.poll(requireUser(ctx).id, args.id),
-    connectGithubFromVault: (_: unknown, args: { itemId: string }, ctx: Ctx) => githubService.connectFromVault(requireUser(ctx).id, args.itemId),
+    startGithubDeviceLogin: (_: unknown, __: unknown, ctx: Ctx) => githubDeviceService.start(settingsUser(ctx).id),
+    pollGithubDeviceLogin: (_: unknown, args: { id: string }, ctx: Ctx) => githubDeviceService.poll(settingsUser(ctx).id, args.id),
+    connectGithubFromVault: (_: unknown, args: { itemId: string }, ctx: Ctx) => githubService.connectFromVault(settingsUser(ctx).id, args.itemId),
     setDefaultGithubAccount: async (_: unknown, args: { accountId: string }, ctx: Ctx) => {
-      await githubService.setDefault(requireUser(ctx).id, args.accountId);
+      await githubService.setDefault(settingsUser(ctx).id, args.accountId);
       return appSettings(ctx);
     },
     disconnectGithub: async (_: unknown, args: { accountId?: string | null }, ctx: Ctx) => {
-      await githubService.disconnect(requireUser(ctx).id, args.accountId ?? null);
+      await githubService.disconnect(settingsUser(ctx).id, args.accountId ?? null);
       return appSettings(ctx);
     },
-    startGitlabDeviceLogin: (_: unknown, __: unknown, ctx: Ctx) => gitlabDeviceService.start(requireUser(ctx).id),
-    pollGitlabDeviceLogin: (_: unknown, args: { id: string }, ctx: Ctx) => gitlabDeviceService.poll(requireUser(ctx).id, args.id),
-    connectGitlabFromVault: (_: unknown, args: { itemId: string; host?: string | null }, ctx: Ctx) => gitlabService.connectFromVault(requireUser(ctx).id, args.itemId, args.host),
+    startGitlabDeviceLogin: (_: unknown, __: unknown, ctx: Ctx) => gitlabDeviceService.start(settingsUser(ctx).id),
+    pollGitlabDeviceLogin: (_: unknown, args: { id: string }, ctx: Ctx) => gitlabDeviceService.poll(settingsUser(ctx).id, args.id),
+    connectGitlabFromVault: (_: unknown, args: { itemId: string; host?: string | null }, ctx: Ctx) => gitlabService.connectFromVault(settingsUser(ctx).id, args.itemId, args.host),
     setDefaultGitlabAccount: async (_: unknown, args: { accountId: string }, ctx: Ctx) => {
-      await gitlabService.setDefault(requireUser(ctx).id, args.accountId);
+      await gitlabService.setDefault(settingsUser(ctx).id, args.accountId);
       return appSettings(ctx);
     },
     disconnectGitlab: async (_: unknown, args: { accountId?: string | null }, ctx: Ctx) => {
-      await gitlabService.disconnect(requireUser(ctx).id, args.accountId ?? null);
+      await gitlabService.disconnect(settingsUser(ctx).id, args.accountId ?? null);
       return appSettings(ctx);
     },
     // ---- Workflows ----------------------------------------------------------------------------
@@ -1422,7 +1521,9 @@ export const resolvers = {
       ctx: Ctx,
     ) => {
       await requireProject(ctx, input.projectId, 'member');
-      return sessionService.create({ ...input, ownerId: requireUser(ctx).id, autoStart: input.autoStart ?? true });
+      const { agentId, ...rest } = input as typeof input & { agentId?: string | null };
+      const owner = await sessionOwnerFor(ctx, agentId, input.projectId);
+      return sessionService.create({ ...rest, ...owner, autoStart: input.autoStart ?? true });
     },
     createChat: (_: unknown, args: { text: string; attachments?: AttachmentInput[] | null; config?: Record<string, unknown> | null }, ctx: Ctx) =>
       personalService.createChat(requireUser(ctx), args.text, args.attachments, args.config),
@@ -1484,9 +1585,11 @@ export const resolvers = {
       await guardSession(ctx, args.id, 'member');
       return scheduleService.setEnabled(args.id, args.enabled);
     },
-    createScheduledSession: async (_: unknown, args: { input: Parameters<typeof scheduleService.createWithSession>[0] }, ctx: Ctx) => {
+    createScheduledSession: async (_: unknown, args: { input: Parameters<typeof scheduleService.createWithSession>[0] & { agentId?: string | null } }, ctx: Ctx) => {
       await requireProject(ctx, args.input.projectId, 'member');
-      return scheduleService.createWithSession(args.input, requireUser(ctx).id);
+      const { agentId, ...input } = args.input;
+      const owner = await sessionOwnerFor(ctx, agentId, input.projectId);
+      return scheduleService.createWithSession(input, owner.ownerId);
     },
     runSessionScheduleNow: async (_: unknown, args: { id: string }, ctx: Ctx) => {
       await guardSession(ctx, args.id, 'member');
@@ -1562,9 +1665,16 @@ export const resolvers = {
       if (comment.authorUserId !== requireUser(ctx).id && role !== 'admin') throw new AppError("Seuls l'auteur et les administrateurs du projet suppriment un commentaire", 'FORBIDDEN');
       return taskService.deleteComment(args.id);
     },
-    startTaskSession: async (_: unknown, args: { id: string; provider?: string | null; config?: Record<string, unknown> | null; prompt?: string | null }, ctx: Ctx) => {
+    startTaskSession: async (_: unknown, args: { id: string; provider?: string | null; config?: Record<string, unknown> | null; prompt?: string | null; agentId?: string | null }, ctx: Ctx) => {
       await guardTask(ctx, args.id, 'member');
-      return startTaskSession(args.id, { ...args, ownerId: requireUser(ctx).id });
+      const task = await taskService.get(args.id);
+      const { agentId, ...rest } = args;
+      const owner = await sessionOwnerFor(ctx, agentId, task.projectId);
+      if (agentId) {
+        const agent = await agentService.get(agentId);
+        return startTaskSession(args.id, { ...rest, ...owner, provider: rest.provider ?? agentService.providerOf(agent), config: agentService.sessionConfig(agent, rest.config) });
+      }
+      return startTaskSession(args.id, { ...rest, ...owner });
     },
     resumeTaskSession: async (_: unknown, args: { id: string; text: string }, ctx: Ctx) => {
       await guardTask(ctx, args.id, 'member');

@@ -95,6 +95,8 @@ export interface User {
   id: string;
   email: string;
   name: string;
+  /** Une personne, ou un agent de projet (membre qui n'est pas une personne). */
+  kind?: 'PERSON' | 'AGENT';
   avatarUrl: string | null;
   isAdmin: boolean;
   isSuperAdmin: boolean;
@@ -116,7 +118,7 @@ export interface PermissionRule {
 }
 
 export interface ProjectMember {
-  user: Pick<User, 'id' | 'email' | 'name' | 'avatarUrl'>;
+  user: Pick<User, 'id' | 'email' | 'name' | 'avatarUrl' | 'kind'>;
   role: ProjectRole;
   invitedBy: Pick<User, 'id' | 'name'> | null;
   pending: boolean;
@@ -207,7 +209,11 @@ export interface Session {
   /** Exécution de workflow qui a ouvert la session ; null pour une session lancée à la main. */
   workflowRun: { id: string; workflow: { id: string; name: string } } | null;
   /** Utilisateur qui a lancé la session (null : session d'avant cette version). */
-  owner: Pick<User, 'id' | 'name' | 'email' | 'avatarUrl'> | null;
+  owner: Pick<User, 'id' | 'name' | 'email' | 'avatarUrl' | 'kind'> | null;
+  /** Personne qui a demandé la session quand son propriétaire est un agent de projet. */
+  requestedBy?: { id: string; name: string } | null;
+  /** Agent de projet qui joue la session (null : session d'une personne). */
+  agent?: { id: string; name: string; kind: 'PRODUCT_MANAGER' | 'DEVELOPER' | 'CUSTOM'; avatar: { emoji: string | null; color: string | null } } | null;
   /** Archivée : consultable en lecture seule, relançable. */
   archivedAt: string | null;
   /** Worksession supprimé dans lequel la session a travaillé (archivée avec lui) ; null sinon. */
@@ -337,6 +343,8 @@ export interface TaskComment {
   authorName: string;
   author: { id: string; name: string } | null;
   authorSession: { id: string; name: string } | null;
+  /** Agent de projet dont la session a écrit le message. */
+  agent?: { id: string; name: string; kind: 'PRODUCT_MANAGER' | 'DEVELOPER' | 'CUSTOM'; avatar: { emoji: string | null; color: string | null } } | null;
   body: string;
   mentions: TaskMention[];
   reactions: TaskReaction[];
@@ -567,6 +575,7 @@ export const PROJECT_MEMBERS = gql`
           email
           name
           avatarUrl
+          kind
         }
         invitedBy {
           id
@@ -679,6 +688,20 @@ export const SESSION_FIELDS = gql`
       name
       email
       avatarUrl
+      kind
+    }
+    requestedBy {
+      id
+      name
+    }
+    agent {
+      id
+      name
+      kind
+      avatar {
+        emoji
+        color
+      }
     }
     archivedAt
     formerWorksession {
@@ -1380,6 +1403,18 @@ export const SIDEBAR = gql`
       id
       name
       avatarUrl
+      kind
+    }
+    requestedBy {
+      id
+    }
+    agent {
+      id
+      name
+      avatar {
+        emoji
+        color
+      }
     }
     parentSession {
       id
@@ -1609,8 +1644,8 @@ export const DELETE_TASK = gql`
 `;
 
 export const START_TASK_SESSION = gql`
-  mutation StartTaskSession($id: ID!, $provider: String, $config: JSON, $prompt: String) {
-    startTaskSession(id: $id, provider: $provider, config: $config, prompt: $prompt) {
+  mutation StartTaskSession($id: ID!, $provider: String, $config: JSON, $prompt: String, $agentId: ID) {
+    startTaskSession(id: $id, provider: $provider, config: $config, prompt: $prompt, agentId: $agentId) {
       id
     }
   }
