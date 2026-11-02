@@ -3,14 +3,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Client Gmail testé sans réseau : googleAccountService.json renvoie des réponses préparées par URL.
+// Client Gmail testé sans réseau : googleAccountService.json renvoie des réponses préparées par fin d'URL
+// (« POST /labels » pour ne répondre qu'à cette méthode).
 const { calls, inits, responses } = vi.hoisted(() => ({ calls: [] as string[], inits: [] as Array<RequestInit | undefined>, responses: new Map<string, unknown>() }));
 vi.mock('./service.js', () => ({
   googleAccountService: {
     json: async (_accountId: string, url: string, init?: RequestInit) => {
       calls.push(url);
       inits.push(init);
-      for (const [suffix, value] of responses) if (url.endsWith(suffix)) return value;
+      const method = init?.method ?? 'GET';
+      for (const [key, value] of responses) if (key.startsWith(`${method} `) && url.endsWith(key.slice(method.length + 1))) return value;
+      for (const [suffix, value] of responses) if (!/^[A-Z]+ /.test(suffix) && url.endsWith(suffix)) return value;
       throw new Error(`réponse non préparée pour ${url}`);
     },
   },
@@ -22,6 +25,7 @@ const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64url');
 const message = {
   id: 'm1',
   threadId: 't1',
+  labelIds: ['INBOX', 'Label_7'],
   payload: {
     mimeType: 'multipart/mixed',
     headers: [{ name: 'From', value: 'perrine@example.org' }, { name: 'Subject', value: 'Remboursement courses' }],
@@ -41,6 +45,7 @@ beforeEach(async () => {
   inits.length = 0;
   responses.clear();
   responses.set('/messages/m1?format=full', message);
+  responses.set('/labels', { labels: [{ id: 'INBOX', name: 'INBOX', type: 'system' }, { id: 'UNREAD', name: 'UNREAD', type: 'system' }, { id: 'Label_7', name: 'Factures', type: 'user' }] });
   responses.set('/messages/m1/attachments/ATT-1', { size: 3, data: b64('JPG') });
   responses.set('/messages/m1/attachments/ATT-2', { size: 3, data: b64('BIS') });
 });
@@ -55,6 +60,7 @@ describe('gmail.read', () => {
       { index: 2, filename: 'note.txt', mimeType: 'text/plain', size: 5 },
       { index: 3, filename: 'image_261009_125550.jpeg', mimeType: 'image/jpeg', size: 3 },
     ]);
+    expect(m.labels).toEqual(['INBOX', 'Factures']);
     expect(gmail.renderMessage(m)).toContain('Pièces jointes (gmail_attachment pour en télécharger une) : 1. Image_261009_125550.jpeg (image/jpeg, 3 octets) ; 2. note.txt');
   });
 });
@@ -116,5 +122,48 @@ describe('gmail.downloadAttachment', () => {
     expect(inits.at(-1)?.method).toBe('PUT');
     expect(JSON.parse(String(inits.at(-1)?.body))).toEqual(expect.objectContaining({ id: 'd1' }));
     await expect(gmail.send('a', { to: '', subject: 'x', body: 'y' })).rejects.toThrow('Destinataire obligatoire');
+  });
+});
+
+describe('gmail.modify', () => {
+  const meta = (id: string, threadId: string) => ({ id, threadId, payload: { headers: [{ name: 'Subject', value: `Sujet ${id}` }, { name: 'From', value: 'perrine@example.org' }] } });
+  beforeEach(() => {
+    responses.set('/messages/m1?format=metadata&metadataHeaders=From&metadataHeaders=Subject', meta('m1', 't1'));
+    responses.set('/messages/m2?format=metadata&metadataHeaders=From&metadataHeaders=Subject', meta('m2', 't1'));
+  });
+
+  it('archive le fil, ajoute un libellé existant par son nom et crée celui qui manque, une fois par fil', async () => {
+    responses.set('/labels', { labels: [{ id: 'INBOX', name: 'INBOX', type: 'system' }, { id: 'Label_7', name: 'Factures', type: 'user' }] });
+    responses.set('POST /labels', { id: 'Label_8', name: 'Remboursements', type: 'user' });
+    responses.set('/threads/t1/modify', { messages: [{ id: 'm1', labelIds: ['Label_7', 'Label_8'] }] });
+    const { results, created } = await gmail.modify('a', ['m1', 'm2'], { archive: true, read: true, addLabels: ['factures', 'Remboursements'] });
+    expect(created).toEqual(['Remboursements']);
+    expect(JSON.parse(String(inits[calls.findIndex((u, i) => u.endsWith('/labels') && inits[i]?.method === 'POST')]?.body))).toEqual(expect.objectContaining({ name: 'Remboursements' }));
+    const threadCalls = calls.filter((u) => u.endsWith('/threads/t1/modify'));
+    expect(threadCalls).toHaveLength(1);
+    const body = JSON.parse(String(inits[calls.lastIndexOf(threadCalls[0])]?.body)) as { addLabelIds: string[]; removeLabelIds: string[] };
+    expect(body.addLabelIds.sort()).toEqual(['Label_7', 'Label_8']);
+    expect(body.removeLabelIds.sort()).toEqual(['INBOX', 'UNREAD']);
+    expect(results).toEqual([{ id: 'm1', threadId: 't1', subject: 'Sujet m1', from: 'perrine@example.org', labels: ['Factures', 'Remboursements'], ok: true }]);
+  });
+
+  it('modifie le seul message, remet en boîte de réception et marque non lu', async () => {
+    responses.set('/messages/m2/modify', { id: 'm2', threadId: 't1', labelIds: ['INBOX', 'UNREAD'] });
+    const { results } = await gmail.modify('a', ['m2'], { archive: false, read: false, wholeThread: false });
+    expect(JSON.parse(String(inits.at(-1)?.body))).toEqual({ addLabelIds: ['INBOX', 'UNREAD'], removeLabelIds: [] });
+    expect(results[0]).toEqual(expect.objectContaining({ id: 'm2', labels: ['INBOX', 'UNREAD'], ok: true }));
+  });
+
+  it('refuse un libellé à retirer inconnu, une demande vide ou contradictoire', async () => {
+    await expect(gmail.modify('a', ['m1'], { removeLabels: ['Factrues'] })).rejects.toThrow('Libellé inconnu : « Factrues »');
+    await expect(gmail.modify('a', ['m1'], {})).rejects.toThrow('Rien à modifier');
+    await expect(gmail.modify('a', ['m1'], { archive: true, addLabels: ['INBOX'] })).rejects.toThrow('à la fois ajouté et retiré');
+  });
+
+  it("signale l'échec d'un message sans arrêter les autres", async () => {
+    responses.set('/messages/m1/modify', { id: 'm1', threadId: 't1', labelIds: [] });
+    const { results } = await gmail.modify('a', ['absent', 'm1'], { archive: true, wholeThread: false });
+    expect(results.map((r) => r.ok)).toEqual([false, true]);
+    expect(results[0].error).toContain('réponse non préparée');
   });
 });

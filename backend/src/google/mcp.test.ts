@@ -11,10 +11,10 @@ import type { GoogleAccount } from './types.js';
 // Le CLI Claude liste les outils d'un serveur in-process au démarrage (tools/list) : si la conversion d'un
 // schéma zod échoue, tout le serveur disparaît pour l'agent sans erreur visible (voir dev/outils-mcp-agents).
 // Services voisins simulés : seule la déclaration des outils et l'outil gmail_attachment sont exercés.
-const { downloadAttachment, saveDraft, trash } = vi.hoisted(() => ({ downloadAttachment: vi.fn(), saveDraft: vi.fn(), trash: vi.fn() }));
+const { downloadAttachment, saveDraft, trash, modify } = vi.hoisted(() => ({ downloadAttachment: vi.fn(), saveDraft: vi.fn(), trash: vi.fn(), modify: vi.fn() }));
 vi.mock('./service.js', () => ({ accessLabels: { none: 'aucun accès', read: 'lecture', write: 'lecture et écriture' } }));
 vi.mock('./drive.js', () => ({}));
-vi.mock('./gmail.js', () => ({ downloadAttachment, saveDraft, trash }));
+vi.mock('./gmail.js', () => ({ downloadAttachment, saveDraft, trash, modify }));
 
 const { createGoogleMcpServer } = await import('./mcp.js');
 
@@ -48,6 +48,7 @@ beforeEach(async () => {
   downloadAttachment.mockReset();
   saveDraft.mockReset();
   trash.mockReset();
+  modify.mockReset();
 });
 afterEach(() => rm(cwd, { recursive: true, force: true }));
 
@@ -67,7 +68,7 @@ describe('serveur MCP google', () => {
     const client = await connect(server([account()]));
     try {
       const names = (await client.listTools()).tools.map((t) => t.name).sort();
-      expect(names).toEqual(['account', 'drive_download', 'drive_read', 'drive_search', 'drive_upload', 'drive_write', 'gmail_attachment', 'gmail_delete', 'gmail_draft', 'gmail_drafts', 'gmail_read', 'gmail_search', 'gmail_send']);
+      expect(names).toEqual(['account', 'drive_download', 'drive_read', 'drive_search', 'drive_upload', 'drive_write', 'gmail_attachment', 'gmail_delete', 'gmail_draft', 'gmail_drafts', 'gmail_labels', 'gmail_modify', 'gmail_read', 'gmail_search', 'gmail_send']);
     } finally {
       await client.close();
     }
@@ -77,7 +78,7 @@ describe('serveur MCP google', () => {
     const client = await connect(server([account({ gmailAccess: 'read', driveAccess: 'none' })]));
     try {
       const names = (await client.listTools()).tools.map((t) => t.name).sort();
-      expect(names).toEqual(['account', 'gmail_attachment', 'gmail_drafts', 'gmail_read', 'gmail_search']);
+      expect(names).toEqual(['account', 'gmail_attachment', 'gmail_drafts', 'gmail_labels', 'gmail_read', 'gmail_search']);
     } finally {
       await client.close();
     }
@@ -133,6 +134,29 @@ describe('serveur MCP google', () => {
     }
   });
 
+  it('gmail_modify archive et étiquette des fils, et journalise le changement', async () => {
+    modify.mockResolvedValue({
+      created: ['Factures/2026'],
+      results: [
+        { id: 'm1', threadId: 't1', subject: 'Remboursement', from: 'perrine@example.org', labels: ['UNREAD', 'Factures/2026'], ok: true },
+        { id: 'absent', threadId: '', subject: '', from: '', labels: [], ok: false, error: 'Google : Requested entity was not found.' },
+      ],
+    });
+    const client = await connect(server([account()]));
+    try {
+      const res = (await client.callTool({ name: 'gmail_modify', arguments: { message_ids: ['m1', 'absent'], archive: true, add_labels: ['Factures/2026'] } })) as { content: Array<{ text: string }>; isError?: boolean };
+      expect(res.isError).toBeFalsy();
+      expect(modify).toHaveBeenCalledWith('g1', ['m1', 'absent'], { archive: true, read: undefined, addLabels: ['Factures/2026'], removeLabels: undefined, wholeThread: undefined });
+      expect(res.content[0].text).toContain('Fils modifiés (archive · +Factures/2026)');
+      expect(res.content[0].text).toContain('Libellé(s) créé(s) : Factures/2026');
+      expect(res.content[0].text).toContain('[m1] Remboursement (de perrine@example.org) · libellés : UNREAD, Factures/2026');
+      expect(res.content[0].text).toContain('[absent] échec');
+      expect(events).toEqual([expect.objectContaining({ action: 'gmail_modify', ok: true, note: '1 modifié(s), 1 échec(s)' })]);
+    } finally {
+      await client.close();
+    }
+  });
+
   it('demande de reconnecter un compte relié en écriture avant les brouillons et la corbeille', async () => {
     const client = await connect(server([account({ scopes: ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.send'] })]));
     try {
@@ -140,6 +164,10 @@ describe('serveur MCP google', () => {
       expect(res.isError).toBe(true);
       expect(res.content[0].text).toContain('reconnecter');
       expect(saveDraft).not.toHaveBeenCalled();
+      const mod = (await client.callTool({ name: 'gmail_modify', arguments: { message_ids: ['m1'], archive: true } })) as { content: Array<{ text: string }>; isError?: boolean };
+      expect(mod.isError).toBe(true);
+      expect(mod.content[0].text).toContain('reconnecter');
+      expect(modify).not.toHaveBeenCalled();
     } finally {
       await client.close();
     }

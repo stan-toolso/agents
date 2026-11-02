@@ -316,7 +316,7 @@ export const googleAccountService = {
       if (several) lines.push(`Compte \`${account.email}\`${account.displayName ? ` (${account.displayName})` : ''} :`);
       const indent = several ? '  ' : '';
       if (account.gmailAccess !== 'none') {
-        lines.push(`${indent}- Messagerie Gmail (${accessLabels[account.gmailAccess]}) : \`gmail_search\` (requête au format de la recherche Gmail, ex. \`from:x newer_than:7d\`), \`gmail_read\`, \`gmail_attachment\` (télécharge une pièce jointe d'un mail dans le dossier de travail, pour la lire ou la déposer ailleurs), \`gmail_drafts\` (liste des brouillons)${account.gmailAccess === 'write' ? ', `gmail_send` (envoi ou réponse, au nom de ce compte), `gmail_draft` (rédige ou remplace un brouillon sans l\'envoyer, réponse possible), `gmail_delete` (messages à la corbeille, brouillon supprimé)' : ''}.${account.gmailAccess === 'write' && (!gmailCan(account, 'drafts') || !gmailCan(account, 'trash')) ? ' Ce compte a été relié avant les brouillons et la suppression : ces outils lui demandent d\'être reconnecté depuis le coffre.' : ''}`);
+        lines.push(`${indent}- Messagerie Gmail (${accessLabels[account.gmailAccess]}) : \`gmail_search\` (requête au format de la recherche Gmail, ex. \`from:x newer_than:7d\`), \`gmail_read\`, \`gmail_attachment\` (télécharge une pièce jointe d'un mail dans le dossier de travail, pour la lire ou la déposer ailleurs), \`gmail_drafts\` (liste des brouillons), \`gmail_labels\` (libellés du compte)${account.gmailAccess === 'write' ? ', `gmail_send` (envoi ou réponse, au nom de ce compte), `gmail_draft` (rédige ou remplace un brouillon sans l\'envoyer, réponse possible), `gmail_delete` (messages à la corbeille, brouillon supprimé), `gmail_modify` (archive ou remet en boîte de réception, marque lu ou non lu, ajoute ou retire des libellés)' : ''}.${account.gmailAccess === 'write' && (!gmailCan(account, 'drafts') || !gmailCan(account, 'modify')) ? ' Ce compte a été relié avant les brouillons, la suppression et les libellés : ces outils lui demandent d\'être reconnecté depuis le coffre.' : ''}`);
       }
       if (account.driveAccess !== 'none') {
         lines.push(`${indent}- Drive (${accessLabels[account.driveAccess]}) : \`drive_search\`, \`drive_read\` (texte des Docs, Sheets en CSV, fichiers texte), \`drive_download\` (dans le dossier de travail)${account.driveAccess === 'write' ? ', `drive_upload` (fichier du dossier de travail, conversion en Doc ou Sheet possible), `drive_write` (créer ou remplacer un Google Doc à partir d\'un texte)' : ''}.`);
@@ -332,7 +332,7 @@ vaultService.probers.set('google', (item) => googleAccountService.probe(item));
 /** Outils du serveur `google` accessibles sans approbation (lectures), d'après les accès de l'ensemble des comptes. */
 export function googleReadTools(accounts: GoogleAccount[]): string[] {
   const tools: string[] = ['mcp__google__account'];
-  if (accounts.some((a) => a.gmailAccess !== 'none')) tools.push('mcp__google__gmail_search', 'mcp__google__gmail_read', 'mcp__google__gmail_attachment', 'mcp__google__gmail_drafts');
+  if (accounts.some((a) => a.gmailAccess !== 'none')) tools.push('mcp__google__gmail_search', 'mcp__google__gmail_read', 'mcp__google__gmail_attachment', 'mcp__google__gmail_drafts', 'mcp__google__gmail_labels');
   if (accounts.some((a) => a.driveAccess !== 'none')) tools.push('mcp__google__drive_search', 'mcp__google__drive_read', 'mcp__google__drive_download');
   return tools;
 }

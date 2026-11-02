@@ -65,15 +65,15 @@ export function createGoogleMcpServer(ctx: GoogleMcpContext): McpSdkServerConfig
     throw new AppError(`Plusieurs comptes Google ont l'accès ${label} : précise lequel avec le paramètre account (${eligible.map((a) => a.email).join(', ')})`);
   };
 
-  /** Compte Gmail visé par une écriture qui demande une portée ajoutée après coup (brouillons, corbeille). */
-  const pickGmail = (email: string | undefined, what: 'drafts' | 'trash'): GoogleAccount => {
+  /** Compte Gmail visé par une écriture qui demande une portée ajoutée après coup (brouillons, corbeille, libellés). */
+  const pickGmail = (email: string | undefined, what: 'drafts' | 'modify'): GoogleAccount => {
     const acct = pick(email, 'gmail', 'write');
     if (gmailCan(acct, what)) return acct;
     if (!email) {
       const capable = accounts.filter((a) => gmailCan(a, what));
       if (capable.length === 1) return capable[0];
     }
-    throw new AppError(`Le compte ${acct.email} a été relié avant l'ajout ${what === 'drafts' ? 'des brouillons' : 'de la suppression'} : il faut le reconnecter depuis le coffre (élément \`${acct.name}\`, Gmail en écriture) pour accorder cet accès`);
+    throw new AppError(`Le compte ${acct.email} a été relié avant l'ajout ${what === 'drafts' ? 'des brouillons' : 'de la suppression et des libellés'} : il faut le reconnecter depuis le coffre (élément \`${acct.name}\`, Gmail en écriture) pour accorder cet accès`);
   };
 
   const run = async (fn: () => Promise<string>) => {
@@ -171,6 +171,20 @@ export function createGoogleMcpServer(ctx: GoogleMcpContext): McpSdkServerConfig
             return gmail.renderDrafts(drafts);
           }),
       ),
+      tool(
+        'gmail_labels',
+        'Liste les libellés du compte : ceux de Gmail (INBOX, UNREAD, STARRED, IMPORTANT…) et ceux créés par la personne (pour gmail_modify ou la recherche label:).',
+        { account: accountParam },
+        async ({ account }) =>
+          run(async () => {
+            const acct = pick(account, 'gmail', 'read');
+            const labels = await audited(acct, 'gmail', 'gmail_labels', 'libellés', async () => {
+              const r = await gmail.listLabels(acct.id);
+              return { result: r, note: `${r.length} libellé(s)` };
+            });
+            return gmail.renderLabels(labels);
+          }),
+      ),
     );
   }
   if (accounts.some((a) => a.gmailAccess === 'write')) {
@@ -239,7 +253,7 @@ export function createGoogleMcpServer(ctx: GoogleMcpContext): McpSdkServerConfig
               lines.push(`Brouillon ${draft_id} supprimé.`);
             }
             if (ids.length) {
-              const acct = pickGmail(account, 'trash');
+              const acct = pickGmail(account, 'modify');
               for (const id of ids) {
                 try {
                   const m = await audited(acct, 'gmail', 'gmail_delete', id, async () => {
@@ -252,6 +266,44 @@ export function createGoogleMcpServer(ctx: GoogleMcpContext): McpSdkServerConfig
                 }
               }
             }
+            return lines.join('\n');
+          }),
+      ),
+      tool(
+        'gmail_modify',
+        "Range des messages : archive (retire de la boîte de réception) ou remet dans la boîte de réception, marque lu ou non lu, ajoute ou retire des libellés (un libellé à ajouter qui n'existe pas est créé ; « Parent/Enfant » pour un sous-libellé). S'applique par défaut au fil entier de chaque message, comme l'interface de Gmail. Soumis à l'approbation d'un humain.",
+        {
+          message_ids: z.array(z.string()).min(1).max(100).describe('Messages à modifier (identifiants de gmail_search)'),
+          archive: z.boolean().optional().describe('true : archiver ; false : remettre dans la boîte de réception'),
+          read: z.boolean().optional().describe('true : marquer comme lu ; false : comme non lu'),
+          add_labels: z.array(z.string()).max(20).optional().describe('Libellés à ajouter (nom ou identifiant, cf. gmail_labels)'),
+          remove_labels: z.array(z.string()).max(20).optional().describe('Libellés à retirer'),
+          whole_thread: z.boolean().optional().describe('Appliquer au fil entier (défaut true) ou au seul message'),
+          account: accountParam,
+        },
+        async ({ message_ids, archive, read, add_labels, remove_labels, whole_thread, account }) =>
+          run(async () => {
+            const ids = message_ids.map((id) => id.trim()).filter(Boolean);
+            if (!ids.length) throw new AppError('Indique au moins un message');
+            const acct = pickGmail(account, 'modify');
+            const changes = [
+              archive === true ? 'archive' : archive === false ? 'boîte de réception' : '',
+              read === true ? 'lu' : read === false ? 'non lu' : '',
+              add_labels?.length ? `+${add_labels.join(', +')}` : '',
+              remove_labels?.length ? `-${remove_labels.join(', -')}` : '',
+            ].filter(Boolean).join(' · ');
+            const { results, created } = await audited(acct, 'gmail', 'gmail_modify', `${ids.length} message(s) · ${changes}`, async () => {
+              const r = await gmail.modify(acct.id, ids, { archive, read, addLabels: add_labels, removeLabels: remove_labels, wholeThread: whole_thread });
+              const failed = r.results.filter((x) => !x.ok).length;
+              return { result: r, note: `${r.results.length - failed} modifié(s)${failed ? `, ${failed} échec(s)` : ''}` };
+            });
+            const lines = [
+              `${whole_thread === false ? 'Messages' : 'Fils'} modifiés (${changes}) :`,
+              ...(created.length ? [`Libellé(s) créé(s) : ${created.join(', ')}`] : []),
+              ...results.map((r) =>
+                r.ok ? `- [${r.id}] ${r.subject || '(sans sujet)'} (de ${r.from || '?'}) · libellés : ${r.labels.join(', ') || '(aucun)'}` : `- [${r.id}] échec : ${r.error}`,
+              ),
+            ];
             return lines.join('\n');
           }),
       ),

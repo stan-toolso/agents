@@ -62,7 +62,7 @@ projet **Skipper** (`skipper-510112`, organisation toolso.io, compte de facturat
   servent à relier un compte Google à un projet (Gmail, Drive) : pour cela, activer les API **Gmail
   API** et **Google Drive API** dans « API et services » du projet Google Cloud (fait le 2026-09-29).
   Portées demandées : `gmail.readonly` (lecture) ; en écriture, `gmail.send`, `gmail.compose`
-  (brouillons) et `gmail.modify` (corbeille) ; `drive.readonly` ou `drive`. Si l'écran « Accès aux données »
+  (brouillons) et `gmail.modify` (corbeille, archivage, libellés, lu / non lu) ; `drive.readonly` ou `drive`. Si l'écran « Accès aux données »
   de Google Auth Platform les déclare, y ajouter `gmail.compose` et `gmail.modify` (portées restreintes,
   comme `gmail.readonly`). Un compte relié en écriture avant leur ajout doit être reconnecté.
 - Le secret du client n'est visible qu'à sa création : il est dans le `.env` du poste de

@@ -154,11 +154,17 @@ export async function search(accountId: string, query: string, maxResults: numbe
 }
 
 export async function read(accountId: string, messageId: string): Promise<MessageContent> {
-  const m = await googleAccountService.json<Message>(accountId, `${BASE}/messages/${encodeURIComponent(messageId)}?format=full`);
+  const [m, labels] = await Promise.all([
+    googleAccountService.json<Message>(accountId, `${BASE}/messages/${encodeURIComponent(messageId)}?format=full`),
+    // Pour afficher les libellés personnels par leur nom ; sans eux, les identifiants bruts.
+    listLabels(accountId).catch(() => [] as Label[]),
+  ]);
   const { text, html, attachments } = extract(m.payload);
   const full = (text.trim() || htmlToText(html)).trim();
+  const summary = toSummary(m);
   return {
-    ...toSummary(m),
+    ...summary,
+    labels: labelNames(summary.labels, labels),
     cc: header(m.payload?.headers, 'Cc'),
     messageId: header(m.payload?.headers, 'Message-ID'),
     body: full.slice(0, MAX_BODY_CHARS),
@@ -325,6 +331,133 @@ export async function trash(accountId: string, messageId: string): Promise<Messa
     `${BASE}/messages/${encodeURIComponent(messageId)}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`,
   );
   return toSummary(m);
+}
+
+export interface Label {
+  id: string;
+  name: string;
+  /** `system` (INBOX, UNREAD, STARRED…, nom = identifiant) ou `user`. */
+  type: string;
+}
+
+/** Libellés du compte : ceux de Gmail puis ceux créés par la personne, par ordre alphabétique. */
+export async function listLabels(accountId: string): Promise<Label[]> {
+  const r = await googleAccountService.json<{ labels?: Label[] }>(accountId, `${BASE}/labels`);
+  const labels = (r.labels ?? []).map(({ id, name, type }) => ({ id, name, type }));
+  return labels.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name, 'fr') : a.type === 'system' ? -1 : 1));
+}
+
+/** Noms lisibles des libellés d'un message (les libellés personnels ont des identifiants opaques, Label_123). */
+const labelNames = (ids: string[], labels: Label[]) => ids.map((id) => labels.find((l) => l.id === id)?.name ?? id);
+
+/**
+ * Identifiants Gmail des libellés désignés par leur nom (insensible à la casse, « Parent/Enfant » pour un
+ * sous-libellé) ou leur identifiant. Un libellé à ajouter qui n'existe pas encore est créé ; un libellé à
+ * retirer qui n'existe pas est une erreur (faute de frappe probable).
+ */
+async function resolveLabels(accountId: string, labels: Label[], wanted: string[], create: boolean): Promise<{ ids: string[]; created: string[] }> {
+  const ids: string[] = [];
+  const created: string[] = [];
+  for (const raw of wanted) {
+    const w = raw.trim();
+    if (!w) continue;
+    const found = labels.find((l) => l.id === w) ?? labels.find((l) => l.name.toLowerCase() === w.toLowerCase());
+    if (found) {
+      ids.push(found.id);
+      continue;
+    }
+    if (!create) throw new AppError(`Libellé inconnu : « ${w} » (gmail_labels pour la liste)`);
+    const label = await googleAccountService.json<Label>(accountId, `${BASE}/labels`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: w, labelListVisibility: 'labelShow', messageListVisibility: 'show' }),
+    });
+    labels.push({ id: label.id, name: label.name, type: 'user' });
+    ids.push(label.id);
+    created.push(label.name);
+  }
+  return { ids, created };
+}
+
+export interface ModifyInput {
+  /** Archiver (retirer de la boîte de réception) ou, à false, remettre dans la boîte de réception. */
+  archive?: boolean;
+  /** Marquer comme lu, ou à false comme non lu. */
+  read?: boolean;
+  addLabels?: string[];
+  removeLabels?: string[];
+  /** Appliquer au fil entier de chaque message, comme l'interface de Gmail (défaut), ou au seul message. */
+  wholeThread?: boolean;
+}
+
+export interface ModifyResult {
+  id: string;
+  threadId: string;
+  subject: string;
+  from: string;
+  /** Libellés après modification (noms lisibles). */
+  labels: string[];
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * Archive, remet dans la boîte de réception, marque lu ou non lu, ajoute ou retire des libellés sur des
+ * messages (ou leurs fils). Les libellés à ajouter qui n'existent pas sont créés. Chaque fil n'est modifié
+ * qu'une fois même si plusieurs de ses messages sont désignés ; un échec sur un message n'arrête pas les autres.
+ */
+export async function modify(accountId: string, messageIds: string[], input: ModifyInput): Promise<{ results: ModifyResult[]; created: string[] }> {
+  const labels = await listLabels(accountId);
+  const add = await resolveLabels(accountId, labels, input.addLabels ?? [], true);
+  const remove = await resolveLabels(accountId, labels, input.removeLabels ?? [], false);
+  const addIds = new Set(add.ids);
+  const removeIds = new Set(remove.ids);
+  if (input.archive === true) removeIds.add('INBOX');
+  if (input.archive === false) addIds.add('INBOX');
+  if (input.read === true) removeIds.add('UNREAD');
+  if (input.read === false) addIds.add('UNREAD');
+  const conflict = [...addIds].filter((id) => removeIds.has(id));
+  if (conflict.length) throw new AppError(`Libellé à la fois ajouté et retiré : ${labelNames(conflict, labels).join(', ')}`);
+  if (!addIds.size && !removeIds.size) throw new AppError('Rien à modifier : indique archive, read, add_labels ou remove_labels');
+  const body = JSON.stringify({ addLabelIds: [...addIds], removeLabelIds: [...removeIds] });
+  const wholeThread = input.wholeThread !== false;
+  const doneThreads = new Set<string>();
+  const results: ModifyResult[] = [];
+  for (const id of messageIds) {
+    try {
+      const m = await googleAccountService.json<Message>(accountId, `${BASE}/messages/${encodeURIComponent(id)}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`);
+      const base = { id: m.id, threadId: m.threadId, subject: header(m.payload?.headers, 'Subject'), from: header(m.payload?.headers, 'From') };
+      if (wholeThread && doneThreads.has(m.threadId)) continue;
+      let after: string[];
+      if (wholeThread) {
+        const t = await googleAccountService.json<{ messages?: Message[] }>(accountId, `${BASE}/threads/${encodeURIComponent(m.threadId)}/modify`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body,
+        });
+        doneThreads.add(m.threadId);
+        after = t.messages?.find((x) => x.id === m.id)?.labelIds ?? t.messages?.at(-1)?.labelIds ?? [];
+      } else {
+        const r = await googleAccountService.json<Message>(accountId, `${BASE}/messages/${encodeURIComponent(id)}/modify`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body,
+        });
+        after = r.labelIds ?? [];
+      }
+      results.push({ ...base, labels: labelNames(after, labels), ok: true });
+    } catch (err) {
+      results.push({ id, threadId: '', subject: '', from: '', labels: [], ok: false, error: (err as Error).message });
+    }
+  }
+  return { results, created: add.created };
+}
+
+export function renderLabels(labels: Label[]): string {
+  if (labels.length === 0) return 'Aucun libellé.';
+  const system = labels.filter((l) => l.type === 'system').map((l) => l.name);
+  const user = labels.filter((l) => l.type !== 'system').map((l) => `- ${l.name}`);
+  return [`Libellés de Gmail : ${system.join(', ')}`, user.length ? `Libellés personnels (${user.length}) :\n${user.join('\n')}` : 'Aucun libellé personnel.'].join('\n');
 }
 
 export function renderDrafts(drafts: DraftSummary[]): string {
