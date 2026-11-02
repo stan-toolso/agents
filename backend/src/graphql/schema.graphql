@@ -1247,11 +1247,11 @@ type PullRequestReview {
   state: String!
 }
 
-"Pull request GitHub du dépôt d'un projet, ou d'un autre dépôt (lue avec le jeton de la connexion GitHub) ; pour un dépôt hébergé par Skipper, pull request de sa forge Forgejo."
+"Pull request GitHub du dépôt d'un projet, ou d'un autre dépôt (lue avec le jeton de la connexion GitHub) ; pour un dépôt hébergé par Skipper, pull request de sa forge Forgejo ; pour un dépôt GitLab, merge request (numéro = iid)."
 type PullRequest {
-  "Dépôt « owner/name » (GitHub, ou Forgejo pour un dépôt hébergé)."
+  "Dépôt « owner/name » (GitHub, ou Forgejo pour un dépôt hébergé) ; chemin complet du projet pour GitLab."
   repo: String!
-  "Forge de la PR, pour les libellés : « GitHub » ou « Forgejo »."
+  "Forge de la PR, pour les libellés : « GitHub », « GitLab » ou « Forgejo »."
   forgeName: String!
   number: Int!
   title: String!

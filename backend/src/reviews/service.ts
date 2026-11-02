@@ -22,7 +22,7 @@ import { reviewOf, type SessionReview } from './types.js';
 /**
  * Revue de code par un agent (« Faire relire par un agent », panneau git et PR suivies) : lance une session Claude en
  * lecture seule dans le dossier de travail de la branche, avec le diff par rapport à la base et une grille de relecture,
- * puis publie son rapport (fil de la tâche, commentaire GitHub de la PR) dès son premier tour terminé.
+ * puis publie son rapport (fil de la tâche, commentaire GitHub ou GitLab de la PR) dès son premier tour terminé.
  */
 
 /** Diff inclus dans la consigne jusqu'à cette taille ; au-delà, il est joint en fichier que l'agent lit par morceaux. */
@@ -153,7 +153,7 @@ export const reviewService = {
 
   /**
    * Publie le rapport d'une session de relecture dont le premier tour est fini (ou qui s'est arrêtée) : fil de la tâche,
-   * commentaire GitHub de la PR encore ouverte, rapport rangé dans la session ; puis la session est terminée.
+   * commentaire GitHub ou GitLab de la PR encore ouverte, rapport rangé dans la session ; puis la session est terminée.
    * Une seule fois : `reportedAt` est posé avant toute publication.
    */
   async report(sessionId: string): Promise<void> {

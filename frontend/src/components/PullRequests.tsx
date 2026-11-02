@@ -89,7 +89,7 @@ function DetailsLine({ pr, showRepo = false }: { pr: PullRequest; showRepo?: boo
     <div className="small text-secondary d-flex flex-wrap gap-2 align-items-center">
       {showRepo && pr.repo && (
         <span className="font-monospace" title={`Dépôt ${pr.forgeName} de la pull request`}>
-          <i className={`bi ${pr.forgeName === 'GitHub' ? 'bi-github' : 'bi-git'} me-1`} />
+          <i className={`bi ${pr.forgeName === 'GitHub' ? 'bi-github' : pr.forgeName === 'GitLab' ? 'bi-gitlab' : 'bi-git'} me-1`} />
           {pr.repo}
         </span>
       )}
@@ -273,7 +273,10 @@ export function PullRequestModal({
                       ['MERGE', 'Commit de fusion'],
                       ['REBASE', 'Rebase'],
                     ] as const
-                  ).map(([value, label]) => (
+                  )
+                    // GitLab ne fusionne pas en rebase à la demande (méthode de fusion du projet GitLab).
+                    .filter(([value]) => value !== 'REBASE' || pr.forgeName !== 'GitLab')
+                    .map(([value, label]) => (
                     <Form.Check key={value} type="radio" id={`merge-${value}`} name="merge-method" label={label} checked={method === value} onChange={() => setMethod(value)} />
                   ))}
                 </Form.Group>
