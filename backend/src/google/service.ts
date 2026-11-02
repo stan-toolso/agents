@@ -5,7 +5,7 @@ import { sealSecrets } from '../vault/crypto.js';
 import { vaultRepository } from '../vault/repository.js';
 import { vaultService } from '../vault/service.js';
 import { GOOGLE_ACCESSES, type GoogleSettings, type VaultActor, type VaultItem } from '../vault/types.js';
-import type { GoogleAccess, GoogleAccessRequest, GoogleAccount } from './types.js';
+import { GMAIL_COMPOSE, GMAIL_FULL, GMAIL_MODIFY, gmailCan, type GoogleAccess, type GoogleAccessRequest, type GoogleAccount } from './types.js';
 import { log } from '../log.js';
 
 /**
@@ -33,7 +33,7 @@ export const accessLabels: Record<GoogleAccess, string> = { none: 'aucun accès'
 function scopesFor(req: GoogleAccessRequest): string[] {
   const scopes = ['openid', 'email', 'profile'];
   if (req.gmail !== 'none') scopes.push(GMAIL_READ);
-  if (req.gmail === 'write') scopes.push(GMAIL_SEND);
+  if (req.gmail === 'write') scopes.push(GMAIL_SEND, GMAIL_COMPOSE, GMAIL_MODIFY);
   if (req.drive === 'read') scopes.push(DRIVE_READ);
   if (req.drive === 'write') scopes.push(DRIVE_FULL);
   return scopes;
@@ -42,7 +42,7 @@ function scopesFor(req: GoogleAccessRequest): string[] {
 /** Accès réellement obtenus, d'après les portées accordées (l'utilisateur peut en décocher sur l'écran Google). */
 function grantedAccess(scopes: string[]): GoogleAccessRequest {
   const has = (s: string) => scopes.includes(s);
-  const gmail: GoogleAccess = has(GMAIL_SEND) || has('https://mail.google.com/') ? 'write' : has(GMAIL_READ) || has('https://www.googleapis.com/auth/gmail.modify') ? 'read' : 'none';
+  const gmail: GoogleAccess = has(GMAIL_SEND) || has(GMAIL_COMPOSE) || has(GMAIL_FULL) ? 'write' : has(GMAIL_READ) || has(GMAIL_MODIFY) ? 'read' : 'none';
   const drive: GoogleAccess = has(DRIVE_FULL) ? 'write' : has(DRIVE_READ) || has('https://www.googleapis.com/auth/drive.file') ? 'read' : 'none';
   return { gmail, drive };
 }
@@ -309,14 +309,14 @@ export const googleAccountService = {
     const several = accounts.length > 1;
     const lines = [
       several
-        ? `La session dispose de ${accounts.length} comptes Google par les outils du serveur MCP \`google\` (le serveur détient les jetons : tu n'as pas à les connaître). Chaque outil prend un paramètre \`account\` : l'adresse du compte à utiliser. Les lectures sont libres ; les écritures (envoi de mail, dépôt sur le Drive) sont soumises à l'approbation d'un humain.`
-        : `La session dispose du compte Google \`${accounts[0].email}\` par les outils du serveur MCP \`google\` (le serveur détient les jetons : tu n'as pas à les connaître). Les lectures sont libres ; les écritures (envoi de mail, dépôt sur le Drive) sont soumises à l'approbation d'un humain.`,
+        ? `La session dispose de ${accounts.length} comptes Google par les outils du serveur MCP \`google\` (le serveur détient les jetons : tu n'as pas à les connaître). Chaque outil prend un paramètre \`account\` : l'adresse du compte à utiliser. Les lectures sont libres ; les écritures (envoi de mail, brouillon, suppression, dépôt sur le Drive) sont soumises à l'approbation d'un humain.`
+        : `La session dispose du compte Google \`${accounts[0].email}\` par les outils du serveur MCP \`google\` (le serveur détient les jetons : tu n'as pas à les connaître). Les lectures sont libres ; les écritures (envoi de mail, brouillon, suppression, dépôt sur le Drive) sont soumises à l'approbation d'un humain.`,
     ];
     for (const account of accounts) {
       if (several) lines.push(`Compte \`${account.email}\`${account.displayName ? ` (${account.displayName})` : ''} :`);
       const indent = several ? '  ' : '';
       if (account.gmailAccess !== 'none') {
-        lines.push(`${indent}- Messagerie Gmail (${accessLabels[account.gmailAccess]}) : \`gmail_search\` (requête au format de la recherche Gmail, ex. \`from:x newer_than:7d\`), \`gmail_read\`, \`gmail_attachment\` (télécharge une pièce jointe d'un mail dans le dossier de travail, pour la lire ou la déposer ailleurs)${account.gmailAccess === 'write' ? ', `gmail_send` (envoi ou réponse, au nom de ce compte)' : ''}.`);
+        lines.push(`${indent}- Messagerie Gmail (${accessLabels[account.gmailAccess]}) : \`gmail_search\` (requête au format de la recherche Gmail, ex. \`from:x newer_than:7d\`), \`gmail_read\`, \`gmail_attachment\` (télécharge une pièce jointe d'un mail dans le dossier de travail, pour la lire ou la déposer ailleurs), \`gmail_drafts\` (liste des brouillons)${account.gmailAccess === 'write' ? ', `gmail_send` (envoi ou réponse, au nom de ce compte), `gmail_draft` (rédige ou remplace un brouillon sans l\'envoyer, réponse possible), `gmail_delete` (messages à la corbeille, brouillon supprimé)' : ''}.${account.gmailAccess === 'write' && (!gmailCan(account, 'drafts') || !gmailCan(account, 'trash')) ? ' Ce compte a été relié avant les brouillons et la suppression : ces outils lui demandent d\'être reconnecté depuis le coffre.' : ''}`);
       }
       if (account.driveAccess !== 'none') {
         lines.push(`${indent}- Drive (${accessLabels[account.driveAccess]}) : \`drive_search\`, \`drive_read\` (texte des Docs, Sheets en CSV, fichiers texte), \`drive_download\` (dans le dossier de travail)${account.driveAccess === 'write' ? ', `drive_upload` (fichier du dossier de travail, conversion en Doc ou Sheet possible), `drive_write` (créer ou remplacer un Google Doc à partir d\'un texte)' : ''}.`);
@@ -332,7 +332,7 @@ vaultService.probers.set('google', (item) => googleAccountService.probe(item));
 /** Outils du serveur `google` accessibles sans approbation (lectures), d'après les accès de l'ensemble des comptes. */
 export function googleReadTools(accounts: GoogleAccount[]): string[] {
   const tools: string[] = ['mcp__google__account'];
-  if (accounts.some((a) => a.gmailAccess !== 'none')) tools.push('mcp__google__gmail_search', 'mcp__google__gmail_read', 'mcp__google__gmail_attachment');
+  if (accounts.some((a) => a.gmailAccess !== 'none')) tools.push('mcp__google__gmail_search', 'mcp__google__gmail_read', 'mcp__google__gmail_attachment', 'mcp__google__gmail_drafts');
   if (accounts.some((a) => a.driveAccess !== 'none')) tools.push('mcp__google__drive_search', 'mcp__google__drive_read', 'mcp__google__drive_download');
   return tools;
 }
