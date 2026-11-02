@@ -1,12 +1,14 @@
 # Image de base des environnements d'exécution isolés (un conteneur par projet).
-# Contient git, le CLI Claude Code et les outils courants ; le code du projet est monté en volume
-# au même chemin absolu que sur l'hôte, ce qui évite toute traduction de chemins.
+# Contient git, le CLI Claude Code et les outils courants (dont Python 3 avec pip et venv, zip et unzip) ;
+# le code du projet est monté en volume au même chemin absolu que sur l'hôte, ce qui évite toute traduction
+# de chemins.
 FROM node:22-bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git curl ca-certificates openssh-client ripgrep jq less procps bash \
- && rm -rf /var/lib/apt/lists/*
+    python3 python3-pip python3-venv zip unzip \
+ && rm -rf /var/lib/apt/lists/* && python3 --version && zip -v >/dev/null
 
 # CLI Claude Code et OpenCode (mis à jour en reconstruisant l'image).
 RUN npm install -g @anthropic-ai/claude-code opencode-ai && npm cache clean --force
@@ -20,10 +22,9 @@ RUN npm install -g @playwright/mcp \
 
 # CLI AWS v2 (outil aws_run du coffre) : lancé par le serveur dans un conteneur jetable de cette image, jamais
 # depuis le conteneur du projet, pour que les identifiants ne soient pas visibles des agents.
-RUN apt-get update && apt-get install -y --no-install-recommends unzip \
- && curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/awscliv2.zip \
+RUN curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/awscliv2.zip \
  && unzip -q /tmp/awscliv2.zip -d /tmp && /tmp/aws/install && rm -rf /tmp/aws /tmp/awscliv2.zip \
- && apt-get purge -y unzip && rm -rf /var/lib/apt/lists/* && aws --version
+ && aws --version
 
 # CLI Scaleway (outil scw_run du coffre) : même principe, binaire unique téléchargé depuis les versions GitHub.
 ARG SCW_CLI_VERSION=2.65.2

@@ -293,7 +293,8 @@ Déployer le front (`theme-init.js`) avant ou en même temps que la CSP : l'anci
 
 ## Image du runner Docker
 
-Après une modification de `deploy/runner/Dockerfile` (CLI Claude Code, CLI OpenCode pour les
+Après une modification de `deploy/runner/Dockerfile` (outils courants dont Python 3 avec pip et venv, zip et
+unzip ; CLI Claude Code, CLI OpenCode pour les
 sessions OpenCode, Playwright/Chromium pour l'option « navigateur headless », CLI AWS et CLI Scaleway pour les
 comptes AWS et Scaleway du coffre) : `docker build -t skipper-runner deploy/runner` sur le serveur
 (≈ 1 Go, l'ARM64 télécharge son propre Chromium), puis « Recréer » le conteneur sur la page de
