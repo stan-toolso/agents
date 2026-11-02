@@ -319,4 +319,23 @@ describe('installation des dépendances à la création d’une work session', (
     expect(await readFile(path.join(state, 'log'), 'utf8')).not.toMatch(/Attente/);
     expect((await readFile(path.join(ws, 'node_modules', MARKER), 'utf8')).trim()).toBe('h');
   });
+
+  it('une commande qui s’arrête ne laisse rien en arrière-plan, même un processus qui ignore TERM', async () => {
+    const state = path.join(tmp, 'state');
+    await mkdir(state, { recursive: true });
+    await writeFile(path.join(state, 'run.sh'), RUN_SCRIPT);
+    const pidFile = path.join(tmp, 'orphan.pid');
+    const exit = await new Promise<number | null>((resolve) => {
+      const child = spawn('setsid', ['-w', 'sh', path.join(state, 'run.sh')], {
+        cwd: tmp,
+        env: { ...process.env, SKIPPER_STATE: state, SKIPPER_APP_DIR: tmp, SKIPPER_COMMAND: `sh -c 'trap "" TERM; echo $$ > ${pidFile}; exec sleep 30' & sleep 0.3; exit 1` },
+        stdio: 'ignore',
+      });
+      child.on('close', resolve);
+    });
+    expect(exit).not.toBe(0);
+    expect(await readFile(path.join(state, 'events'), 'utf8')).toMatch(/exited 1/);
+    const orphan = Number((await readFile(pidFile, 'utf8')).trim());
+    expect(() => process.kill(orphan, 0)).toThrow();
+  });
 });
