@@ -1071,7 +1071,7 @@ montre la consigne envoyée à l'agent et permet de la modifier avant le lanceme
 lister et créer des tâches.
 
 **Dépendances entre tâches (« bloquée par »).** Table `task_dependencies (task_id, depends_on_task_id)` (migration
-`056_task_dependencies`) : une tâche dépend d'autres tâches **du même projet** ; tant que l'une d'elles n'est pas
+`20261102T2057_task_dependencies`) : une tâche dépend d'autres tâches **du même projet** ; tant que l'une d'elles n'est pas
 **terminée** (une dépendance annulée bloque encore : on la retire), elle est bloquée et ne peut pas être confiée à un
 agent (`assertUnblocked` dans `startTaskSession`, `resumeTaskSession` et `tasks.claim` ; pas de prise implicite par
 `tasks.update`). Les **cycles sont refusés** à l'écriture (`dependencyCycle` de `tasks/dependencyGraph.ts`, message qui
