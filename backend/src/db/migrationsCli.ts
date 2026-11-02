@@ -13,8 +13,10 @@ import { addedBeforeLatest, checkMigrationNames, newMigrationName } from './migr
 
 const migrationsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations');
 const listFiles = async () => (await readdir(migrationsDir)).filter((f) => f.endsWith('.sql')).sort();
+// Outil en ligne de commande : sorties brutes, pas le journal du backend (log.ts).
+const out = (line: string) => process.stdout.write(`${line}\n`);
 const annotate = (level: 'error' | 'warning', message: string) =>
-  console.log(process.env.GITHUB_ACTIONS ? `::${level}::${message}` : `${level === 'error' ? 'Erreur' : 'Avertissement'} : ${message}`);
+  out(process.env.GITHUB_ACTIONS ? `::${level}::${message}` : `${level === 'error' ? 'Erreur' : 'Avertissement'} : ${message}`);
 
 /** Fichiers de migration d'une référence git (vide si la référence est inconnue). */
 function filesAt(ref: string): string[] | null {
@@ -36,7 +38,7 @@ async function create(name: string | undefined) {
   const existing = await listFiles();
   if (existing.includes(file)) throw new Error(`${file} existe déjà`);
   await writeFile(path.join(migrationsDir, file), `-- ${name}\n`, { flag: 'wx' });
-  console.log(path.relative(process.cwd(), path.join(migrationsDir, file)));
+  out(path.relative(process.cwd(), path.join(migrationsDir, file)));
 }
 
 async function check(ref = 'origin/main') {
@@ -51,14 +53,14 @@ async function check(ref = 'origin/main') {
     }
   }
   if (errors.length) process.exitCode = 1;
-  else console.log(`${files.length} migrations, nommage correct`);
+  else out(`${files.length} migrations, nommage correct`);
 }
 
 const [command, ...args] = process.argv.slice(2);
 const arg = args.join(' ') || undefined;
 (command === 'new' ? create(arg) : command === 'check' ? check(arg) : Promise.reject(new Error('Commandes : new <nom>, check [ref]'))).catch(
   (err: Error) => {
-    console.error(err.message);
+    process.stderr.write(`${err.message}\n`);
     process.exit(1);
   },
 );
