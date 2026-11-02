@@ -69,7 +69,13 @@ export default function TaskActions({ task, target, onEdit, onDeleted, compact =
   const open = task.status === 'TODO' || task.status === 'IN_PROGRESS';
   // Une session déjà en charge : la modale propose de reprendre sa conversation plutôt que d'en lancer une nouvelle.
   const resume = Boolean(task.session);
-  const launchTitle = resume ? 'Reprendre la conversation de la session de la tâche avec un nouveau message (ou lancer une nouvelle session)' : "Choisir la consigne, l'agent et l'endroit où il travaille, puis lancer une session";
+  // Une tâche bloquée par des dépendances non terminées ne se confie pas à un agent (le serveur le refuse aussi).
+  const blocked = task.blockedBy.length > 0;
+  const launchTitle = blocked
+    ? `Bloquée par ${task.blockedBy.map((t) => `« ${t.title} »`).join(', ')} : elle pourra être confiée à un agent quand ses dépendances seront terminées${task.autoStartWhenUnblocked ? ' (elle sera alors lancée automatiquement)' : ''}`
+    : resume
+      ? 'Reprendre la conversation de la session de la tâche avec un nouveau message (ou lancer une nouvelle session)'
+      : "Choisir la consigne, l'agent et l'endroit où il travaille, puis lancer une session";
   const remove = async () => {
     if (await confirm({ title: 'Supprimer la tâche', message: `Supprimer la tâche « ${task.title} » ?`, confirmLabel: 'Supprimer', danger: true })) deleteTask({ variables: { id: task.id } });
   };
@@ -90,9 +96,11 @@ export default function TaskActions({ task, target, onEdit, onDeleted, compact =
     return (
       <div className="task-actions-compact">
         {open ? (
-          <Button size="sm" variant="primary" className="text-nowrap" onClick={() => launchTask(task, target)} title={launchTitle}>
-            <i className="bi bi-play-fill" /> {resume ? 'Reprendre' : 'Confier'}
-          </Button>
+          <span title={launchTitle}>
+            <Button size="sm" variant="primary" className="text-nowrap" disabled={blocked} onClick={() => launchTask(task, target)}>
+              <i className={`bi ${blocked ? 'bi-lock' : 'bi-play-fill'}`} /> {resume ? 'Reprendre' : 'Confier'}
+            </Button>
+          </span>
         ) : (
           <Button size="sm" variant="outline-secondary" className="text-nowrap" onClick={() => move('TODO')}>
             Rouvrir
@@ -123,9 +131,11 @@ export default function TaskActions({ task, target, onEdit, onDeleted, compact =
   return (
     <div className="d-flex flex-wrap gap-1 align-items-center">
       {open && (
-        <Button size="sm" variant="primary" onClick={() => launchTask(task, target)} title={launchTitle}>
-          <i className="bi bi-play-fill" /> {resume ? 'Reprendre' : 'Confier à un agent'}
-        </Button>
+        <span title={launchTitle}>
+          <Button size="sm" variant="primary" disabled={blocked} onClick={() => launchTask(task, target)}>
+            <i className={`bi ${blocked ? 'bi-lock' : 'bi-play-fill'}`} /> {resume ? 'Reprendre' : 'Confier à un agent'}
+          </Button>
+        </span>
       )}
       {task.status === 'TODO' && (
         <Button size="sm" variant="outline-secondary" onClick={() => move('IN_PROGRESS')}>

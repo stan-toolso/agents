@@ -232,7 +232,9 @@ backend/
       mentions.ts              # mentions @Nom / @e-mail / @session:<id> : candidats et résolution dans un texte
       sessionFeed.ts           # changements, messages et réactions transmis aux sessions reliées à la tâche (en charge, passées par la tâche, mentionnées)
       mcp.ts                   # serveur MCP `tasks` (list, get, create, update, claim, release, comment, react, people, pr_list, pr_open, pr_register, pr_update)
-      launch.ts                # confier une tâche à un nouvel agent
+      launch.ts                # confier une tâche à un nouvel agent (refusé tant qu'elle est bloquée)
+      dependencyGraph.ts       # dépendances entre tâches : détection des cycles (sans base)
+      autoStart.ts             # enchaînement : tâche débloquée lancée automatiquement, notifiée
       api.ts                   # API REST /api/v1/tasks (clés d'API du projet)
     gitServer/
       paths.ts                 # dépôt Forgejo d'un projet (organisation, URL de clone et web), miroirs locaux
@@ -1067,6 +1069,24 @@ personne) et `releaseSessionIds`. « Confier à un agent »
 montre la consigne envoyée à l'agent et permet de la modifier avant le lancement. Une **API REST**
 (`/api/v1/tasks`, clés `skp_…` créées sur la fiche du projet, haché en base) permet à un outil externe de
 lister et créer des tâches.
+
+**Dépendances entre tâches (« bloquée par »).** Table `task_dependencies (task_id, depends_on_task_id)` (migration
+`20261102T2057_task_dependencies`) : une tâche dépend d'autres tâches **du même projet** ; tant que l'une d'elles n'est pas
+**terminée** (une dépendance annulée bloque encore : on la retire), elle est bloquée et ne peut pas être confiée à un
+agent (`assertUnblocked` dans `startTaskSession`, `resumeTaskSession` et `tasks.claim` ; pas de prise implicite par
+`tasks.update`). Les **cycles sont refusés** à l'écriture (`dependencyCycle` de `tasks/dependencyGraph.ts`, message qui
+nomme le chemin) ; déplacer une tâche dans un autre projet retire ses dépendances. Option **« Lancer automatiquement
+quand débloquée »** (`tasks.auto_start_when_unblocked`, au nom de `auto_start_by_id`, la personne qui l'a armée ou le
+propriétaire de la session d'agent) : quand la dernière dépendance passe à terminée, l'écouteur de `tasks/autoStart.ts`
+consomme l'option (une seule session même si deux dépendances se terminent en même temps) et appelle
+`startTaskSession` avec la configuration par défaut du projet (celle de l'agent si l'option a été armée par un agent
+de projet), puis notifie `task.unblocked` (ou `task.autostart_failed`, famille « Tâches »). L'option n'est armée que si
+une dépendance reste à terminer. Exposé : GraphQL `Task.dependsOn`, `blockedBy`, `blocked`, `dependents`,
+`autoStartWhenUnblocked`, `autoStartBy` et `dependsOnIds` / `autoStartWhenUnblocked` des entrées ; MCP `tasks`
+(`depends_on` et `auto_start` de `create` / `update`, détail dans `get` et `list`) ; REST `dependsOn` / `blockedBy`.
+Le prompt système des agents indique, pour chaque tâche ouverte, ce qui la bloque. Interface : badge « bloquée » (cadenas,
+éclair si lancement automatique) sur les cartes, la grille et la fiche ; champ « Bloquée par » et interrupteur dans le
+formulaire ; listes « Bloquée par » / « Bloque » dans la fiche et le panneau de droite ; bouton « Confier » désactivé.
 
 ### Le fil d'une tâche : une conversation
 

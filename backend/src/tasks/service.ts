@@ -5,6 +5,7 @@ import { AppError, NotFoundError } from '../errors.js';
 import { notificationService } from '../notifications/service.js';
 import { projectService } from '../projects/service.js';
 import { describeAttachment, describeAttachments, fitInInstruction, removeAllTaskAttachments, removeAttachmentFiles, removeTaskAttachments, storeTaskAttachments, validateTaskAttachments, type AttachmentDelivery } from './attachments.js';
+import { dependencyCycle, normalizeDependencyIds } from './dependencyGraph.js';
 import { findMentions, sessionMentionable, userMentionable, type Mentionable } from './mentions.js';
 import { taskRepository } from './repository.js';
 import { promptTasks } from './promptList.js';
@@ -38,6 +39,22 @@ const MAX_FIELD_KEY = 100;
 const MAX_FIELD_VALUE = 10_000;
 const MAX_COMMENT = 20_000;
 const MAX_EMOJI_CODEPOINTS = 8;
+const MAX_DEPENDENCIES = 50;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** « « Titre » (id) » d'une tâche, pour les messages et prompts. */
+const taskRef = (t: Pick<Task, 'id' | 'title'>) => `« ${t.title} » (${t.id})`;
+
+/** Une tâche est bloquée tant qu'au moins une de ses dépendances n'est pas terminée. */
+export const isBlocked = (t: Pick<Task, 'blockedByIds'>) => t.blockedByIds.length > 0;
+
+/** Refuse de confier à un agent une tâche bloquée (lancement, reprise, prise en charge par un agent). */
+export async function assertUnblocked(task: Task): Promise<void> {
+  if (!isBlocked(task)) return;
+  const blockers = await taskRepository.findByIds(task.blockedByIds);
+  const names = task.blockedByIds.map((id) => blockers.find((b) => b.id === id)).map((b, i) => (b ? `${taskRef(b)}, ${statusLabels[b.status]}` : task.blockedByIds[i]));
+  throw new AppError(`La tâche est bloquée par ${names.join(' ; ')} : elle pourra être confiée à un agent quand ses dépendances seront terminées.`);
+}
 
 /** Emoji d'une réaction nettoyé : court, sans espace. */
 export function normalizeEmoji(emoji: string): string {
@@ -170,6 +187,8 @@ export function describeTaskChanges(before: Task, after: Task, addedAttachments:
     else if (old.value !== f.value) lines.push(`- Champ « ${f.key} » : « ${old.value} » → « ${f.value} »`);
   }
   for (const [k, f] of beforeFields) if (!afterFields.has(k)) lines.push(`- Champ « ${f.key} » retiré`);
+  if (before.dependsOnIds.join('\n') !== after.dependsOnIds.join('\n')) lines.push(`- Dépendances (bloquée par) : ${before.dependsOnIds.join(', ') || 'aucune'} → ${after.dependsOnIds.join(', ') || 'aucune'}`);
+  if (before.autoStartWhenUnblocked !== after.autoStartWhenUnblocked) lines.push(`- Lancement automatique quand débloquée : ${after.autoStartWhenUnblocked ? 'activé' : 'désactivé'}`);
   if (before.description !== after.description) lines.push(`- Description, nouveau texte :\n${after.description.split('\n').map((l) => `  ${l}`).join('\n')}`);
   const { kept, leftOut } = fitInInstruction(addedAttachments);
   if (kept.length) lines.push(`- Fichiers ajoutés (joints à ce message) : ${kept.map(describeAttachment).join(', ')}`);
@@ -193,6 +212,8 @@ const fmtDate = (d: Date) => d.toISOString().slice(0, 16).replace('T', ' ');
 export const taskService = {
   list: (filter?: TaskFilter) => taskRepository.list(filter),
   listForSession: (sessionId: string) => taskRepository.listForSession(sessionId),
+  /** Tâches de ces identifiants, sans ordre garanti (dépendances d'une tâche…). */
+  findByIds: (ids: string[]) => taskRepository.findByIds(ids),
   sessionIds: (taskId: string) => taskRepository.sessionIds(taskId),
   people: (projectIds: string[]) => (projectIds.length ? taskRepository.people(projectIds) : Promise.resolve([])),
 
@@ -230,9 +251,58 @@ export const taskService = {
     return ids;
   },
 
+  /**
+   * Dépendances demandées pour une tâche (`taskId` null : tâche à créer) : identifiants nettoyés, tâches existantes du
+   * même projet, sans la tâche elle-même ni cycle. Renvoie aussi le nombre de celles qui la bloquent (pas terminées).
+   */
+  async prepareDependencies(projectId: string, taskId: string | null, ids: string[]): Promise<{ ids: string[]; blocking: number }> {
+    const wanted = normalizeDependencyIds(ids);
+    if (wanted.length > MAX_DEPENDENCIES) throw new AppError(`Au plus ${MAX_DEPENDENCIES} dépendances par tâche`);
+    const invalid = wanted.find((id) => !UUID_RE.test(id));
+    if (invalid) throw new AppError(`Dépendance invalide : ${invalid} (identifiant de tâche attendu)`);
+    if (taskId && wanted.includes(taskId)) throw new AppError('Une tâche ne peut pas dépendre d’elle-même');
+    const found = await taskRepository.findByIds(wanted);
+    for (const id of wanted) {
+      const dep = found.find((t) => t.id === id);
+      if (!dep) throw new AppError(`Dépendance introuvable : ${id}`);
+      if (dep.projectId !== projectId) throw new AppError(`La tâche ${taskRef(dep)} appartient à un autre projet : une dépendance est une tâche du même projet`);
+    }
+    if (taskId && wanted.length) {
+      const cycle = dependencyCycle(taskId, wanted, await taskRepository.dependencyEdges(projectId));
+      if (cycle) {
+        const titles = new Map([...found, ...(await taskRepository.findByIds(cycle))].map((t) => [t.id, t.title]));
+        throw new AppError(`Dépendance circulaire : ${cycle.map((id) => `« ${titles.get(id) ?? id} »`).join(' → ')}`);
+      }
+    }
+    return { ids: wanted, blocking: found.filter((t) => t.status !== 'done').length };
+  },
+
+  /**
+   * Dépendances et lancement automatique d'une entrée : validés, et l'option n'est armée que si la tâche a des
+   * dépendances non terminées (sinon il n'y a rien à attendre), au nom de l'acteur.
+   */
+  async withDependencies<T extends CreateTaskInput | UpdateTaskInput>(projectId: string, current: Task | null, input: T, actor?: TaskActor): Promise<T> {
+    const out = { ...input };
+    let blocking = current?.blockedByIds.length ?? 0;
+    if (input.dependsOn != null) {
+      const deps = await this.prepareDependencies(projectId, current?.id ?? null, input.dependsOn);
+      out.dependsOn = deps.ids;
+      blocking = deps.blocking;
+    }
+    const arm = input.autoStartWhenUnblocked ?? (input.dependsOn != null && current?.autoStartWhenUnblocked ? true : null);
+    if (arm != null) {
+      out.autoStartWhenUnblocked = arm && blocking > 0;
+      // Option réévaluée après un changement de dépendances : elle reste au nom de qui l'avait armée.
+      out.autoStartById = input.autoStartById ?? (input.autoStartWhenUnblocked == null ? current?.autoStartById : null) ?? actor?.userId ?? null;
+      if (out.autoStartWhenUnblocked && !out.autoStartById) throw new AppError('Le lancement automatique doit être armé par une personne (au nom de qui la session sera lancée)');
+    }
+    return out;
+  },
+
   async create(projectId: string, input: CreateTaskInput, actor: TaskActor): Promise<Task> {
     const project = await projectService.get(projectId);
     await validateTaskAttachments('', null, input.attachments);
+    input = await this.withDependencies(projectId, null, input, actor);
     const created = await taskRepository.create(projectId, prepare(input), actor);
     const attachments = await storeTaskAttachments(created.id, null, input.attachments).catch(async (err) => {
       await taskRepository.delete(created.id).catch(() => undefined);
@@ -267,6 +337,7 @@ export const taskService = {
     const before = await taskRepository.findById(id);
     if (!before) throw new NotFoundError('Tâche introuvable');
     await validateTaskAttachments(id, null, input.attachments, input.removeAttachmentIds);
+    input = await this.withDependencies(before.projectId, before, input, actor);
     const updated = await taskRepository.update(id, prepare(input));
     if (!updated) throw new NotFoundError('Tâche introuvable');
     const removed = await removeTaskAttachments(id, null, input.removeAttachmentIds);
@@ -438,6 +509,7 @@ export const taskService = {
     const open = await taskRepository.list({ projectId, status: OPEN_STATUSES });
     const intro = [
       "Le projet dispose d'un tableau de tâches géré avec les outils du serveur MCP `tasks` (list, get, create, update, claim, release, comment, react, people). Quand tu réalises une tâche, passe-la en `in_progress` avec `claim` puis en `done` une fois terminée ; une tâche que tu crées déjà en cours ou terminée (ton propre travail) t'est rattachée d'office, et une session peut être en charge de plusieurs tâches. Si tu découvres du travail à faire plus tard, crée une tâche `todo` plutôt que de le laisser tomber.",
+      "Une tâche peut dépendre d'autres tâches du projet (`depends_on` de `create` et `update`) : tant qu'une de ses dépendances n'est pas terminée, elle est bloquée et ne peut pas être prise ni confiée à un agent ; termine d'abord ce qui la bloque.",
       THREAD_HINT,
     ].join(' ');
     if (open.length === 0) return `${intro}\nAucune tâche ouverte pour le moment.`;
@@ -445,7 +517,7 @@ export const taskService = {
     const { shown, hidden } = promptTasks(open, sessionId);
     const lines = shown.map(
       (t) =>
-        `- [${statusLabels[t.status]}${statusTagText(t)}, priorité ${priorityLabels[t.priority]}${sessionId && t.sessionIds.includes(sessionId) ? ', assignée à cette session' : t.sessionIds.length ? ', prise par une autre session' : ''}${t.assignee ? `, responsable ${formatPerson(t.assignee)}` : ''}${tagsText(t)}] ${t.title} (id ${t.id})`,
+        `- [${statusLabels[t.status]}${statusTagText(t)}, priorité ${priorityLabels[t.priority]}${sessionId && t.sessionIds.includes(sessionId) ? ', assignée à cette session' : t.sessionIds.length ? ', prise par une autre session' : ''}${t.assignee ? `, responsable ${formatPerson(t.assignee)}` : ''}${tagsText(t)}] ${t.title} (id ${t.id})${dependencyText(t)}`,
     );
     if (hidden.length) {
       const byPriority = [...TASK_PRIORITIES].reverse().map((p) => [p, hidden.filter((t) => t.priority === p).length] as const).filter(([, n]) => n > 0);
@@ -519,6 +591,13 @@ export const taskService = {
     return parts.join('\n');
   },
 };
+
+/** « · bloquée par a, b · lancée automatiquement une fois débloquée » : dépendances d'une tâche pour un agent (vide sans dépendance). */
+export function dependencyText(t: Pick<Task, 'dependsOnIds' | 'blockedByIds' | 'autoStartWhenUnblocked'>): string {
+  if (!t.dependsOnIds.length) return '';
+  if (!t.blockedByIds.length) return ` · dépendances terminées : ${t.dependsOnIds.join(', ')}`;
+  return ` · bloquée par ${t.blockedByIds.join(', ')}${t.autoStartWhenUnblocked ? ' (lancée automatiquement une fois débloquée)' : ''}`;
+}
 
 /** « 👍 2 (Alice, Bob) · 🎉 1 (Session x) » */
 export function summarizeReactions(reactions: TaskReaction[]): string {

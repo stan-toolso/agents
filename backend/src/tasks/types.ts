@@ -47,6 +47,16 @@ export interface Task {
   commentCount: number;
   /** Fichiers joints à la tâche elle-même (ceux de ses commentaires ne comptent pas). */
   attachmentCount: number;
+  /** Tâches dont celle-ci dépend (« bloquée par »), du même projet. */
+  dependsOnIds: string[];
+  /** Celles de `dependsOnIds` qui ne sont pas terminées (une annulée bloque encore) : tant qu'il en reste, la tâche est bloquée. */
+  blockedByIds: string[];
+  /** Tâches qui dépendent de celle-ci. */
+  dependentIds: string[];
+  /** Confiée automatiquement à une session quand sa dernière dépendance se termine (option consommée au lancement). */
+  autoStartWhenUnblocked: boolean;
+  /** Personne (ou agent) au nom de qui la session sera lancée : celle qui a armé l'option. */
+  autoStartById: string | null;
   createdAt: Date;
   updatedAt: Date;
   completedAt: Date | null;
@@ -89,6 +99,12 @@ export interface CreateTaskInput {
   reporter?: TaskPersonInput | null;
   /** Fichiers joints à la tâche (images collées dans la description, documents…). */
   attachments?: AttachmentInput[] | null;
+  /** Tâches du même projet dont celle-ci dépend. */
+  dependsOn?: string[] | null;
+  /** Lancer automatiquement quand la dernière dépendance se termine ; armée au nom de l'acteur (`autoStartById`). */
+  autoStartWhenUnblocked?: boolean | null;
+  /** Rempli par le service d'après l'acteur. */
+  autoStartById?: string | null;
 }
 
 export interface UpdateTaskInput {
@@ -114,6 +130,12 @@ export interface UpdateTaskInput {
   attachments?: AttachmentInput[] | null;
   /** Pièces jointes de la tâche (pas de ses commentaires) à retirer. */
   removeAttachmentIds?: string[] | null;
+  /** Remplace la liste complète des dépendances (tâches du même projet). */
+  dependsOn?: string[] | null;
+  /** Arme ou désarme le lancement automatique quand la tâche est débloquée. */
+  autoStartWhenUnblocked?: boolean | null;
+  /** Rempli par le service d'après l'acteur. */
+  autoStartById?: string | null;
 }
 
 export interface TaskFilter {
