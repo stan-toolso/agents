@@ -107,6 +107,15 @@ ils peuvent donc commiter et pousser en https, y compris dans un conteneur. **Cu
 https** (`https://github.com/stan-toolso/Curso.git`) ; la deploy key ci-dessous reste installée mais
 n'est plus utilisée.
 
+**GitLab** (gitlab.com ou instance auto-hébergée) : Paramètres → GitLab, par personne. Un **jeton d'accès
+personnel** (Preferences → Access tokens, portées `api` et `write_repository`) déposé dans le coffre (jeton
+applicatif, service GitLab) puis choisi dans la page avec l'adresse de l'instance. La **connexion par code**
+n'apparaît que si une application OAuth de l'instance est configurée (Admin ou Preferences → Applications,
+portées `api`, `read_repository`, `write_repository`, non confidentielle, GitLab 17.2+ pour le device flow) :
+`GITLAB_CLIENT_ID` dans le `.env`, plus `GITLAB_URL` pour une instance autre que gitlab.com et
+`GITLAB_CLIENT_SECRET` si l'application est confidentielle. Les agents reçoivent `GITLAB_TOKEN`, `GITLAB_HOST` et
+un credential helper pour l'instance.
+
 **Clé de déploiement par dépôt (repli)** : pour un dépôt hors du compte connecté ou sans OAuth App.
 Il faut une **clé de déploiement en lecture seule** dédiée, avec un alias SSH. Attention : un projet
 en **conteneur Docker** n'a pas accès aux clés SSH de l'hôte ; utiliser l'https avec le jeton. Exemple pour Curso (déjà en place : clé `~/.ssh/curso-deploy`, alias

@@ -6,6 +6,7 @@ import { isHostedGitUrl } from '../gitServer/paths.js';
 import { forgejoAccounts } from '../gitServer/forgejo.js';
 import { userService } from '../users/service.js';
 import { githubService } from '../settings/github.js';
+import { gitlabRepoOf, gitlabService } from '../settings/gitlab.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -13,12 +14,16 @@ const execFileAsync = promisify(execFile);
 export const AGENT_GIT_ENV_KEYS = [
   'GITHUB_TOKEN',
   'GH_TOKEN',
+  'GITLAB_TOKEN',
+  'GITLAB_HOST',
   'SKIPPER_GIT_TOKEN',
   'GIT_CONFIG_COUNT',
   'GIT_CONFIG_KEY_0',
   'GIT_CONFIG_VALUE_0',
   'GIT_CONFIG_KEY_1',
   'GIT_CONFIG_VALUE_1',
+  'GIT_CONFIG_KEY_2',
+  'GIT_CONFIG_VALUE_2',
   'GIT_AUTHOR_NAME',
   'GIT_AUTHOR_EMAIL',
   'GIT_COMMITTER_NAME',
@@ -43,7 +48,9 @@ async function hostIdentity(): Promise<{ name: string | null; email: string | nu
 /**
  * Environnement git des agents d'une session : le jeton GitHub du compte de SON PROPRIÉTAIRE qui sert le
  * dépôt du projet (servi par un credential helper via GIT_CONFIG_*, jamais écrit sur disque), et l'identité
- * des commits (celle du compte GitHub, sinon celle du serveur). Sans propriétaire ou sans compte : pas de
+ * des commits (celle du compte GitHub, sinon celle du serveur). Même chose pour GitLab : le jeton du compte GitLab qui
+ * sert le dépôt (sinon le compte GitLab par défaut) pour son instance (GITLAB_TOKEN, GITLAB_HOST, lus aussi par glab), et
+ * l'identité de ce compte quand le dépôt du projet est sur GitLab. Sans propriétaire ou sans compte : pas de
  * jeton (les dépôts publics restent accessibles). Un usage par une session est journalisé sur le jeton.
  * Dépôt hébergé par Skipper (Forgejo) : le jeton Forgejo des sessions du propriétaire (forge_accounts), servi de la même
  * façon pour l'origine de Forgejo, afin que fetch et push depuis le conteneur passent par la forge avec son compte.
@@ -51,8 +58,10 @@ async function hostIdentity(): Promise<{ name: string | null; email: string | nu
 export async function agentGitEnv(ownerId: string | null | undefined, repoUrl?: string | null, actor: { sessionId?: string | null; projectId?: string | null } = {}): Promise<Record<string, string>> {
   const env: Record<string, string> = {};
   const hosted = isHostedGitUrl(repoUrl);
-  const [auth, identity, hostedToken] = await Promise.all([
+  const [auth, gitlab, gitlabHosts, identity, hostedToken] = await Promise.all([
     hosted ? null : githubService.gitAuth(ownerId, repoUrl, actor).catch(() => null),
+    hosted ? null : gitlabService.gitAuth(ownerId, repoUrl, actor).catch(() => null),
+    hosted ? [] : gitlabService.hosts(ownerId).catch(() => []),
     hostIdentity(),
     hosted && ownerId ? userService.get(ownerId).then((u) => forgejoAccounts.agentToken(u)).catch((err) => (log.warn(`[forgejo] jeton des sessions : ${(err as Error).message}`), null)) : null,
   ]);
@@ -61,6 +70,11 @@ export async function agentGitEnv(ownerId: string | null | undefined, repoUrl?: 
     env.GITHUB_TOKEN = auth.token;
     env.GH_TOKEN = auth.token;
     configs.push(['credential.https://github.com.helper', '!f() { echo username=x-access-token; echo "password=$GITHUB_TOKEN"; }; f']);
+  }
+  if (gitlab) {
+    env.GITLAB_TOKEN = gitlab.token;
+    env.GITLAB_HOST = gitlab.host;
+    configs.push([`credential.https://${gitlab.host}.helper`, '!f() { echo username=oauth2; echo "password=$GITLAB_TOKEN"; }; f']);
   }
   if (hostedToken) {
     env.SKIPPER_GIT_TOKEN = hostedToken;
@@ -73,8 +87,10 @@ export async function agentGitEnv(ownerId: string | null | undefined, repoUrl?: 
       env[`GIT_CONFIG_VALUE_${i}`] = value;
     });
   }
-  const name = auth?.name ?? identity.name ?? null;
-  const email = auth?.email ?? identity.email ?? null;
+  // Dépôt GitLab : identité du compte GitLab ; sinon celle du compte GitHub, sinon celle du serveur.
+  const author = gitlab && gitlabRepoOf(repoUrl, gitlabHosts) ? gitlab : auth;
+  const name = author?.name ?? identity.name ?? null;
+  const email = author?.email ?? identity.email ?? null;
   if (name) {
     env.GIT_AUTHOR_NAME = name;
     env.GIT_COMMITTER_NAME = name;

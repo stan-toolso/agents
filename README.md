@@ -92,7 +92,8 @@ Mise en production (serveur, nginx, base RDS, pm2) : voir `DEPLOY.md`.
 Paramètres (menu en bas de la sidebar), **propres à chaque personne** : **Claude** (abonnement
 connecté depuis la page ou clé API du coffre, modèles, budgets et consommation), **OpenCode** (modèle
 par défaut, clés des fournisseurs, liste des modèles), **GitHub** (comptes connectés par code ou par
-jeton du coffre, dépôts), **Serveur** (administrateurs : santé, sessions simultanées, maintenance,
+jeton du coffre, dépôts), **GitLab** (comptes gitlab.com ou d'une instance auto-hébergée, connectés
+par jeton du coffre ou par code, dépôts), **Serveur** (administrateurs : santé, sessions simultanées, maintenance,
 limites de l'abonnement), **Notifications** (familles reçues en push) et **Apparence**. Les sessions, actions git et pull requests d'une personne
 utilisent ses propres comptes.
 
@@ -197,6 +198,8 @@ backend/
       opencode.ts              # réglages OpenCode d'une personne : modèle par défaut, clés des fournisseurs, modèles
       github.ts                # comptes GitHub d'une personne : jeton par dépôt, identité des commits, dépôts
       githubDevice.ts          # connexion GitHub par code (device flow)
+      gitlab.ts                # comptes GitLab d'une personne (gitlab.com ou instance) : jeton par dépôt, identité, dépôts
+      gitlabDevice.ts          # connexion GitLab par code (device flow d'une application OAuth, GITLAB_CLIENT_ID)
       usage.ts                 # consommation (usage_ledger) par personne
       legacy.ts                # reprise des réglages Claude / GitHub d'application vers le premier administrateur
       server.ts / rateLimits.ts # réglages du serveur et limites de l'abonnement (administrateurs)
@@ -369,7 +372,8 @@ Drive, même serveur MCP `google` qu'auparavant (`account` = nom de l'élément)
 **Réservés à Skipper.** Un **jeton applicatif** (`backend/src/vault/tokens.ts`) est un identifiant
 que Skipper utilise pour le compte d'une personne : jeton d'abonnement Claude (`claude`, obtenu par
 la connexion de Paramètres → Claude, jamais révélable, renouvelé par Skipper), clé API Anthropic
-(`anthropic`), jeton GitHub (`github`, collé ou obtenu par la connexion par code), clés des
+(`anthropic`), jeton GitHub (`github`, collé ou obtenu par la connexion par code), jeton GitLab
+(`gitlab`, idem ; gitlab.com ou instance auto-hébergée), clés des
 fournisseurs de modèles d'OpenCode (`openai`, `google`, `openrouter`, `opencode`, `mistral`,
 `deepseek`, `xai`, `groq`). Un **proxy LiteLLM** (adresse et clé) et un **projet Langfuse** (hôte, clé
 publique, clé secrète) servent aux agents à appel direct de modèle. Ces éléments n'ont aucun outil
@@ -377,7 +381,7 @@ MCP, ne peuvent pas être ouverts à un projet, et les jetons OAuth ne se copien
 d'une personne les **référencent** (identifiant de l'élément) et Skipper relit le secret à chaque
 usage, après avoir vérifié qu'elle peut toujours s'en servir, en journalisant l'usage. Partager un
 jeton (permission `utiliser`) permet à un collègue de le choisir dans ses réglages sans le voir. Le
-test d'un élément vérifie le jeton auprès du service (Anthropic, GitHub, LiteLLM `/v1/models`,
+test d'un élément vérifie le jeton auprès du service (Anthropic, GitHub, GitLab sur gitlab.com, LiteLLM `/v1/models`,
 Langfuse `/api/public/projects`).
 
 **AWS.** Deux modes : **IAM Identity Center** (`sso` : adresse du portail d'accès et région ; connexion par
@@ -485,7 +489,9 @@ L'hébergement ne se désactive pas.
   `vault_item_links` (portée `project` ou `personal`), `vault_audit_events`.
 - **UserSettings** (`user_settings`, une ligne par personne et par clé : `claude`, `claude.verification`,
   `opencode`, `opencode.models`) et **UserGithubAccount** (`user_github_accounts` : `login`, `method`,
-  `scopes`, `organizations`, `isDefault`, `vaultItemId` du jeton, expiration).
+  `scopes`, `organizations`, `isDefault`, `vaultItemId` du jeton, expiration) et **UserGitlabAccount**
+  (`user_gitlab_accounts` : `host` de l'instance, `login`, `name`, `email` des commits, `method`, `scopes`, `groups`,
+  `isDefault`, `vaultItemId`, expiration).
 - **Workflow** (`workflows`) : `projectId`, `name`, `definition` (nœuds et arêtes), `enabled`,
   planification (`schedule`, `scheduleInputs`, `scheduleOwnerId`), `eventOwnerId`. **WorkflowRun**
   (`workflow_runs`, `workflow_run_nodes`, `workflow_run_logs`) : définition figée au lancement, entrées,
@@ -1502,7 +1508,7 @@ le budget USD par session du formulaire de lancement n'est plus proposé. Le co�
 vue Toolso de la page Consommation. Sans facturation configurée (instance interne), tout reste en USD : **configurer
 la facturation à la création d'une cellule client**.
 
-## Paramètres par personne (Claude, OpenCode, GitHub)
+## Paramètres par personne (Claude, OpenCode, GitHub, GitLab)
 
 Page « Paramètres » (menu du bas de la sidebar). Chaque personne a ses réglages (table
 `user_settings`, `backend/src/settings/userStore.ts`) et ses identifiants, rangés dans son coffre
@@ -1542,6 +1548,20 @@ chaque dépôt, le compte retenu est celui dont l'identifiant ou l'une des organ
 dépôt, sinon le compte par défaut. Ce compte sert aux actions git de la personne (clone, fetch, pull,
 push, création du dossier d'une session), à ses pull requests, et aux agents de ses sessions (credential helper
 par variables d'environnement, jamais écrit sur disque ; identité des commits = celle du compte).
+
+**GitLab** (`settings/gitlab.ts`, `settings/gitlabDevice.ts`) : même principe, table `user_gitlab_accounts`.
+Un compte appartient à une **instance** (`host` : gitlab.com ou une instance auto-hébergée, jointe en https).
+Connexion par **jeton personnel** déposé dans le coffre (élément `gitlab`, portées `api` et `write_repository`)
+en indiquant l'instance, ou par **code** (device authorization grant, GitLab 17.2+) quand une application OAuth
+de l'instance est configurée : `GITLAB_CLIENT_ID` (et `GITLAB_URL` hors gitlab.com, `GITLAB_CLIENT_SECRET` si
+l'application est confidentielle) ; GitLab n'a pas de client public comme le CLI GitHub, donc sans
+`GITLAB_CLIENT_ID` seuls les jetons personnels sont proposés. Les jetons OAuth (2 h) sont renouvelés par Skipper.
+Une URL de dépôt est GitLab si son hôte est gitlab.com ou l'instance d'un compte de la personne ; le compte
+retenu est celui de l'instance dont l'identifiant ou un groupe de premier niveau possède l'espace du dépôt,
+sinon le compte par défaut. Il sert aux actions git de la personne (`gitAuthFor` : en-tête `oauth2:<jeton>`),
+à la liste des dépôts du formulaire de projet (`gitlabRepositories`) et aux agents : credential helper pour
+l'instance, `GITLAB_TOKEN` et `GITLAB_HOST` (lus par `glab`), identité des commits du compte GitLab quand le
+dépôt du projet est sur GitLab. Les merge requests ne sont pas encore suivies comme les pull requests GitHub.
 
 **OpenCode** (`settings/opencode.ts`) : modèle par défaut (`fournisseur/modèle`), budget par session,
 et la clé de chaque fournisseur de modèles (OpenAI, Anthropic, Google, OpenRouter, OpenCode Zen,

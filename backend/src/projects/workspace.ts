@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { config } from '../config.js';
 import { AppError } from '../errors.js';
 import { githubService } from '../settings/github.js';
+import { gitlabService } from '../settings/gitlab.js';
 import { forgejoGitAuthArgs } from '../gitServer/forgejo.js';
 import type { Project } from './types.js';
 
@@ -25,13 +26,15 @@ export async function workspaceExists(project: Pick<Project, 'slug'>): Promise<b
 }
 
 /**
- * Arguments d'authentification git d'une personne pour le dépôt d'un projet (jeton de son compte GitHub qui sert le
- * dépôt), vides sans compte. Dépôt hébergé par Skipper (Forgejo) : les commandes du serveur passent par l'adresse
+ * Arguments d'authentification git d'une personne pour le dépôt d'un projet (jeton de son compte GitHub ou GitLab qui
+ * sert le dépôt), vides sans compte. Dépôt hébergé par Skipper (Forgejo) : les commandes du serveur passent par l'adresse
  * directe de Forgejo avec le jeton administrateur (voir `forgejoGitAuthArgs`).
  */
 export async function gitAuthFor(project: Pick<Project, 'gitUrl' | 'gitHosted' | 'slug'>, actorId: string | null | undefined): Promise<string[]> {
   if (project.gitHosted) return forgejoGitAuthArgs();
   if (!actorId || !project.gitUrl) return [];
+  const gitlab = await gitlabService.gitConfigArgs(actorId, project.gitUrl).catch(() => []);
+  if (gitlab.length) return gitlab;
   return githubService.gitConfigArgs(actorId, project.gitUrl).catch(() => []);
 }
 

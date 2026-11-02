@@ -272,12 +272,65 @@ export interface ClaudeRateLimits {
 }
 
 /** Paramètres de la personne connectée ; `rateLimits` et `server` ne sont remplis que pour un administrateur. */
+/** Compte GitLab connecté par la personne, sur gitlab.com ou une instance auto-hébergée (OAUTH : connexion par code ; PAT : jeton personnel du coffre). */
+export interface GitlabAccount {
+  id: string;
+  host: string;
+  login: string;
+  name: string | null;
+  avatarUrl: string | null;
+  method: 'OAUTH' | 'PAT';
+  scopes: string[];
+  groups: string[];
+  isDefault: boolean;
+  vaultItemId: string;
+  connectedAt: string;
+  tokenExpiresAt: string | null;
+}
+
+export interface GitlabAuthStatus {
+  connected: boolean;
+  accounts: GitlabAccount[];
+  deviceAvailable: boolean;
+  deviceHost: string | null;
+}
+
+export interface GitlabDeviceLogin {
+  id: string;
+  userCode: string;
+  verificationUri: string;
+  verificationUriComplete: string | null;
+  expiresAt: string;
+  interval: number;
+}
+
+export interface GitlabDevicePoll {
+  status: 'PENDING' | 'CONNECTED' | 'EXPIRED' | 'DENIED' | string;
+  interval: number;
+  account: GitlabAccount | null;
+}
+
+export interface GitlabRepository {
+  fullName: string;
+  name: string;
+  namespace: string;
+  description: string | null;
+  private: boolean;
+  defaultBranch: string | null;
+  cloneUrl: string;
+  htmlUrl: string;
+  pushedAt: string | null;
+  host: string;
+  account: string;
+}
+
 export interface AppSettings {
   claude: ClaudeSettings;
   claudeAuth: ClaudeAuthStatus;
   models: ClaudeModel[];
   usage: UsageSummary;
   github: GithubAuthStatus;
+  gitlab: GitlabAuthStatus;
   opencode: OpencodeSettings;
   rateLimits: ClaudeRateLimits | null;
   server: ServerState | null;
@@ -321,8 +374,38 @@ export const GITHUB_AUTH_FIELDS = gql`
   }
 `;
 
+export const GITLAB_ACCOUNT_FIELDS = gql`
+  fragment GitlabAccountFields on GitlabAccount {
+    id
+    host
+    login
+    name
+    avatarUrl
+    method
+    scopes
+    groups
+    isDefault
+    vaultItemId
+    connectedAt
+    tokenExpiresAt
+  }
+`;
+
+export const GITLAB_AUTH_FIELDS = gql`
+  ${GITLAB_ACCOUNT_FIELDS}
+  fragment GitlabAuthFields on GitlabAuthStatus {
+    connected
+    deviceAvailable
+    deviceHost
+    accounts {
+      ...GitlabAccountFields
+    }
+  }
+`;
+
 export const APP_SETTINGS_FIELDS = gql`
   ${GITHUB_AUTH_FIELDS}
+  ${GITLAB_AUTH_FIELDS}
   fragment AppSettingsFields on AppSettings {
     claude {
       authMode
@@ -386,6 +469,9 @@ export const APP_SETTINGS_FIELDS = gql`
     }
     github {
       ...GithubAuthFields
+    }
+    gitlab {
+      ...GitlabAuthFields
     }
     opencode {
       defaultModel
@@ -526,6 +612,88 @@ export const DISCONNECT_GITHUB = gql`
   ${APP_SETTINGS_FIELDS}
   mutation DisconnectGithub($accountId: ID) {
     disconnectGithub(accountId: $accountId) {
+      ...AppSettingsFields
+    }
+  }
+`;
+
+export const GITLAB_STATUS = gql`
+  ${GITLAB_AUTH_FIELDS}
+  query GitlabStatus {
+    settings {
+      gitlab {
+        ...GitlabAuthFields
+      }
+    }
+  }
+`;
+
+export const GITLAB_REPOSITORIES = gql`
+  query GitlabRepositories($query: String) {
+    gitlabRepositories(query: $query) {
+      fullName
+      name
+      namespace
+      description
+      private
+      defaultBranch
+      cloneUrl
+      htmlUrl
+      pushedAt
+      host
+      account
+    }
+  }
+`;
+
+export const START_GITLAB_DEVICE_LOGIN = gql`
+  mutation StartGitlabDeviceLogin {
+    startGitlabDeviceLogin {
+      id
+      userCode
+      verificationUri
+      verificationUriComplete
+      expiresAt
+      interval
+    }
+  }
+`;
+
+export const POLL_GITLAB_DEVICE_LOGIN = gql`
+  ${GITLAB_ACCOUNT_FIELDS}
+  mutation PollGitlabDeviceLogin($id: ID!) {
+    pollGitlabDeviceLogin(id: $id) {
+      status
+      interval
+      account {
+        ...GitlabAccountFields
+      }
+    }
+  }
+`;
+
+export const CONNECT_GITLAB_FROM_VAULT = gql`
+  ${GITLAB_ACCOUNT_FIELDS}
+  mutation ConnectGitlabFromVault($itemId: ID!, $host: String) {
+    connectGitlabFromVault(itemId: $itemId, host: $host) {
+      ...GitlabAccountFields
+    }
+  }
+`;
+
+export const SET_DEFAULT_GITLAB_ACCOUNT = gql`
+  ${APP_SETTINGS_FIELDS}
+  mutation SetDefaultGitlabAccount($accountId: ID!) {
+    setDefaultGitlabAccount(accountId: $accountId) {
+      ...AppSettingsFields
+    }
+  }
+`;
+
+export const DISCONNECT_GITLAB = gql`
+  ${APP_SETTINGS_FIELDS}
+  mutation DisconnectGitlab($accountId: ID) {
+    disconnectGitlab(accountId: $accountId) {
       ...AppSettingsFields
     }
   }
