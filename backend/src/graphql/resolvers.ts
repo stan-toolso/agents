@@ -724,6 +724,8 @@ export const resolvers = {
     worksession: (session: Session, _: unknown, ctx: Ctx) => worksessionOrNull(ctx, session.worksessionId),
     owner: (session: Session, _: unknown, ctx: Ctx) => userOrNull(ctx, session.ownerId),
     requestedBy: (session: Session, _: unknown, ctx: Ctx) => userOrNull(ctx, session.requestedById),
+    takenOverBy: (session: Session, _: unknown, ctx: Ctx) => userOrNull(ctx, session.takenOverById),
+    viewerCanTakeOver: (session: Session, _: unknown, ctx: Ctx) => (ctx.user && session.ownerId ? agentService.canTakeOver(ctx.user.id, session) : false),
     agent: async (session: Session, _: unknown, ctx: Ctx) => (session.ownerId ? ((await loadersOf(ctx).agent(session.ownerId)) ?? null) : null),
     task: (session: Session) => taskService.forSession(session.id),
     tasks: (session: Session) => taskService.tasksInCharge(session.id),
@@ -1180,6 +1182,14 @@ export const resolvers = {
       const agent = await agentService.get(args.id);
       await requireProject(ctx, agent.projectId, 'member');
       return agentService.summon(agent.id, { taskId: args.taskId ?? null, text: args.text, attachments: args.attachments ?? null, requestedById: requireUser(ctx).id });
+    },
+    takeOverSession: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      await guardSession(ctx, args.id, 'member');
+      return agentService.takeOver(args.id, requireUser(ctx));
+    },
+    handBackSession: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      await guardSession(ctx, args.id, 'member');
+      return agentService.handBack(args.id, requireUser(ctx));
     },
     setAgentDelegation: async (_: unknown, args: { id: string; account: string; delegate: boolean; readOnly?: boolean | null; pullRequests?: boolean | null }, ctx: Ctx) => {
       const agent = await guardAgentManager(ctx, args.id);

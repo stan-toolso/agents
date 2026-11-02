@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentIdentityPrompt } from "./prompt.js";
+import { agentIdentityPrompt, roleRulesPrompt } from "./prompt.js";
 import type { Agent } from "./types.js";
 
 const agent = {
@@ -44,5 +44,30 @@ describe("agentIdentityPrompt : comptes git prêtés", () => {
         githubPullRequests: true,
       }),
     ).not.toContain("lecture seule");
+  });
+});
+
+describe("agentIdentityPrompt : règles du rôle et prise en main", () => {
+  const pm = { ...agent, name: "Chris", kind: "product_manager" } as Agent;
+
+  it("un Product Manager ne livre pas de code et confie le correctif au développeur", () => {
+    const text = agentIdentityPrompt(pm, { name: "Skipper" }, null, {});
+    expect(text).toContain("Règles de ton rôle");
+    expect(text).toContain("tu n'ouvres pas de pull request");
+    expect(text).toContain("confie-la tout de suite à l'agent développeur");
+    expect(roleRulesPrompt({ kind: "custom" })).toBe("");
+  });
+
+  it("prise en main : comptes de la personne, règles du rôle et lecture seule levées", () => {
+    const text = agentIdentityPrompt(
+      pm,
+      { name: "Skipper" },
+      null,
+      { githubReadOnly: true, githubPullRequests: false },
+      { name: "Stan", email: "stan@toolso.io" },
+    );
+    expect(text).toContain("Stan (stan@toolso.io) a pris la main sur cette session");
+    expect(text).not.toContain("Règles de ton rôle");
+    expect(text).not.toContain("lecture seule");
   });
 });

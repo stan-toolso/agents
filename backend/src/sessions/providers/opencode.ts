@@ -296,13 +296,13 @@ class OpencodeRun {
 
     // Même portée qu'une session Claude : coffre, comptes Google, contexte, tâches, prompt système.
     const browserEnabled = Boolean((ctx.project.runnerConfig as { browser?: boolean } | null)?.browser);
-    const vaultItems = await vaultService.agentItems(ctx.project.id, this.ownerId);
+    const vaultItems = await vaultService.agentItems(ctx.project.id, ctx.session.takenOverById ?? this.ownerId);
     const vaultTools = vaultItems.some((i) => i.kind !== 'google');
     const vaultBrowser = vaultItems.some((i) => i.kind === 'website' || i.kind === 'secret');
-    const googleAccounts = await googleAccountService.accountsFor(ctx.project.id, this.ownerId);
+    const googleAccounts = await googleAccountService.accountsFor(ctx.project.id, ctx.session.takenOverById ?? this.ownerId);
     // Session jouée par un agent de projet : son identité, sa bibliothèque propre (et celle du projet s'il en hérite), ses comptes prêtés.
     const agent = await agentService.forUser(this.ownerId);
-    const accounts = await agentService.accountsForOwner(this.ownerId);
+    const accounts = await agentService.accountsForSession(ctx.session);
     const agentLibraries = isPersonalProject(ctx.project) ? [] : await agentService.libraries(ctx.project.id);
     const projectContext = !agent || agent.inheritContext;
     this.systemPrompt = [
