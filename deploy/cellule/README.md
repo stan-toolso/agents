@@ -62,6 +62,14 @@ sudo -iu skipper ~/skipper/deploy/cellule/deploy.sh            # origin/main
 ~/skipper/deploy/cellule/deploy.sh --force                      # tout reconstruire et changer d'instance même sans changement
 ```
 
+Depuis une session d'agent (`ssh_run` plafonne à 600 s) : `sudo -iu skipper bash -c 'nohup ~/skipper/deploy/cellule/deploy.sh
+> /dev/null 2>&1 < /dev/null & disown'`, puis lire `~/deploy-logs/latest.log` (le script écrit lui-même son journal,
+`~/deploy-logs/<date>-<heure>.log`, 30 gardés ; chaque étape porte le temps écoulé). Un seul déploiement à la fois
+(verrou `~/.skipper-deploy.lock` : un second lancement s'arrête aussitôt sans rien toucher). Après la récupération,
+le script se relance depuis une copie de la version à déployer (`git show <rev>:deploy/cellule/deploy.sh`) : la mise
+à jour du clone ne le coupe plus en pleine exécution, et c'est la nouvelle logique qui s'applique. Le build du
+backend et celui du front tournent en parallèle, le front sans son typecheck (la CI le fait) : ~15 s.
+
 **Bleu/vert** (cellule préparée par `bluegreen-setup.sh`). Deux instances du backend, `skipper@blue` (4101) et
 `skipper@green` (4102), chacune dans son dossier ; nginx envoie le trafic à l'instance active. `deploy.sh` :
 
@@ -70,7 +78,9 @@ sudo -iu skipper ~/skipper/deploy/cellule/deploy.sh            # origin/main
 2. si seul `frontend/` a changé : publie le front, rien d'autre ;
 3. sinon démarre la nouvelle instance (elle applique les migrations, s'inscrit dans `backend_instances`, laisse en
    place les sessions de l'autre), attend qu'elle réponde sur `/graphql` (échec : elle est arrêtée, nginx n'a pas
-   bougé), réécrit `/etc/nginx/skipper-upstream.conf`, `nginx -t` puis recharge nginx, publie le front ;
+   bougé), réécrit `/etc/nginx/skipper-upstream.conf` sur place (skipper possède le fichier, pas `/etc/nginx` :
+   aucun fichier temporaire à côté), `nginx -t` puis recharge nginx, publie le front. Toute sortie entre le démarrage
+   et la bascule arrête la nouvelle instance (piège `EXIT`) ;
 4. envoie SIGUSR2 à l'ancienne et la désactive au boot. Elle cède les planificateurs à la nouvelle, finit les tours
    en cours, gare chaque session à la fin de son tour (la prochaine instruction la relance sur la nouvelle instance,
    conversation comprise) et sort d'elle-même quand plus rien n'y tourne (au plus `SKIPPER_DRAIN_TIMEOUT_MINUTES`,
@@ -80,7 +90,9 @@ sudo -iu skipper ~/skipper/deploy/cellule/deploy.sh            # origin/main
 
 Suivi : `sudo journalctl -u skipper@blue -f` ; instances : `SELECT label, port, heartbeat_at, draining_since FROM
 backend_instances`. Une mise à jour lancée pendant que l'instance précédente se vide encore attend sa sortie (au plus
-`--max-wait`, puis abandon, ou arrêt forcé avec `--force`). Les migrations doivent rester compatibles avec la version
+`--max-wait`, puis abandon, ou arrêt forcé avec `--force`). Une instance de la couleur cible qui tourne **sans** se vider (`draining_since`
+vide : déploiement arrêté entre son démarrage et la bascule) n'est pas attendue pour rien : si elle tourne déjà la
+révision voulue et répond, le déploiement reprend directement à la bascule ; sinon elle reçoit SIGUSR2 et se vide. Les migrations doivent rester compatibles avec la version
 précédente, qui tourne encore pendant le drainage : ajouter, pas retirer ni renommer dans la même livraison.
 
 **Transition d'une cellule installée avant** (skipper-1) : `sudo …/deploy/cellule/bluegreen-setup.sh` (root, depuis
