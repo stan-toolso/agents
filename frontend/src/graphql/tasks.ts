@@ -26,6 +26,12 @@ export const TASK_PAGE = gql`
         headRefName
         baseRefName
       }
+      sessionCosts {
+        session {
+          id
+        }
+        usd
+      }
       sessions {
         id
         name

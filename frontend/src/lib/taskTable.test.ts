@@ -3,6 +3,7 @@ import type { Task } from '../graphql/operations';
 import { applyFilters, defaultLayout, loadLayout, matchesFilter, moveColumn, normalizeLayout, shiftColumn, sortTasks, TASK_COLUMNS, visibleColumns } from './taskTable';
 
 const task = (over: Partial<Task> & { id: string }): Task => ({
+  costUsd: 0,
   title: 'Tâche',
   description: '',
   status: 'TODO',

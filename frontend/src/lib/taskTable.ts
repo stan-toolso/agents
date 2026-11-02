@@ -1,5 +1,6 @@
 import type { Task, TaskPriority, TaskStatus } from '../graphql/operations';
 import { prRef, type PullRequestStage } from '../graphql/pullRequests';
+import { formatCost } from './humanize';
 
 /** Étape d'une PR suivie telle qu'elle se lit et se filtre dans la grille. */
 export const PR_STAGE_TEXT: Record<PullRequestStage, string> = { PENDING: 'en préparation', DRAFT: 'brouillon', TO_MERGE: 'à fusionner', MERGED: 'fusionnée', CANCELLED: 'annulée' };
@@ -25,6 +26,7 @@ export type TaskColumnKey =
   | 'pullRequest'
   | 'comments'
   | 'attachments'
+  | 'cost'
   | 'createdBy'
   | 'createdAt'
   | 'updatedAt'
@@ -74,6 +76,7 @@ export const TASK_COLUMNS: TaskColumn[] = [
   { key: 'branch', label: 'Branche', width: 160, minWidth: 80, defaultVisible: false, sortable: true, filter: { kind: 'text' } },
   { key: 'pullRequest', label: 'PR', width: 96, minWidth: 60, defaultVisible: true, sortable: true, filter: { kind: 'text' } },
   { key: 'comments', label: 'Comm.', width: 76, minWidth: 50, defaultVisible: true, sortable: true, filter: null, align: 'end' },
+  { key: 'cost', label: 'Coût', width: 80, minWidth: 50, defaultVisible: false, sortable: true, filter: null, align: 'end' },
   { key: 'attachments', label: 'Fichiers', width: 70, minWidth: 50, defaultVisible: false, sortable: true, filter: null, align: 'end' },
   {
     key: 'createdBy',
@@ -232,6 +235,8 @@ export function cellText(t: Task, key: TaskColumnKey): string {
       return t.pullRequest ? `#${t.pullRequest.number} ${t.pullRequest.title}` : '';
     case 'comments':
       return t.commentCount ? String(t.commentCount) : '';
+    case 'cost':
+      return t.costUsd > 0 ? formatCost(t.costUsd) : '';
     case 'attachments':
       return t.attachmentCount ? String(t.attachmentCount) : '';
     case 'createdBy':
@@ -332,6 +337,8 @@ export function sortValue(t: Task, key: TaskColumnKey): string | number | null {
       return t.pullRequests?.find((pr) => pr.number != null)?.number ?? t.pullRequest?.number ?? (t.pullRequests?.length ? 0 : null);
     case 'comments':
       return t.commentCount;
+    case 'cost':
+      return t.costUsd;
     case 'attachments':
       return t.attachmentCount;
     case 'createdBy':

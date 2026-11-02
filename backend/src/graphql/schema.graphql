@@ -318,6 +318,11 @@ type TaskComment {
 }
 
 "Tâche d'un projet, avec priorité. Créée et mise à jour par les humains ou les agents (outils MCP `tasks`)."
+type TaskSessionCost {
+  session: Session!
+  usd: Float!
+}
+
 type Task {
   id: ID!
   project: Project!
@@ -335,6 +340,10 @@ type Task {
   sessionsInCharge: [Session!]!
   "Toutes les sessions passées par la tâche (archivées comprises), la plus récemment reliée d'abord."
   sessions: [Session!]!
+  "Coût attribué à la tâche (unité d'affichage : crédits dans une cellule facturée). Chaque tour d'une session est réparti à parts égales entre les tâches auxquelles elle était reliée à ce moment."
+  costUsd: Float!
+  "Part du coût de chaque session dans celui de la tâche, la plus coûteuse d'abord."
+  sessionCosts: [TaskSessionCost!]!
   "'human' ou 'agent'."
   createdByType: String!
   createdBySession: Session

@@ -343,6 +343,13 @@ export const resolvers = {
       const sessions = ids.length ? await sessionService.list({ ids, archived: 'all', limit: 500 }) : [];
       return ids.map((id) => sessions.find((s) => s.id === id)).filter((s): s is Session => Boolean(s));
     },
+    costUsd: async (t: Task, _: unknown, ctx: Ctx) => (await loadersOf(ctx).taskCost(t.id))?.totalUsd ?? 0,
+    sessionCosts: async (t: Task, _: unknown, ctx: Ctx) => {
+      const cost = await loadersOf(ctx).taskCost(t.id);
+      if (!cost) return [];
+      const sessions = await sessionService.list({ ids: [...cost.bySession.keys()], archived: 'all', limit: 500 });
+      return sessions.map((session) => ({ session, usd: cost.bySession.get(session.id) ?? 0 })).sort((a, b) => b.usd - a.usd);
+    },
     createdBySession: (t: Task) => (t.createdBySessionId ? sessionService.get(t.createdBySessionId) : null),
     // Les réactions de toute la tâche sont lues une fois et accrochées à chaque message (évite une requête par message).
     comments: async (t: Task) => {
