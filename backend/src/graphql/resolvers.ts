@@ -778,6 +778,8 @@ export const resolvers = {
     worksession: (session: Session, _: unknown, ctx: Ctx) => worksessionOrNull(ctx, session.worksessionId),
     owner: (session: Session, _: unknown, ctx: Ctx) => userOrNull(ctx, session.ownerId),
     requestedBy: (session: Session, _: unknown, ctx: Ctx) => userOrNull(ctx, session.requestedById),
+    takenOverBy: (session: Session, _: unknown, ctx: Ctx) => userOrNull(ctx, session.takenOverById),
+    viewerCanTakeOver: (session: Session, _: unknown, ctx: Ctx) => (ctx.user && session.ownerId ? agentService.canTakeOver(ctx.user.id, session) : false),
     agent: async (session: Session, _: unknown, ctx: Ctx) => (session.ownerId ? ((await loadersOf(ctx).agent(session.ownerId)) ?? null) : null),
     task: (session: Session) => taskService.forSession(session.id),
     tasks: (session: Session) => taskService.tasksInCharge(session.id),
@@ -823,7 +825,7 @@ export const resolvers = {
       const acc = agentService.accounts(a);
       const github = await userOrNull(ctx, a.githubDelegateId);
       const gitlab = await userOrNull(ctx, a.gitlabDelegateId);
-      return { claude: await userOrNull(ctx, a.claudeDelegateId), github, githubReadOnly: acc.githubReadOnly, gitlab, gitlabReadOnly: acc.gitlabReadOnly, git: github ?? gitlab, gitReadOnly: acc.githubReadOnly || acc.gitlabReadOnly };
+      return { claude: await userOrNull(ctx, a.claudeDelegateId), github, githubReadOnly: acc.githubReadOnly, githubPullRequests: acc.githubPullRequests, gitlab, gitlabReadOnly: acc.gitlabReadOnly, gitlabPullRequests: acc.gitlabPullRequests, git: github ?? gitlab, gitReadOnly: acc.githubReadOnly || acc.gitlabReadOnly };
     },
     managers: (a: Agent) => agentService.managers(a.id),
     canManage: (a: Agent, _: unknown, ctx: Ctx) => agentService.canManage(requireUser(ctx).id, a),
@@ -1244,13 +1246,21 @@ export const resolvers = {
       await requireProject(ctx, agent.projectId, 'member');
       return agentService.summon(agent.id, { taskId: args.taskId ?? null, text: args.text, attachments: args.attachments ?? null, requestedById: requireUser(ctx).id });
     },
-    setAgentDelegation: async (_: unknown, args: { id: string; account: string; delegate: boolean; readOnly?: boolean | null }, ctx: Ctx) => {
+    takeOverSession: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      await guardSession(ctx, args.id, 'member');
+      return agentService.takeOver(args.id, requireUser(ctx));
+    },
+    handBackSession: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      await guardSession(ctx, args.id, 'member');
+      return agentService.handBack(args.id, requireUser(ctx));
+    },
+    setAgentDelegation: async (_: unknown, args: { id: string; account: string; delegate: boolean; readOnly?: boolean | null; pullRequests?: boolean | null }, ctx: Ctx) => {
       const agent = await guardAgentManager(ctx, args.id);
       // On ne prête que son propre compte : la personne connectée est la délégante ; retirer une délégation est ouvert aux gestionnaires.
       const delegateId = args.delegate ? requireUser(ctx).id : null;
       const kinds: AgentAccountKind[] = args.account === 'GIT' ? ['github', 'gitlab'] : [args.account.toLowerCase() as AgentAccountKind];
       let updated = agent;
-      for (const kind of kinds) updated = await agentService.setDelegation(agent.id, kind, delegateId, { readOnly: args.readOnly ?? null });
+      for (const kind of kinds) updated = await agentService.setDelegation(agent.id, kind, delegateId, { readOnly: args.readOnly ?? null, pullRequests: args.pullRequests ?? null });
       return updated;
     },
     runAgentAction: async (_: unknown, args: { id: string; key: string; taskId?: string | null }, ctx: Ctx) => {

@@ -313,6 +313,11 @@ export default function SessionDetailPage() {
                 {' '}
                 · <Link to={`/projects/${session.project.id}/agents/${session.agent.id}`} className="cc-meta" title={`Session jouée par l'agent ${session.agent.name}`}><AgentAvatar agent={session.agent} size={14} className="agent-inline-avatar" />{session.agent.name}</Link>
                 {session.requestedBy && <span className="cc-dimmer"> · demandée par {session.requestedBy.id === user?.id ? 'moi' : session.requestedBy.name}</span>}
+                {session.takenOverBy && (
+                  <span className="cc-yellow" title={`La session tourne avec les comptes et les droits de ${session.takenOverBy.name} (Claude, GitHub, GitLab, coffre), plus ceux de ${session.agent.name}`}>
+                    {' '}· <i className="bi bi-person-check" /> {session.takenOverBy.id === user?.id ? "j'ai la main" : `${session.takenOverBy.name} a la main`}
+                  </span>
+                )}
               </>
             ) : (
               session.owner && (

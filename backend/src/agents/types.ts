@@ -68,12 +68,16 @@ export interface AgentProfile {
   claudeDelegateId: string | null;
   /** Personne qui prête son compte GitHub à l'agent (null : les comptes GitHub propres de l'agent). */
   githubDelegateId: string | null;
-  /** Compte GitHub prêté en lecture seule : ni push, ni pull request. */
+  /** Compte GitHub prêté en lecture seule : ni push, ni pull request (sauf `githubDelegatePullRequests`). */
   githubDelegateReadOnly: boolean;
+  /** Compte GitHub prêté en lecture seule, mais l'agent peut ouvrir des pull requests (`tasks.pr_open`). */
+  githubDelegatePullRequests: boolean;
   /** Personne qui prête son compte GitLab à l'agent (null : les comptes GitLab propres de l'agent). */
   gitlabDelegateId: string | null;
-  /** Compte GitLab prêté en lecture seule : ni push, ni merge request. */
+  /** Compte GitLab prêté en lecture seule : ni push, ni merge request (sauf `gitlabDelegatePullRequests`). */
   gitlabDelegateReadOnly: boolean;
+  /** Compte GitLab prêté en lecture seule, mais l'agent peut ouvrir des merge requests (`tasks.pr_open`). */
+  gitlabDelegatePullRequests: boolean;
   triggers: AgentTriggers;
   actions: AgentAction[];
   enabled: boolean;
@@ -131,16 +135,20 @@ export interface OwnerAccounts {
   githubUserId: string;
   /** Compte GitHub prêté en lecture seule : la session ne pousse pas vers GitHub et n'y ouvre pas de pull request. */
   githubReadOnly: boolean;
+  /** La session peut ouvrir des pull requests GitHub par `tasks.pr_open` (Skipper pousse sa branche), même en lecture seule. */
+  githubPullRequests: boolean;
   /** Dont les comptes GitLab servent les dépôts GitLab. */
   gitlabUserId: string;
   /** Compte GitLab prêté en lecture seule. */
   gitlabReadOnly: boolean;
+  /** La session peut ouvrir des merge requests GitLab par `tasks.pr_open`, même en lecture seule. */
+  gitlabPullRequests: boolean;
   /** Dont le compte de la forge de Skipper (dépôt hébergé) sert le dépôt : toujours le propriétaire lui-même. */
   forgeUserId: string;
 }
 
 /** Comptes d'une personne : les siens partout, en écriture. */
-export const ownAccounts = (userId: string): OwnerAccounts => ({ claudeUserId: userId, githubUserId: userId, githubReadOnly: false, gitlabUserId: userId, gitlabReadOnly: false, forgeUserId: userId });
+export const ownAccounts = (userId: string): OwnerAccounts => ({ claudeUserId: userId, githubUserId: userId, githubReadOnly: false, githubPullRequests: true, gitlabUserId: userId, gitlabReadOnly: false, gitlabPullRequests: true, forgeUserId: userId });
 
 /** Ce qu'un agent peut emprunter : le compte Claude, le compte GitHub ou le compte GitLab d'une personne. */
 export type AgentAccountKind = 'claude' | 'github' | 'gitlab';

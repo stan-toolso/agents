@@ -37,12 +37,13 @@ export type GitHostKind = 'github' | 'gitlab' | 'forge';
 
 /**
  * Compte qui sert un dépôt pour un propriétaire de session : la forge de Skipper (dépôt hébergé), GitLab (gitlab.com ou
- * une instance des comptes GitLab en jeu) ou GitHub, avec la personne dont le compte sert et le prêt en lecture seule.
+ * une instance des comptes GitLab en jeu) ou GitHub, avec la personne dont le compte sert, le prêt en lecture seule et
+ * le droit d'ouvrir des pull requests par `tasks.pr_open` (vrai hors lecture seule, ou par option du prêt).
  */
-export async function gitAccountFor(accounts: OwnerAccounts, repoUrl: string | null | undefined): Promise<{ host: GitHostKind; userId: string; readOnly: boolean }> {
-  if (isHostedGitUrl(repoUrl)) return { host: 'forge', userId: accounts.forgeUserId, readOnly: false };
-  if (gitlabRepoOf(repoUrl, await gitlabService.hosts(accounts.gitlabUserId).catch(() => []))) return { host: 'gitlab', userId: accounts.gitlabUserId, readOnly: accounts.gitlabReadOnly };
-  return { host: 'github', userId: accounts.githubUserId, readOnly: accounts.githubReadOnly };
+export async function gitAccountFor(accounts: OwnerAccounts, repoUrl: string | null | undefined): Promise<{ host: GitHostKind; userId: string; readOnly: boolean; pullRequests: boolean }> {
+  if (isHostedGitUrl(repoUrl)) return { host: 'forge', userId: accounts.forgeUserId, readOnly: false, pullRequests: true };
+  if (gitlabRepoOf(repoUrl, await gitlabService.hosts(accounts.gitlabUserId).catch(() => []))) return { host: 'gitlab', userId: accounts.gitlabUserId, readOnly: accounts.gitlabReadOnly, pullRequests: accounts.gitlabPullRequests };
+  return { host: 'github', userId: accounts.githubUserId, readOnly: accounts.githubReadOnly, pullRequests: accounts.githubPullRequests };
 }
 
 let identityCache: { name: string | null; email: string | null } | null = null;

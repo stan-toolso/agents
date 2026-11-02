@@ -14,6 +14,14 @@ export const TASK_PAGE = gql`
       sessionsInCharge {
         id
       }
+      createdBySession {
+        id
+        name
+        owner {
+          id
+          name
+        }
+      }
       pullRequest {
         number
         title
@@ -103,6 +111,10 @@ export const TASK_THREAD = gql`
         authorSession {
           id
           name
+          owner {
+            id
+            name
+          }
         }
         agent {
           id

@@ -260,8 +260,10 @@ export const agentService = {
       claudeUserId: agent.claudeDelegateId ?? agent.id,
       githubUserId: agent.githubDelegateId ?? agent.id,
       githubReadOnly: Boolean(agent.githubDelegateId && agent.githubDelegateReadOnly),
+      githubPullRequests: !(agent.githubDelegateId && agent.githubDelegateReadOnly) || agent.githubDelegatePullRequests,
       gitlabUserId: agent.gitlabDelegateId ?? agent.id,
       gitlabReadOnly: Boolean(agent.gitlabDelegateId && agent.gitlabDelegateReadOnly),
+      gitlabPullRequests: !(agent.gitlabDelegateId && agent.gitlabDelegateReadOnly) || agent.gitlabDelegatePullRequests,
       forgeUserId: agent.id,
     };
   },
@@ -274,11 +276,60 @@ export const agentService = {
   },
 
   /**
+   * Comptes qui servent une session : ceux de la personne qui a pris la main (les siens, en écriture), sinon ceux de son
+   * propriétaire (`accountsForOwner`). Tout code qui agit « avec les comptes de la session » passe par là.
+   */
+  async accountsForSession(session: Pick<Session, 'ownerId' | 'takenOverById'>): Promise<OwnerAccounts | null> {
+    return session.takenOverById ? ownAccounts(session.takenOverById) : this.accountsForOwner(session.ownerId);
+  },
+
+  /**
+   * Peut prendre la main sur la session d'un agent : membre du projet (au moins rôle membre) qui a demandé la session,
+   * ou gestionnaire de l'agent, ou administrateur du projet. Une session de personne ne se prend pas.
+   */
+  async canTakeOver(userId: string, session: Pick<Session, 'ownerId' | 'projectId' | 'requestedById'>): Promise<boolean> {
+    const agent = await this.forUser(session.ownerId);
+    if (!agent) return false;
+    const role = await userService.roleFor(userId, session.projectId);
+    if (!role || ROLE_RANK[role] < ROLE_RANK.member) return false;
+    return session.requestedById === userId || this.canManage(userId, agent);
+  },
+
+  /**
+   * Une personne prend la main sur la session d'un agent : la session continue (même conversation, même dossier, toujours
+   * au nom de l'agent), mais avec les comptes et les droits de la personne — elle peut alors pousser, ouvrir une PR,
+   * utiliser ses éléments du coffre — jusqu'à ce qu'elle la rende (`handBack`).
+   */
+  async takeOver(sessionId: string, user: Pick<User, 'id' | 'name'>): Promise<Session> {
+    const session = await sessionRepository.findById(sessionId);
+    if (!session) throw new NotFoundError('Session introuvable');
+    if (!(await this.canTakeOver(user.id, session))) {
+      throw new AppError("Seuls la personne qui a demandé la session, les gestionnaires de l'agent et les administrateurs du projet peuvent prendre la main", 'FORBIDDEN');
+    }
+    if (session.takenOverById === user.id) return session;
+    const agent = await this.get(session.ownerId!);
+    return sessionService.setTakenOver(sessionId, user.id, `${user.name} a pris la main : la session tourne désormais avec ses comptes et ses droits, plus ceux de ${agent.name}${session.status === 'running' ? ' (appliqué à la prochaine instruction, après la fin du tour en cours)' : ''}`);
+  },
+
+  /** Rend la session à l'agent : elle reprend ses comptes. La personne qui a la main, ou quiconque peut la prendre. */
+  async handBack(sessionId: string, user: Pick<User, 'id' | 'name'>): Promise<Session> {
+    const session = await sessionRepository.findById(sessionId);
+    if (!session) throw new NotFoundError('Session introuvable');
+    if (!session.takenOverById) return session;
+    if (session.takenOverById !== user.id && !(await this.canTakeOver(user.id, session))) {
+      throw new AppError("Seuls la personne qui a la main, les gestionnaires de l'agent et les administrateurs du projet peuvent la rendre", 'FORBIDDEN');
+    }
+    const agent = await this.get(session.ownerId!);
+    return sessionService.setTakenOver(sessionId, null, `${user.name} a rendu la main à ${agent.name} : la session reprend les comptes de l'agent`);
+  },
+
+  /**
    * Prête (ou reprend) un compte à l'agent : `delegateId` est la personne qui prête — elle ne peut prêter que son propre
    * compte, et doit être membre du projet ; null retire la délégation. Les comptes GitHub et GitLab se prêtent chacun à
-   * part, en lecture seule par défaut.
+   * part, en lecture seule par défaut ; `pullRequests` permet, en lecture seule, d'ouvrir des pull requests (merge
+   * requests) par `tasks.pr_open`. Une option absente garde sa valeur tant que le prêt reste à la même personne.
    */
-  async setDelegation(agentId: string, account: AgentAccountKind, delegateId: string | null, opts: { readOnly?: boolean | null } = {}): Promise<Agent> {
+  async setDelegation(agentId: string, account: AgentAccountKind, delegateId: string | null, opts: { readOnly?: boolean | null; pullRequests?: boolean | null } = {}): Promise<Agent> {
     const agent = await this.get(agentId);
     if (delegateId) {
       const user = await userRepository.findById(delegateId);
@@ -286,13 +337,19 @@ export const agentService = {
       const role = await userService.roleFor(delegateId, agent.projectId);
       if (!role || ROLE_RANK[role] < ROLE_RANK.member) throw new AppError(`${user.name} doit être membre du projet pour prêter son compte à l'agent`);
     }
-    const readOnly = delegateId ? (opts.readOnly ?? true) : true;
+    const current =
+      account === 'github'
+        ? { id: agent.githubDelegateId, readOnly: agent.githubDelegateReadOnly, pullRequests: agent.githubDelegatePullRequests }
+        : { id: agent.gitlabDelegateId, readOnly: agent.gitlabDelegateReadOnly, pullRequests: agent.gitlabDelegatePullRequests };
+    const same = delegateId != null && delegateId === current.id;
+    const readOnly = delegateId ? (opts.readOnly ?? (same ? current.readOnly : true)) : true;
+    const pullRequests = delegateId ? (opts.pullRequests ?? (same ? current.pullRequests : false)) : false;
     const patch =
       account === 'claude'
         ? { claudeDelegateId: delegateId }
         : account === 'github'
-          ? { githubDelegateId: delegateId, githubDelegateReadOnly: readOnly }
-          : { gitlabDelegateId: delegateId, gitlabDelegateReadOnly: readOnly };
+          ? { githubDelegateId: delegateId, githubDelegateReadOnly: readOnly, githubDelegatePullRequests: pullRequests }
+          : { gitlabDelegateId: delegateId, gitlabDelegateReadOnly: readOnly, gitlabDelegatePullRequests: pullRequests };
     const updated = await agentRepository.update(agentId, patch);
     if (!updated) throw new NotFoundError('Agent introuvable');
     return updated;

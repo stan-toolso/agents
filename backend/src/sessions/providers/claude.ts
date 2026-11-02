@@ -46,7 +46,7 @@ import { taskService } from '../../tasks/service.js';
 import { createWorksessionsMcpServer } from '../../worksessions/mcp.js';
 import { createEnvMcpServer } from '../../envFiles/mcp.js';
 import { envFileService } from '../../envFiles/service.js';
-import { createSessionsMcpServer, sessionsPromptSummary } from '../mcp.js';
+import { archivePromptSummary, createSessionsMcpServer, sessionsPromptSummary } from '../mcp.js';
 import { claudeSettings, cliEnv } from '../../settings/claude.js';
 import { usageService } from '../../settings/usage.js';
 import { describeRejection, rateLimitService } from '../../settings/rateLimits.js';
@@ -189,7 +189,10 @@ export class ClaudeProvider implements SessionProvider {
     // Réglages du PROPRIÉTAIRE de la session : identifiants (coffre), modèle par défaut, budgets, plafond mensuel. Pour un
     // agent de projet, les comptes qu'une personne lui a prêtés (délégation) remplacent les siens.
     const ownerId = ctx.session.ownerId;
-    const accounts = await agentService.accountsForOwner(ownerId);
+    // Personne qui a pris la main sur la session d'un agent : ses comptes et ses droits (coffre, comptes Google) servent la
+    // session à la place de ceux de l'agent ; l'agent reste le propriétaire (identité, coût, bibliothèque).
+    const rightsHolderId = ctx.session.takenOverById ?? ownerId;
+    const accounts = await agentService.accountsForSession(ctx.session);
     const owner = await claudeSettings.forSession(accounts?.claudeUserId ?? null);
     owner.assertCredentials();
     await owner.assertBudgetAvailable();
@@ -210,6 +213,7 @@ export class ClaudeProvider implements SessionProvider {
     // ses messages dans les fils de tâches sont signés de son nom. Les autres agents du projet sont présentés à toute session.
     const agent = chat || review ? null : await agentService.forUser(ownerId);
     const requestedBy = agent && ctx.session.requestedById ? await userRepository.findById(ctx.session.requestedById) : null;
+    const takenOverBy = agent && ctx.session.takenOverById ? await userRepository.findById(ctx.session.takenOverById) : null;
     const projectAgents = chat || review || isPersonalProject(ctx.project) ? [] : await agentService.listByProject(ctx.project.id);
     // Canaux de conversation d'équipe du projet (serveur MCP `conversations`) ; un espace personnel n'en a pas.
     const channels = chat || review || isPersonalProject(ctx.project) ? [] : await conversationService.list(ctx.project.id);
@@ -236,11 +240,11 @@ export class ClaudeProvider implements SessionProvider {
     // Option « navigateur » du projet : un serveur MCP Playwright (Chromium headless) dans le conteneur du projet.
     const browserEnabled = !chat && !review && Boolean((ctx.project.runnerConfig as { browser?: boolean } | null)?.browser);
     // Portée du coffre pour cette session : éléments du projet, reliés au projet, reliés par le propriétaire pour ses sessions.
-    const vaultItems = review ? [] : await vaultService.agentItems(ctx.project.id, ownerId);
+    const vaultItems = review ? [] : await vaultService.agentItems(ctx.project.id, rightsHolderId);
     const vaultTools = vaultItems.some((i) => i.kind !== 'google');
     const vaultBrowser = vaultItems.some((i) => i.kind === 'website' || i.kind === 'secret');
     // Comptes Google de la portée (Gmail, Drive) : serveur MCP `google`, lectures libres, écritures soumises à autorisation.
-    const googleAccounts = review ? [] : await googleAccountService.accountsFor(ctx.project.id, ownerId);
+    const googleAccounts = review ? [] : await googleAccountService.accountsFor(ctx.project.id, rightsHolderId);
     // Aperçu en direct de la branche (serveur MCP `preview`) : sessions qui ont un dossier de travail, aperçus activés.
     const previewWorksession = !chat && !review && previewsEnabled() ? ctx.session.worksessionId : null;
     // Prompt système : celui du projet, l'identité de la session, puis la bibliothèque de contexte, les tâches, le coffre et les comptes Google.
@@ -248,7 +252,7 @@ export class ClaudeProvider implements SessionProvider {
       ? [ctx.project.systemPrompt.trim(), sessionIdentityPrompt(ctx.session, ctx.project), await contextService.promptSummary(ctx.project.id), REVIEW_SYSTEM_PROMPT]
       : [
         ctx.project.systemPrompt.trim(),
-        agent ? agentIdentityPrompt(agent, ctx.project, requestedBy, { githubReadOnly: accounts?.githubReadOnly, gitlabReadOnly: accounts?.gitlabReadOnly }) : '',
+        agent ? agentIdentityPrompt(agent, ctx.project, requestedBy, accounts ?? {}, takenOverBy) : '',
         sessionIdentityPrompt(ctx.session, ctx.project),
         projectAgents.length ? [agentsPromptSummary(projectAgents, agent), agentsMcpPrompt()].filter(Boolean).join('\n') : '',
         scope ? await personalService.promptSummary(scope, await userService.get(scope.ownerId)) : '',
@@ -264,6 +268,7 @@ export class ClaudeProvider implements SessionProvider {
         vaultService.promptSummary(vaultItems, ctx.project),
         chat ? '' : await envFileService.promptSummary(ctx.project.id),
         sessionsPromptSummary(ctx.project, { chat }),
+        archivePromptSummary({ agent: Boolean(agent), child: Boolean(ctx.session.parentSessionId) }),
         googleAccountService.promptSummary(googleAccounts),
         chat ? '' : sharedPagesPrompt(),
         ctx.session.worksessionId && !chat ? previewPrompt(previewsEnabled(), ctx.session.worksessionId) : '',
@@ -295,7 +300,7 @@ export class ClaudeProvider implements SessionProvider {
     const vaultContext = {
       project: ctx.project,
       sessionId: ctx.session.id,
-      ownerId,
+      ownerId: rightsHolderId,
       cwd: ctx.cwd,
       emit: ctx.emit,
       remembered: async (toolName: string, key: string, projectRules: boolean) => {
@@ -329,7 +334,7 @@ export class ClaudeProvider implements SessionProvider {
         worksessions: createWorksessionsMcpServer(ctx.project, ctx.session.id, scope),
         sessions: createSessionsMcpServer(ctx.project, ctx.session.id, scope),
         // Fichiers d'environnement du projet : un chat n'a pas de dossier de travail où les écrire.
-        ...(chat ? {} : { env: createEnvMcpServer({ project: ctx.project, sessionId: ctx.session.id, ownerId, worksessionId: ctx.session.worksessionId ?? null }) }),
+        ...(chat ? {} : { env: createEnvMcpServer({ project: ctx.project, sessionId: ctx.session.id, ownerId: rightsHolderId, worksessionId: ctx.session.worksessionId ?? null }) }),
         // Espace personnel : la liste des projets de la personne (lecture seule).
         ...(scope ? { projects: createProjectsMcpServer(scope) } : {}),
         // Un chat n'a pas de dossier de travail : rien à publier.
@@ -365,7 +370,7 @@ export class ClaudeProvider implements SessionProvider {
       // Fichiers d'environnement : libres (modèles du projet en base, écriture dans le seul dossier de travail ; une valeur
       // du coffre n'y arrive que si l'élément le permet, choix de qui le gère).
       // Aperçu : libre (le même bouton que l'onglet « Aperçu », dans le conteneur du projet, sans coût ni effet extérieur).
-      allowedTools: review ? REVIEW_ALLOWED_TOOLS : [...allowedTools, ...projectRules.map(formatRule), 'mcp__context', ...TASKS_FREE_TOOLS, ...CONVERSATIONS_FREE_TOOLS, 'mcp__vault', 'mcp__worksessions__list', 'mcp__worksessions__create', 'mcp__sessions__list', 'mcp__sessions__get', 'mcp__sessions__wait', 'mcp__sessions__end', 'mcp__pages__list', 'mcp__projects', ...AGENTS_FREE_TOOLS, ...(chat ? [] : ['mcp__env']), ...(previewWorksession ? ['mcp__preview'] : []), ...(browserServer ? browserReadTools : []), ...(googleAccounts.length ? googleReadTools(googleAccounts) : [])],
+      allowedTools: review ? REVIEW_ALLOWED_TOOLS : [...allowedTools, ...projectRules.map(formatRule), 'mcp__context', ...TASKS_FREE_TOOLS, ...CONVERSATIONS_FREE_TOOLS, 'mcp__vault', 'mcp__worksessions__list', 'mcp__worksessions__create', 'mcp__sessions__list', 'mcp__sessions__get', 'mcp__sessions__wait', 'mcp__sessions__end', 'mcp__sessions__archive', 'mcp__pages__list', 'mcp__projects', ...AGENTS_FREE_TOOLS, ...(chat ? [] : ['mcp__env']), ...(previewWorksession ? ['mcp__preview'] : []), ...(browserServer ? browserReadTools : []), ...(googleAccounts.length ? googleReadTools(googleAccounts) : [])],
       ...(review ? { disallowedTools: REVIEW_DISALLOWED_TOOLS } : {}),
       // Le coffre saisit des secrets dans le navigateur : les outils qui pourraient relire la valeur sont retirés à l'agent.
       ...(browserServer && vaultBrowser ? { disallowedTools: ['mcp__playwright__browser_evaluate', 'mcp__playwright__browser_run_code'] } : {}),
@@ -491,7 +496,7 @@ export class ClaudeProvider implements SessionProvider {
         await done;
       },
       sendMessage: async (text, attachments = []) => {
-        await (await claudeSettings.forSession(ownerId)).assertBudgetAvailable();
+        await (await claudeSettings.forSession(accounts?.claudeUserId ?? null)).assertBudgetAvailable();
         queue.push(await this.instruction(ctx, text, attachments, null, takeNotes()));
         turnInProgress = true;
         await ctx.setActivity('busy');
@@ -516,7 +521,7 @@ export class ClaudeProvider implements SessionProvider {
           applied.push('permissionMode');
         }
         if ('model' in patch) {
-          const fresh = await claudeSettings.forSession(ownerId);
+          const fresh = await claudeSettings.forSession(accounts?.claudeUserId ?? null);
           const next = patch.model ? String(patch.model) : fresh.settings.defaultModel ?? undefined;
           fresh.assertModelAllowed(next);
           await stream.setModel(next);

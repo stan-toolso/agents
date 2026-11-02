@@ -10,6 +10,8 @@ interface SessionRow {
   parent_session_id: string | null;
   owner_id: string | null;
   requested_by_id: string | null;
+  taken_over_by_id: string | null;
+  taken_over_at: Date | null;
   workflow_run_id: string | null;
   archived_at: Date | null;
   former_worksession: FormerWorksession | null;
@@ -55,6 +57,8 @@ function toSession(row: SessionRow): Session {
     parentSessionId: row.parent_session_id,
     ownerId: row.owner_id ?? null,
     requestedById: row.requested_by_id ?? null,
+    takenOverById: row.taken_over_by_id ?? null,
+    takenOverAt: row.taken_over_at ?? null,
     workflowRunId: row.workflow_run_id ?? null,
     archivedAt: row.archived_at ?? null,
     formerWorksession: row.former_worksession ?? null,
@@ -99,6 +103,8 @@ export interface SessionPatch {
   name?: string;
   archivedAt?: Date | null;
   ownerId?: string | null;
+  takenOverById?: string | null;
+  takenOverAt?: Date | null;
   cleanup?: SessionCleanup;
   contextTokens?: number | null;
   resumeDigest?: string | null;
@@ -122,6 +128,8 @@ const patchColumns: Record<keyof SessionPatch, string> = {
   name: 'name',
   archivedAt: 'archived_at',
   ownerId: 'owner_id',
+  takenOverById: 'taken_over_by_id',
+  takenOverAt: 'taken_over_at',
   cleanup: 'cleanup',
   contextTokens: 'context_tokens',
   resumeDigest: 'resume_digest',

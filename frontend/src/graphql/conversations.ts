@@ -22,7 +22,7 @@ export interface ChannelMessage {
   authorType: 'human' | 'agent';
   authorName: string;
   author: { id: string; name: string } | null;
-  authorSession: { id: string; name: string } | null;
+  authorSession: { id: string; name: string; owner: { id: string; name: string } | null } | null;
   agent?: { id: string; name: string; kind: 'PRODUCT_MANAGER' | 'DEVELOPER' | 'CUSTOM'; avatar: { emoji: string | null; color: string | null } } | null;
   body: string;
   mentions: TaskMention[];
@@ -63,6 +63,10 @@ export const MESSAGE_FIELDS = gql`
     authorSession {
       id
       name
+      owner {
+        id
+        name
+      }
     }
     agent {
       id

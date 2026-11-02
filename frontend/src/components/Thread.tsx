@@ -36,7 +36,8 @@ export interface ThreadMessage {
   authorType: 'human' | 'agent';
   authorName: string;
   author: { id: string; name: string } | null;
-  authorSession: { id: string; name: string } | null;
+  /** Session qui a écrit le message ; `owner` est la personne (ou l'agent) qui la pilote. */
+  authorSession: { id: string; name: string; owner?: { id: string; name: string } | null } | null;
   /** Agent de projet dont la session a écrit le message. */
   agent?: { id: string; name: string; kind: 'PRODUCT_MANAGER' | 'DEVELOPER' | 'CUSTOM'; avatar: { emoji: string | null; color: string | null } } | null;
   body: string;
@@ -109,6 +110,16 @@ export function useThreadAnchor(anchor: string, ready: boolean): void {
     const t = setTimeout(() => el.classList.remove('tt-flash'), 2500);
     return () => clearTimeout(t);
   }, [anchor, ready]);
+}
+
+/** Lien discret vers la session qui a écrit le message, à côté de son auteur (la personne ou l'agent qui la pilote). */
+export function SessionLink({ session }: { session: { id: string; name: string } }) {
+  return (
+    <Link to={`/sessions/${session.id}`} className="tt-session-link" title={`Écrit par la session « ${session.name} »`}>
+      <i className="bi bi-robot" />
+      session
+    </Link>
+  );
 }
 
 /** Avatar d'un auteur : initiales d'une personne, robot pour une session d'agent, avatar nommé pour un agent du projet. */
@@ -373,7 +384,11 @@ export function MessageView({ c, onReply, isReply }: { c: ThreadMessage; onReply
   const { confirm, showError } = useDialogs();
   const edited = new Date(c.updatedAt).getTime() - new Date(c.createdAt).getTime() > 1000;
   const mentionsMe = Boolean(user && c.mentions.some((m) => m.kind === 'user' && m.id === user.id));
-  const agent = c.authorType === 'agent';
+  // Un message de session est signé par qui la pilote (personne ou agent du projet) ; le titre de la session
+  // n'est plus que le repli d'une session sans pilote connu.
+  const owner = c.authorSession?.owner ?? null;
+  const name = c.agent?.name ?? owner?.name ?? c.authorName;
+  const robot = c.authorType === 'agent' && !owner;
   const attachments = c.attachments ?? [];
   const save = async () => {
     setSaving(true);
@@ -388,17 +403,12 @@ export function MessageView({ c, onReply, isReply }: { c: ThreadMessage; onReply
   };
   return (
     <div id={`${api.anchor}-${c.id}`} className={`tt-msg${isReply ? ' tt-reply' : ''}${mentionsMe ? ' tt-mentions-me' : ''}`}>
-      <Avatar name={c.authorName} agent={agent} projectAgent={c.agent} />
+      <Avatar name={name} agent={robot} projectAgent={c.agent} />
       <div className="tt-msg-main">
         <div className="tt-msg-head">
-          {c.authorSession ? (
-            <Link to={`/sessions/${c.authorSession.id}`} className="tt-author">
-              {c.authorName}
-            </Link>
-          ) : (
-            <span className="tt-author">{c.authorName}</span>
-          )}
-          {agent && <span className="tt-badge-agent">{c.agent ? agentKindLabels[c.agent.kind] : 'agent'}</span>}
+          <span className="tt-author">{name}</span>
+          {(c.agent || robot) && <span className="tt-badge-agent">{c.agent ? agentKindLabels[c.agent.kind] : 'agent'}</span>}
+          {c.authorSession && <SessionLink session={c.authorSession} />}
           <span className="tt-time" title={fmtFull(c.createdAt)}>
             {timeAgo(c.createdAt)}
             {edited && ' · modifié'}

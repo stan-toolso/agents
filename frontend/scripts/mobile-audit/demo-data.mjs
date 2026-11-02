@@ -119,6 +119,8 @@ function session(id, p, name, opts = {}) {
     activity: opts.activity ?? (opts.status && opts.status !== 'RUNNING' ? null : 'IDLE'),
     owner: opts.owner ?? U.me,
     requestedBy: opts.requestedBy ?? null,
+    takenOverBy: opts.takenOverBy ?? null,
+    viewerCanTakeOver: Boolean(opts.owner?.agent && opts.requestedBy === U.me),
     agent: opts.owner?.agent ?? null,
     archivedAt: opts.archivedAt ?? null,
     formerWorksession: null,
@@ -182,7 +184,7 @@ const S = {
   stripe: session('s-stripe-2026-10', P.api, 'Migration vers l’API Stripe 2026-10', { status: 'COMPLETED', age: 60 * 28, updated: 60 * 22, cost: 3.4 }),
   relances: session('s-relances-impayes', P.api, 'Relances automatiques des impayés', { status: 'INTERRUPTED', age: 60 * 30, updated: 60 * 20, cost: 0.95 }),
   push: session('s-notifs-camps', P.mobile, 'Notifications push des camps', { owner: U.lea, status: 'FAILED', age: 60 * 6, updated: 60 * 2, cost: 0.58, error: 'npm run test : 2 tests en échec (CampReminder.test.ts)' }),
-  revue: session('s-max-cotisations', P.mobile, 'Paiement des cotisations en trois fois', { owner: U.max, requestedBy: U.lea, activity: 'BUSY', age: 35, updated: 0, cost: 0.66 }),
+  revue: session('s-max-cotisations', P.mobile, 'Paiement des cotisations en trois fois', { owner: U.max, requestedBy: U.lea, takenOverBy: U.lea, activity: 'BUSY', age: 35, updated: 0, cost: 0.66 }),
   hebdo: session('s-rapport-hebdo', P.data, 'Rapport hebdo des inscriptions', { age: 60 * 24 * 6, updated: 60 * 9, cost: 2.1, branch: null }),
   chat1: session('c-idees-blog', P.perso, 'Idées d’articles pour le blog', { kind: 'CHAT', age: 60 * 2, updated: 50, cost: 0.08 }),
   chat2: session('c-compte-rendu', P.perso, 'Résumé du comité de pilotage', { kind: 'CHAT', age: 60 * 26, updated: 60 * 25, cost: 0.05 }),
@@ -320,8 +322,10 @@ const comment = (t, author, minutesAgo, body, extra = {}) => {
   return c;
 };
 comment(T.tarifs, U.lea, 60 * 26, 'Le support reçoit beaucoup de questions sur l’offre annuelle : on peut l’afficher directement sur la page ?');
-comment(T.tarifs, U.chris, 60 * 25, 'J’ai ajouté l’interrupteur mensuel / annuel aux critères d’acceptation. @Camille Laurent, tu valides la remise de 20 % ?');
+comment(T.tarifs, U.chris, 60 * 25, 'J’ai ajouté l’interrupteur mensuel / annuel aux critères d’acceptation. @Camille Laurent, tu valides la remise de 20 % ?', { authorType: 'agent', authorSession: S.blog });
 comment(T.tarifs, U.me, 60 * 24, 'Oui, 20 % sur l’annuel. Go.', { reactions: [{ __typename: 'TaskReaction', emoji: '👍', count: 2, actors: ['Léa Fontaine', 'Chris'], mine: false }] });
+// Message écrit par une session pilotée par une personne : signé par la personne, avec un lien discret vers la session.
+comment(T.tarifs, U.me, 60 * 23, 'Interrupteur mensuel / annuel en place, remise de 20 % appliquée. Capture mobile jointe à la PR.', { authorType: 'agent', authorName: S.tarifs.name, author: null, authorSession: S.tarifs, editable: false });
 comment(T.pdf, U.hugo, 90, 'Le rendu des montants négatifs (avoirs) est à vérifier avec la compta.');
 comment(T.relances, U.me, 60 * 20, 'Bloqué tant qu’on n’a pas le modèle d’e-mail validé par le juridique.');
 comment(T.pdf, U.nora, 20, 'Revue de la PR #118 : le calcul des totaux arrondit ligne par ligne, ce qui peut décaler d’un centime le total TTC. Voir `InvoicePdf.ts:84`.');

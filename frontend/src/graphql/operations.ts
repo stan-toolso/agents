@@ -214,6 +214,10 @@ export interface Session {
   owner: Pick<User, 'id' | 'name' | 'email' | 'avatarUrl' | 'kind'> | null;
   /** Personne qui a demandé la session quand son propriétaire est un agent de projet. */
   requestedBy?: { id: string; name: string } | null;
+  /** Personne qui a pris la main sur la session d'un agent : ses comptes et ses droits servent la session. */
+  takenOverBy?: { id: string; name: string } | null;
+  /** La personne connectée peut prendre ou rendre la main (requête Session seulement). */
+  viewerCanTakeOver?: boolean;
   /** Agent de projet qui joue la session (null : session d'une personne). */
   agent?: { id: string; name: string; kind: 'PRODUCT_MANAGER' | 'DEVELOPER' | 'CUSTOM'; avatar: { emoji: string | null; color: string | null } } | null;
   /** Archivée : consultable en lecture seule, relançable. */
@@ -344,7 +348,8 @@ export interface TaskComment {
   authorType: 'human' | 'agent';
   authorName: string;
   author: { id: string; name: string } | null;
-  authorSession: { id: string; name: string } | null;
+  /** Session qui a écrit le message ; `owner` est la personne (ou l'agent) qui la pilote. */
+  authorSession: { id: string; name: string; owner: { id: string; name: string } | null } | null;
   /** Agent de projet dont la session a écrit le message. */
   agent?: { id: string; name: string; kind: 'PRODUCT_MANAGER' | 'DEVELOPER' | 'CUSTOM'; avatar: { emoji: string | null; color: string | null } } | null;
   body: string;
@@ -386,7 +391,8 @@ export interface Task {
   worksession: { id: string; branch: string; archivedAt: string | null } | null;
   project: { id: string; name: string };
   session: { id: string; name: string; status: SessionStatus; activity: SessionActivity | null; worksession: { id: string; branch: string } | null } | null;
-  createdBySession: { id: string; name: string } | null;
+  /** `owner` (personne ou agent qui pilote la session) n'est demandé que par TASK_PAGE. */
+  createdBySession: { id: string; name: string; owner?: { id: string; name: string } | null } | null;
   /** Présent seulement dans la query TASKS. */
   pullRequest?: PullRequestSummary | null;
   /** Pull requests suivies de la tâche (objets Skipper) ; présentes dans TASKS et TASK_PAGE. */
@@ -716,6 +722,10 @@ export const SESSION_FIELDS = gql`
       id
       name
     }
+    takenOverBy {
+      id
+      name
+    }
     agent {
       id
       name
@@ -927,6 +937,7 @@ export const SESSION = gql`
   query Session($id: ID!) {
     session(id: $id) {
       ...SessionFields
+      viewerCanTakeOver
       project {
         id
         approvalConnections
@@ -1041,6 +1052,26 @@ export const RESUME_SESSION = gql`
   mutation ResumeSession($id: ID!) {
     resumeSession(id: $id) {
       ...SessionFields
+    }
+  }
+`;
+
+export const TAKE_OVER_SESSION = gql`
+  ${SESSION_FIELDS}
+  mutation TakeOverSession($id: ID!) {
+    takeOverSession(id: $id) {
+      ...SessionFields
+      viewerCanTakeOver
+    }
+  }
+`;
+
+export const HAND_BACK_SESSION = gql`
+  ${SESSION_FIELDS}
+  mutation HandBackSession($id: ID!) {
+    handBackSession(id: $id) {
+      ...SessionFields
+      viewerCanTakeOver
     }
   }
 `;

@@ -45,8 +45,10 @@ const agent = (over: Partial<Agent> = {}): Agent =>
     claudeDelegateId: null,
     githubDelegateId: null,
     githubDelegateReadOnly: true,
+    githubDelegatePullRequests: false,
     gitlabDelegateId: null,
     gitlabDelegateReadOnly: true,
+    gitlabDelegatePullRequests: false,
     allowedModels: [],
     triggers: { taskCreated: true, taskCreatedTag: null, threadFollowed: true, prMerged: false, taskReady: false, taskReadyTag: null },
     actions: [],
@@ -199,25 +201,29 @@ describe('syncActionSchedules', () => {
 
 describe('comptes et délégation', () => {
   it('accounts : les comptes propres de l’agent, ou ceux prêtés (GitHub et GitLab séparément, lecture seule par défaut)', async () => {
-    const own = { claudeUserId: 'a1', githubUserId: 'a1', githubReadOnly: false, gitlabUserId: 'a1', gitlabReadOnly: false, forgeUserId: 'a1' };
+    const own = { claudeUserId: 'a1', githubUserId: 'a1', githubReadOnly: false, githubPullRequests: true, gitlabUserId: 'a1', gitlabReadOnly: false, gitlabPullRequests: true, forgeUserId: 'a1' };
     expect(agentService.accounts(agent())).toEqual(own);
-    expect(agentService.accounts(agent({ claudeDelegateId: 'u1', githubDelegateId: 'u2', githubDelegateReadOnly: true }))).toEqual({ ...own, claudeUserId: 'u1', githubUserId: 'u2', githubReadOnly: true });
+    expect(agentService.accounts(agent({ claudeDelegateId: 'u1', githubDelegateId: 'u2', githubDelegateReadOnly: true }))).toEqual({ ...own, claudeUserId: 'u1', githubUserId: 'u2', githubReadOnly: true, githubPullRequests: false });
+    // Lecture seule avec pull requests permises : toujours pas de push, mais pr_open passe.
+    expect(agentService.accounts(agent({ githubDelegateId: 'u2', githubDelegateReadOnly: true, githubDelegatePullRequests: true }))).toEqual({ ...own, githubUserId: 'u2', githubReadOnly: true, githubPullRequests: true });
     expect(agentService.accounts(agent({ gitlabDelegateId: 'u3', gitlabDelegateReadOnly: false }))).toEqual({ ...own, gitlabUserId: 'u3' });
     // La forge de Skipper sert toujours avec le compte de l’agent lui-même.
     expect(agentService.accounts(agent({ githubDelegateId: 'u2', gitlabDelegateId: 'u3' })).forgeUserId).toBe('a1');
-    expect(await agentService.accountsForOwner('u1')).toEqual({ claudeUserId: 'u1', githubUserId: 'u1', githubReadOnly: false, gitlabUserId: 'u1', gitlabReadOnly: false, forgeUserId: 'u1' });
+    expect(await agentService.accountsForOwner('u1')).toEqual({ claudeUserId: 'u1', githubUserId: 'u1', githubReadOnly: false, githubPullRequests: true, gitlabUserId: 'u1', gitlabReadOnly: false, gitlabPullRequests: true, forgeUserId: 'u1' });
     expect(await agentService.accountsForOwner(null)).toBeNull();
   });
 
   it('setDelegation : seule une personne membre du projet prête son compte ; null retire la délégation', async () => {
     await agentService.setDelegation('a1', 'github', 'u1', { readOnly: false });
-    expect(repo.update).toHaveBeenLastCalledWith('a1', { githubDelegateId: 'u1', githubDelegateReadOnly: false });
+    expect(repo.update).toHaveBeenLastCalledWith('a1', { githubDelegateId: 'u1', githubDelegateReadOnly: false, githubDelegatePullRequests: false });
     await agentService.setDelegation('a1', 'gitlab', 'u1');
-    expect(repo.update).toHaveBeenLastCalledWith('a1', { gitlabDelegateId: 'u1', gitlabDelegateReadOnly: true });
+    expect(repo.update).toHaveBeenLastCalledWith('a1', { gitlabDelegateId: 'u1', gitlabDelegateReadOnly: true, gitlabDelegatePullRequests: false });
+    await agentService.setDelegation('a1', 'gitlab', 'u1', { pullRequests: true });
+    expect(repo.update).toHaveBeenLastCalledWith('a1', { gitlabDelegateId: 'u1', gitlabDelegateReadOnly: true, gitlabDelegatePullRequests: true });
     await agentService.setDelegation('a1', 'claude', 'u1');
     expect(repo.update).toHaveBeenLastCalledWith('a1', { claudeDelegateId: 'u1' });
     await agentService.setDelegation('a1', 'github', null);
-    expect(repo.update).toHaveBeenLastCalledWith('a1', { githubDelegateId: null, githubDelegateReadOnly: true });
+    expect(repo.update).toHaveBeenLastCalledWith('a1', { githubDelegateId: null, githubDelegateReadOnly: true, githubDelegatePullRequests: false });
     users.findById = vi.fn(async (id: string) => ({ id, name: 'Léa', kind: 'agent' }));
     await expect(agentService.setDelegation('a1', 'gitlab', 'a2')).rejects.toThrow('Seule une personne');
     users.findById = vi.fn(async (id: string) => ({ id, name: 'Alice', kind: 'person' }));
@@ -255,5 +261,33 @@ describe('setManagers', () => {
     userSvc.roleFor = vi.fn(async () => 'admin');
     await agentService.setManagers('a1', [{ userId: 'u1', role: 'owner' }, { userId: 'u2', role: 'manager' }]);
     expect(repo.setManagers).toHaveBeenCalledWith('a1', [{ userId: 'u1', role: 'owner' }, { userId: 'u2', role: 'manager' }]);
+  });
+});
+
+describe('prise en main d’une session d’agent', () => {
+  const session = (over: Record<string, unknown> = {}) => ({ id: 's1', projectId: 'p1', ownerId: 'a1', requestedById: 'u1', takenOverById: null, status: 'completed', archivedAt: null, ...over });
+
+  it('le demandeur, un gestionnaire ou un administrateur peut prendre la main ; pas un lecteur, pas une session de personne', async () => {
+    expect(await agentService.canTakeOver('u1', session())).toBe(true);
+    expect(await agentService.canTakeOver('u2', session())).toBe(false);
+    repo.isManager = vi.fn(async () => true);
+    expect(await agentService.canTakeOver('u2', session())).toBe(true);
+    userSvc.roleFor = vi.fn(async () => 'viewer');
+    expect(await agentService.canTakeOver('u1', session())).toBe(false);
+    userSvc.roleFor = vi.fn(async () => 'member');
+    expect(await agentService.canTakeOver('u1', session({ ownerId: 'u9' }))).toBe(false);
+  });
+
+  it('takeOver passe les comptes de la session à la personne, handBack les rend à l’agent', async () => {
+    sessionRepo.findById = vi.fn(async () => session());
+    sessions.setTakenOver = vi.fn(async (id: string, userId: string | null) => ({ id, takenOverById: userId }));
+    await agentService.takeOver('s1', { id: 'u1', name: 'Alice' });
+    expect(sessions.setTakenOver).toHaveBeenCalledWith('s1', 'u1', expect.stringContaining('Alice a pris la main'));
+    await expect(agentService.takeOver('s1', { id: 'u2', name: 'Bob' })).rejects.toThrow('prendre la main');
+    expect(await agentService.accountsForSession({ ownerId: 'a1', takenOverById: 'u1' })).toMatchObject({ githubUserId: 'u1', githubReadOnly: false, claudeUserId: 'u1' });
+    expect(await agentService.accountsForSession({ ownerId: 'a1', takenOverById: null })).toMatchObject({ githubUserId: 'a1' });
+    sessionRepo.findById = vi.fn(async () => session({ takenOverById: 'u1' }));
+    await agentService.handBack('s1', { id: 'u1', name: 'Alice' });
+    expect(sessions.setTakenOver).toHaveBeenLastCalledWith('s1', null, expect.stringContaining('rendu la main à Léa'));
   });
 });

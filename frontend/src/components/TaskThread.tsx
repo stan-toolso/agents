@@ -1,6 +1,5 @@
 import { useMutation } from '@apollo/client';
 import { useCallback, useMemo, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
 import { ADD_TASK_COMMENT, DELETE_TASK_COMMENT, TASK_THREAD, TOGGLE_TASK_REACTION, UPDATE_TASK_COMMENT } from '../graphql/tasks';
 import type { TaskComment, TaskMentionable, TaskReaction } from '../graphql/operations';
 import type { AttachmentRef } from '../lib/attachments';
@@ -8,7 +7,7 @@ import { timeAgo } from '../lib/humanize';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { useDialogs } from './Dialogs';
 import TaskAttachments from './TaskAttachments';
-import { Avatar, Composer, Reactions, RootMessage, ThreadProvider, fmtFull, groupThread, useThreadAnchor, type ThreadApi, type ThreadMessage } from './Thread';
+import { Avatar, Composer, Reactions, RootMessage, SessionLink, ThreadProvider, fmtFull, groupThread, useThreadAnchor, type ThreadApi, type ThreadMessage } from './Thread';
 
 const REFETCH = ['TaskThread', 'Tasks', 'TaskDetail', 'TaskPage'];
 
@@ -20,7 +19,8 @@ interface ThreadData {
 export interface ThreadOpening {
   authorName: string;
   byAgent: boolean;
-  sessionId: string | null;
+  /** Session qui a ouvert la tâche (lien discret à côté de l'auteur). */
+  session: { id: string; name: string } | null;
   createdAt: string;
   body: ReactNode;
   attachments: AttachmentRef[];
@@ -65,14 +65,9 @@ export default function TaskThread({ taskId, opening, canWrite = true, compact =
             <Avatar name={opening.authorName} agent={opening.byAgent} />
             <div className="tt-msg-main">
               <div className="tt-msg-head">
-                {opening.sessionId ? (
-                  <Link to={`/sessions/${opening.sessionId}`} className="tt-author">
-                    {opening.authorName}
-                  </Link>
-                ) : (
-                  <span className="tt-author">{opening.authorName}</span>
-                )}
+                <span className="tt-author">{opening.authorName}</span>
                 {opening.byAgent && <span className="tt-badge-agent">agent</span>}
+                {opening.session && <SessionLink session={opening.session} />}
                 <span className="tt-time" title={fmtFull(opening.createdAt)}>
                   a ouvert la tâche {timeAgo(opening.createdAt)}
                 </span>

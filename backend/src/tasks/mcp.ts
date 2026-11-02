@@ -60,6 +60,10 @@ function detail(t: Task, comments: TaskComment[], attachments: TaskAttachment[],
   return parts.join('\n');
 }
 
+/** Refus de `pr_open` à une session de Product Manager (sauf prise en main par une personne). */
+export const PM_NO_PULL_REQUEST =
+  "Tu es Product Manager : tu n'ouvres pas de pull request et tu ne livres pas de code. Crée une tâche pour ce changement (`tasks.create` : contexte, ce qui doit changer, critères d'acceptation, et le diagnostic ou le correctif que tu as trouvé), passe-la à « prête », puis confie-la à l'agent développeur du projet (« @Nom » dans son fil, ou `agents.summon`). Si une tâche attend ce changement, déclare la dépendance (`depends_on`). Abandonne tes modifications locales.";
+
 const statusSchema = z.enum(TASK_STATUSES as [string, ...string[]]);
 const prioritySchema = z.enum(TASK_PRIORITIES as [string, ...string[]]);
 const prStatusSchema = z.enum(SETTABLE_PR_STATUSES as [string, ...string[]]);
@@ -324,10 +328,15 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
             if (t.projectId !== project.id) throw new Error('pr_open ouvre une PR du projet de cette session seulement');
             const s = await sessionContext();
             if (!s.worksessionId) throw new Error("Cette session travaille dans le dossier principal : ouvre une PR depuis une work session (branche dédiée)");
-            // Agent de projet : le compte prêté pour l'hébergeur du dépôt (GitHub, GitLab) sert la PR ; prêté en lecture seule, pas de push ni de PR.
-            const accounts = await agentService.accountsForOwner(s.ownerId);
+            // Agent de projet : le compte prêté pour l'hébergeur du dépôt (GitHub, GitLab) sert la PR ; prêté en lecture seule, pas de push ni de PR,
+            // sauf si le prêt permet les pull requests : Skipper pousse alors la branche de travail (jamais la base) et ouvre la PR.
+            // Un Product Manager ne livre pas de code : le changement passe par une tâche confiée à l'agent développeur. Une
+            // personne qui a pris la main sur sa session l'ouvre avec ses propres droits.
+            const owner = s.takenOverById ? null : await agentService.forUser(s.ownerId);
+            if (owner?.kind === 'product_manager') throw new Error(PM_NO_PULL_REQUEST);
+            const accounts = await agentService.accountsForSession(s);
             const account = accounts ? await gitAccountFor(accounts, path?.trim() ? null : project.gitUrl) : null;
-            if (account?.readOnly) throw new Error(`Ton compte ${account.host === 'gitlab' ? 'GitLab' : 'GitHub'} est prêté en lecture seule : tu ne peux ni pousser ni ouvrir de pull request. Demande dans le fil de la tâche à une personne de le faire.`);
+            if (account?.readOnly && !account.pullRequests) throw new Error(`Ton compte ${account.host === 'gitlab' ? 'GitLab' : 'GitHub'} est prêté en lecture seule : tu ne peux ni pousser ni ouvrir de pull request. Si le changement relève du développement, crée une tâche et confie-la à l'agent développeur du projet ; sinon demande dans le fil de la tâche à une personne de prendre la main sur cette session (bouton « Prendre la main ») ou de pousser elle-même.`);
             const pr = await trackedPullRequestService.open({ projectId: project.id, worksessionId: s.worksessionId }, account?.userId ?? s.ownerId, { title, body, base, draft, path }, { taskId: task_id, note }, prActor);
             return `Pull request ouverte et suivie :\n${describePullRequest(pr, projectRepo)}`;
           }),

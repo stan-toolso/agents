@@ -39,7 +39,7 @@ import { createEnvMcpServer } from '../../envFiles/mcp.js';
 import { envFileService } from '../../envFiles/service.js';
 import { attachmentsNote, publicAttachment } from '../attachments.js';
 import { sessionIdentityPrompt } from '../identity.js';
-import { createSessionsMcpServer, sessionsPromptSummary } from '../mcp.js';
+import { archivePromptSummary, createSessionsMcpServer, sessionsPromptSummary } from '../mcp.js';
 import type { Attachment } from '../types.js';
 import { startMcpBridges, type McpBridges, type McpFactory } from './opencodeBridge.js';
 import { allowedByRules, claudeQuestions, claudeTool, mcpToolOf, OPENCODE_EDIT_TOOLS, opencodeAnswers, permissionSuggestions, permissionTitle, permissionTool, toolResultData, type OpencodePermissionRequest, type ToolCall } from './opencodeEvents.js';
@@ -77,7 +77,7 @@ const BROWSER_READ_TOOLS = ['browser_snapshot', 'browser_take_screenshot', 'brow
 const BROWSER_FIELD_READERS = ['browser_evaluate', 'browser_run_code'];
 
 /** Outils des serveurs MCP de Skipper autorisés d'office (mêmes règles que pour une session Claude). */
-const SKIPPER_FREE_TOOLS = ['mcp__context', ...TASKS_FREE_TOOLS, ...CONVERSATIONS_FREE_TOOLS, 'mcp__vault', 'mcp__worksessions__list', 'mcp__worksessions__create', 'mcp__sessions__list', 'mcp__sessions__get', 'mcp__sessions__wait', 'mcp__sessions__end', 'mcp__pages__list', 'mcp__env'];
+const SKIPPER_FREE_TOOLS = ['mcp__context', ...TASKS_FREE_TOOLS, ...CONVERSATIONS_FREE_TOOLS, 'mcp__vault', 'mcp__worksessions__list', 'mcp__worksessions__create', 'mcp__sessions__list', 'mcp__sessions__get', 'mcp__sessions__wait', 'mcp__sessions__end', 'mcp__sessions__archive', 'mcp__pages__list', 'mcp__env'];
 
 /** Autorisations d'OpenCode lui-même : lectures et recherches libres, tout le reste demande — à cet exécuteur, qui applique le mode et les règles de la session puis interroge l'humain. */
 const BASE_PERMISSION: Record<string, string> = { '*': 'ask', read: 'allow', glob: 'allow', grep: 'allow', list: 'allow', lsp: 'allow', todowrite: 'allow', todoread: 'allow', question: 'allow', skill: 'allow', task: 'allow' };
@@ -298,19 +298,19 @@ class OpencodeRun {
 
     // Même portée qu'une session Claude : coffre, comptes Google, contexte, tâches, prompt système.
     const browserEnabled = Boolean((ctx.project.runnerConfig as { browser?: boolean } | null)?.browser);
-    const vaultItems = await vaultService.agentItems(ctx.project.id, this.ownerId);
+    const vaultItems = await vaultService.agentItems(ctx.project.id, ctx.session.takenOverById ?? this.ownerId);
     const vaultTools = vaultItems.some((i) => i.kind !== 'google');
     const vaultBrowser = vaultItems.some((i) => i.kind === 'website' || i.kind === 'secret');
-    const googleAccounts = await googleAccountService.accountsFor(ctx.project.id, this.ownerId);
+    const googleAccounts = await googleAccountService.accountsFor(ctx.project.id, ctx.session.takenOverById ?? this.ownerId);
     // Session jouée par un agent de projet : son identité, sa bibliothèque propre (et celle du projet s'il en hérite), ses comptes prêtés.
     const agent = await agentService.forUser(this.ownerId);
-    const accounts = await agentService.accountsForOwner(this.ownerId);
+    const accounts = await agentService.accountsForSession(ctx.session);
     const agentLibraries = isPersonalProject(ctx.project) ? [] : await agentService.libraries(ctx.project.id);
     const channels = isPersonalProject(ctx.project) ? [] : await conversationService.list(ctx.project.id);
     const projectContext = !agent || agent.inheritContext;
     this.systemPrompt = [
       ctx.project.systemPrompt.trim(),
-      agent ? agentIdentityPrompt(agent, ctx.project, null, { githubReadOnly: accounts?.githubReadOnly, gitlabReadOnly: accounts?.gitlabReadOnly }) : '',
+      agent ? agentIdentityPrompt(agent, ctx.project, null, accounts ?? {}) : '',
       sessionIdentityPrompt(ctx.session, ctx.project),
       agent ? await contextService.promptSummary(ctx.project.id, agent.id, { own: true }) : '',
       projectContext ? await contextService.promptSummary(ctx.project.id) : '',
@@ -321,6 +321,7 @@ class OpencodeRun {
       vaultService.promptSummary(vaultItems, ctx.project),
       await envFileService.promptSummary(ctx.project.id),
       sessionsPromptSummary(ctx.project),
+      archivePromptSummary({ agent: Boolean(agent), child: Boolean(ctx.session.parentSessionId) }),
       googleAccountService.promptSummary(googleAccounts),
       sharedPagesPrompt(),
       ctx.session.worksessionId ? previewPrompt(previewsEnabled(), ctx.session.worksessionId) : '',

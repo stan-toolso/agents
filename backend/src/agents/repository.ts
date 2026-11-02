@@ -15,8 +15,10 @@ interface Row {
   claude_delegate_id: string | null;
   github_delegate_id: string | null;
   github_delegate_read_only: boolean;
+  github_delegate_pull_requests: boolean;
   gitlab_delegate_id: string | null;
   gitlab_delegate_read_only: boolean;
+  gitlab_delegate_pull_requests: boolean;
   allowed_models: string[] | null;
   triggers: Partial<AgentTriggers> | null;
   actions: AgentAction[] | null;
@@ -62,8 +64,10 @@ const toAgent = (r: Row): Agent => ({
   claudeDelegateId: r.claude_delegate_id ?? null,
   githubDelegateId: r.github_delegate_id ?? null,
   githubDelegateReadOnly: r.github_delegate_read_only ?? true,
+  githubDelegatePullRequests: r.github_delegate_pull_requests ?? false,
   gitlabDelegateId: r.gitlab_delegate_id ?? null,
   gitlabDelegateReadOnly: r.gitlab_delegate_read_only ?? true,
+  gitlabDelegatePullRequests: r.gitlab_delegate_pull_requests ?? false,
   triggers: normalizeTriggers(r.triggers),
   actions: (r.actions ?? []).map(normalizeAction),
   enabled: Boolean(r.enabled),
@@ -89,8 +93,10 @@ export interface AgentProfilePatch {
   claudeDelegateId?: string | null;
   githubDelegateId?: string | null;
   githubDelegateReadOnly?: boolean;
+  githubDelegatePullRequests?: boolean;
   gitlabDelegateId?: string | null;
   gitlabDelegateReadOnly?: boolean;
+  gitlabDelegatePullRequests?: boolean;
   triggers?: AgentTriggers;
   actions?: AgentAction[];
   enabled?: boolean;
@@ -109,8 +115,10 @@ const patchColumns: Record<keyof AgentProfilePatch, string> = {
   claudeDelegateId: 'claude_delegate_id',
   githubDelegateId: 'github_delegate_id',
   githubDelegateReadOnly: 'github_delegate_read_only',
+  githubDelegatePullRequests: 'github_delegate_pull_requests',
   gitlabDelegateId: 'gitlab_delegate_id',
   gitlabDelegateReadOnly: 'gitlab_delegate_read_only',
+  gitlabDelegatePullRequests: 'gitlab_delegate_pull_requests',
   triggers: 'triggers',
   actions: 'actions',
   enabled: 'enabled',

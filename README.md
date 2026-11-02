@@ -809,8 +809,10 @@ sous elle. Une session ouverte occupe **un seul onglet** dans la barre du haut (
 (« principal ») que pour les sessions et terminaux d'avant les work sessions. Les
 pages restent montées quand on change d'onglet (React 19 `<Activity>`), les onglets ouverts sont
 mémorisés dans le navigateur, un onglet fermé se rouvre (Alt+Maj+T), et la sidebar se replie. Le filtre
-« Mes sessions / Tout le monde » cache les sessions des autres ; les pastilles portent les initiales de
-leur auteur. Menu « ⋮ » d'une session : ouvrir, fichiers, nouveau terminal, arrêter, renommer,
+« Mes sessions / Tout le monde » cache les sessions des autres ; quand elles sont affichées, elles sont
+**rangées par personne ou agent** sous une ligne repliable (pastille, nom, nombre de sessions, état ; ouverte
+d'office quand l'une attend une réponse ou est affichée ; `ownerGroups` dans `workbench/workspaces.ts`),
+pour que le travail des autres et des agents ne noie pas le sien. Les pastilles portent les initiales de leur auteur. Menu « ⋮ » d'une session : ouvrir, fichiers, nouveau terminal, arrêter, renommer,
 archiver, supprimer. **Recherche** (⌘K ou Ctrl+K, `search`) sur les projets, sessions (nom et
 conversation), tâches, pages et éléments du coffre ; **raccourcis** listés par « ? »
 (`lib/shortcuts.ts`). Le panneau de droite a deux onglets : **Tâche** (la tâche liée à la session,
@@ -1334,16 +1336,38 @@ l'application, la page Contexte d'un projet a un sélecteur de bibliothèque (Pr
 lui **prêter son propre compte** Claude (`claude_delegate_id` : identifiants, modèle par défaut, budgets de cette
 personne), son compte **GitHub** (`github_delegate_id`) et/ou son compte **GitLab** (`gitlab_delegate_id`), chacun
 séparément ; GitHub et GitLab se prêtent **en lecture seule** par défaut (`github_delegate_read_only`,
-`gitlab_delegate_read_only`). Un dépôt hébergé par Skipper (forge) sert toujours avec le compte de l'agent lui-même.
+`gitlab_delegate_read_only`), avec ou sans le droit d'ouvrir des **pull requests / merge requests**
+(`github_delegate_pull_requests`, `gitlab_delegate_pull_requests`, faux par défaut). Un dépôt hébergé par Skipper (forge) sert toujours avec le compte de l'agent lui-même.
 On ne prête que son propre compte (mutation `setAgentDelegation(id, account: CLAUDE | GITHUB | GITLAB, delegate,
-readOnly)`, carte « Comptes prêtés » de l'onglet Comptes) ; un gestionnaire peut retirer une délégation.
+readOnly, pullRequests)`, carte « Comptes prêtés » de l'onglet Comptes) ; un gestionnaire peut retirer une délégation.
 `agentService.accounts(agent)` / `accountsForOwner(ownerId)` donnent les comptes effectifs (`OwnerAccounts` :
-`claudeUserId`, `githubUserId` / `githubReadOnly`, `gitlabUserId` / `gitlabReadOnly`, `forgeUserId`) : le provider
+`claudeUserId`, `githubUserId` / `githubReadOnly` / `githubPullRequests`, `gitlabUserId` / `gitlabReadOnly` /
+`gitlabPullRequests`, `forgeUserId`) : le provider
 Claude lit les réglages Claude du délégant (`claudeSettings.forSession`), passe les comptes à `agentGitEnv` (jeton
 GitHub de l'un, GitLab de l'autre) qui, si le compte de l'hébergeur de l'origine est prêté en lecture seule, pose une
 adresse de push inexistante sur `origin` (`remote.origin.pushurl`) ; `tasks.pr_open` choisit le compte de
-l'hébergeur du dépôt (`gitAccountFor`) et refuse alors d'ouvrir une PR, et le prompt de l'agent le lui dit. La
+l'hébergeur du dépôt (`gitAccountFor`) et refuse alors d'ouvrir une PR, sauf si le prêt permet les pull requests :
+Skipper pousse alors lui-même la branche de travail (jamais la base) avec le compte prêté et ouvre la PR, tandis qu'un
+`git push` lancé par l'agent reste bloqué ; le prompt de l'agent lui dit ce qu'il peut faire. La
 consommation reste imputée à l'agent (propriétaire des sessions) ; le plafond mensuel vérifié est celui du délégant.
+
+**Prendre la main sur la session d'un agent** (migration `20261102T2230_session_taken_over_by.sql`). La personne qui
+a demandé la session, un gestionnaire de l'agent ou un administrateur du projet (rôle membre au moins) peut cliquer
+« Prendre la main » (actions de la session ; mutation `takeOverSession`, `handBackSession` pour rendre) : la session
+continue — même conversation, même dossier, toujours au nom de l'agent, coût imputé à l'agent — mais avec **les
+comptes et les droits de cette personne** (`sessions.taken_over_by_id`) : ses identifiants Claude, ses comptes GitHub
+et GitLab en écriture (push, `tasks.pr_open`), son coffre et ses comptes Google. `agentService.accountsForSession`
+remplace `accountsForOwner` partout où l'on choisit les comptes d'une session (providers Claude et OpenCode,
+`tasks.pr_open`). Les comptes d'un processus étant fixés à son lancement, une session en cours finit son tour puis se
+termine sans bruit (`sessionService.setTakenOver`) ; l'instruction suivante la relance avec les nouveaux comptes. Le
+prompt de l'agent dit qui a la main, lève ses règles de rôle et les phrases « lecture seule ».
+
+**Règles de rôle** (`roleRulesPrompt`, `agents/prompt.ts`). Les instructions d'un agent sont copiées du modèle à sa
+création et ne suivent pas les évolutions des modèles ; Skipper ajoute donc au prompt des règles par rôle, quelles que
+soient ses instructions : un **Product Manager** ne modifie pas le code, ne commite, ne pousse ni n'ouvre de PR
+(`tasks.pr_open` le lui refuse) ; un changement de code nécessaire, y compris un bug qui bloque une release, devient une
+tâche « prête » confiée aussitôt à l'agent développeur, la tâche bloquée en dépendant. Un **Developer** ne met rien en
+production et ne fusionne pas. Ces règles sont levées quand une personne a pris la main.
 
 **Type de session et modèles.** Le profil (carte « Sessions ») règle le **type de session par défaut**
 (`defaults.provider` : Claude Code ou OpenCode ; `agentService.providerOf`), le **modèle par défaut**
@@ -1381,7 +1405,8 @@ nouvelle session dans son propre dossier, nommée d'après le message. Quatre fa
 **Déclencheurs** (`triggers`, écouteurs du service des tâches et des PR suivies, garde anti-boucle : rien de ce qu'une
 session d'agent fait ne déclenche les agents) : `taskCreated` (tâche créée par une personne ou l'API, filtrable par
 étiquette : le PM intervient pour la cadrer), `threadFollowed` (une réponse humaine dans un fil où l'agent est
-intervenu revient à sa session comme instruction, via `tasks/sessionFeed.ts`), `prMerged` (PR d'une tâche
+intervenu revient à sa session comme instruction, via `tasks/sessionFeed.ts` ; si ses sessions sur la tâche ont été
+archivées — les agents rangent les leurs une fois le travail rendu —, il est convoqué à nouveau, message « [Fil suivi] »), `prMerged` (PR d'une tâche
 fusionnée), `taskReady` (tâche passée par une personne à l'étiquette d'état `taskReadyTag`, « prête » : le Developer
 démarre). **Actions** : instructions nommées jouées à la demande (menu « Actions ») ou à heures fixes (`cron` : une
 session planifiée dédiée dont l'agent est propriétaire, créée et tenue à jour par `syncActionSchedules`). Les modèles
@@ -1685,7 +1710,17 @@ La relance travaille dans le dossier et sur la branche de la session d'origine (
 la session d'origine est archivée, arrêtée si elle tournait : une seule session par dossier), ou dans un
 nouveau dossier si le sien a été supprimé. Archiver une session archive son dossier (terminaux fermés,
 dossier et branche conservés) ; la restaurer le restaure ; un dossier disparu est recréé à la prochaine
-utilisation. Une session se renomme depuis la sidebar ou ses réglages. Les mutations `archiveWorksession`,
+utilisation. Une session se renomme depuis la sidebar ou ses réglages.
+
+**Une session peut s'archiver elle-même** (outil MCP `sessions.archive`, libre) : sans `id`, la session
+courante, archivée **à la fin de son tour** (`sessionService.archiveWhenDone` : fin propre par `end`, puis
+`archiveSessionCascade` branché par `onArchiveWhenDone` dans `index.ts` ; un événement `agent_archive` le note
+dans le transcript, avec la raison donnée) ; avec un `id`, une session qu'elle a lancée. Le prompt système dit quand
+(`archivePromptSummary` dans `sessions/mcp.ts`) : une session **d'agent de projet** se range elle-même une fois son
+travail rendu (fil à jour, PR ouverte, rien de non poussé, aucune sous-session en cours, pas de conversation en cours
+avec la personne qui l'a demandée) ; une **sous-session** laisse sa parente l'archiver ; une session **pilotée par une
+personne** ne s'archive que si elle le demande ; toutes archivent les sessions qu'elles ont lancées une fois leur
+réponse lue. Les mutations `archiveWorksession`,
 `restoreWorksession`, `renameWorksession` et `deleteWorksession` restent dans l'API (sans interface).
 
 ## Export et import
