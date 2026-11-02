@@ -232,7 +232,10 @@ export interface ProjectApiKey {
   createdBy: { id: string; name: string } | null;
 }
 
-/** Ce que « Confier à un agent » doit savoir : la branche de la tâche (dossier repris) et la session déjà en charge, qui sera archivée. */
+/**
+ * Ce que « Confier à un agent » doit savoir : la branche de la tâche (dossier repris), la session déjà en charge (archivée
+ * si l'on en lance une nouvelle) et celle dont on reprend la conversation par défaut.
+ */
 export const TASK_LAUNCH_INFO = gql`
   query TaskLaunchInfo($id: ID!) {
     task(id: $id) {
@@ -241,6 +244,12 @@ export const TASK_LAUNCH_INFO = gql`
       session {
         id
         name
+        archivedAt
+      }
+      resumableSession {
+        id
+        name
+        status
         archivedAt
       }
       worksession {

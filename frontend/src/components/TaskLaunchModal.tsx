@@ -1,7 +1,8 @@
 import { useMutation, useQuery } from '@apollo/client';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Alert, Button, Collapse, Form, Modal } from 'react-bootstrap';
-import { PROVIDERS, START_TASK_SESSION, type ConfigField, type Provider, type Task } from '../graphql/operations';
+import { Link } from 'react-router-dom';
+import { PROVIDERS, RESUME_TASK_SESSION, START_TASK_SESSION, type ConfigField, type Provider, type SessionStatus, type Task } from '../graphql/operations';
 import { TASK_LAUNCH_INFO, TASK_PROMPT } from '../graphql/tasks';
 import { bypassConnectionsWarning } from '../lib/humanize';
 import { buildConfig, FieldGroup, lastPermissionMode, rememberPermissionMode } from './SessionLauncher';
@@ -44,20 +45,119 @@ export function TaskLauncherProvider({ children }: { children: ReactNode }) {
   );
 }
 
+interface ResumableSession {
+  id: string;
+  name: string;
+  status: SessionStatus;
+  archivedAt: string | null;
+}
+
+interface LaunchInfo {
+  task: {
+    id: string;
+    branch: string | null;
+    session: { id: string; name: string; archivedAt: string | null } | null;
+    resumableSession: ResumableSession | null;
+    worksession: { id: string; name: string; branch: string; label: string; archivedAt: string | null } | null;
+  } | null;
+}
+
+/** Message proposé pour reprendre la conversation, modifiable. */
+export const RESUME_MESSAGE = "Reprends la tâche là où tu t'étais arrêté : relis-la (description et fil) pour voir s'il y a du nouveau, puis continue.";
+
 /**
- * « Confier à un agent » : consigne relue, type d'agent et ses options. L'agent travaille dans le dossier de la
+ * « Confier à un agent » : si la tâche a déjà une session dans son dossier, on reprend sa conversation (un message,
+ * modifiable, envoyé à cette session) ; sinon, ou sur demande, on lance une nouvelle session.
+ */
+export default function TaskLaunchModal({ task, target, onClose }: { task: Task; target: LaunchTarget | undefined; onClose: () => void }) {
+  const { data } = useQuery<LaunchInfo>(TASK_LAUNCH_INFO, { variables: { id: task.id }, fetchPolicy: 'cache-and-network' });
+  const [fresh, setFresh] = useState(false);
+  const resumable = data?.task?.resumableSession ?? null;
+  if (!data)
+    return (
+      <Modal show onHide={onClose} size="lg" centered>
+        <Modal.Header closeButton>
+          <Modal.Title className="h6">Confier à un agent · {task.title}</Modal.Title>
+        </Modal.Header>
+        <Modal.Body className="small text-secondary">Chargement…</Modal.Body>
+      </Modal>
+    );
+  if (resumable && !fresh) return <TaskResumeModal task={task} session={resumable} onFresh={() => setFresh(true)} onClose={onClose} />;
+  return <TaskNewSessionModal task={task} target={target} info={data} onClose={onClose} />;
+}
+
+/**
+ * Reprise de la conversation de la session de la tâche : le message lui est envoyé comme depuis sa page (transmis à
+ * l'agent s'il tourne, sinon la session repart avec, historique compris) ; la session est restaurée si elle était
+ * archivée et la tâche repasse en cours. On reste sur la page.
+ */
+function TaskResumeModal({ task, session, onFresh, onClose }: { task: Task; session: ResumableSession; onFresh: () => void; onClose: () => void }) {
+  const [text, setText] = useState(RESUME_MESSAGE);
+  const [resume, { loading, error }] = useMutation<{ resumeTaskSession: { id: string } }>(RESUME_TASK_SESSION, {
+    refetchQueries: ['Tasks', 'TaskPage', 'TaskDetail', 'Sidebar'],
+    onCompleted: onClose,
+  });
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (text.trim()) void resume({ variables: { id: task.id, text } }).catch(() => undefined);
+  };
+  const state = session.archivedAt
+    ? 'Elle est archivée : elle sera restaurée avec son dossier.'
+    : session.status === 'RUNNING'
+      ? "Elle tourne : le message est transmis à l'agent."
+      : session.status === 'QUEUED'
+        ? "Elle est en file d'attente : arrêtez-la d'abord, ou lancez une nouvelle session."
+        : 'Elle repart avec ce message, là où elle s’était arrêtée.';
+  return (
+    <Modal show onHide={() => !loading && onClose()} size="lg" centered backdrop={loading ? 'static' : true}>
+      <Form onSubmit={submit}>
+        <Modal.Header closeButton={!loading}>
+          <Modal.Title className="h6">Reprendre · {task.title}</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <p className="small text-secondary">
+            <i className="bi bi-chat-left-text me-1" />
+            Le message est envoyé dans la conversation de la session{' '}
+            <Link to={`/sessions/${session.id}`} onClick={onClose}>
+              « {session.name} »
+            </Link>
+            , avec tout son historique, dans le même dossier. {state}
+          </p>
+          <Form.Group className="mb-2">
+            <Form.Label>Message</Form.Label>
+            <Form.Control as="textarea" rows={5} value={text} autoFocus onChange={(e) => setText(e.target.value)} />
+          </Form.Group>
+          <button type="button" className="btn btn-link btn-sm p-0" disabled={loading} onClick={onFresh}>
+            Lancer plutôt une nouvelle session (consigne complète de la tâche, « {session.name} » archivée)
+          </button>
+          {error && <Alert variant="danger" className="mt-2 mb-0 py-2">{error.message}</Alert>}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="outline-secondary" onClick={onClose} disabled={loading}>
+            Annuler
+          </Button>
+          <Button type="submit" disabled={loading || !text.trim() || session.status === 'QUEUED'}>
+            {loading ? 'Envoi…' : 'Reprendre la conversation'}
+          </Button>
+        </Modal.Footer>
+      </Form>
+    </Modal>
+  );
+}
+
+/**
+ * Nouvelle session : consigne relue, type d'agent et ses options. L'agent travaille dans le dossier de la
  * tâche (sa branche task/… pour un projet git), créé à la première session et repris ensuite ; la session
  * précédente de la tâche, s'il y en a une d'active, est archivée. Une fois la session lancée, on reste sur la page
  * (liste, kanban, tâche) : la session apparaît sur la tâche et dans la sidebar, sans y être emmené.
  */
-export default function TaskLaunchModal({ task, target, onClose }: { task: Task; target: LaunchTarget | undefined; onClose: () => void }) {
+function TaskNewSessionModal({ task, target, info: infoData, onClose }: { task: Task; target: LaunchTarget | undefined; info: LaunchInfo; onClose: () => void }) {
   const { data: promptData, loading: promptLoading } = useQuery<{ taskPrompt: string }>(TASK_PROMPT, { variables: { id: task.id }, fetchPolicy: 'network-only' });
   const { data: providersData } = useQuery<{ providers: Provider[] }>(PROVIDERS);
   const providers = providersData?.providers ?? [];
   const [providerType, setProviderType] = useState('');
   const provider = providers.find((p) => p.type === (providerType || providers[0]?.type));
   const [prompt, setPrompt] = useState<string | null>(null);
-  const { data: infoData } = useQuery<{ task: { id: string; branch: string | null; session: { id: string; name: string; archivedAt: string | null } | null; worksession: { id: string; name: string; branch: string; label: string; archivedAt: string | null } | null } | null }>(TASK_LAUNCH_INFO, { variables: { id: task.id }, fetchPolicy: 'cache-and-network' });
   const own = infoData?.task?.worksession ?? null;
   const branch = own?.branch ?? infoData?.task?.branch ?? null;
   // Session active déjà en charge de la tâche : elle sera archivée au profit de la nouvelle.

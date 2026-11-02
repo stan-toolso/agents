@@ -1616,6 +1616,15 @@ export const START_TASK_SESSION = gql`
   }
 `;
 
+/** Reprend la tâche dans la conversation de sa session (`Task.resumableSession`), au lieu d'en lancer une nouvelle. */
+export const RESUME_TASK_SESSION = gql`
+  mutation ResumeTaskSession($id: ID!, $text: String!) {
+    resumeTaskSession(id: $id, text: $text) {
+      id
+    }
+  }
+`;
+
 /** Où une tâche peut être confiée : projets reliés à git et leurs work sessions existantes. */
 export const TASK_LAUNCH_TARGETS = gql`
   query TaskLaunchTargets {
