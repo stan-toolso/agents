@@ -1,5 +1,7 @@
 import { pool } from '../db/pool.js';
 import { hostedGitUrl } from '../gitServer/paths.js';
+import { toJson } from '../db/json.js';
+import type { SessionCleanup } from '../sessions/types.js';
 import type { CreateProjectInput, Project, ProjectPermissionMode, UpdateProjectInput } from './types.js';
 
 interface ProjectRow {
@@ -13,6 +15,7 @@ interface ProjectRow {
   git_hosted: boolean;
   runner_config: Record<string, unknown>;
   default_permission_mode: ProjectPermissionMode;
+  default_context_cleanup: SessionCleanup | null;
   task_instructions: string | null;
   personal_owner_id: string | null;
   created_at: Date;
@@ -32,6 +35,7 @@ function toProject(row: ProjectRow): Project {
     gitHosted: Boolean(row.git_hosted),
     runnerConfig: row.runner_config ?? {},
     defaultPermissionMode: row.default_permission_mode ?? 'default',
+    defaultContextCleanup: row.default_context_cleanup ?? null,
     taskInstructions: row.task_instructions ?? '',
     personalOwnerId: row.personal_owner_id ?? null,
     createdAt: row.created_at,
@@ -48,15 +52,16 @@ const updateColumns: Record<keyof UpdateProjectInput, string> = {
   gitHosted: 'git_hosted',
   runnerConfig: 'runner_config',
   defaultPermissionMode: 'default_permission_mode',
+  defaultContextCleanup: 'default_context_cleanup',
   taskInstructions: 'task_instructions',
 };
 
 export const projectRepository = {
   async create(input: CreateProjectInput & { slug: string }): Promise<Project> {
     const { rows } = await pool.query<ProjectRow>(
-      `INSERT INTO projects (name, slug, description, system_prompt, git_url, git_branch, git_hosted, runner_config, default_permission_mode, task_instructions, personal_owner_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-      [input.name, input.slug, input.description ?? null, input.systemPrompt ?? '', input.gitHosted ? null : input.gitUrl || null, input.gitBranch || null, Boolean(input.gitHosted), JSON.stringify(input.runnerConfig ?? {}), input.defaultPermissionMode || 'default', input.taskInstructions ?? '', input.personalOwnerId ?? null],
+      `INSERT INTO projects (name, slug, description, system_prompt, git_url, git_branch, git_hosted, runner_config, default_permission_mode, task_instructions, personal_owner_id, default_context_cleanup)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb) RETURNING *`,
+      [input.name, input.slug, input.description ?? null, input.systemPrompt ?? '', input.gitHosted ? null : input.gitUrl || null, input.gitBranch || null, Boolean(input.gitHosted), JSON.stringify(input.runnerConfig ?? {}), input.defaultPermissionMode || 'default', input.taskInstructions ?? '', input.personalOwnerId ?? null, input.defaultContextCleanup ? toJson(input.defaultContextCleanup) : null],
     );
     return toProject(rows[0]);
   },
@@ -118,6 +123,11 @@ export const projectRepository = {
       if (key === 'runnerConfig') {
         params.push(JSON.stringify(value ?? {}));
         sets.push(`${column} = $${params.length}::jsonb`);
+        continue;
+      }
+      if (key === 'defaultContextCleanup') {
+        params.push(value ? toJson(value) : null);
+        sets.push(`${column} = ${params.length}::jsonb`);
         continue;
       }
       if (key === 'gitHosted') {

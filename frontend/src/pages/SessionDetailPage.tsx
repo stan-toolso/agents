@@ -344,7 +344,7 @@ export default function SessionDetailPage() {
           {session.context.tokens !== null && (
             <span className="cc-header-gauge">
               <span className="cc-sep"> · </span>
-              <ContextGauge context={session.context} onClick={actions.openSettings} />
+              <ContextGauge context={session.context} cleanup={session.cleanup} onClick={actions.openContextSettings} />
             </span>
           )}
           <span className="cc-meta cc-meta-more">

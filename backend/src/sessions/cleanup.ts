@@ -5,15 +5,21 @@ import { sessionRepository } from './repository.js';
 import { sessionService } from './service.js';
 import type { Session, SessionCleanup } from './types.js';
 import { log } from '../log.js';
+import { MIN_CONTEXT_TOKENS } from './context.js';
 
 /** Délai maximal d'une compaction de conversation. */
 const COMPACT_TIMEOUT_MS = 10 * 60_000;
 /** Délai laissé à une session en attente d'instructions pour se terminer avant une remise à zéro. */
 const END_TIMEOUT_MS = 60_000;
-/** Seuil minimal de contexte acceptable (en tokens) : en dessous, la compaction tournerait en boucle. */
-const MIN_CONTEXT_TOKENS = 10_000;
 /** Providers qui savent compacter leur conversation (commande /compact). */
 const COMPACT_PROVIDERS = new Set(['claude', 'opencode']);
+/** Sessions dont la limite de contexte est en cours d'application (fin de tour) : pas de seconde application en même temps. */
+const applying = new Set<string>();
+/**
+ * Contexte laissé par la dernière compaction automatique quand elle n'est pas passée sous la limite : on ne recompacte
+ * qu'après `MIN_CONTEXT_TOKENS` de plus, plutôt qu'à chaque tour.
+ */
+const compactedAbove = new Map<string, number>();
 
 async function emit(sessionId: string, payload: Record<string, unknown>): Promise<void> {
   const event = await sessionRepository.addEvent(sessionId, 'cleanup', payload);
@@ -57,11 +63,11 @@ export function normalizeCleanup(input: SessionCleanup): SessionCleanup {
  * Si la session tourne mais attend des instructions, la termine proprement (la conversation du modèle ne peut
  * être oubliée que session arrêtée). Renvoie l'état obtenu, ou null si l'agent travaille encore.
  */
-async function settle(session: Session): Promise<Session | null> {
+async function settle(session: Session, quiet = false): Promise<Session | null> {
   // Pas de processus en mémoire : rien à arrêter, quel que soit le statut enregistré.
   if (!sessionService.isRunning(session.id)) return session;
   if (session.activity !== 'idle') return null;
-  await sessionService.end(session.id);
+  await sessionService.end(session.id, { quiet });
   const after = await sessionService.waitForIdle(session.id, END_TIMEOUT_MS);
   return after.status === 'running' || sessionService.isRunning(session.id) ? null : after;
 }
@@ -70,8 +76,8 @@ async function settle(session: Session): Promise<Session | null> {
  * Oublie la conversation du modèle : le prochain démarrage repart de zéro (le transcript affiché est conservé).
  * `summary` : les derniers échanges accompagneront la première instruction de la conversation neuve.
  */
-async function reset(session: Session, extra: Record<string, unknown>, summary: boolean): Promise<Session | null> {
-  const settled = await settle(session);
+async function reset(session: Session, extra: Record<string, unknown>, summary: boolean, quiet = false): Promise<Session | null> {
+  const settled = await settle(session, quiet);
   if (!settled) {
     await emit(session.id, { action: 'skipped', reason: "l'agent travaille encore : la conversation repartira de zéro à son prochain lancement", before: session.contextTokens });
     return null;
@@ -103,8 +109,8 @@ async function compact(session: Session, extra: Record<string, unknown>): Promis
 /**
  * Nettoyage de l'historique d'une session : purge du transcript au-delà d'une durée de conservation, et
  * compaction ou remise à zéro de la conversation de l'agent (au-delà d'une taille de contexte, ou avant chaque
- * exécution planifiée). Appliqué avant chaque exécution planifiée, par un balayage horaire (purge), à la demande
- * depuis les réglages, et depuis le bandeau de contexte d'une session (compaction ou remise à zéro immédiates).
+ * exécution planifiée). Appliqué avant chaque exécution planifiée, à la fin de chaque autre tour (limite de contexte
+ * choisie pour la session, `afterTurn`), par un balayage horaire (purge), à la demande depuis les réglages, et depuis le bandeau de contexte d'une session (compaction ou remise à zéro immédiates).
  */
 export const cleanupService = {
   async set(id: string, input: SessionCleanup): Promise<Session> {
@@ -141,6 +147,33 @@ export const cleanupService = {
     if (!contextMaxTokens || session.contextTokens === null || session.contextTokens < contextMaxTokens) return null;
     if (contextAction === 'reset') return (await reset(session, { threshold: contextMaxTokens }, false)) ? 'reset' : null;
     return (await compact(session, { threshold: contextMaxTokens })) ? 'compacted' : null;
+  },
+
+  /**
+   * À la fin d'un tour qui n'est pas une exécution planifiée : si la session a une limite de contexte (choisie au
+   * lancement, dans ses réglages, ou héritée du défaut du projet) et que le contexte la dépasse, compacte la
+   * conversation, ou la remet à zéro en gardant un résumé (la session, qui attend des instructions, est terminée sans
+   * notification ; la prochaine instruction la relance avec le résumé). Sans limite, rien : l'interface propose seulement.
+   */
+  async afterTurn(id: string): Promise<'compacted' | 'reset' | null> {
+    if (applying.has(id)) return null;
+    const session = await load(id);
+    const { contextAction, contextMaxTokens } = session.cleanup ?? {};
+    if ((contextAction !== 'compact' && contextAction !== 'reset') || !contextMaxTokens || session.archivedAt) return null;
+    const tokens = session.contextTokens;
+    if (tokens === null || tokens < contextMaxTokens) return null;
+    const floor = compactedAbove.get(id);
+    if (contextAction === 'compact' && floor !== undefined && tokens < floor + MIN_CONTEXT_TOKENS) return null;
+    applying.add(id);
+    try {
+      if (contextAction === 'reset') return (await reset(session, { threshold: contextMaxTokens, auto: true }, true, true)) ? 'reset' : null;
+      const after = await compact(session, { threshold: contextMaxTokens, auto: true });
+      if (after?.contextTokens != null && after.contextTokens >= contextMaxTokens) compactedAbove.set(id, after.contextTokens);
+      else compactedAbove.delete(id);
+      return after ? 'compacted' : null;
+    } finally {
+      applying.delete(id);
+    }
   },
 
   /** Compaction immédiate, demandée depuis l'interface (bandeau de contexte), quel que soit le réglage. */

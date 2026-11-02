@@ -1094,7 +1094,9 @@ d'une tâche dont elle est en charge. Le reste (modification par une autre sessi
 réaction) est une **note discrète** (`sessionService.notify`) : le provider Claude la remet avec le résultat du
 prochain lot d'outils (hook `PostToolBatch`, `additionalContext`) ou avec la prochaine instruction, sans tour ni
 réponse de l'agent ; le transcript en garde un événement `task_note`, replié avec les étapes de l'agent.
-Le prompt système d'une session cite la tâche dont elle a la charge et celles auxquelles elle est reliée.
+Le prompt système d'une session cite la tâche dont elle a la charge et celles auxquelles elle est reliée. La liste des
+tâches ouvertes qu'il embarque (relue à chaque tour) est plafonnée à 15 (`tasks/promptList.ts`) : celles de la session,
+puis les tâches en cours, puis les plus prioritaires ; un décompte par priorité renvoie vers `tasks.list` pour le reste.
 
 ## Lancer des sessions
 
@@ -1390,6 +1392,26 @@ planifiée qui tourne tous les jours. Deux réglages indépendants (`Session.cle
   session qui attend des instructions est d'abord terminée, une session au travail est laissée tranquille (le
   nettoyage est reporté).
 
+**Limite de contexte d'une session manuelle** (opt-in, jamais imposée) : une session dont la conversation est en
+`compact` ou `reset` avec un seuil est nettoyée **à la fin de chaque tour** (hors exécution planifiée) où le contexte
+dépasse ce seuil (`cleanupService.afterTurn`, appelé quand l'activité repasse à « idle ») : compaction, ou remise à
+zéro **en gardant un résumé** (la session, qui attend des instructions, est terminée sans notification ; la prochaine
+instruction ouvre une conversation neuve avec le résumé). Sans limite, rien ne change : le bandeau propose seulement. La
+limite se choisit :
+
+- **à la création** : option « Contexte » du formulaire de nouvelle session, à côté des autorisations (« Me proposer de
+  nettoyer au-delà de 150 k », « Compacter au-delà de N k », « Repartir d'une conversation neuve au-delà de N k »),
+  rappelée dans la ligne récapitulative des options et mémorisée par projet dans le navigateur
+  (`skipper.launcher.contextLimit.<projet>`) ; le formulaire envoie toujours son choix (`CreateSessionInput.cleanup`,
+  objet vide : aucune limite) ;
+- **par projet** : « Contexte des nouvelles sessions » dans le formulaire du projet (`projects.default_context_cleanup`,
+  migration `056`, null par défaut) ; présélectionné au lancement (« défaut du projet ») et appliqué aux sessions qui
+  n'en choisissent pas : tâches, sessions lancées par un agent (`sessions.create`), workflows. Une relance garde la
+  limite de la session d'origine ; une relecture par un agent n'en a jamais ;
+- **depuis la jauge** : cliquer la jauge de l'en-tête ouvre les réglages sur « Conversation de l'agent », avec
+  « Recommandé : compacter au-delà de 100 k tokens » et un bouton « Appliquer » ; la jauge affiche la limite choisie
+  (« 84 k / limite 100 k »).
+
 La modale de planification porte le même réglage (`SessionScheduleInput.cleanup`) : une nouvelle planification
 part sur « nouvelle conversation à chaque exécution », une planification existante sans nettoyage affiche un
 avertissement et un bouton « Activer le nettoyage par défaut » (rien n'est modifié sans l'accord de l'utilisateur ;
@@ -1406,7 +1428,7 @@ du seuil de signalement (la sidebar n'en affiche pas, pour rester lisible). Ce s
 « Session » du panneau de droite (dans la page elle-même pour un chat, qui n'a pas de panneau) propose
 « Compacter » (`compactSessionContext`), « Repartir d'une conversation neuve » (`resetSessionContext`, avec ou
 sans résumé des derniers échanges, transmis au modèle avec la prochaine instruction via `sessions.resume_digest`)
-ou « Ignorer » (jusqu'à 50 000 tokens de plus) ; rien n'est fait automatiquement pour une session manuelle.
+ou « Ignorer » (jusqu'à 50 000 tokens de plus) ; rien n'est fait automatiquement pour une session manuelle sans limite choisie.
 « Nettoyer maintenant » applique les réglages sans attendre (`applySessionCleanup`) ;
 `updateSession(id, { name, cleanup })` renomme et enregistre les réglages. Les événements `cleanup` (purge,
 compaction, remise à zéro, report) apparaissent dans le transcript.

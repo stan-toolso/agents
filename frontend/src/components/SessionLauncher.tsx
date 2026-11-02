@@ -10,6 +10,9 @@ import { bypassConnectionsWarning } from '../lib/humanize';
 import { toAttachmentInputs, usePendingAttachments } from '../lib/attachments';
 import AttachmentChips from './AttachmentChips';
 import DictationButton from './DictationButton';
+import ContextLimitField from './ContextLimitField';
+import { CONTEXT_WARN_SETTING } from '../graphql/settings';
+import { NO_CONTEXT_LIMIT, cleanupFromLimit, lastContextLimit, limitFromCleanup, limitLabel, rememberContextLimit, sameLimit, validLimit, type ContextLimit } from '../lib/contextLimit';
 
 export interface LaunchOptions {
   projectId?: string | null;
@@ -28,6 +31,9 @@ export function useSessionLauncher(): LauncherState {
   if (!ctx) throw new Error('useSessionLauncher doit être utilisé dans un SessionLauncherProvider');
   return ctx;
 }
+
+/** Providers dont la conversation a une limite de contexte réglable (compaction ou remise à zéro). */
+const CONTEXT_LIMIT_PROVIDERS = new Set(['claude', 'opencode']);
 
 /** Dernier mode d'autorisation choisi dans ce formulaire, par projet (prioritaire sur le réglage du projet). */
 const permissionModeKey = (projectId: string) => `skipper.launcher.permissionMode.${projectId}`;
@@ -126,7 +132,7 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
   const attachments = usePendingAttachments();
 
   const project = projects.find((p) => p.id === projectId);
-  const { data: infoData } = useQuery<{ project: { id: string; gitUrl: string | null; git: { branch: string } | null; defaultPermissionMode: string; approvalConnections: string[] } | null }>(PROJECT_LAUNCH_INFO, { variables: { id: projectId }, skip: !projectId });
+  const { data: infoData } = useQuery<{ project: (Pick<Project, 'id' | 'gitUrl' | 'defaultPermissionMode' | 'defaultContextCleanup'> & { git: { branch: string } | null; approvalConnections: string[] }) | null }>(PROJECT_LAUNCH_INFO, { variables: { id: projectId }, skip: !projectId });
   const info = infoData?.project?.id === projectId ? infoData.project : null;
   const mainBranch = info?.git?.branch;
   const provider = providers.find((p) => p.type === providerType);
@@ -164,6 +170,20 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
     setValues((prev) => ({ ...prev, permissionMode: mode }));
   }, [provider, projectId, projectDefaultMode]);
 
+  // Limite de contexte : la dernière choisie dans ce formulaire pour le projet, sinon le défaut du projet (aucune par défaut).
+  const { data: warnData } = useQuery<{ settings: { claude: { contextWarnTokens: number | null } } }>(CONTEXT_WARN_SETTING, { fetchPolicy: 'no-cache' });
+  const warnTokens = warnData ? warnData.settings.claude.contextWarnTokens : undefined;
+  const warnK = warnTokens === undefined ? undefined : warnTokens === null ? null : Math.round(warnTokens / 1000);
+  const projectLimit = info ? limitFromCleanup(info.defaultContextCleanup) : null;
+  const [contextLimit, setContextLimit] = useState<ContextLimit>(NO_CONTEXT_LIMIT);
+  useEffect(() => {
+    if (!projectId || !projectLimit) return;
+    setContextLimit(lastContextLimit(projectId) ?? projectLimit);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, projectLimit?.action, projectLimit?.maxK]);
+  const limitable = Boolean(provider && CONTEXT_LIMIT_PROVIDERS.has(provider.type));
+  const isProjectLimit = Boolean(info?.defaultContextCleanup && projectLimit && sameLimit(contextLimit, projectLimit));
+
   // Nom du dossier et branche dérivés de la consigne, sauf si la branche est choisie.
   const derived = namesFromText(prompt);
   const hasText = Boolean(prompt.trim());
@@ -172,7 +192,7 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
   const isGit = Boolean(project?.gitUrl);
 
   const hasInstruction = Boolean(prompt.trim() || attachments.items.length);
-  const canSubmit = Boolean(project) && !busy && Boolean(provider) && Boolean(effectiveBranch);
+  const canSubmit = Boolean(project) && !busy && Boolean(provider) && Boolean(effectiveBranch) && (!limitable || validLimit(contextLimit));
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -183,6 +203,7 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
     try {
       const chosenMode = values.permissionMode;
       if (chosenMode && provider!.configFields.some((f) => f.key === 'permissionMode')) rememberPermissionMode(project.id, chosenMode);
+      if (limitable) rememberContextLimit(project.id, contextLimit);
       const res = await createSession({
         variables: {
           input: {
@@ -195,6 +216,8 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
             config: buildConfig(provider!.configFields, values),
             autoStart: hasInstruction,
             agentId: asAgent?.id ?? null,
+            // Toujours explicite : le choix du formulaire (objet vide : aucune limite) remplace le défaut du projet.
+            cleanup: limitable ? cleanupFromLimit(contextLimit) : {},
           },
         },
       });
@@ -208,7 +231,7 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
   const configFields = provider?.configFields ?? [];
   const setValue = (key: string) => (v: string) => setValues((prev) => ({ ...prev, [key]: v }));
   const bypassWarning = values.permissionMode === 'bypassPermissions' ? bypassConnectionsWarning(info?.approvalConnections ?? []) : null;
-  const optionSummary = [asAgent ? `en tant que ${asAgent.name}` : null, provider && providers.length > 1 ? provider.label : null, ...configFields.filter((f) => !f.advanced && values[f.key]).map((f) => f.options?.find((o) => o.value === values[f.key])?.label ?? values[f.key])].filter(Boolean).join(' · ');
+  const optionSummary = [asAgent ? `en tant que ${asAgent.name}` : null, provider && providers.length > 1 ? provider.label : null, ...configFields.filter((f) => !f.advanced && values[f.key]).map((f) => f.options?.find((o) => o.value === values[f.key])?.label ?? values[f.key]), limitable ? `contexte : ${limitLabel(contextLimit, warnK)}${isProjectLimit ? ' (défaut du projet)' : ''}` : null].filter(Boolean).join(' · ');
   const submitLabel = busy ? 'Création…' : hasInstruction ? 'Lancer' : 'Créer la session';
 
   return (
@@ -324,6 +347,16 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
                     {configFields.map((field) => (
                       <FieldGroup key={field.key} field={field} value={values[field.key] ?? ''} onChange={setValue(field.key)} />
                     ))}
+                    {limitable && (
+                      <ContextLimitField
+                        id="launcherContextLimit"
+                        label={isProjectLimit ? 'Contexte (défaut du projet)' : 'Contexte'}
+                        value={contextLimit}
+                        onChange={setContextLimit}
+                        warnK={warnK}
+                        hint="Modifiable ensuite dans les réglages de la session (clic sur la jauge de contexte)."
+                      />
+                    )}
                   </div>
                 </Collapse>
               </div>

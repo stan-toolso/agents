@@ -143,7 +143,7 @@ async function git(args: string[], cwd?: string): Promise<string> {
 const withToken = (slug: string, token: string) => hostedGitUrl(slug).replace('http://', `http://x:${token}@`);
 
 function addProject(slug: string, over: Partial<Project> = {}): Project {
-  const p: Project = { id: `id-${slug}`, name: slug, slug, description: null, systemPrompt: '', gitUrl: hostedGitUrl(slug), gitBranch: null, gitHosted: true, runnerConfig: {}, defaultPermissionMode: 'default', taskInstructions: '', personalOwnerId: null, createdAt: new Date(), updatedAt: new Date(), ...over };
+  const p: Project = { id: `id-${slug}`, name: slug, slug, description: null, systemPrompt: '', gitUrl: hostedGitUrl(slug), gitBranch: null, gitHosted: true, runnerConfig: {}, defaultPermissionMode: 'default', defaultContextCleanup: null, taskInstructions: '', personalOwnerId: null, createdAt: new Date(), updatedAt: new Date(), ...over };
   state.projects.push(p);
   return p;
 }

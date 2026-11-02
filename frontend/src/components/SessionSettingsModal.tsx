@@ -4,13 +4,17 @@ import { Alert, Button, Form, Modal } from 'react-bootstrap';
 import { APPLY_SESSION_CLEANUP, UPDATE_SESSION, type Session } from '../graphql/operations';
 
 import { formatCost, formatTokens } from '../lib/humanize';
+import { RECOMMENDED_CONTEXT_K } from '../lib/contextLimit';
 
 type ContextAction = '' | 'compact' | 'reset' | 'fresh';
 /** Les actions qui s'appliquent au-delà d'un seuil (« fresh » n'en a pas). */
 const withThreshold = (a: ContextAction) => a === 'compact' || a === 'reset';
 
-/** Réglages d'une session : nom et nettoyage automatique de l'historique (transcript et conversation de l'agent). */
-export default function SessionSettingsModal({ session, onClose }: { session: Session; onClose: () => void }) {
+/**
+ * Réglages d'une session : nom et nettoyage automatique de l'historique (transcript et conversation de l'agent).
+ * `focus: 'context'` (clic sur la jauge de contexte) : ouvert sur la conversation de l'agent, avec la limite recommandée.
+ */
+export default function SessionSettingsModal({ session, focus, onClose }: { session: Session; focus?: 'context'; onClose: () => void }) {
   const cleanup = session.cleanup;
   const [name, setName] = useState(session.name);
   const [retentionOn, setRetentionOn] = useState(cleanup.retentionDays !== null);
@@ -33,6 +37,12 @@ export default function SessionSettingsModal({ session, onClose }: { session: Se
   });
   const valid = name.trim().length > 0 && (!retentionOn || Number(retentionDays) >= 1) && (!withThreshold(contextAction) || Number(contextMaxK) >= 10);
   const hasCleanup = cleanup.retentionDays !== null || cleanup.contextAction !== null;
+  // Recommandation pour une session sans limite (une planification a la sienne : conversation neuve à chaque exécution).
+  const recommend = !cleanup.contextAction && !session.schedule && (session.provider === 'claude' || session.provider === 'opencode');
+  const applyRecommended = () =>
+    void save({
+      variables: { id: session.id, input: { cleanup: { retentionDays: cleanup.retentionDays, contextAction: 'compact', contextMaxTokens: RECOMMENDED_CONTEXT_K * 1000 } } },
+    });
 
   return (
     <Modal show onHide={onClose} centered size="lg" backdrop={busy ? 'static' : true}>
@@ -54,10 +64,12 @@ export default function SessionSettingsModal({ session, onClose }: { session: Se
             <Form.Control value={name} onChange={(e) => setName(e.target.value)} maxLength={120} />
           </Form.Group>
 
+
           <h6>Nettoyage automatique</h6>
           <p className="text-secondary small">
-            Une session relancée régulièrement accumule un historique sans fin. Le nettoyage s'applique avant chaque exécution planifiée, par un
-            balayage toutes les heures pour la purge, ou tout de suite avec le bouton ci-dessous.
+            Une session relancée régulièrement accumule un historique sans fin. Le nettoyage s'applique avant chaque exécution planifiée, à la fin
+            de chaque autre tour pour une limite de contexte (compacter ou repartir de zéro au-delà d'un seuil), par un balayage toutes les heures
+            pour la purge, ou tout de suite avec le bouton ci-dessous.
           </p>
           <Form.Check
             type="switch"
@@ -77,13 +89,25 @@ export default function SessionSettingsModal({ session, onClose }: { session: Se
 
           <Form.Group className="mb-2">
             <Form.Label className="mb-1">Conversation de l'agent (ce dont le modèle se souvient)</Form.Label>
-            <Form.Select value={contextAction} onChange={(e) => setContextAction(e.target.value as ContextAction)}>
-              <option value="">Ne rien faire</option>
+            <Form.Select value={contextAction} onChange={(e) => setContextAction(e.target.value as ContextAction)} autoFocus={focus === 'context'}>
+              <option value="">Ne rien faire (me le proposer)</option>
               <option value="fresh">Repartir d'une conversation neuve avant chaque exécution planifiée</option>
               <option value="compact">Compacter la conversation quand le contexte dépasse un seuil</option>
               <option value="reset">Repartir d'une conversation neuve quand le contexte dépasse un seuil</option>
             </Form.Select>
           </Form.Group>
+          {recommend && (
+            <Alert variant="info" className="py-2 px-3 small d-flex align-items-center gap-2 mb-2">
+              <i className="bi bi-lightbulb" />
+              <span className="flex-grow-1" style={{ minWidth: 0 }}>
+                Recommandé : <strong>compacter au-delà de {RECOMMENDED_CONTEXT_K} k tokens</strong>. Chaque tour relit tout le contexte : le garder sous ce seuil rend la session plus rapide et
+                moins coûteuse.
+              </span>
+              <Button size="sm" disabled={busy} onClick={applyRecommended}>
+                Appliquer
+              </Button>
+            </Alert>
+          )}
           {withThreshold(contextAction) && (
             <div className="d-flex align-items-center gap-2 mb-2 ms-4">
               <span>Seuil :</span>
@@ -93,8 +117,8 @@ export default function SessionSettingsModal({ session, onClose }: { session: Se
           )}
           <Form.Text className="d-block mb-3">
             {contextAction === 'fresh' && "Avant chaque exécution planifiée, l'agent repart d'une conversation vide : le contexte reste stable d'une fois sur l'autre ; le transcript affiché est conservé."}
-            {contextAction === 'compact' && "Compacter envoie /compact à l'agent : il résume la conversation et repart de ce résumé (comme Claude Code)."}
-            {contextAction === 'reset' && "Repartir de zéro oublie la conversation du modèle ; le transcript affiché est conservé, l'agent ne se souvient plus des tours précédents."}
+            {contextAction === 'compact' && "Compacter envoie /compact à l'agent : il résume la conversation et repart de ce résumé (comme Claude Code). Appliqué à la fin d'un tour où le contexte dépasse le seuil, et avant une exécution planifiée."}
+            {contextAction === 'reset' && "Repartir de zéro oublie la conversation du modèle ; le transcript affiché est conservé. À la fin d'un tour où le contexte dépasse le seuil, la session est terminée et sa prochaine instruction ouvre une conversation neuve, avec un résumé des derniers échanges."}
             {' '}
             Contexte actuel : {session.contextTokens === null ? 'inconnu (aucun tour depuis cette version)' : `${formatTokens(session.contextTokens)} tokens`}
             {session.context.coldTurnUsd !== null && session.context.coldTurnUsd >= 0.01 ? ` (≈ ${formatCost(session.context.coldTurnUsd)} par tour à froid)` : ''}.
