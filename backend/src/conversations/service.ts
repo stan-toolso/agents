@@ -6,8 +6,12 @@ import { fold, findMentions, type Mentionable } from '../tasks/mentions.js';
 import { normalizeEmoji, taskService } from '../tasks/service.js';
 import type { TaskMention } from '../tasks/types.js';
 import { userRepository } from '../users/repository.js';
+import type { AttachmentInput } from '../sessions/types.js';
+import { describeMessageAttachments, removeMessageAttachmentFiles, removeMessageAttachments, storeMessageAttachments, validateMessageAttachments, type MessageFilesDelivery } from './attachments.js';
+
+export { describeMessageAttachments, type MessageFilesDelivery } from './attachments.js';
 import { conversationRepository } from './repository.js';
-import { CONVERSATION_NAME_MAX, CONVERSATION_SLUG_MAX, CONVERSATION_TOPIC_MAX, GENERAL_NAME, GENERAL_SLUG, type Conversation, type ConversationChange, type Message, type MessageActor, type MessageReaction } from './types.js';
+import { CONVERSATION_NAME_MAX, CONVERSATION_SLUG_MAX, CONVERSATION_TOPIC_MAX, GENERAL_NAME, GENERAL_SLUG, type Conversation, type ConversationChange, type Message, type MessageActor, type MessageAttachment, type MessageReaction } from './types.js';
 
 const MAX_MESSAGE = 20_000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -114,6 +118,8 @@ export const conversationService = {
   messages: (conversationId: string, opts: { before?: Date | null; limit?: number } = {}) => conversationRepository.listMessages(conversationId, opts),
   thread: (rootId: string) => conversationRepository.listThread(rootId),
   reactions: (messageIds: string[]) => conversationRepository.listReactions(messageIds),
+  attachments: (messageIds: string[]) => conversationRepository.listAttachments(messageIds),
+  findAttachment: (id: string) => conversationRepository.findAttachment(id),
   replyStats: (rootIds: string[]) => conversationRepository.replyStats(rootIds),
   countMessages: (conversationId: string) => conversationRepository.countMessages(conversationId),
   linkSession: (rootMessageId: string, sessionId: string) => conversationRepository.linkSession(rootMessageId, sessionId),
@@ -149,12 +155,13 @@ export const conversationService = {
    * mentionnées et l'auteur du message auquel on répond sont notifiés, les sessions mentionnées sont reliées au fil
    * (elles reçoivent le message), les agents mentionnés sont convoqués par les déclencheurs (agents/triggers.ts).
    */
-  async post(conversationId: string, body: string, author: MessageActor, opts: { parentId?: string | null } = {}): Promise<Message> {
+  async post(conversationId: string, body: string, author: MessageActor, opts: { parentId?: string | null; attachments?: AttachmentInput[] | null } = {}): Promise<Message> {
     const conversation = await this.get(conversationId);
     if (conversation.archivedAt) throw new AppError(`Le canal ${channelRef(conversation)} est archivé`);
     const text = body.replace(/\u0000/g, '').trim();
-    if (!text) throw new AppError('Le message est vide');
+    if (!text && !opts.attachments?.length) throw new AppError('Le message est vide');
     if (text.length > MAX_MESSAGE) throw new AppError(`Le message dépasse ${MAX_MESSAGE} caractères`);
+    await validateMessageAttachments(null, opts.attachments);
     let parent: Message | null = null;
     if (opts.parentId) {
       parent = await this.getMessage(opts.parentId);
@@ -163,18 +170,22 @@ export const conversationService = {
     }
     const mentions = await this.resolveMentions(conversation.projectId, text);
     const message = await conversationRepository.addMessage(conversationId, text, { type: author.type, userId: author.userId, sessionId: author.sessionId, name: authorName(author) }, { parentId: parent?.id ?? null, mentions });
+    const attachments = await storeMessageAttachments(conversationId, message.id, opts.attachments).catch(async (err) => {
+      await conversationRepository.deleteMessage(message.id).catch(() => undefined);
+      throw err;
+    });
     const root = parent ?? message;
     // L'autrice (session) et les sessions mentionnées suivent le fil.
     if (author.sessionId) await conversationRepository.linkSession(root.id, author.sessionId).catch((err) => log.warn('[conversations] session autrice non reliée', err));
     for (const m of mentions) if (m.kind === 'session') await conversationRepository.linkSession(root.id, m.id).catch((err) => log.warn('[conversations] session mentionnée non reliée', err));
     void this.notifyPeople(conversation, message, parent, author);
-    notifyChanged({ kind: 'posted', conversation, message, root, parent });
+    notifyChanged({ kind: 'posted', conversation, message, root, parent, attachments });
     return message;
   },
 
   /** Notifications d'un nouveau message : aux personnes mentionnées, et à l'auteur (humain) du message auquel il répond. */
   async notifyPeople(conversation: Conversation, message: Message, parent: Message | null, author: MessageActor): Promise<void> {
-    const excerpt = message.body.length > 140 ? `${message.body.slice(0, 140)}…` : message.body;
+    const excerpt = message.body.length > 140 ? `${message.body.slice(0, 140)}…` : message.body || '(fichiers joints)';
     const notified = new Set<string>();
     if (author.userId) notified.add(author.userId);
     const base = { link: messageLink(conversation, message.id), projectId: conversation.projectId, sessionId: author.sessionId ?? null, payload: { conversationId: conversation.id, messageId: message.id } };
@@ -190,21 +201,29 @@ export const conversationService = {
     }
   },
 
-  async updateMessage(id: string, body: string): Promise<Message> {
+  /** Modifie le texte d'un message ; `files` : fichiers ajoutés (base64) et retirés (identifiants). */
+  async updateMessage(id: string, body: string, files: { attachments?: AttachmentInput[] | null; removeAttachmentIds?: string[] | null } = {}): Promise<Message> {
     const current = await this.getMessage(id);
+    const kept = (await conversationRepository.listAttachments([id])).filter((a) => !files.removeAttachmentIds?.includes(a.id));
     const text = body.replace(/\u0000/g, '').trim();
-    if (!text) throw new AppError('Le message est vide');
+    if (!text && kept.length + (files.attachments?.length ?? 0) === 0) throw new AppError('Le message est vide');
     if (text.length > MAX_MESSAGE) throw new AppError(`Le message dépasse ${MAX_MESSAGE} caractères`);
+    await validateMessageAttachments(id, files.attachments, files.removeAttachmentIds);
     const conversation = await this.get(current.conversationId);
     const m = await conversationRepository.updateMessage(id, text, await this.resolveMentions(conversation.projectId, text));
     if (!m) throw new NotFoundError('Message introuvable');
+    await removeMessageAttachments(id, files.removeAttachmentIds);
+    await storeMessageAttachments(current.conversationId, id, files.attachments);
     return m;
   },
 
-  /** Supprime un message (et ses réponses, en cascade). */
+  /** Supprime un message (et ses réponses, en cascade) avec leurs fichiers (les lignes partent en cascade, les fichiers ici). */
   async deleteMessage(id: string): Promise<boolean> {
     await this.getMessage(id);
-    return conversationRepository.deleteMessage(id);
+    const attachments = await conversationRepository.listAttachmentsWithReplies(id);
+    const deleted = await conversationRepository.deleteMessage(id);
+    if (deleted) await removeMessageAttachmentFiles(attachments);
+    return deleted;
   },
 
   /** Pose ou retire une réaction sur un message ; l'autrice (session) du message en est informée (écouteurs). */
@@ -255,23 +274,26 @@ export function summarizeMessageReactions(reactions: MessageReaction[]): string 
 const fmtDate = (d: Date) => d.toISOString().slice(0, 16).replace('T', ' ');
 const readableMentions = (m: Message): string => (m.mentions.length ? ` (mentionne ${m.mentions.map((x) => (x.kind === 'session' ? `la session « ${x.label} » (${x.id})` : x.label)).join(', ')})` : '');
 
-/** Un message tel que montré à un agent : auteur, date, identifiant (pour y répondre ou y réagir), mentions, texte, réactions. */
-export function describeMessage(m: Message, opts: { reactions?: MessageReaction[]; indent?: string; replyTo?: Message | null } = {}): string[] {
+/** Un message tel que montré à un agent : auteur, date, identifiant (pour y répondre ou y réagir), mentions, texte, fichiers, réactions. */
+export function describeMessage(m: Message, opts: { reactions?: MessageReaction[]; attachments?: MessageAttachment[]; files?: MessageFilesDelivery; indent?: string; replyTo?: Message | null } = {}): string[] {
   const pad = opts.indent ?? '';
   const head = `${pad}- ${m.authorName}${m.authorType === 'agent' ? ' (agent)' : ''}, ${fmtDate(m.createdAt)} UTC (message ${m.id}${opts.replyTo ? `, en réponse à ${opts.replyTo.authorName}` : ''})${readableMentions(m)} :`;
-  const body = [m.body];
+  const body = [m.body || '(pas de texte)'];
+  const own = (opts.attachments ?? []).filter((a) => a.messageId === m.id);
+  if (own.length) body.push(...describeMessageAttachments(own, opts.files));
   if (opts.reactions?.length) body.push(`Réactions : ${summarizeMessageReactions(opts.reactions)}`);
   return [head, ...body.join('\n').split('\n').map((l) => `${pad}  ${l}`)];
 }
 
 /** Des messages (racines dans l'ordre, réponses indentées sous chacune) pour un agent. */
-export function describeMessages(messages: Message[], reactions: MessageReaction[] = []): string[] {
+export function describeMessages(messages: Message[], reactions: MessageReaction[] = [], files: { attachments?: MessageAttachment[]; delivery?: MessageFilesDelivery } = {}): string[] {
   const roots = messages.filter((m) => !m.parentId || !messages.some((p) => p.id === m.parentId));
   const lines: string[] = [];
+  const common = { attachments: files.attachments, files: files.delivery };
   for (const root of roots) {
-    lines.push(...describeMessage(root, { reactions: reactions.filter((r) => r.messageId === root.id) }));
+    lines.push(...describeMessage(root, { ...common, reactions: reactions.filter((r) => r.messageId === root.id) }));
     for (const reply of messages.filter((m) => m.parentId === root.id)) {
-      lines.push(...describeMessage(reply, { reactions: reactions.filter((r) => r.messageId === reply.id), indent: '    ', replyTo: root }));
+      lines.push(...describeMessage(reply, { ...common, reactions: reactions.filter((r) => r.messageId === reply.id), indent: '    ', replyTo: root }));
     }
   }
   return lines;

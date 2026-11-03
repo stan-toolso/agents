@@ -1,3 +1,4 @@
+import type { AttachmentRef } from '../lib/attachments';
 import { gql } from '@apollo/client';
 import type { TaskMention, TaskMentionable, TaskReaction } from './operations';
 
@@ -27,6 +28,7 @@ export interface ChannelMessage {
   body: string;
   mentions: TaskMention[];
   reactions: TaskReaction[];
+  attachments: AttachmentRef[];
   editable: boolean;
   deletable: boolean;
   replyCount: number;
@@ -89,6 +91,12 @@ export const MESSAGE_FIELDS = gql`
       count
       actors
       mine
+    }
+    attachments {
+      id
+      name
+      mediaType
+      size
     }
     editable
     deletable
@@ -206,19 +214,25 @@ export const SET_CONVERSATION_ARCHIVED = gql`
 `;
 
 export const POST_MESSAGE = gql`
-  mutation PostMessage($conversationId: ID!, $body: String!, $parentId: ID) {
-    postMessage(conversationId: $conversationId, body: $body, parentId: $parentId) {
+  mutation PostMessage($conversationId: ID!, $body: String!, $parentId: ID, $attachments: [AttachmentInput!]) {
+    postMessage(conversationId: $conversationId, body: $body, parentId: $parentId, attachments: $attachments) {
       id
     }
   }
 `;
 
 export const UPDATE_MESSAGE = gql`
-  mutation UpdateMessage($id: ID!, $body: String!) {
-    updateMessage(id: $id, body: $body) {
+  mutation UpdateMessage($id: ID!, $body: String!, $attachments: [AttachmentInput!], $removeAttachmentIds: [ID!]) {
+    updateMessage(id: $id, body: $body, attachments: $attachments, removeAttachmentIds: $removeAttachmentIds) {
       id
       body
       updatedAt
+      attachments {
+        id
+        name
+        mediaType
+        size
+      }
     }
   }
 `;

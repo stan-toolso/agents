@@ -523,7 +523,7 @@ export const agentService = {
     const prompt = [
       `Tu es convoqué dans le canal ${channelRef(conversation)} du projet, dans le fil « ${title} » (fil ${rootMessageId}, canal « ${conversation.slug} »). Le fil complet :`,
       '',
-      ...describeMessages(thread, await conversationService.reactions(thread.map((m) => m.id))),
+      ...describeMessages(thread, await conversationService.reactions(thread.map((m) => m.id)), { attachments: await conversationService.attachments(thread.map((m) => m.id)) }),
       '',
       text,
       '',

@@ -20,6 +20,8 @@ export interface TaskFeed {
    */
   quiet: boolean;
   attachments: TaskAttachment[];
+  /** Fichiers déjà prêts pour l'instruction (base64), à la place de `attachments` : ceux d'un message de canal (conversations/feed.ts). */
+  files?: AttachmentInput[];
 }
 
 /** La session est-elle en charge de la tâche (plusieurs peuvent l'être) ? */
@@ -128,7 +130,7 @@ export async function deliverFeed(feed: TaskFeed): Promise<void> {
       return;
     }
     // Les fichiers du commentaire (ou ajoutés à la tâche) accompagnent le message, autant qu'une instruction en porte.
-    const files: AttachmentInput[] = feed.attachments.length ? await asInstructionAttachments(fitInInstruction(feed.attachments).kept) : [];
+    const files: AttachmentInput[] = feed.files ?? (feed.attachments.length ? await asInstructionAttachments(fitInInstruction(feed.attachments).kept) : []);
     await sessionService.sendMessage(session.id, feed.text, files.length ? files : null);
   } catch (err) {
     log.warn(`[tasks] message non transmis à la session ${session.id} : ${(err as Error).message}`);

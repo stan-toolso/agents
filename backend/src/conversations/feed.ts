@@ -1,6 +1,8 @@
 import { agentConversationFeedTargets } from '../agents/triggers.js';
 import { log } from '../log.js';
 import { deliverFeed } from '../tasks/sessionFeed.js';
+import { fitInInstruction } from '../tasks/attachments.js';
+import { messageAttachmentsAsInstruction } from './attachments.js';
 import { channelRef, conversationService, describeMessage, threadTitle } from './service.js';
 import type { ConversationChange } from './types.js';
 
@@ -12,6 +14,8 @@ export interface ConversationFeed {
   restart: boolean;
   /** Note discrète (sans tour de l'agent), voir tasks/sessionFeed.ts. */
   quiet: boolean;
+  /** Les fichiers du message accompagnent l'instruction (message adressé) ; une note discrète les nomme seulement. */
+  withFiles: boolean;
 }
 
 const QUIET_HINT = "Pour information : poursuis sans en parler, sauf si cela change ton travail (l'outil `conversations.read` montre le fil complet).";
@@ -33,13 +37,15 @@ export function feedsFor(change: ConversationChange, linked: string[] = [], also
       .filter((sessionId) => sessionId !== m.authorSessionId)
       .map((sessionId) => {
         const addressed = mentioned.has(sessionId) || alsoAddressed.has(sessionId);
+        const files = addressed ? { kind: 'instruction' as const, ids: new Set(fitInInstruction(change.attachments).kept.map((a) => a.id)) } : { kind: 'none' as const };
         return {
           sessionId,
           restart: addressed,
           quiet: !addressed,
+          withFiles: addressed && change.attachments.length > 0,
           text: [
             `[Message dans un canal] Nouveau message dans le fil « ${threadTitle(change.root)} » du canal ${ref} (fil ${change.root.id}) que cette session suit${mentioned.has(sessionId) ? ', et qui mentionne cette session' : ''} :`,
-            ...describeMessage(m, { replyTo: change.parent }),
+            ...describeMessage(m, { replyTo: change.parent, attachments: change.attachments, files }),
             '',
             addressed
               ? `Réponds-y avec l'outil \`conversations.post\` (channel « ${change.conversation.slug} », reply_to ${change.root.id} pour rester dans son fil) quand il appelle une réponse ; \`conversations.react\` pour un simple accusé.`
@@ -56,6 +62,7 @@ export function feedsFor(change: ConversationChange, linked: string[] = [], also
       sessionId: target.authorSessionId,
       restart: false,
       quiet: true,
+      withFiles: false,
       text: `[Réaction dans un canal] ${r.actorName}${r.actorType === 'agent' ? ' (agent)' : ''} ${change.added ? 'a réagi' : 'a retiré sa réaction'} ${r.emoji} ${change.added ? 'à' : 'de'} ton message ${target.id} dans ${ref}${change.added ? ` : « ${target.body.slice(0, 120)}${target.body.length > 120 ? '…' : ''} »` : ''}. Rien à faire, sauf si cela appelle une suite.`,
     },
   ];
@@ -66,7 +73,9 @@ export async function deliverConversationChange(change: ConversationChange): Pro
   const rootId = change.kind === 'posted' ? change.root.id : (change.message.parentId ?? change.message.id);
   const linked = await conversationService.sessionIdsOnThread(rootId).catch(() => [] as string[]);
   const addressed = await agentConversationFeedTargets(change, linked).catch(() => new Set<string>());
-  await Promise.all(feedsFor(change, linked, addressed).map((f) => deliverFeed({ ...f, attachments: [] }).catch((err) => log.warn(`[conversations] message non transmis à ${f.sessionId} : ${(err as Error).message}`))));
+  const feeds = feedsFor(change, linked, addressed);
+  const files = change.kind === 'posted' && feeds.some((f) => f.withFiles) ? await messageAttachmentsAsInstruction(change.attachments).catch(() => []) : [];
+  await Promise.all(feeds.map(({ withFiles, ...f }) => deliverFeed({ ...f, attachments: [], files: withFiles ? files : [] }).catch((err) => log.warn(`[conversations] message non transmis à ${f.sessionId} : ${(err as Error).message}`))));
 }
 
 /** Branche l'écouteur sur le service des conversations (au démarrage du serveur). */

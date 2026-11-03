@@ -46,6 +46,11 @@ export function taskAttachmentUrl(taskId: string, attachmentId: string): string 
   return `${apiBaseUrl}/api/task-attachments/${taskId}/${attachmentId}`;
 }
 
+/** URL de téléchargement d'un fichier joint à un message d'un canal (cookie de session). */
+export function messageAttachmentUrl(conversationId: string, attachmentId: string): string {
+  return `${apiBaseUrl}/api/message-attachments/${conversationId}/${attachmentId}`;
+}
+
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} o`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} Ko`;

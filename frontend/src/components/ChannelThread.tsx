@@ -3,9 +3,11 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Button } from 'react-bootstrap';
 import { CONVERSATION_MESSAGES, DELETE_MESSAGE, MARK_CONVERSATION_READ, POST_MESSAGE, TOGGLE_MESSAGE_REACTION, UPDATE_MESSAGE, type ChannelMessage, type Conversation } from '../graphql/conversations';
 import type { TaskMentionable } from '../graphql/operations';
+import { messageAttachmentUrl } from '../lib/attachments';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { useDialogs } from './Dialogs';
-import { Composer, RootMessage, ThreadProvider, groupThread, useThreadAnchor, type ThreadApi } from './Thread';
+import TaskAttachments from './TaskAttachments';
+import { Composer, RootMessage, ThreadProvider, groupThread, useThreadAnchor, type ThreadApi, type ThreadMessage } from './Thread';
 
 /** Requêtes à rafraîchir après une écriture : le canal lui-même, la liste des canaux (non-lus) et l'onglet. */
 const REFETCH = ['ConversationMessages', 'ProjectConversations', 'ProjectUnreadMessages', 'ProjectDashboard'];
@@ -33,11 +35,14 @@ export default function ChannelThread({ conversationId, canWrite, compact = fals
   const api = useMemo<ThreadApi>(
     () => ({
       anchor: 'm',
-      files: false,
-      send: ({ body, parentId }) => post({ variables: { conversationId, body, parentId } }),
-      update: ({ id, body }) => update({ variables: { id, body } }),
+      files: true,
+      send: ({ body, parentId, attachments }) => post({ variables: { conversationId, body, parentId, attachments } }),
+      update: ({ id, body, removeAttachmentIds }) => update({ variables: { id, body, removeAttachmentIds } }),
       remove: (id) => remove({ variables: { id } }),
       toggleReaction: toggle,
+      renderAttachments: (m: ThreadMessage, edit) => (
+        <TaskAttachments urlFor={(id) => messageAttachmentUrl(conversationId, id)} attachments={m.attachments ?? []} removed={edit?.removed} onToggleRemove={edit?.onToggleRemove} />
+      ),
     }),
     [post, update, remove, toggle, conversationId],
   );

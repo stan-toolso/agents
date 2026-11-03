@@ -96,6 +96,7 @@ beforeEach(() => {
   conversations.agentSessionIdsOnThread = vi.fn(async () => []);
   conversations.thread = vi.fn(async () => []);
   conversations.reactions = vi.fn(async () => []);
+  conversations.attachments = vi.fn(async () => []);
   conversations.linkSession = vi.fn(async () => undefined);
   worksessions.findById = vi.fn(async (id: string) => ({ id }));
 });

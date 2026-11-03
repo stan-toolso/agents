@@ -147,6 +147,7 @@ describe('onConversationChanged', () => {
       conversation: { id: 'cv1', projectId: 'p1', slug: 'general' },
       root: { id: 'm0' },
       parent: null,
+      attachments: [],
       message: { id: 'm2', parentId: 'm0', authorType: 'human', authorUserId: 'u1', authorSessionId: null, authorName: 'Alice', body: 'Oui, prépare la release', mentions: [], ...over },
     }) as unknown as ConversationChange;
 
