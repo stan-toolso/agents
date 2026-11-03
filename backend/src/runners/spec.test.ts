@@ -63,6 +63,12 @@ describe('containerDrift', () => {
     expect(cpusArgs('0.5')).toEqual(['--cpus', '0.5']);
   });
 
+  it('signale les variables d’environnement ajoutées à un conteneur qui ne les avait pas (CLAUDE_CONFIG_DIR)', () => {
+    const withEnv = { ...expected, env: ['CLAUDE_CONFIG_DIR=/home/skipper/.claude'] };
+    expect(containerDrift(withEnv, { specLabel: label(), init: true, imageId: 'sha256:new' }, image)).toEqual(['variables d’environnement modifié']);
+    expect(containerDrift(withEnv, { specLabel: JSON.stringify(withEnv), init: true, imageId: 'sha256:new' }, image)).toEqual([]);
+  });
+
   it("signale un changement d'image par son nom plutôt que par sa reconstruction", () => {
     expect(containerDrift(expected, { specLabel: label({ image: 'skipper-runner:old', imageId: 'sha256:old' }), init: true, imageId: 'sha256:old' }, image)).toEqual(['image skipper-runner:old → skipper-runner:latest']);
   });
