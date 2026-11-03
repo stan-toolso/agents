@@ -137,7 +137,36 @@ function InputForm({ onAnswer, busy }: { onAnswer: (r: Record<string, unknown>) 
   );
 }
 
-const typeLabels: Record<string, string> = { permission: 'Autorisation', question: 'Question', input: 'Saisie' };
+/** Demande d'accord officielle d'un agent (tasks.request_approval) : accorder ou refuser, réservé aux administrateurs du projet. */
+function ApprovalForm({ request, onAnswer, busy }: { request: HumanRequest; onAnswer: (r: Record<string, unknown>) => void; busy: boolean }) {
+  const [message, setMessage] = useState('');
+  const p = request.payload as { taskId?: string; taskTitle?: string };
+  return (
+    <>
+      <div className="mb-1">
+        L'agent demande votre accord pour : <strong>{request.title}</strong>
+      </div>
+      {p.taskId && (
+        <div className="small mb-2">
+          Tâche : <Link to={`/tasks/${p.taskId}`}>{p.taskTitle || p.taskId}</Link>
+        </div>
+      )}
+      {request.message && <Markdown className="small mb-2" text={request.message} />}
+      <Form.Control size="sm" className="mb-2" placeholder="Commentaire ou motif de refus (optionnel, posté dans le fil de la tâche)" value={message} onChange={(e) => setMessage(e.target.value)} />
+      <div className="d-flex flex-wrap gap-2 align-items-center">
+        <Button size="sm" variant="success" disabled={busy} onClick={() => onAnswer({ decision: 'approve', message: message || undefined })}>
+          Accorder
+        </Button>
+        <Button size="sm" variant="outline-danger" disabled={busy} onClick={() => onAnswer({ decision: 'deny', message: message || undefined })}>
+          Refuser
+        </Button>
+        <span className="small text-secondary">Réservé aux administrateurs du projet ; la décision est postée dans le fil de la tâche.</span>
+      </div>
+    </>
+  );
+}
+
+const typeLabels: Record<string, string> = { permission: 'Autorisation', question: 'Question', input: 'Saisie', approval: 'Accord' };
 
 /** Carte d'une demande d'intervention humaine, avec le formulaire de réponse adapté à son type. */
 export default function RequestCard({ request, showSession = false }: { request: HumanRequest; showSession?: boolean }) {
@@ -164,10 +193,11 @@ export default function RequestCard({ request, showSession = false }: { request:
         </span>
       </Card.Header>
       <Card.Body>
-        {request.message && request.type !== 'permission' && <p className="small">{request.message}</p>}
+        {request.message && request.type !== 'permission' && request.type !== 'approval' && <p className="small">{request.message}</p>}
         {request.type === 'permission' && <PermissionForm request={request} onAnswer={onAnswer} busy={busy} />}
         {request.type === 'question' && <QuestionForm request={request} onAnswer={onAnswer} busy={busy} />}
-        {request.type !== 'permission' && request.type !== 'question' && <InputForm onAnswer={onAnswer} busy={busy} />}
+        {request.type === 'approval' && <ApprovalForm request={request} onAnswer={onAnswer} busy={busy} />}
+        {request.type !== 'permission' && request.type !== 'question' && request.type !== 'approval' && <InputForm onAnswer={onAnswer} busy={busy} />}
         {error && (
           <Alert variant="danger" className="mt-2 mb-0 py-1 small">
             {error.message}

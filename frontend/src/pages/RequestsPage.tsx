@@ -12,7 +12,7 @@ const statusLabels: Record<RequestStatus, { label: string; bg: string }> = {
   CANCELLED: { label: 'Annulée', bg: 'secondary' },
   EXPIRED: { label: 'Expirée', bg: 'dark' },
 };
-const typeLabels: Record<string, string> = { permission: 'Autorisation', question: 'Question', input: 'Saisie' };
+const typeLabels: Record<string, string> = { permission: 'Autorisation', question: 'Question', input: 'Saisie', approval: 'Accord' };
 
 /** Résumé lisible de la réponse d'une demande selon son type. */
 function summarizeResponse(r: HumanRequest): string {

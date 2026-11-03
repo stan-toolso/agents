@@ -12,6 +12,7 @@ const m = vi.hoisted(() => ({
   prs: {} as Record<string, unknown>,
   session: { id: 's1', worksessionId: 'w1' as string | null, ownerId: 'u1', takenOverById: null as string | null },
   ownerKind: null as string | null,
+  approvalImplicit: false,
   calls: [] as Array<[string, unknown[]]>,
   events: [] as unknown[][],
   taskStatus: 'in_progress' as string,
@@ -47,6 +48,11 @@ vi.mock('../worksessions/service.js', () => ({ worksessionService: { get: async 
 vi.mock('../runners/index.js', () => ({ runner: {} }));
 vi.mock('../pullRequests/localCheck.js', async (orig) => ({ ...(await orig<typeof import('../pullRequests/localCheck.js')>()), localCheck: { run: async (...a: unknown[]) => (m.calls.push(['check', a]), m.check) } }));
 vi.mock('../sessions/service.js', () => ({ sessionService: { get: async () => m.session } }));
+vi.mock('../approvals/service.js', () => ({
+  approvalService: {
+    request: async (input: unknown) => (m.calls.push(['approval', [input]]), m.approvalImplicit ? { implicit: true, approver: { name: 'Stan', email: 's@x' } } : { implicit: false, request: { id: 'r1' } }),
+  },
+}));
 vi.mock('../personal/scope.js', () => ({
   inScope: async (_p: Project, _s: unknown, projectId: string) => projectId === 'p',
   targetProject: async (p: Project) => p,
@@ -170,10 +176,23 @@ describe('serveur MCP tasks', () => {
   it('déclare tous ses outils (schémas acceptés par le SDK), dont ceux des pull requests', async () => {
     const client = await connect();
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
-    expect(names).toEqual(['claim', 'comment', 'create', 'get', 'list', 'people', 'pr_list', 'pr_merge', 'pr_open', 'pr_register', 'pr_update', 'react', 'release', 'update']);
+    expect(names).toEqual(['claim', 'comment', 'create', 'get', 'list', 'people', 'pr_list', 'pr_merge', 'pr_open', 'pr_register', 'pr_update', 'react', 'release', 'request_approval', 'update']);
     // Tout outil libre existe ; pr_open (pousse et ouvre sur GitHub) n'est pas libre.
     for (const free of TASKS_FREE_TOOLS) expect(names).toContain(free.replace('mcp__tasks__', ''));
     expect(TASKS_FREE_TOOLS).not.toContain('mcp__tasks__pr_open');
+  });
+
+  it('request_approval pose une demande ou constate l’accord implicite, sans exécuter l’action', async () => {
+    const client = await connect();
+    m.approvalImplicit = false;
+    const posted = textOf(await client.callTool({ name: 'request_approval', arguments: { id: 't1', action: 'Mettre en production main' } }));
+    expect(posted).toContain("Demande d'accord posée");
+    expect(posted).toContain('termine ton tour');
+    expect(m.calls.at(-1)?.[1][0]).toMatchObject({ projectId: 'p', sessionId: 's1', taskId: 't1', action: 'Mettre en production main', actor: { type: 'agent', sessionId: 's1' } });
+    m.approvalImplicit = true;
+    const implicit = textOf(await client.callTool({ name: 'request_approval', arguments: { id: 't1', action: 'Mettre en production main' } }));
+    expect(implicit).toContain('Accord implicite : Stan');
+    m.approvalImplicit = false;
   });
 
   it('create rattache la session aux tâches créées en cours ou terminées, pas aux tâches à faire, sauf demande', async () => {

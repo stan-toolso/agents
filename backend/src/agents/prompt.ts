@@ -19,6 +19,7 @@ export function roleRulesPrompt(agent: Pick<Agent, 'kind'>): string {
       "- Dès qu'un changement de code est nécessaire, y compris un bug qui bloque ce qu'on t'a demandé (release, mise en production, vérification), crée une tâche : contexte, diagnostic, correctif proposé, critères d'acceptation, rapporteur = la personne qui t'a fait la demande. Passe-la à « prête » et confie-la tout de suite à l'agent développeur du projet (« @Nom » dans son fil, ou `agents.summon`) : ce correctif est couvert par la demande en cours, pas besoin d'un nouvel accord pour le lancer.",
       "- Relie la tâche bloquée au correctif (`depends_on`), passe son étiquette d'état à « bloquée » et dis dans son fil ce qu'on attend. Quand la PR du correctif est fusionnée, reprends là où tu t'étais arrêté.",
       "- S'il n'y a pas d'agent développeur dans le projet, décris le correctif dans la tâche et mentionne une personne du projet.",
+      "- Un accord avant une mise en production ou une action sensible se demande toujours avec `tasks.request_approval` (sur la tâche de release ou la tâche concernée), jamais par un simple message ou une mention dans le fil, même si tes instructions le disent : l'outil pose une vraie demande aux administrateurs. Si la personne qui t'a demandé ce travail est administrateur, l'outil constate que son accord est déjà donné : poursuis sans attendre. Sinon termine ton tour et reprends quand la décision arrive dans le fil.",
     ].join('\n');
   }
   if (agent.kind === 'developer') {

@@ -65,6 +65,7 @@ import { rateLimitView } from '../settings/rateLimits.js';
 import type { Notification } from '../notifications/types.js';
 import { pubSub } from '../pubsub.js';
 import { requestService } from '../requests/service.js';
+import { APPROVAL, approvalService } from '../approvals/service.js';
 import type { HumanRequest, RequestStatus } from '../requests/types.js';
 import { listProviders } from '../sessions/providers/registry.js';
 import { publicAttachment } from '../sessions/attachments.js';
@@ -1857,10 +1858,19 @@ export const resolvers = {
       return cleanupService.resetNow(args.id, args.keepSummary ?? true);
     },
     answerRequest: async (_: unknown, args: { id: string; response: Record<string, unknown> }, ctx: Ctx) => {
+      // Une demande d'accord (approvals/service.ts) est réservée aux administrateurs du projet.
+      if ((await requestService.get(args.id)).type === APPROVAL) {
+        await guardRequest(ctx, args.id, 'admin');
+        return approvalService.answer(args.id, args.response ?? {}, requireUser(ctx));
+      }
       await guardRequest(ctx, args.id, 'member');
       return requestService.answer(args.id, args.response ?? {}, requireUser(ctx).id);
     },
     cancelRequest: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      if ((await requestService.get(args.id)).type === APPROVAL) {
+        await guardRequest(ctx, args.id, 'admin');
+        return approvalService.cancel(args.id, requireUser(ctx));
+      }
       await guardRequest(ctx, args.id, 'member');
       return requestService.cancel(args.id, requireUser(ctx).id);
     },

@@ -98,10 +98,23 @@ export const requestRepository = {
     return rows[0] ? toRequest(rows[0]) : null;
   },
 
+  /** Demandes d'accord (approvals/service.ts) encore en attente pour une tâche. */
+  async pendingApprovalsForTask(taskId: string): Promise<HumanRequest[]> {
+    const { rows } = await pool.query<RequestRow>(
+      `SELECT * FROM requests WHERE type = 'approval' AND status = 'pending' AND payload->>'taskId' = $1 ORDER BY created_at`,
+      [taskId],
+    );
+    return rows.map(toRequest);
+  },
+
+  /**
+   * Règle les demandes en attente d'une session qui s'arrête. Les demandes d'accord n'attendent pas le processus de
+   * l'agent (la réponse lui revient par le fil de la tâche) : elles survivent à l'arrêt de la session.
+   */
   async settleAllPending(sessionId: string, status: 'cancelled' | 'expired'): Promise<HumanRequest[]> {
     const { rows } = await pool.query<RequestRow>(
       `UPDATE requests SET status = $2, answered_at = now()
-       WHERE session_id = $1 AND status = 'pending' RETURNING *`,
+       WHERE session_id = $1 AND status = 'pending' AND type <> 'approval' RETURNING *`,
       [sessionId, status],
     );
     return rows.map(toRequest);
@@ -109,12 +122,12 @@ export const requestRepository = {
 
   /**
    * Au redémarrage : une demande encore en attente n'a plus de processus pour la consommer, sauf si sa session tourne
-   * sur une autre instance vivante du backend (déploiement bleu/vert).
+   * sur une autre instance vivante du backend (déploiement bleu/vert). Les demandes d'accord ne dépendent d'aucun processus.
    */
   async expireAllPending(liveInstanceIds: string[] = []): Promise<number> {
     const { rowCount } = await pool.query(
       `UPDATE requests r SET status = 'expired', answered_at = now()
-       WHERE r.status = 'pending'
+       WHERE r.status = 'pending' AND r.type <> 'approval'
          AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.id = r.session_id AND s.status = 'running' AND s.instance_id = ANY($1::uuid[]))`,
       [liveInstanceIds],
     );
