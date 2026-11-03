@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { INTERRUPTED_LABEL, isEmptyNotificationResult, isInterruptedResult, resultError } from './claudeResult.js';
+import { INTERRUPTED_LABEL, isEmptyNotificationResult, isInterruptedResult, isLastResultEcho, resultError } from './claudeResult.js';
 
 // Résultat réel émis par le CLI 2.1.300 après un clic sur « Interrompre » pendant un appel d'outil (24/10/2026).
 const interrupted = {
@@ -57,5 +57,16 @@ describe('isEmptyNotificationResult', () => {
     expect(isEmptyNotificationResult({ subtype: 'success', num_turns: 5 })).toBe(false);
     expect(isEmptyNotificationResult({ ...resumed, num_turns: 2 })).toBe(false);
     expect(isEmptyNotificationResult({ ...resumed, origin: null })).toBe(false);
+  });
+});
+
+describe('isLastResultEcho', () => {
+  it('reconnaît l’erreur du SDK qui répète le dernier résultat à la sortie du CLI (prise en main après une question écartée, 03/11/2026)', () => {
+    expect(isLastResultEcho(new Error('Claude Code returned an error result: [ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use'))).toBe(true);
+  });
+
+  it('laisse passer les vraies pannes du processus', () => {
+    expect(isLastResultEcho(new Error('Claude Code process exited with code 137'))).toBe(false);
+    expect(isLastResultEcho('Claude Code returned an error result: x')).toBe(false);
   });
 });

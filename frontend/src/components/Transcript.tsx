@@ -432,6 +432,17 @@ function toolBody({ name, input, result, subCalls, expanded, rel }: { name: stri
  * un avertissement — le code ressort, la sortie garde sa couleur — plutôt qu'en bloc rouge. Un échec sans
  * sortie, ou toute autre erreur d'outil, reste une erreur.
  */
+/**
+ * Résultat écrit par Claude Code quand une personne a écarté l'appel : question ignorée, demande d'autorisation
+ * annulée, tour interrompu pendant l'outil. Le texte brut (« The user doesn't want to proceed… STOP what you are
+ * doing… ») est destiné au modèle ; affiché tel quel en rouge, il faisait croire à une panne.
+ */
+export const USER_DECLINED = /^The user doesn't want to proceed with this tool use/;
+
+export function declinedByUser(result: { text: string; isError: boolean } | undefined): boolean {
+  return Boolean(result?.isError && USER_DECLINED.test(result.text.trim()));
+}
+
 export function nonZeroExit(name: string, result: { text: string; isError: boolean } | undefined): { code: number; output: string } | null {
   if (!result?.isError || (name !== 'Bash' && name !== 'BashOutput')) return null;
   const match = /^\s*Exit code (\d+)\s*\n([\s\S]*)$/.exec(result.text);
@@ -440,10 +451,12 @@ export function nonZeroExit(name: string, result: { text: string; isError: boole
   return output ? { code: Number(match[1]), output } : null;
 }
 
-type Severity = 'pending' | 'ok' | 'warn' | 'error';
+// `declined` : appel écarté par une personne (question ignorée, demande annulée, tour interrompu pendant l'outil) ;
+// ce n'est pas une panne, l'agent attend la suite.
+type Severity = 'pending' | 'ok' | 'warn' | 'error' | 'declined';
 
 /** Issue d'un appel d'outil : une commande sortie en code non nul est un avertissement, pas un échec (voir nonZeroExit). */
-const toolSeverity = (name: string, result?: ToolResult): Severity => (!result ? 'pending' : nonZeroExit(name, result) ? 'warn' : result.isError ? 'error' : 'ok');
+const toolSeverity = (name: string, result?: ToolResult): Severity => (!result ? 'pending' : declinedByUser(result) ? 'declined' : nonZeroExit(name, result) ? 'warn' : result.isError ? 'error' : 'ok');
 
 /**
  * Autoriser depuis le transcript un outil refusé par le mode « Refuser sans demander » : fourni par la page de session
@@ -506,7 +519,14 @@ function ToolCall({ name, input, result, subCalls, rel }: { name: string; input:
     if (!window.getSelection()?.toString()) setExpanded((v) => !v);
   };
   const deniedByMode = Boolean(result?.isError && DONT_ASK_DENIAL.test(result.text));
-  const body = deniedByMode ? <DontAskDenial name={name} input={input} /> : toolBody({ name, input, result, subCalls, expanded, rel });
+  const declined = declinedByUser(result);
+  const body = deniedByMode ? (
+    <DontAskDenial name={name} input={input} />
+  ) : declined ? (
+    <>{name === 'AskUserQuestion' ? "Question écartée · l'agent attend vos instructions" : "Écarté · l'agent attend vos instructions"}</>
+  ) : (
+    toolBody({ name, input, result, subCalls, expanded, rel })
+  );
   const severity = toolSeverity(name, result);
   return (
     <div className="cc-tool">
@@ -894,8 +914,9 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
           const content = (p.message as { content?: unknown } | undefined)?.content;
           const text = typeof content === 'string' ? content : Array.isArray(content) ? (content as ContentBlock[]).map((b) => (b.type === 'text' ? b.text ?? '' : '')).join('') : '';
           if (text.startsWith('[Request interrupted by user')) {
+            // Interruption demandée par une personne : rien de grave, pas de rouge.
             nodes.push(
-              <div key={e.id} className="cc-result error">
+              <div key={e.id} className="cc-result">
                 <span className="cc-elbow">⎿</span>
                 <div className="cc-result-body">Interrompu · que doit faire l'agent à la place ?</div>
               </div>,
