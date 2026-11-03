@@ -66,6 +66,7 @@ import { isEmptyNotificationResult, resultError } from './claudeResult.js';
 import { liveDraftService } from '../live.js';
 import { SESSION_ENV } from '../../runners/stats.js';
 import { log } from '../../log.js';
+import { failedMcpServers, mcpFailureNotice, readMcpLogDetail } from '../mcpFailures.js';
 import { REVIEW_ALLOWED_TOOLS, REVIEW_DISALLOWED_TOOLS, REVIEW_SYSTEM_PROMPT, REVIEW_TOOLS, reviewOf } from '../../reviews/types.js';
 import { agentService } from '../../agents/service.js';
 import { agentIdentityPrompt, agentsPromptSummary, scopedAgentsPromptSummary } from '../../agents/prompt.js';
@@ -470,7 +471,7 @@ export class ClaudeProvider implements SessionProvider {
       // Taille du contexte : tokens d'entrée (dont cache) du dernier appel au modèle, relevée sur les messages assistant.
       let contextTokens: number | null = null;
       // Statut de limite d'utilisation rapporté en dernier à cette session : seuls ses changements sont journalisés.
-      const run: RunState = { rateLimitStatus: null };
+      const run: RunState = { rateLimitStatus: null, mcpReported: new Set() };
       try {
         for await (const message of stream) {
           // Le modèle travaille alors qu'aucun tour n'était en cours : tour lancé par le CLI lui-même (fin d'une
@@ -788,6 +789,16 @@ export class ClaudeProvider implements SessionProvider {
         const reason = await explainBrowserFailure(ctx.project, `le serveur MCP playwright est « ${playwright.status} » dans le CLI.`);
         await ctx.emit('system', { notice: true, browser: true, message: `Navigateur headless indisponible : ${reason}` });
       }
+      // Autres serveurs MCP (coffre, tâches…) en échec ou sans outil : signalés dans le fil et les logs, cause tirée
+      // du journal du CLI dans le conteneur (un chat tourne sur le serveur, sans conteneur : statut seul).
+      // Le message d'init peut revenir à chaque tour : chaque serveur n'est signalé qu'une fois par exécution.
+      for (const failure of failedMcpServers(message)) {
+        if (run.mcpReported.has(failure.name)) continue;
+        run.mcpReported.add(failure.name);
+        const detail = ctx.session.kind === 'chat' ? null : await readMcpLogDetail(ctx.project, ctx.cwd, failure.name);
+        log.warn(`[mcp] session ${ctx.session.id} (${ctx.project.slug}) : serveur ${failure.name} en échec (statut ${failure.status})${detail ? ` : ${detail}` : ''}`);
+        await ctx.emit('system', { notice: true, mcpServer: failure.name, message: mcpFailureNotice(failure, detail) });
+      }
     }
     // Premier outil du navigateur utilisé par l'agent : la vue en direct est proposée dans la sidebar.
     if (message.type === 'assistant' && message.message.content.some((b) => b.type === 'tool_use' && b.name.startsWith('mcp__playwright__'))) {
@@ -810,6 +821,8 @@ interface RuleUsage {
 /** État propre à une exécution du provider (un processus Claude Code). */
 interface RunState {
   rateLimitStatus: string | null;
+  /** Serveurs MCP déjà signalés en échec. */
+  mcpReported: Set<string>;
 }
 
 type ContentBlock = { type?: string; source?: { type?: string; data?: string }; content?: unknown };
