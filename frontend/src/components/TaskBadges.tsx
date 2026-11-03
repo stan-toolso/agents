@@ -115,6 +115,21 @@ export function TaskBlockedBadge({ task, short = false, className = '' }: { task
   );
 }
 
+/**
+ * « Agent arrêté » : la tâche est en cours mais aucune session en charge ne tourne plus (terminée, arrêtée, en erreur ou
+ * interrompue, sans pull request ouverte) : personne n'y travaille, il faut la reprendre, la relancer ou la remettre à faire.
+ */
+export function TaskStalledBadge({ task, short = false, className = '' }: { task: { stalledSince?: string | null }; short?: boolean; className?: string }) {
+  if (!task.stalledSince) return null;
+  const since = new Date(task.stalledSince).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return (
+    <span className={`task-stalled ${className}`} title={`En cours, mais l'agent s'est arrêté le ${since} sans la terminer : reprenez sa session, relancez un agent ou remettez-la à faire`}>
+      <i className="bi bi-person-x" aria-label={short ? 'agent arrêté' : undefined} />
+      {!short && ' agent arrêté'}
+    </span>
+  );
+}
+
 /** Liste de tâches liées (dépendances, tâches qui en dépendent), chacune avec son statut et un lien vers sa page. */
 export function TaskRefList({ tasks }: { tasks: TaskRef[] }) {
   return (

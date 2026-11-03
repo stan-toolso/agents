@@ -57,6 +57,11 @@ export interface Task {
   autoStartWhenUnblocked: boolean;
   /** Personne (ou agent) au nom de qui la session sera lancée : celle qui a armé l'option. */
   autoStartById: string | null;
+  /**
+   * « Agent arrêté » : la tâche est en cours, des sessions en ont la charge mais aucune ne tourne plus (et aucune pull
+   * request n'est ouverte) ; date de fin de la plus récente. Null : rien à signaler.
+   */
+  stalledSince: Date | null;
   createdAt: Date;
   updatedAt: Date;
   completedAt: Date | null;
@@ -154,6 +159,8 @@ export interface TaskFilter {
   branch?: string;
   /** Tâches portant cette étiquette (sans tenir compte de la casse). */
   tag?: string;
+  /** Seulement les tâches « agent arrêté » (`stalledSince` non nul). */
+  stalled?: boolean;
   limit?: number;
 }
 

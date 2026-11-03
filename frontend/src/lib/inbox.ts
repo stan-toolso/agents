@@ -1,21 +1,22 @@
-import type { HumanRequest, Session } from '../graphql/operations';
+import type { HumanRequest, Session, Task } from '../graphql/operations';
 import type { TrackedPullRequest } from '../graphql/pullRequests';
 
 /**
- * File « À traiter » : fusion des demandes, sessions et pull requests en une liste unique, triée par
+ * File « À traiter » : fusion des demandes, sessions, tâches dont l'agent s'est arrêté et pull requests en une liste unique, triée par
  * urgence puis par ancienneté, et filtrable par projet et par nature. Fonctions pures (testées).
  */
 
-export type InboxKind = 'request' | 'session' | 'pullRequest';
+export type InboxKind = 'request' | 'session' | 'task' | 'pullRequest';
 export type SessionReason = 'idle' | 'failed' | 'interrupted';
 
 export type InboxItem =
   | { key: string; kind: 'request'; urgency: number; at: string; projectId: string; projectName: string; request: HumanRequest }
   | { key: string; kind: 'session'; urgency: number; at: string; projectId: string; projectName: string; session: Session; reason: SessionReason }
+  | { key: string; kind: 'task'; urgency: number; at: string; projectId: string; projectName: string; task: Task }
   | { key: string; kind: 'pullRequest'; urgency: number; at: string; projectId: string; projectName: string; pr: TrackedPullRequest };
 
 /** Plus le chiffre est petit, plus c'est urgent : un agent bloqué d'abord, un brouillon en dernier. */
-export const URGENCY = { request: 0, failed: 1, interrupted: 1, idle: 2, toMerge: 3, draft: 4 } as const;
+export const URGENCY = { request: 0, failed: 1, interrupted: 1, idle: 2, stalled: 2, toMerge: 3, draft: 4 } as const;
 
 export function sessionReason(s: Pick<Session, 'status'>): SessionReason {
   return s.status === 'FAILED' ? 'failed' : s.status === 'INTERRUPTED' ? 'interrupted' : 'idle';
@@ -24,6 +25,8 @@ export function sessionReason(s: Pick<Session, 'status'>): SessionReason {
 export interface InboxData {
   requests: HumanRequest[];
   sessions: Session[];
+  /** Tâches « agent arrêté » (absentes d'une ancienne réponse : liste vide). */
+  tasks?: Task[];
   pullRequests: TrackedPullRequest[];
 }
 
@@ -35,6 +38,9 @@ export function buildInboxItems(data: InboxData): InboxItem[] {
   for (const session of data.sessions) {
     const reason = sessionReason(session);
     items.push({ key: `session:${session.id}`, kind: 'session', urgency: URGENCY[reason], at: session.endedAt ?? session.updatedAt, projectId: session.project.id, projectName: session.project.name, session, reason });
+  }
+  for (const task of data.tasks ?? []) {
+    items.push({ key: `task:${task.id}`, kind: 'task', urgency: URGENCY.stalled, at: task.stalledSince ?? task.updatedAt, projectId: task.project.id, projectName: task.project.name, task });
   }
   for (const pr of data.pullRequests) {
     items.push({ key: `pr:${pr.id}`, kind: 'pullRequest', urgency: pr.isDraft ? URGENCY.draft : URGENCY.toMerge, at: pr.openedAt, projectId: pr.project.id, projectName: pr.project.name, pr });

@@ -24,6 +24,7 @@ import { archiveSessionCascade } from './projects/cleanup.js';
 import { archiveAgentSessionsOfPullRequest } from './pullRequests/archiveOnEnd.js';
 import { registerTaskAutoStart } from './tasks/autoStart.js';
 import { registerTaskSessionEnd } from './tasks/endSessions.js';
+import { registerStalledTasks } from './tasks/stalled.js';
 import { agentService } from './agents/service.js';
 import { vaultService } from './vault/service.js';
 import { authSession, readCookie, SESSION_COOKIE } from './auth/session.js';
@@ -131,6 +132,7 @@ async function main() {
   registerApprovalTaskListener();
   registerTaskAutoStart();
   registerTaskSessionEnd();
+  registerStalledTasks();
   registerWorkflowTriggers();
   registerAgentTriggers();
   registerConversationSessionFeed();

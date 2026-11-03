@@ -11,7 +11,7 @@ import { useSessionLauncher } from '../components/SessionLauncher';
 import { useAuth } from '../auth/AuthContext';
 import ChatComposer from '../components/ChatComposer';
 import TaskModal from '../components/TaskModal';
-import { PullRequestRow, RequestRow, SessionRow, TaskRow, UsageTile, isRecent, plural, shorten, statusIcon } from '../components/DashboardRows';
+import { PullRequestRow, RequestRow, SessionRow, TaskRow, UsageTile, isRecent, plural, shorten, stalledHint, statusIcon } from '../components/DashboardRows';
 import './dashboard.css';
 
 /**
@@ -49,7 +49,9 @@ export default function DashboardPage() {
     );
 
   const { counts, usage } = d;
-  const waiting = counts.pendingRequests + counts.idleSessions;
+  // Tâches en cours dont l'agent s'est arrêté sans les terminer (absentes d'une ancienne réponse du serveur).
+  const staleTasks = d.staleTasks ?? [];
+  const waiting = counts.pendingRequests + counts.idleSessions + staleTasks.length;
   // Sessions coupées en plein tour par un redémarrage du serveur (pas une erreur, mais un travail à reprendre).
   // Projets où l'on peut créer une tâche (pas lecteur), proposés dans la modale de création.
   const writableProjects = d.projects.filter((p) => p.project.myRole !== 'VIEWER').map((p) => p.project);
@@ -123,6 +125,7 @@ export default function DashboardPage() {
               {d.runningSessions.filter((s) => s.activity !== 'BUSY' && s.pendingRequestCount === 0).map((s) => <SessionRow key={s.id} session={s} hint="attend vos instructions" icon="bi-chat-left-dots warn" />)}
               {d.recentSessions.filter((s) => s.status === 'FAILED' && isRecent(s.endedAt ?? s.updatedAt, 24)).map((s) => <SessionRow key={s.id} session={s} hint={s.error ? shorten(s.error, 80) : 'en erreur'} icon="bi-x-octagon bad" />)}
               {interruptedMidTurn.map((s) => <SessionRow key={s.id} session={s} hint="interrompue en plein travail par un redémarrage" icon="bi-pause-circle warn" />)}
+              {staleTasks.map((t) => <TaskRow key={t.id} task={t} hint={stalledHint(t)} icon="bi-person-x bad" />)}
               {waiting === 0 && counts.failedSessions24h === 0 && interruptedMidTurn.length === 0 && <li className="empty">Rien à traiter : les agents n’ont besoin de rien pour l’instant.</li>}
             </ul>
           </section>

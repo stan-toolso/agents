@@ -60,6 +60,22 @@ const finishing = new Map<string, Promise<void>>();
  */
 const archiveWhenDone = new Set<string>();
 let archiveWhenDoneListener: ((id: string) => Promise<unknown>) | null = null;
+
+/** Fin d'une session (processus terminé : terminée, arrêtée ou en erreur ; ni garée ni interrompue). */
+export interface SessionEnd {
+  session: Session;
+  /** Fin décidée par le serveur sans notification (inactivité, remise à zéro, archivage, prise en main). */
+  quiet: boolean;
+}
+/** Écouteurs de fin de session (`sessionService.onEnded`), appelés en tâche de fond : une erreur n'empêche pas les autres. */
+const endedListeners = new Map<string, (end: SessionEnd) => Promise<void> | void>();
+function notifyEnded(end: SessionEnd): void {
+  for (const [name, fn] of endedListeners) {
+    void Promise.resolve()
+      .then(() => fn(end))
+      .catch((err) => log.warn(`[sessions] écouteur de fin « ${name} » (session ${end.session.id})`, err));
+  }
+}
 /**
  * Arrêt du serveur en cours. Posé de façon synchrone dès la réception du signal : pm2 signale tout
  * l'arbre de processus, donc les agents peuvent mourir avant que leur `stop()` ne soit appelé ; leur
@@ -694,7 +710,9 @@ export const sessionService = {
       this.drainQueue();
       const message = (err as Error).message;
       await emit('status', { status: 'failed', error: message });
-      return publishSession(await sessionRepository.update(id, { status: 'failed', activity: null, error: message, endedAt: new Date(), instanceId: null }));
+      const failed = await publishSession(await sessionRepository.update(id, { status: 'failed', activity: null, error: message, endedAt: new Date(), instanceId: null }));
+      notifyEnded({ session: failed, quiet: false });
+      return failed;
     }
 
     running.set(id, handle);
@@ -734,7 +752,8 @@ export const sessionService = {
         if (oom) error = `${oom} (détail : ${error})`;
       }
       await emit('status', { status, exitCode: result.exitCode, error });
-      await publishSession(await sessionRepository.update(id, { status, activity: null, exitCode: result.exitCode, error, endedAt: new Date(), instanceId: null }));
+      const ended = await publishSession(await sessionRepository.update(id, { status, activity: null, exitCode: result.exitCode, error, endedAt: new Date(), instanceId: null }));
+      notifyEnded({ session: ended, quiet: idleEnd });
       // Une exécution planifiée a sa propre notification de fin (avec le coût), émise par l'ordonnanceur.
       // Une session terminée pour inactivité n'est pas notifiée : un événement l'explique dans le transcript.
       if ((status === 'completed' || status === 'failed') && !scheduledRuns.has(id) && !idleEnd) {
@@ -920,6 +939,14 @@ export const sessionService = {
     await this.archiveWhenDone(id, null, { auto: true });
     log.info(`[sessions] session ${id} archivée d'office à la fin de son tour`);
     return true;
+  },
+
+  /**
+   * Écouteur appelé quand le processus d'une session se termine (terminée, arrêtée, en erreur), branché au démarrage
+   * (index.ts : tâches « agent arrêté »). Ni les sessions garées par le drainage ni les interrompues (reprises d'office) ne passent ici.
+   */
+  onEnded(name: string, listener: (end: SessionEnd) => Promise<void> | void): void {
+    endedListeners.set(name, listener);
   },
 
   /** Écouteur qui archive une session (en cascade avec son dossier), branché au démarrage (index.ts : archiveSessionCascade). */

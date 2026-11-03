@@ -5,6 +5,8 @@ import { requestService } from '../requests/service.js';
 import type { HumanRequest } from '../requests/types.js';
 import { sessionService } from '../sessions/service.js';
 import type { Session } from '../sessions/types.js';
+import { STALLED_SINCE_SQL, taskRepository } from '../tasks/repository.js';
+import type { Task } from '../tasks/types.js';
 
 /**
  * File « À traiter » : ce qui attend une action humaine sur l'ensemble des projets de la personne.
@@ -21,6 +23,8 @@ export interface InboxCounts {
   failedSessions: number;
   /** Sessions coupées en plein tour (redémarrage) depuis 24 h. */
   interruptedSessions: number;
+  /** Tâches en cours dont l'agent s'est arrêté sans les terminer (`Task.stalledSince`). */
+  stalledTasks: number;
   /** Pull requests ouvertes (à fusionner, brouillons compris). */
   pullRequests: number;
   total: number;
@@ -32,6 +36,8 @@ export interface Inbox {
   requests: HumanRequest[];
   /** Sessions à reprendre ou à relancer : en attente d'instructions, en erreur ou interrompues. */
   sessions: Session[];
+  /** Tâches « agent arrêté », la plus anciennement arrêtée d'abord. */
+  tasks: Task[];
   pullRequests: TrackedPullRequest[];
 }
 
@@ -45,20 +51,21 @@ const FAILED_SQL = `status = 'failed' AND COALESCE(ended_at, updated_at) >= now(
 const INTERRUPTED_SQL = `status = 'interrupted' AND activity = 'busy' AND COALESCE(ended_at, updated_at) >= now() - ${RECENT}`;
 
 export function totalOf(c: Omit<InboxCounts, 'total'>): number {
-  return c.requests + c.idleSessions + c.failedSessions + c.interruptedSessions + c.pullRequests;
+  return c.requests + c.idleSessions + c.failedSessions + c.interruptedSessions + c.stalledTasks + c.pullRequests;
 }
 
 export const inboxService = {
   async counts(projectIds: string[]): Promise<InboxCounts> {
-    if (!projectIds.length) return { requests: 0, idleSessions: 0, failedSessions: 0, interruptedSessions: 0, pullRequests: 0, total: 0 };
+    if (!projectIds.length) return { requests: 0, idleSessions: 0, failedSessions: 0, interruptedSessions: 0, stalledTasks: 0, pullRequests: 0, total: 0 };
     const [{ rows }, prs] = await Promise.all([
-      pool.query<{ requests: string; idle: string; failed: string; interrupted: string }>(
+      pool.query<{ requests: string; idle: string; failed: string; interrupted: string; stalled: string }>(
         `SELECT
            (SELECT count(*) FROM requests q JOIN sessions s ON s.id = q.session_id
              WHERE q.status = 'pending' AND s.project_id = ANY($1::uuid[]))::text AS requests,
            (SELECT count(*) FROM sessions WHERE project_id = ANY($1::uuid[]) AND kind = 'session' AND ${IDLE_SQL})::text AS idle,
            (SELECT count(*) FROM sessions WHERE project_id = ANY($1::uuid[]) AND kind = 'session' AND ${FAILED_SQL})::text AS failed,
-           (SELECT count(*) FROM sessions WHERE project_id = ANY($1::uuid[]) AND kind = 'session' AND ${INTERRUPTED_SQL})::text AS interrupted`,
+           (SELECT count(*) FROM sessions WHERE project_id = ANY($1::uuid[]) AND kind = 'session' AND ${INTERRUPTED_SQL})::text AS interrupted,
+           (SELECT count(*) FROM tasks t WHERE t.project_id = ANY($1::uuid[]) AND t.status = 'in_progress' AND ${STALLED_SINCE_SQL} IS NOT NULL)::text AS stalled`,
         [projectIds],
       ),
       trackedPullRequestService.countPending(projectIds),
@@ -68,6 +75,7 @@ export const inboxService = {
       idleSessions: Number(rows[0].idle),
       failedSessions: Number(rows[0].failed),
       interruptedSessions: Number(rows[0].interrupted),
+      stalledTasks: Number(rows[0].stalled),
       pullRequests: prs.open,
     };
     return { ...c, total: totalOf(c) };
@@ -75,9 +83,9 @@ export const inboxService = {
 
   async build(projectIds: string[], now = new Date()): Promise<Inbox> {
     if (!projectIds.length) {
-      return { generatedAt: now, counts: await inboxService.counts(projectIds), requests: [], sessions: [], pullRequests: [] };
+      return { generatedAt: now, counts: await inboxService.counts(projectIds), requests: [], sessions: [], tasks: [], pullRequests: [] };
     }
-    const [counts, requests, sessionIds, pullRequests] = await Promise.all([
+    const [counts, requests, sessionIds, stalled, pullRequests] = await Promise.all([
       inboxService.counts(projectIds),
       requestService.list({ projectIds, status: 'pending', limit: ITEM_LIMIT }),
       pool.query<{ id: string }>(
@@ -86,9 +94,11 @@ export const inboxService = {
           ORDER BY COALESCE(ended_at, updated_at) LIMIT ${ITEM_LIMIT}`,
         [projectIds],
       ),
+      taskRepository.list({ projectIds, status: ['in_progress'], stalled: true, limit: ITEM_LIMIT }),
       trackedPullRequestService.list({ projectIds, stage: ['to_merge', 'draft'], limit: ITEM_LIMIT }),
     ]);
     const sessions = (await Promise.all(sessionIds.rows.map((r) => sessionService.get(r.id)))).filter((s): s is Session => s !== null);
-    return { generatedAt: now, counts, requests, sessions, pullRequests };
+    const tasks = [...stalled].sort((a, b) => (a.stalledSince?.getTime() ?? 0) - (b.stalledSince?.getTime() ?? 0));
+    return { generatedAt: now, counts, requests, sessions, tasks, pullRequests };
   },
 };

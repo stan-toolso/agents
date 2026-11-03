@@ -414,6 +414,8 @@ type Task {
   autoStartWhenUnblocked: Boolean!
   "Personne (ou agent) au nom de qui la session sera lancée : celle qui a armé l'option."
   autoStartBy: User
+  "« Agent arrêté » : en cours, des sessions en ont la charge mais aucune ne tourne plus (et aucune pull request n'est ouverte) ; fin de la plus récente. Null : rien à signaler."
+  stalledSince: DateTime
   createdAt: DateTime!
   updatedAt: DateTime!
   completedAt: DateTime
@@ -2069,6 +2071,8 @@ type InboxCounts {
   failedSessions: Int!
   "Sessions coupées en plein tour depuis 24 h."
   interruptedSessions: Int!
+  "Tâches en cours dont l'agent s'est arrêté sans les terminer."
+  stalledTasks: Int!
   "Pull requests ouvertes (à fusionner, brouillons compris)."
   pullRequests: Int!
   total: Int!
@@ -2082,6 +2086,8 @@ type Inbox {
   requests: [Request!]!
   "Sessions à reprendre : en attente d'instructions, en erreur ou interrompues (les plus anciennes d'abord)."
   sessions: [Session!]!
+  "Tâches en cours dont l'agent s'est arrêté sans les terminer (la plus anciennement arrêtée d'abord)."
+  tasks: [Task!]!
   pullRequests: [TrackedPullRequest!]!
 }
 
@@ -2166,6 +2172,8 @@ type Dashboard {
   recentSessions: [Session!]!
   "Tâches ouvertes à surveiller : en retard, urgentes ou hautes."
   attentionTasks: [Task!]!
+  "Tâches en cours dont aucune session en charge ne tourne : l'agent s'est arrêté sans les terminer."
+  staleTasks: [Task!]!
   "Pull requests suivies qui attendent une action : à fusionner puis à déployer."
   pullRequests: [TrackedPullRequest!]!
 }

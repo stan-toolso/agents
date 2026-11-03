@@ -104,6 +104,9 @@ export function SessionRow({ session, hint, icon, showStatus, showProject = true
   );
 }
 
+/** Sous-titre d'une tâche « agent arrêté » dans « À traiter ». */
+export const stalledHint = (t: Pick<Task, 'stalledSince'>) => `en cours, mais l'agent s'est arrêté${t.stalledSince ? ` ${timeAgo(t.stalledSince)}` : ''} sans la terminer`;
+
 export function TaskRow({ task, showProject = true, hint, icon }: { task: Task; showProject?: boolean; hint?: string; icon?: string }) {
   const overdue = task.dueDate && task.dueDate < new Date().toISOString().slice(0, 10);
   const prio = taskPriorityLabels[task.priority];
