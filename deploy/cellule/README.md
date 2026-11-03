@@ -23,7 +23,7 @@ Scaleway fr-par-2, Ubuntu 24.04). Ces scripts sont idempotents : relançables sa
 # 1. En root, sur la machine :
 git clone https://github.com/stan-toolso/skipper.git /root/skipper-install
 cd /root/skipper-install/deploy/cellule
-./bootstrap.sh --domain skipper2.toolso.io --hostname skipper-1 --certbot-email ops@toolso.io   # long : nohup … > /var/log/skipper-bootstrap.log &
+./bootstrap.sh --domain <domaine> --hostname skipper-1 --certbot-email ops@toolso.io   # long : nohup … > /var/log/skipper-bootstrap.log &
 #    Clé d'API Object Storage (application IAM « sauvegardes », permission ObjectStorageFullAccess), déposée une fois :
 install -m 600 /dev/null /etc/skipper/s3.env && printf 'S3_BUCKET=skipper-sauvegardes\nS3_KEY=SCW...\nS3_SECRET=...\nS3_REGION=fr-par\n' > /etc/skipper/s3.env
 ./postgres.sh                 # lit /etc/skipper/s3.env ; ou --s3-bucket/--s3-key/--s3-secret ; ou rien pour commencer sans sauvegarde
@@ -31,8 +31,8 @@ install -m 600 /dev/null /etc/skipper/s3.env && printf 'S3_BUCKET=skipper-sauveg
 # 2. En skipper (les scripts root ne sont pas lisibles par skipper : en copier le dossier) :
 cp -r /root/skipper-install/deploy/cellule /home/skipper/cellule-install && chown -R skipper:skipper /home/skipper/cellule-install
 sudo -iu skipper
-~/cellule-install/install-skipper.sh --domain skipper2.toolso.io       # ou avec --google-client-id/--google-client-secret ; long : nohup … &
-# 3. Migration (facultatif) : d'abord en répétition, puis avec --freeze pour la bascule définitive
+~/cellule-install/install-skipper.sh --domain <domaine>       # ou avec --google-client-id/--google-client-secret ; long : nohup … &
+# 3. Migration depuis une ancienne installation (fait pour skipper-1 le 30/10/2026 ; facultatif) : répétition, puis --freeze
 ~/skipper/deploy/cellule/migrate-from-ec2.sh --old skipper@skipper.toolso.io
 ```
 
@@ -118,8 +118,12 @@ sudo bash -c '. /etc/skipper/restic.env; restic snapshots; restic restore latest
 
 Tester une restauration sur une machine vide tous les mois : c'est la seule preuve que les sauvegardes valent quelque chose.
 
-## Changer de domaine (bascule skipper2 → skipper)
+## Changer de domaine
 
 1. Ajouter l'URI de redirection `https://<domaine>/auth/google/callback` au client OAuth (console Google Cloud).
 2. Pointer le DNS, puis `sudo certbot --nginx -d <domaine>` et remplacer `server_name` dans le site nginx.
 3. Mettre `APP_URL`, `API_URL`, `VITE_GRAPHQL_URL` à jour dans `.env`, puis `deploy.sh --force` (rebuild du front, nouvelle instance).
+4. Retirer l'ancien nom : supprimer son enregistrement DNS et son URI de redirection OAuth ; réémettre le certificat
+   pour le seul nouveau nom (`sudo certbot certonly --nginx --cert-name <domaine> -d <domaine>`), corriger les chemins
+   `ssl_certificate*` du site nginx, retirer le bloc `if ($host = <ancien>)`, `nginx -t`, recharger, puis
+   `sudo certbot delete --cert-name <ancien>`.

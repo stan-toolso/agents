@@ -1,44 +1,35 @@
 # Mise en production — skipper.toolso.io
 
-Skipper tourne sur **le même serveur que Curso** (EC2 `13.36.242.35`, `t4g.medium`, Ubuntu 24.04
-arm64, 2 vCPU / 3,7 Go + 2 Go de swap), mais sous un **utilisateur Linux dédié `skipper`**. Il n'y a
-pas de CD : la CI GitHub Actions (`.github/workflows/ci.yml`) vérifie typecheck, build et tests
-à chaque push et pull request, mais le déploiement reste manuel (tirer `main`, builder, redémarrer).
+Skipper tourne sur la **cellule `skipper-1`** : un serveur dédié Scaleway Elastic Metal (EM-A116X-SSD, zone
+`fr-par-2`, adresse `51.158.36.16`, Ubuntu 24.04 x86_64, 4 cœurs / 8 threads, 32 Go, 2 × 1 To en RAID 1), avec
+PostgreSQL local, Docker pour les conteneurs des projets, nginx et sauvegardes vers Object Storage. Installation,
+disposition, mise à jour sans interruption (bleu/vert), sauvegardes et restauration : **`deploy/cellule/README.md`**,
+qui fait référence. Ce fichier rassemble ce qui ne dépend pas de la machine (Google, GitHub, conteneurs, nginx,
+journaux, aperçus). Il n'y a pas de CD : la CI GitHub Actions (`.github/workflows/ci.yml`) vérifie typecheck, build
+et tests à chaque push, le déploiement se lance à la main (`deploy.sh`).
 
 ## Accès
 
-- **SSH** : `ssh skipper@skipper.toolso.io` (clé `~/.ssh/id_rsa` du poste, ou la clé EC2
-  `app-paris.pem`). `skipper` est sudoer sans mot de passe.
-- **Web** : https://skipper.toolso.io. Connexion des utilisateurs par **Google OAuth** (voir
-  « Connexion des utilisateurs »). L'ancienne **authentification HTTP basic** nginx est désactivée
-  (lignes `auth_basic` commentées dans le site nginx) ; le fichier `/etc/nginx/.htpasswd-skipper` et
-  les identifiants dans `/home/skipper/.skipper-credentials` existent toujours pour la réactiver en
-  cas de besoin.
-- **Base** : PostgreSQL 14 sur l'instance RDS `toolso-campaign-manager` (compte AWS Toolso
-  Emailing, `eu-west-1`), base `skipper`, rôle `skipper`. Connexion en TLS vérifié
-  (`sslmode=verify-full`, bundle CA `~/rds-eu-west-1-bundle.pem`). Le mot de passe est dans
-  `~/skipper/.env` et nulle part ailleurs.
-- **DNS** : enregistrement A `skipper.toolso.io` dans la zone Route 53 de toolso.io (profil
-  AWS local `claude-toolso`).
+- **SSH** : `ssh ubuntu@51.158.36.16` (sudo sans mot de passe), puis `sudo -iu skipper` pour l'utilisateur
+  applicatif. Depuis une session d'agent : élément `skipper-1` du coffre (voir la bibliothèque de contexte,
+  `dev/deploiement` et `dev/cellule-skipper-1`).
+- **Web** : https://skipper.toolso.io, connexion par **Google OAuth** (voir « Connexion des utilisateurs »).
+- **Base** : PostgreSQL 17 local, base et rôle `skipper`, `DATABASE_URL` dans `/etc/skipper/db.env` (lisible par
+  `skipper` seulement). Interroger : `sudo -u postgres psql -d skipper`.
+- **DNS** : enregistrements A `skipper.toolso.io` et `*.apercu.skipper.toolso.io` vers `51.158.36.16` dans la zone
+  Route 53 de toolso.io. Certificats Let's Encrypt : `skipper.toolso.io` (greffon nginx, renouvellement automatique)
+  et `*.apercu.skipper.toolso.io` (défi DNS-01, voir « Aperçus des branches »).
 
 ## Disposition sur le serveur
 
-| Élément            | Emplacement                                                     |
-| ------------------ | --------------------------------------------------------------- |
-| Clone du dépôt     | `/home/skipper/skipper` (branche `main`, remote HTTPS public `https://github.com/stan-toolso/skipper.git` ; l'alias ssh `github-skipper` et la clé `~/.ssh/skipper-deploy` restent disponibles si le dépôt devient privé) |
-| Configuration      | `/home/skipper/skipper/.env` (jamais versionné)                 |
-| Workspaces projets | `/home/skipper/skipper-workspaces`                              |
-| Front publié       | `/var/www/skipper` (copie de `frontend/dist/`)                  |
-| Backend            | processus pm2 `skipper` (`node --env-file=../.env dist/index.js` depuis `backend/`), port **4100** |
-| Redémarrage au boot| service systemd `pm2-skipper`                                   |
-| nginx              | `/etc/nginx/sites-available/skipper` (copie : `deploy/nginx-skipper.conf`), TLS Let's Encrypt via certbot (renouvellement automatique) |
-| Node               | nvm de l'utilisateur `skipper` (Node 22), pm2 global            |
-| Claude Code CLI    | `~/.local/bin/claude` (pour se connecter : `claude` puis `/login`) |
-
-Le port 4000 est celui de l'API Curso : Skipper est sur 4100. Le `.env` fixe aussi
-`SHELL=/bin/bash` (les terminaux web utilisent zsh par défaut, absent du serveur),
-`VITE_GRAPHQL_URL=https://skipper.toolso.io/graphql` (lu par Vite au build),
-`APP_URL=https://skipper.toolso.io`, `API_URL=https://skipper.toolso.io` et les identifiants Google.
+Voir le tableau « Disposition » de `deploy/cellule/README.md`. L'essentiel : clone et `.env` dans
+`/home/skipper/skipper`, instances `skipper@blue` (port 4101) et `skipper@green` (4102) dans
+`/home/skipper/skipper-blue` et `skipper-green`, workspaces (avec la clé maîtresse `.secret-key` et les pièces
+jointes) dans `/home/skipper/skipper-workspaces`, front dans `/var/www/skipper`, site nginx
+`/etc/nginx/sites-available/skipper` (modèle `deploy/cellule/templates/nginx-site.conf`), CLI Claude Code de
+l'utilisateur `skipper` dans `~/.local/bin/claude`. Le `.env` fixe notamment `SHELL=/bin/bash`,
+`VITE_GRAPHQL_URL=https://skipper.toolso.io/graphql` (lu par Vite au build), `APP_URL`, `API_URL` et les
+identifiants Google.
 
 ## Connexion des utilisateurs
 
@@ -67,13 +58,13 @@ projet **Skipper** (`skipper-510112`, organisation toolso.io, compte de facturat
   comme `gmail.readonly`). Un compte relié en écriture avant leur ajout doit être reconnecté.
 - Le secret du client n'est visible qu'à sa création : il est dans le `.env` du poste de
   développement (jamais versionné). Le reporter dans `~/skipper/.env` sur le serveur
-  (`GOOGLE_CLIENT_ID=...`, `GOOGLE_CLIENT_SECRET=...`), puis `pm2 restart skipper --update-env`.
+  (`GOOGLE_CLIENT_ID=...`, `GOOGLE_CLIENT_SECRET=...`), puis `deploy.sh --force` (nouvelle instance).
   S'il est perdu : dans le client, « Add secret » en génère un nouveau.
 
 Seules les adresses invitées sur un projet peuvent se connecter. La migration `011_users.sql` crée
 `stan@toolso.io` administrateur de l'application et de tous les projets existants ; les autres
 utilisateurs sont invités depuis la page d'un projet (bloc « Membres »). Le site nginx doit
-proxifier `/auth/` vers le backend (bloc présent dans `deploy/nginx-skipper.conf`).
+proxifier `/auth/` vers le backend (bloc présent dans `deploy/cellule/templates/nginx-site.conf`).
 
 ## Authentification Claude
 
@@ -201,7 +192,7 @@ premier déploiement, dès qu'ils sont inactifs. La carte « Environnement d'ex�
 pression CPU du conteneur (PSI `cpu.pressure` : part du temps où un processus attendait le
 processeur, bridé ou en concurrence) et avertit au-delà de 25 % ; une notification
 `container.cpu_saturated` part quand elle dépasse 50 % pendant plus de cinq minutes. Le vrai plafond
-est alors la machine (t4g.medium : 2 vCPU, 3,7 Go) : si plusieurs sessions en parallèle sont l'usage
+est alors la machine (skipper-1 : 8 threads, 32 Go) : si plusieurs sessions en parallèle sont l'usage
 courant, c'est l'instance qu'il faut agrandir. Pour mesurer sur le serveur :
 
 ```bash
@@ -214,29 +205,15 @@ cat /proc/pressure/cpu                                 # pression CPU de toute l
 ## Procédure de déploiement
 
 ```bash
-# 1. Depuis le poste
-git push origin main
-
-# 2. Sur le serveur
-ssh skipper@skipper.toolso.io
-export NVM_DIR=$HOME/.nvm; . $NVM_DIR/nvm.sh   # node/pm2 ne sont pas dans le PATH d'un ssh non interactif
-cd ~/skipper && git pull --ff-only
-npm ci --no-audit --no-fund                    # seulement si package-lock.json a changé
-npm run build                                  # backend (dist/ + schema + migrations SQL) et frontend
-cp -rf frontend/dist/. /var/www/skipper/
-pm2 restart skipper --update-env               # seulement si le backend a changé (voir ci-dessous)
+sudo -iu skipper ~/skipper/deploy/cellule/deploy.sh      # origin/main ; --ref <réf>, --force : voir deploy/cellule/README.md
 ```
 
-Les migrations SQL sont appliquées automatiquement au démarrage du backend.
-
-**Redémarrer le backend interrompt toutes les sessions en cours** : les processus Claude Code sont des
-enfants du backend. Elles passent à « Interrompue » (pas en erreur) et un message relance la
-conversation. Au démarrage, celles qui étaient au milieu d'un tour (toutes, dont l'agent qui a
-lancé le redémarrage ; au-delà de la limite de sessions simultanées, en file d'attente) sont relancées automatiquement (réglage **Paramètres → Serveur**, activé par défaut). Avant `pm2 restart`, activer **Paramètres → Serveur → mode maintenance** : aucune
-nouvelle session ne démarre, et la page indique combien d'agents travaillent encore. Redémarrer quand
-ce nombre est à zéro si possible, en pensant à l'agent qui déploie depuis Skipper. Le redémarrage
-lève la maintenance. Si seul `frontend/` a changé (`git diff --stat HEAD@{1} HEAD`), le `cp`
-suffit : pas de redémarrage.
+Depuis une session d'agent, lancer le script détaché et suivre `~/deploy-logs/latest.log` (détails dans
+`deploy/cellule/README.md`, « Mettre à jour »). `deploy.sh` construit la nouvelle version dans le dossier de l'autre
+couleur, la démarre (elle applique les migrations SQL), bascule nginx puis laisse l'ancienne instance finir ses tours
+et se vider : les sessions ne sont pas coupées. Si seul `frontend/` a changé, il publie le front sans rien
+redémarrer. Les migrations doivent rester compatibles avec la version précédente, qui tourne encore pendant le
+drainage.
 
 `npm run build` et `npm run typecheck` valident le schéma GraphQL du backend et toutes les requêtes du
 front contre ce schéma (`frontend/scripts/check-graphql.mjs`) : tsc ne voit pas l'intérieur des gabarits
@@ -247,7 +224,7 @@ front contre ce schéma (`frontend/scripts/check-graphql.mjs`) : tsc ne voit pas
 Les fichiers joints par les utilisateurs sont écrits dans `/home/skipper/skipper-workspaces/<slug>.attachments/`
 (à sauvegarder avec les workspaces si l'on tient aux pièces jointes ; supprimés avec la session). Le
 transcript les charge par `GET /api/attachments/<session>/<id>` : le site nginx doit proxifier `/api/`
-vers le backend (bloc présent dans `deploy/nginx-skipper.conf`, à reporter dans
+vers le backend (bloc présent dans `deploy/cellule/templates/nginx-site.conf`, à reporter dans
 `/etc/nginx/sites-available/skipper` puis `sudo nginx -t && sudo systemctl reload nginx`). Les conteneurs
 docker créés avant cette version n'ont pas le dossier monté : « Recréer » sur la page du projet.
 
@@ -261,8 +238,7 @@ prochaine ouverture. L'installation exige HTTPS : c'est le cas.
 
 Le `gzip on` global de `/etc/nginx/nginx.conf` (Ubuntu) ne compresse que `text/html` tant que `gzip_types` y
 reste commenté : le bundle (2,4 Mo brut, 0,7 Mo gzippé), le CSS et toutes les réponses GraphQL (JSON, dont les
-pages d'événements d'une session) partaient bruts. Le site nginx (`deploy/nginx-skipper.conf`,
-`deploy/cellule/templates/nginx-site.conf`) porte désormais ses propres directives `gzip_*` (sans
+pages d'événements d'une session) partaient bruts. Le site nginx (`deploy/cellule/templates/nginx-site.conf`) porte désormais ses propres directives `gzip_*` (sans
 `text/event-stream` : les subscriptions SSE restent sans tampon). HTTP/2 se déclare sur les écoutes TLS que
 certbot ajoute (`listen 443 ssl http2;`, nginx 1.24 n'a pas `http2 on`) : `bootstrap.sh` le fait après certbot ;
 sur une cellule déjà installée, reporter les directives `gzip_*` et ajouter `http2` aux deux lignes
@@ -272,7 +248,7 @@ répondre `HTTP/2 200` avec `content-encoding: gzip`.
 
 ## En-têtes de sécurité
 
-Le site nginx (`deploy/cellule/templates/nginx-site.conf`, `deploy/nginx-skipper.conf`) masque sa version
+Le site nginx (`deploy/cellule/templates/nginx-site.conf`) masque sa version
 (`server_tokens off`) et pose, au niveau `server`, HSTS, `X-Content-Type-Options`, `X-Frame-Options`,
 `Referrer-Policy`, `Permissions-Policy` et une `Content-Security-Policy` (`default-src 'self'`, aucun script en
 ligne, `frame-ancestors 'none'` contre le clickjacking). La CSP et le `Cache-Control` dépendent du chemin par deux
@@ -312,7 +288,7 @@ l'image doit contenir le CLI `scw` (binaire de 60 Mo environ, version fixée par
 Dockerfile) ; l'outil `scw_api` et le test de l'élément passent par l'API HTTP et n'en ont pas besoin.
 
 La vue en direct du navigateur passe par le WebSocket `/browsers/<session>` : reporter le bloc
-`location /browsers/` de `deploy/nginx-skipper.conf` dans `/etc/nginx/sites-available/skipper`, puis
+`location` des WebSockets (`browsers/`) de `deploy/cellule/templates/nginx-site.conf` dans `/etc/nginx/sites-available/skipper`, puis
 `sudo nginx -t && sudo systemctl reload nginx`. Les conteneurs sont désormais créés avec `--init`
 (récolte des processus de Chromium arrêtés) : « Recréer » le conteneur des projets qui utilisent le
 navigateur pour en bénéficier. Les sessions OpenCode exigent une image reconstruite (CLI `opencode`)
@@ -324,8 +300,9 @@ de l'hôte : les copier dans le dossier du projet (`projects/-<chemin encodé>*`
 ## Vérifications
 
 ```bash
-pm2 list                                     # skipper « online », uptime remis à zéro
-pm2 logs skipper --nostream --lines 20       # « [http] GraphQL prêt sur http://localhost:4100/graphql »
+cat /etc/nginx/skipper-upstream.conf        # instance active (4101 : blue, 4102 : green)
+systemctl is-active skipper@blue skipper@green
+sudo journalctl -u skipper@blue -n 20 --no-pager   # « [http] GraphQL prêt sur … »
 curl -s -X POST https://skipper.toolso.io/graphql \
   -H 'content-type: application/json' -d '{"query":"{ providers { type label } }"}'
 curl -s https://skipper.toolso.io/ | grep -o 'assets/index-[A-Za-z0-9_-]*\.js'
@@ -336,20 +313,17 @@ curl -s https://skipper.toolso.io/ | grep -o 'assets/index-[A-Za-z0-9_-]*\.js'
 Le backend écrit une ligne par message : niveau (`DEBUG`, `INFO`, `WARN`, `ERROR`) puis le message avec
 son préfixe de module (`[sessions]`, `[graphql]`…). Tout passe par `backend/src/log.ts` (`log` ou
 `createLogger('module')`) : pas de `console.*` dans le backend, sinon la ligne sort sans niveau.
-`info` et `debug` vont sur la sortie standard (`~/.pm2/logs/skipper-out.log`), `warn` et `error` sur
-la sortie d'erreur (`~/.pm2/logs/skipper-error.log`). Le niveau minimal se règle avec `LOG_LEVEL` dans le
-`.env` (défaut `info` ; `pm2 restart skipper --update-env` après modification).
+Les instances tournent sous systemd : tout part dans journald (`journalctl -u skipper@blue`, ou `@green`),
+`info` et `debug` sur la sortie standard, `warn` et `error` sur la sortie d'erreur, chaque ligne avec sa priorité
+syslog : `journalctl -u skipper@blue -p warning` ne montre que les `WARN` et `ERROR`. La rotation est celle de
+journald. Le niveau minimal se règle avec `LOG_LEVEL` dans le `.env` (défaut `info`, pris en compte au
+déploiement suivant).
 
-**Une seule date par ligne** : pm2 date déjà chaque ligne (`2026-10-12T20:52:38: `, réglage
-`log_date_format` du processus), journald aussi (cellule skipper-1, service systemd, voir
-`deploy/cellule/README.md`). Le logger n'ajoute donc son horodatage ISO que hors de ces deux cas :
-`LOG_TIMESTAMP=auto` (défaut) l'omet quand `pm_id` est défini (pm2) ou quand la sortie d'erreur est
-raccordée à journald (`JOURNAL_STREAM`, vérifiée contre le descripteur, car la variable est héritée par
-les terminaux et sessions lancés depuis le service). On a gardé la date du gestionnaire plutôt que de
-relancer pm2 sans `log_date_format` : elle reste présente même pour ce qui n'est pas écrit par le
-logger (sortie d'un processus enfant, plantage de Node). `LOG_TIMESTAMP=on` ou `off` force le choix.
-Vers journald, chaque ligne porte aussi la priorité syslog, que journald enregistre :
-`journalctl -u skipper -p warning` ne montre que les `WARN` et `ERROR`.
+**Une seule date par ligne** : journald date déjà chaque ligne. Le logger n'ajoute donc son horodatage ISO
+qu'ailleurs : `LOG_TIMESTAMP=auto` (défaut) l'omet quand la sortie d'erreur est raccordée à journald
+(`JOURNAL_STREAM`, vérifiée contre le descripteur, car la variable est héritée par les terminaux et sessions lancés
+depuis le service) ou quand `pm_id` est défini (pm2, ancienne installation). `LOG_TIMESTAMP=on` ou `off` force le
+choix.
 
 Une erreur métier renvoyée au client (`AppError` : refus, ressource introuvable, dépôt sans branche de
 base…) tient sur une ligne `WARN [graphql] <opération> · <champ> · <utilisateur> : <message>`. Seules les
@@ -357,24 +331,6 @@ erreurs inattendues sortent en `ERROR` avec leur trace : le journal d'erreurs ne
 vraies anomalies. Les avertissements de Node attendus par conception (le SDK Claude signalant que
 `canUseTool` n'est pas consulté pour les serveurs MCP internes, code `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED`)
 sont journalisés une seule fois, en `INFO`.
-
-**Rotation** : pm2 ne fait pas tourner ses fichiers de journal (le journal d'erreurs dépassait
-10 000 lignes en octobre 2026). Installer une fois le module `pm2-logrotate` :
-
-```bash
-export NVM_DIR=$HOME/.nvm; . $NVM_DIR/nvm.sh
-pm2 install pm2-logrotate
-pm2 set pm2-logrotate:max_size 10M          # rotation dès qu'un fichier dépasse 10 Mo
-pm2 set pm2-logrotate:retain 14             # 14 fichiers tournés conservés par journal
-pm2 set pm2-logrotate:compress true         # fichiers tournés compressés en gzip
-pm2 set pm2-logrotate:rotateInterval '0 0 * * *'   # et une rotation quotidienne à minuit
-pm2 set pm2-logrotate:workerInterval 60     # vérification de la taille toutes les 60 s
-pm2 conf pm2-logrotate                      # relire les réglages
-pm2 flush skipper                           # (optionnel) vider les journaux courants, une fois
-```
-
-Le module est lui-même un processus pm2 (`pm2 list` l'affiche), sauvegardé avec `pm2 save` et relancé
-au démarrage par le service systemd.
 
 ## Aperçus des branches
 
@@ -401,13 +357,10 @@ instantanés de dépendances (`<projet>.worktrees/.skipper-deps/`, quatre par pr
 
 ## Bon à savoir
 
-- **Mémoire** : 3,7 Go de RAM pour tout le serveur, partagés avec l'API et le job Curso (≈ 400 Mo),
-  le backend Skipper (≈ 200 Mo) et les conteneurs des projets. Les limites des conteneurs peuvent
-  dépasser à elles toutes la mémoire du serveur (elles ne sont pas réservées) : surveiller `free -h` et
-  `docker stats`. Un swap de 2 Go (`/swapfile`) amortit les pics.
-- **Ne jamais lire ni copier le `.env` du serveur** dans une conversation ou un dépôt.
-- **Retirer l'accès** : `sudo deluser skipper` ne suffit pas, penser au rôle RDS, à la clé de
-  déploiement GitHub et au fichier `.htpasswd-skipper`.
+- **Mémoire** : 32 Go pour le backend, PostgreSQL et les conteneurs des projets. Les limites des conteneurs
+  peuvent dépasser à elles toutes la mémoire du serveur (elles ne sont pas réservées) : surveiller `free -h` et
+  `docker stats`.
+- **Ne jamais lire ni copier le `.env` du serveur** (ni `/etc/skipper/*.env`) dans une conversation ou un dépôt.
 - **Connexions des projets (SSH, PostgreSQL)** : le mode « outils » n'a besoin de rien de plus (client
   SSH et pg intégrés au backend). Le mode « shell de la session » utilise `ssh`, `ssh-agent`, `ssh-add`
   (paquet `openssh-client`, déjà présent) et, pour les bases, `psql` (`sudo apt install postgresql-client`).
@@ -415,3 +368,13 @@ instantanés de dépendances (`<projet>.worktrees/.skipper-deps/`, quatre par pr
   la session ou balayés au redémarrage du backend. Les identifiants sont chiffrés avec la même clé que les
   jetons des Paramètres (`SKIPPER_SECRET_KEY` ou `WORKSPACES_ROOT/.secret-key`) : sauvegarder cette clé
   avec la base, sinon les secrets deviennent illisibles.
+
+## Ancienne installation (EC2 + RDS, retirée)
+
+Jusqu'au 30/10/2026, Skipper tournait sous pm2 sur l'EC2 de Curso (`13.36.242.35`, compte AWS Toolso) avec sa base
+sur l'instance RDS `toolso-campaign-manager` (eu-west-1). Données reprises par `deploy/cellule/migrate-from-ec2.sh`,
+puis installation retirée le 03/11/2026 : processus pm2 et service `pm2-skipper`, conteneur et image du runner, site
+nginx, certificat, fichiers de `/home/skipper` et base `skipper` de RDS supprimés ; domaine de transition
+`skipper2.toolso.io` supprimé. Archive (dernier dump RDS et `/home/skipper` sans `node_modules`) sur skipper-1 dans
+`/home/skipper/archives/ec2-20261103/` et dans le dépôt restic de la cellule (bucket `skipper-sauvegardes`,
+instantané étiqueté `ec2-archive` : `sudo bash -c '. /etc/skipper/restic.env; restic snapshots --tag ec2-archive'`).
