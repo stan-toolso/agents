@@ -1710,7 +1710,17 @@ La relance travaille dans le dossier et sur la branche de la session d'origine (
 la session d'origine est archivée, arrêtée si elle tournait : une seule session par dossier), ou dans un
 nouveau dossier si le sien a été supprimé. Archiver une session archive son dossier (terminaux fermés,
 dossier et branche conservés) ; la restaurer le restaure ; un dossier disparu est recréé à la prochaine
-utilisation. Une session se renomme depuis la sidebar ou ses réglages.
+utilisation. Une session se renomme depuis la sidebar (menu « ⋮ »), ses réglages, ou d'un double-clic (ou clic droit)
+sur son onglet.
+
+**Titre généré** (`backend/src/sessions/autoTitle.ts`) : une session lancée sans nom explicite (lanceur, chat,
+`sessions.create` sans `name`) reçoit un nom provisoire (début de la consigne) et le drapeau `config.autoTitle`. À
+la fin de son premier tour, Haiku 4.5 (`claude-haiku-4-5-20251001`, par le SDK Agent avec les identifiants Claude
+de la session, clé API ou abonnement) propose un titre de 4 à 8 mots d'après la consigne et la première réponse ; il
+remplace le nom provisoire et le drapeau tombe (un échec garde le nom provisoire, sans réessayer). Un renommage
+manuel retire le drapeau et l'emporte toujours. Les sessions de tâches et planifiées gardent leur nom (pas de
+drapeau). Le coût est inscrit dans `usage_ledger`. Réglage par personne : Paramètres → Claude → Modèles,
+« Titrer les sessions automatiquement » (`ClaudeSettings.autoTitle`, activé par défaut).
 
 **Une session peut s'archiver elle-même** (outil MCP `sessions.archive`, libre) : sans `id`, la session
 courante, archivée **à la fin de son tour** (`sessionService.archiveWhenDone` : fin propre par `end`, puis

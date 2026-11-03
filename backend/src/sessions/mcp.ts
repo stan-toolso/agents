@@ -161,6 +161,7 @@ export function createSessionsMcpServer(project: Project, sessionId: string, sco
                 // Sans work session indiquée : une nouvelle, nommée d'après la consigne.
                 newWorksession: new_branch ? { branch: new_branch, baseRef: base_ref ?? null } : worksessionId ? null : { baseRef: base_ref ?? null },
                 name: (name?.trim() || prompt.trim().split('\n')[0]).slice(0, 80),
+                autoTitle: !name?.trim(),
                 provider: me.kind === 'chat' ? 'claude' : me.provider,
                 prompt,
                 config,

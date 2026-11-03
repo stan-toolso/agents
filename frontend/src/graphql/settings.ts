@@ -52,6 +52,8 @@ export interface ClaudeSettings {
   defaultMaxTurns: number | null;
   /** Seuil (tokens) de signalement du contexte d'une session ; null = jamais. */
   contextWarnTokens: number | null;
+  /** Titre généré après le premier tour des sessions au nom provisoire. */
+  autoTitle: boolean;
 }
 
 export interface UsageSummary {
@@ -416,6 +418,7 @@ export const APP_SETTINGS_FIELDS = gql`
       sessionBudgetUsd
       defaultMaxTurns
       contextWarnTokens
+      autoTitle
     }
     claudeAuth {
       mode

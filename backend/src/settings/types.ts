@@ -34,6 +34,8 @@ export interface ClaudeSettings {
    * « Compacter / Repartir d'une conversation neuve »). null = ne jamais signaler.
    */
   contextWarnTokens: number | null;
+  /** Titre court généré par un modèle léger après le premier tour des sessions au nom provisoire (sessions/autoTitle.ts). */
+  autoTitle: boolean;
 }
 
 export const defaultClaudeSettings: ClaudeSettings = {
@@ -47,6 +49,7 @@ export const defaultClaudeSettings: ClaudeSettings = {
   oauthItemId: null,
   apiKeyItemId: null,
   contextWarnTokens: CONTEXT_WARN_TOKENS,
+  autoTitle: true,
 };
 
 export interface ClaudeAccount {
