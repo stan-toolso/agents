@@ -1484,8 +1484,14 @@ sous condition), donc une seule instance l'exécute. Le suivi d'une exécution v
 si ce processus disparaît (déploiement, arrêt), la reprise (`scheduleService.reconcile`, à chaque passage de
 l'ordonnanceur) clôt les exécutions « en cours » depuis plus de cinq minutes dont la session est au repos, avec ce
 que dit le transcript ; la clôture est atomique (`finishRun ... WHERE status = 'running'`), une seule notification.
-L'analyseur cron (`backend/src/schedules/cron.ts`) n'a pas de dépendance et gère les fuseaux IANA, changements
-d'heure compris (une heure locale inexistante est sautée).
+L'analyseur cron (`backend/src/schedules/cron.ts`, testé par `cron.test.ts`) n'a pas de dépendance et gère les
+fuseaux IANA. Aux changements d'heure, il suit le cron classique :
+- **heure répétée** (retour à l'heure d'hiver, 2 h → 3 h deux fois) : une planification à heure fixe (`30 2 * * *`)
+  ne tourne qu'une fois, à la première occurrence ; une planification dont le champ des heures commence par `*`
+  (`*/15 * * * *`, `0 * * * *`, `0 */2 * * *`) tourne aux échéances des deux occurrences ;
+- **heure absente** (passage à l'heure d'été, 2 h → 3 h) : une planification à heure fixe est décalée à la première
+  minute qui existe (`30 2 * * *` tourne à 3 h ce jour-là, une seule fois même si plusieurs échéances tombent dans
+  le trou) ; une planification dont le champ des heures commence par `*` saute les minutes absentes.
 
 Modèle : `SessionSchedule` (`session_schedules`, une ligne par session au plus : `name`, `cron`, `timezone`,
 `prompt`, `enabled`, `endAfterRun`, `nextRunAt`, `lastRunAt`, `lastResult`), exposée par `Session.schedule`

@@ -14,6 +14,8 @@ export interface CronSpec {
   anyDay: boolean;
   /** Jour de la semaine non restreint (`*`). */
   anyWeekday: boolean;
+  /** Champ des heures commençant par `*` (`*` ou `*` suivi d’un pas) : planification « horaire » au changement d'heure. */
+  hourWildcard: boolean;
   source: string;
 }
 
@@ -83,7 +85,7 @@ export function parseCron(expression: string): CronSpec {
     weekdays.values.delete(7);
     weekdays.values.add(0);
   }
-  return { minutes: minutes.values, hours: hours.values, days: days.values, months: months.values, weekdays: weekdays.values, anyDay: days.any, anyWeekday: weekdays.any, source };
+  return { minutes: minutes.values, hours: hours.values, days: days.values, months: months.values, weekdays: weekdays.values, anyDay: days.any, anyWeekday: weekdays.any, hourWildcard: fields[1].startsWith('*'), source };
 }
 
 // ---- Fuseaux horaires ---------------------------------------------------------------------------
@@ -118,12 +120,48 @@ function wallClock(instant: Date, timeZone: string): number {
   return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
 }
 
-/** Instant correspondant à une heure locale du fuseau (ms « UTC » de l'heure locale). Une heure locale ambiguë (retour à l'heure d'hiver) donne l'une de ses deux occurrences. */
-function fromWallClock(wall: number, timeZone: string): Date {
-  let guess = wall - (wallClock(new Date(wall), timeZone) - wall);
-  const offset = wallClock(new Date(guess), timeZone) - guess;
-  if (guess + offset !== wall) guess = wall - offset;
-  return new Date(guess);
+const MINUTE = 60_000;
+const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
+
+/** Décalage du fuseau (heure locale − UTC, en ms) à un instant donné. */
+function offsetAt(instant: number, timeZone: string): number {
+  return wallClock(new Date(instant), timeZone) - instant;
+}
+
+/**
+ * Instants (ms UTC, croissants) dont l'heure locale dans le fuseau vaut `wall` : aucun pour une heure
+ * absente (passage à l'heure d'été), deux pour une heure répétée (retour à l'heure d'hiver), un sinon.
+ */
+function instantsOf(wall: number, timeZone: string): number[] {
+  const out = new Set<number>();
+  for (const probe of [wall - DAY, wall, wall + DAY]) {
+    const instant = wall - offsetAt(probe, timeZone);
+    if (wallClock(new Date(instant), timeZone) === wall) out.add(instant);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+/**
+ * Échéance réelle (ms UTC) d'une heure locale `wall` qui satisfait l'expression, si elle est postérieure à `after`.
+ * Changements d'heure, comme le cron classique :
+ * - heure répétée : une planification à heure fixe ne tourne qu'à la première occurrence ; une planification dont
+ *   le champ des heures commence par `*` (toutes les heures, tous les quarts d'heure...) tourne aux deux ;
+ * - heure absente : une planification à heure fixe est décalée à la première minute qui existe (2 h 30 → 3 h) ;
+ *   une planification dont le champ des heures commence par `*` saute simplement les minutes absentes.
+ */
+function occurrence(spec: CronSpec, wall: number, timeZone: string, after: number): number | null {
+  const instants = instantsOf(wall, timeZone);
+  if (instants.length === 0) {
+    if (spec.hourWildcard) return null;
+    for (let w = wall + MINUTE; w <= wall + 3 * HOUR; w += MINUTE) {
+      const next = instantsOf(w, timeZone);
+      if (next.length) return next[0] > after ? next[0] : null;
+    }
+    return null;
+  }
+  const allowed = spec.hourWildcard ? instants : instants.slice(0, 1);
+  return allowed.find((i) => i > after) ?? null;
 }
 
 // ---- Prochaine échéance ---------------------------------------------------------------------------
@@ -137,12 +175,23 @@ function dayMatches(spec: CronSpec, d: Date): boolean {
   return domOk || dowOk; // sémantique cron classique : les deux champs restreints s'additionnent
 }
 
-/** Première échéance strictement postérieure à `after` (null si aucune dans les cinq prochaines années). */
+/**
+ * Première échéance strictement postérieure à `after` (null si aucune dans les cinq prochaines années).
+ *
+ * On parcourt les heures locales de champ en champ. Quand un retour à l'heure d'hiver suit `after` de peu, l'heure
+ * répétée a des heures locales antérieures à celle de `after` mais des instants postérieurs : on recule alors le
+ * point de départ de la durée du recul (`lookback`), et on garde la plus proche des échéances trouvées dans cette
+ * fenêtre, l'ordre des heures locales n'étant plus celui des instants.
+ */
 export function nextRun(spec: CronSpec, after: Date, timeZone: string): Date | null {
+  const afterMs = after.getTime();
   const start = wallClock(after, timeZone);
-  let t = start - (start % 60_000) + 60_000;
-  const limit = start + 5 * 366 * 24 * 3_600_000;
-  while (t <= limit) {
+  const lookback = Math.max(0, offsetAt(afterMs, timeZone) - offsetAt(afterMs + 3 * HOUR, timeZone));
+  let t = start - (start % MINUTE) + MINUTE - lookback;
+  const limit = start + 5 * 366 * DAY;
+  let best: number | null = null;
+  let stopAt = Infinity;
+  while (t <= limit && t <= stopAt) {
     const d = new Date(t);
     const y = d.getUTCFullYear();
     const m = d.getUTCMonth();
@@ -159,15 +208,17 @@ export function nextRun(spec: CronSpec, after: Date, timeZone: string): Date | n
       continue;
     }
     if (!spec.minutes.has(d.getUTCMinutes())) {
-      t += 60_000;
+      t += MINUTE;
       continue;
     }
-    const instant = fromWallClock(t, timeZone);
-    // Heure locale inexistante (passage à l'heure d'été) ou déjà passée : on continue.
-    if (instant.getTime() > after.getTime() && wallClock(instant, timeZone) === t) return instant;
-    t += 60_000;
+    const instant = occurrence(spec, t, timeZone, afterMs);
+    if (instant !== null) {
+      if (best === null || instant < best) best = instant;
+      if (stopAt === Infinity) stopAt = t + lookback;
+    }
+    t += MINUTE;
   }
-  return null;
+  return best === null ? null : new Date(best);
 }
 
 /** Les `count` prochaines échéances après `after`. */
