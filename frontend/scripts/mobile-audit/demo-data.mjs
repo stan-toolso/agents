@@ -626,7 +626,37 @@ const projectDashboard = (id) => {
   };
 };
 
+// ---- Journal d'audit (page Journal d'un projet) -----------------------------------------------------------------
+
+const audit = (n, minutes, actorKind, actor, actorLabel, action, actionLabel, targetType, targetTypeLabel, targetId, targetLabel, details = {}, sessionId = null) => ({
+  __typename: 'AuditEntry', id: String(1000 - n), createdAt: ago(minutes), action, actionLabel, targetType, targetTypeLabel, targetId, targetLabel, details, actorKind, actor, sessionId, actorLabel,
+});
+const auditEntries = [
+  audit(1, 3, 'HUMAN', U.me, 'Camille Laurent', 'request.answer', 'a répondu à la demande', 'request', 'Demande', 'r-1', 'Autoriser Bash : npm run build ?', { type: 'permission', decision: 'allow', always: true, scope: 'project', rules: ['Bash(npm run build *)'] }),
+  audit(2, 12, 'AGENT', U.max, 'Refonte de la page tarifs', 'task.status', 'a changé le statut de la tâche', 'task', 'Tâche', 't-1', 'Refondre la page tarifs', { from: 'todo', to: 'in_progress' }, 's-page-tarifs'),
+  audit(3, 25, 'HUMAN', U.hugo, 'Hugo Bernard', 'git.commit', 'a commité', 'git', 'Git', 'w-1', 'page-tarifs (task/page-tarifs)', { message: 'Corrige le comparatif des offres', stageAll: true }),
+  audit(4, 26, 'HUMAN', U.hugo, 'Hugo Bernard', 'git.push', 'a poussé', 'git', 'Git', 'w-1', 'page-tarifs (task/page-tarifs)'),
+  audit(5, 40, 'HUMAN', U.me, 'Camille Laurent', 'session.stop', 'a arrêté la session', 'session', 'Session', 's-page-tarifs', 'Refonte de la page tarifs'),
+  audit(6, 95, 'AGENT', U.chris, 'Cadrage du formulaire de contact', 'task.create', 'a créé la tâche', 'task', 'Tâche', 't-2', 'Formulaire de contact : anti-spam', { status: 'todo', priority: 'medium' }, 's-page-tarifs'),
+  audit(7, 60 * 3, 'HUMAN', U.me, 'Camille Laurent', 'member.role', 'a changé le rôle de', 'member', 'Membre', 'u-thomas', 'thomas.petit@toolso.io', { role: 'VIEWER' }),
+  audit(8, 60 * 5, 'HUMAN', U.lea, 'Léa Fontaine', 'vault.update', 'a modifié l’élément du coffre', 'vault', 'Coffre', 'v-1', 'base-staging', { fields: ['host', 'password'] }),
+  audit(9, 60 * 26, 'SYSTEM', null, null, 'task.status', 'a changé le statut de la tâche', 'task', 'Tâche', 't-3', 'Mettre à jour Astro', { from: 'in_progress', to: 'done' }),
+  audit(10, 60 * 30, 'HUMAN', U.me, 'Camille Laurent', 'session.create', 'a lancé la session', 'session', 'Session', 's-page-tarifs', 'Refonte de la page tarifs', { provider: 'claude' }),
+];
+const auditFacets = {
+  __typename: 'AuditFacets',
+  actors: [U.me, U.hugo, U.lea, U.max, U.chris],
+  targetTypes: [['git', 'Git'], ['member', 'Membre'], ['request', 'Demande'], ['session', 'Session'], ['task', 'Tâche'], ['vault', 'Coffre']].map(([value, label]) => ({ __typename: 'AuditOption', value, label })),
+  actions: [['git.commit', 'a commité'], ['git.push', 'a poussé'], ['member.role', 'a changé le rôle de'], ['request.answer', 'a répondu à la demande'], ['session.create', 'a lancé la session'], ['session.stop', 'a arrêté la session'], ['task.create', 'a créé la tâche'], ['task.status', 'a changé le statut de la tâche'], ['vault.update', 'a modifié l’élément du coffre']].map(([value, label]) => ({ __typename: 'AuditOption', value, label })),
+};
+const auditLog = (a = {}) => {
+  const f = a.filter ?? {};
+  return auditEntries.filter((e) => (!f.actorKind || e.actorKind === f.actorKind) && (!f.actorUserId || e.actor?.id === f.actorUserId) && (!f.targetType || e.targetType === f.targetType) && (!f.action || e.action === f.action) && (!f.from || e.createdAt >= f.from) && (!f.to || e.createdAt < f.to) && (!a.before || Number(e.id) < Number(a.before)));
+};
+
 export const demoRoot = {
+  auditLog,
+  auditFacets: () => auditFacets,
   me: U.me,
   users: Object.values(U),
   sidebarProjects: allProjects,

@@ -1,3 +1,4 @@
+import { auditService } from '../audit/service.js';
 import { agentService } from '../agents/service.js';
 import { gitAccountFor } from '../git/agentEnv.js';
 import { createSdkMcpServer, tool, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
@@ -338,6 +339,7 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
             const account = accounts ? await gitAccountFor(accounts, path?.trim() ? null : project.gitUrl) : null;
             if (account?.readOnly && !account.pullRequests) throw new Error(`Ton compte ${account.host === 'gitlab' ? 'GitLab' : 'GitHub'} est prêté en lecture seule : tu ne peux ni pousser ni ouvrir de pull request. Si le changement relève du développement, crée une tâche et confie-la à l'agent développeur du projet ; sinon demande dans le fil de la tâche à une personne de prendre la main sur cette session (bouton « Prendre la main ») ou de pousser elle-même.`);
             const pr = await trackedPullRequestService.open({ projectId: project.id, worksessionId: s.worksessionId }, account?.userId ?? s.ownerId, { title, body, base, draft, path }, { taskId: task_id, note }, prActor);
+            await auditService.record({ projectId: project.id, actor: { sessionId }, action: 'pull_request.open', targetType: 'pull_request', targetId: pr.number != null ? String(pr.number) : pr.id, targetLabel: `#${pr.number ?? '?'} ${pr.title}`, details: { taskId: task_id, url: pr.url, draft } });
             return `Pull request ouverte et suivie :\n${describePullRequest(pr, projectRepo)}`;
           }),
       ),

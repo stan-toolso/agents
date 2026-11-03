@@ -10,9 +10,13 @@ import { userService } from '../users/service.js';
 import { worksessionRepository } from '../worksessions/repository.js';
 import { sessionToMarkdown, type MarkdownEvent } from './sessionMarkdown.js';
 import { exportProjectArchive } from './service.js';
+import { auditToCsv } from '../audit/csv.js';
+import { auditService } from '../audit/service.js';
+import { parseAuditFilter } from '../audit/types.js';
 
 const SESSION_ROUTE = /^\/api\/sessions\/([0-9a-f-]{36})\/export\.md$/;
 const PROJECT_ROUTE = /^\/api\/projects\/([0-9a-f-]{36})\/export\.tar\.gz$/;
+const AUDIT_ROUTE = /^\/api\/projects\/([0-9a-f-]{36})\/audit\.csv$/;
 
 /** Nom de fichier sûr pour Content-Disposition (le nom complet, accents compris, passe par filename*). */
 function disposition(filename: string): string {
@@ -58,14 +62,17 @@ async function sessionMarkdown(sessionId: string): Promise<{ filename: string; m
 /**
  * Téléchargements des exports, authentifiés par le cookie de session :
  * - GET /api/sessions/<id>/export.md : la session en Markdown (accès au projet suffisant) ;
- * - GET /api/projects/<id>/export.tar.gz : l'archive du projet (administrateurs du projet).
+ * - GET /api/projects/<id>/export.tar.gz : l'archive du projet (administrateurs du projet) ;
+ * - GET /api/projects/<id>/audit.csv : le journal d'audit en CSV (lecteurs du projet ; filtres actorUserId, actorKind,
+ *   targetType, action, from, to en paramètres d'URL, 10 000 entrées au plus).
  * Renvoie false si l'URL n'est pas l'une de ces routes.
  */
 export async function handleExportRoute(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const url = new URL(req.url ?? '/', config.apiUrl);
   const sessionMatch = url.pathname.match(SESSION_ROUTE);
   const projectMatch = sessionMatch ? null : url.pathname.match(PROJECT_ROUTE);
-  if (!sessionMatch && !projectMatch) return false;
+  const auditMatch = sessionMatch || projectMatch ? null : url.pathname.match(AUDIT_ROUTE);
+  if (!sessionMatch && !projectMatch && !auditMatch) return false;
   if (req.method !== 'GET') {
     res.writeHead(405).end();
     return true;
@@ -90,6 +97,8 @@ export async function handleExportRoute(req: IncomingMessage, res: ServerRespons
         return true;
       }
       await requireProject(ctx, session.projectId, 'viewer');
+    } else if (auditMatch) {
+      await requireProject(ctx, auditMatch[1], 'viewer');
     } else {
       await requireProject(ctx, projectMatch![1], 'admin');
     }
@@ -106,6 +115,16 @@ export async function handleExportRoute(req: IncomingMessage, res: ServerRespons
       }
       const body = Buffer.from(out.markdown, 'utf8');
       res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Content-Length': body.length, 'Content-Disposition': disposition(out.filename), 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+      res.end(body);
+    } else if (auditMatch) {
+      const q = url.searchParams;
+      const filter = parseAuditFilter(auditMatch[1], { actorUserId: q.get('actorUserId'), actorKind: q.get('actorKind'), targetType: q.get('targetType'), action: q.get('action'), from: q.get('from'), to: q.get('to') });
+      const [project, entries] = await Promise.all([projectService.get(auditMatch[1]), auditService.listForExport(filter)]);
+      const userIds = [...new Set(entries.map((e) => e.actorUserId).filter((id): id is string => !!id))];
+      const users = new Map((await Promise.all(userIds.map((id) => userService.get(id).catch(() => null)))).filter((u) => u !== null).map((u) => [u.id, u.name || u.email]));
+      const body = Buffer.from(auditToCsv(entries, (id) => users.get(id) ?? null), 'utf8');
+      const filename = `journal-${project.slug || 'projet'}-${new Date().toISOString().slice(0, 10)}.csv`;
+      res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Length': body.length, 'Content-Disposition': disposition(filename), 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
       res.end(body);
     } else {
       const { filename, archive } = await exportProjectArchive(projectMatch![1]);

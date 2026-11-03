@@ -1,3 +1,4 @@
+import { auditService } from '../audit/service.js';
 import { createSdkMcpServer, tool, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type { Actor } from '../context/types.js';
@@ -167,6 +168,7 @@ export function createSessionsMcpServer(project: Project, sessionId: string, sco
               },
               actor,
             );
+            await auditService.record({ projectId: p.id, actor: { sessionId }, action: 'session.create', targetType: 'session', targetId: session.id, targetLabel: session.name, details: { provider: session.provider, worksessionId: session.worksessionId, parentSessionId: sessionId } });
             return `Session lancée :\n${await describe(session)}\nUtilise sessions.wait avec cet id pour obtenir sa réponse.`;
           }),
       ),
@@ -199,6 +201,7 @@ export function createSessionsMcpServer(project: Project, sessionId: string, sco
           const child = await getChild(id);
           if (child.status !== 'running' && child.status !== 'queued') return `La session est déjà ${stateOf(child)}.`;
           const s = await sessionService.end(child.id);
+          await auditService.record({ projectId: s.projectId, actor: { sessionId }, action: 'session.end', targetType: 'session', targetId: s.id, targetLabel: s.name });
           return `Fin demandée :\n${await describe(s)}`;
         }),
       ),
@@ -214,6 +217,7 @@ export function createSessionsMcpServer(project: Project, sessionId: string, sco
             const target = id && id !== sessionId ? await getChild(id) : await getInScope(sessionId);
             if (target.archivedAt) return 'La session est déjà archivée.';
             const deferred = await sessionService.archiveWhenDone(target.id, reason?.trim() || null);
+            await auditService.record({ projectId: target.projectId, actor: { sessionId }, action: 'session.archive', targetType: 'session', targetId: target.id, targetLabel: target.name, details: { reason: reason?.trim() || undefined } });
             if (target.id === sessionId) return deferred ? "Cette session sera archivée à la fin de ce tour : termine ta réponse maintenant, sans autre outil." : 'Session archivée.';
             return deferred ? `La session termine son tour, puis sera archivée :\n${await describe(target)}` : 'Session archivée.';
           }),

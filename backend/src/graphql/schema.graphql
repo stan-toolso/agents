@@ -3785,3 +3785,66 @@ type ProjectDashboard {
 extend type Query {
   projectDashboard(id: ID!): ProjectDashboard!
 }
+
+# ---- Journal d'audit -----------------------------------------------------------------------
+
+"Qui a fait l'action : une personne, une session d'agent, ou Skipper lui-même (automatismes, clé d'API)."
+enum AuditActorKind {
+  HUMAN
+  AGENT
+  SYSTEM
+}
+
+"Une action inscrite au journal d'audit d'un projet."
+type AuditEntry {
+  id: ID!
+  createdAt: DateTime!
+  "Identifiant technique de l'action, ex. session.stop, request.answer."
+  action: String!
+  "Libellé de l'action (« a arrêté la session »)."
+  actionLabel: String!
+  targetType: String!
+  targetTypeLabel: String!
+  targetId: String
+  "Nom de la cible au moment de l'action (titre de tâche, nom de session, chemin…)."
+  targetLabel: String
+  "Ce qui précise l'action (statut avant et après, décision d'une demande, message de commit…) ; jamais un secret."
+  details: JSON!
+  actorKind: AuditActorKind!
+  "Personne, ou agent de projet, qui a agi (directement ou par sa session)."
+  actor: User
+  "Session d'agent qui a agi."
+  sessionId: ID
+  "Nom de l'acteur au moment de l'action (personne, session, clé d'API)."
+  actorLabel: String
+}
+
+input AuditFilterInput {
+  "Une personne ou un agent de projet : ses actions et celles de ses sessions."
+  actorUserId: ID
+  actorKind: AuditActorKind
+  targetType: String
+  action: String
+  "Début de période (inclus)."
+  from: DateTime
+  "Fin de période (exclue)."
+  to: DateTime
+}
+
+type AuditOption {
+  value: String!
+  label: String!
+}
+
+"Valeurs présentes dans le journal d'un projet, pour ses filtres."
+type AuditFacets {
+  actors: [User!]!
+  targetTypes: [AuditOption!]!
+  actions: [AuditOption!]!
+}
+
+extend type Query {
+  "Journal d'audit du projet, du plus récent au plus ancien (lecteurs du projet). before : curseur (id de la dernière entrée reçue)."
+  auditLog(projectId: ID!, filter: AuditFilterInput, limit: Int = 100, before: ID): [AuditEntry!]!
+  auditFacets(projectId: ID!): AuditFacets!
+}

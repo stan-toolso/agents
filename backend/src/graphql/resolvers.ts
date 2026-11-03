@@ -1,3 +1,7 @@
+import { withAudit } from '../audit/mutations.js';
+import { auditService } from '../audit/service.js';
+import { actionLabel, targetTypeLabel } from '../audit/labels.js';
+import { parseAuditFilter, type AuditEntry, type RawAuditFilter } from '../audit/types.js';
 import { DateTimeResolver, JSONResolver } from 'graphql-scalars';
 import { accessibleProjectIds, canAccessProject, filterAsync, memberRoleFor, requireAdmin, requireProject, requireSuperAdmin, requireUser, roleFor, settingsUser, type AuthContext } from '../auth/access.js';
 import { agentService } from '../agents/service.js';
@@ -579,6 +583,13 @@ export const resolvers = {
     linkedBy: (l: VaultLink, _: unknown, ctx: Ctx) => userOrNull(ctx, l.linkedById),
   },
 
+  AuditEntry: {
+    actionLabel: (e: AuditEntry) => actionLabel(e.action),
+    targetTypeLabel: (e: AuditEntry) => targetTypeLabel(e.targetType),
+    actorKind: (e: AuditEntry) => e.actorKind.toUpperCase(),
+    actor: (e: AuditEntry, _: unknown, ctx: Ctx) => userOrNull(ctx, e.actorUserId),
+  },
+
   VaultAuditEvent: {
     actor: (e: VaultAuditEvent, _: unknown, ctx: Ctx) => userOrNull(ctx, e.actorUserId),
     project: (e: VaultAuditEvent, _: unknown, ctx: Ctx) => projectIfAccessible(ctx, e.projectId),
@@ -850,6 +861,20 @@ export const resolvers = {
   },
 
   Query: {
+    auditLog: async (_: unknown, args: { projectId: string; filter?: RawAuditFilter | null; limit?: number | null; before?: string | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'viewer');
+      return auditService.list({ ...parseAuditFilter(args.projectId, args.filter), limit: args.limit ?? 100, before: args.before ?? null });
+    },
+    auditFacets: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'viewer');
+      const facets = await auditService.facets(args.projectId);
+      const actors = (await Promise.all(facets.actorUserIds.map((id) => userOrNull(ctx, id)))).filter((u) => u !== null);
+      return {
+        actors,
+        targetTypes: facets.targetTypes.map((value) => ({ value, label: targetTypeLabel(value) })),
+        actions: facets.actions.map((value) => ({ value, label: actionLabel(value) })),
+      };
+    },
     agent: async (_: unknown, args: { id: string }, ctx: Ctx) => {
       const agent = await agentService.get(args.id);
       await requireProject(ctx, agent.projectId, 'viewer');
@@ -1220,7 +1245,7 @@ export const resolvers = {
     },
   },
 
-  Mutation: {
+  Mutation: withAudit({
     createAgent: async (_: unknown, args: { projectId: string; input: GqlAgentInput }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId, 'member');
       return agentService.create(args.projectId, fromGqlAgentInput(args.input), requireUser(ctx));
@@ -2010,7 +2035,7 @@ export const resolvers = {
       await guardInstruction(ctx, args.id, 'member');
       return contextService.restoreVersion(args.id, args.version, HUMAN);
     },
-  },
+  }),
 
   Subscription: {
     sessionEvents: {
