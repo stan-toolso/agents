@@ -304,6 +304,9 @@ function task(p, title, status, priority, opts = {}) {
     createdAt: ago(opts.age ?? 60 * 24 * 3),
     updatedAt: ago(opts.updated ?? 60 * 2),
     completedAt: status === 'DONE' ? ago(opts.updated ?? 60 * 24) : null,
+    // Passage en cours : aux deux tiers de la vie de la tâche, avant sa fin pour une terminée.
+    startedAt: status === 'IN_PROGRESS' || status === 'DONE' ? ago(Math.min(opts.age ?? 60 * 24 * 3, Math.max((status === 'DONE' ? (opts.updated ?? 60 * 24) : 0) + 60, Math.round((opts.age ?? 60 * 24 * 3) * 0.66)))) : null,
+    cancelledAt: status === 'CANCELLED' ? ago(opts.updated ?? 60 * 2) : null,
   };
   t.comments = () => comments.filter((c) => c.taskId === t.id);
   t.commentCount = () => comments.filter((c) => c.taskId === t.id).length;

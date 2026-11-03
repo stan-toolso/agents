@@ -82,6 +82,9 @@ export interface ExportedTask {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  /** Absents des archives antérieures à ces colonnes. */
+  startedAt?: string | null;
+  cancelledAt?: string | null;
   comments: ExportedComment[];
   /** Fichiers joints (nom, type, taille) : signalés, pas inclus dans l'archive. */
   attachments: { name: string; mediaType: string; size: number }[];

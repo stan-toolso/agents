@@ -417,6 +417,10 @@ type Task {
   createdAt: DateTime!
   updatedAt: DateTime!
   completedAt: DateTime
+  "Passage en cours (le premier ; effacé si la tâche revient à « à faire ») : début du cycle time. Null si jamais démarrée."
+  startedAt: DateTime
+  "Passage en annulée, null hors de ce statut."
+  cancelledAt: DateTime
 }
 
 input CreateTaskInput {
