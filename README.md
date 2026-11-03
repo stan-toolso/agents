@@ -565,6 +565,19 @@ L'hébergement ne se désactive pas.
   `acceptEdits`, `bypassPermissions` ou `plan`, réglable dans le formulaire du projet) ; les sessions
   planifiées gardent le mode de leur session. Le formulaire de nouvelle session propose le dernier mode
   choisi sur ce projet dans ce navigateur (localStorage), sinon celui du projet.
+  Le mode `dontAsk` s'appelle **« Refuser sans demander »** : il ne veut pas dire « ne plus me déranger » mais
+  « refuser tout ce qui n'est pas autorisé d'avance ». Y passer depuis la page de session ouvre une modale qui dit ce
+  qui sera refusé (commandes et fichiers hors règles, outils de Skipper soumis à autorisation, navigateur, écritures
+  Google ; les connexions avec approbation restent soumises à un humain quel que soit le mode), signale la
+  planification que porte la session (ses exécutions prennent ce mode), et propose plutôt « Modifier les fichiers
+  librement » ou « Tout autoriser » (`dontAskConsequences` de `lib/humanize.ts`, `choose` de `Dialogs.tsx`). Un outil
+  refusé par ce mode est signalé dans le transcript avec **« Autoriser cet outil pour la session »** : la règle
+  déduite de l'appel (`ruleForCall` : `Bash(grep *)`, `mcp__vault__sql_query(prod)`, sinon l'outil) rejoint
+  `allowedTools` de la session ; le provider Claude l'applique à chaud par son hook `PreToolUse` (le CLI ne relit
+  pas `allowedTools`, et la décision d'un hook passe avant le mode), puis au prochain lancement par `allowedTools`.
+  Pour une commande Bash que le SDK ne sait pas généraliser (substitution `$(…)`, sous-shell : le CLI ne la tient
+  jamais pour sûre et ne suggère aucune règle), la demande d'autorisation propose quand même les règles déduites de
+  ses commandes simples (`editableRules`), à retenir pour la session ou le projet en un clic.
 - **PermissionRule** : autorisation d'outil mémorisée pour un projet (`toolName`, `ruleContent`
   optionnel, ex. `Bash(git status *)`). Créée en répondant « ne plus demander dans ce projet » à une
   demande d'autorisation ou à la main sur la page du projet ; chaque session Claude du projet les
@@ -934,7 +947,7 @@ dans un sous-dossier du dossier de travail ; `tasks.pr_register`, qui déclare u
 l'URL de n'importe quel dépôt GitHub ou par son numéro dans le dépôt du projet ; `tasks.pr_update` tient à jour
 statut, note et tâche, mais une PR en préparation ne change pas de statut ainsi ; `tasks.pr_merge` fusionne une PR
 ouverte quand une personne le demande : l'outil pose lui-même une demande d'autorisation, jamais mémorisable et posée
-même en mode « ne jamais demander », et la fusion est faite avec le compte de la personne qui l'accepte (`answered_by`
+même en mode « refuser sans demander », et la fusion est faite avec le compte de la personne qui l'accepte (`answered_by`
 de la demande, remis à l'outil par `requestService` sous la clé `answeredById` ; au moins membre du projet), à son nom,
 branche distante supprimée et tâches de la branche terminées, dossier de travail gardé (`pullRequests/mergeApproval.ts`) ;
 `tasks.pr_list` liste par
@@ -1566,8 +1579,8 @@ de chaque exécution** pour ne pas garder un processus ouvert entre deux échéa
 (échéance, ou à la main avec la personne), échéance visée, début, fin, durée, coût, message et **début de la
 dernière réponse de l'agent** (« Voir la réponse »). Issues (`schedules/outcome.ts`, testé) :
 - **Terminée** ;
-- **Bloquée** : un appel d'outil a été refusé (`permission_denials` du résultat du tour : mode « Ne jamais me
-  demander », refus d'un humain), ou une demande d'autorisation est restée **dix minutes** sans réponse (la
+- **Bloquée** : un appel d'outil a été refusé (`permission_denials` du résultat du tour : mode « Refuser
+  sans demander », refus d'un humain), ou une demande d'autorisation est restée **dix minutes** sans réponse (la
   demande reste ouverte ; l'agent repart si quelqu'un y répond). L'agent a pu répondre poliment, l'exécution
   n'est quand même pas présentée comme réussie ;
 - **En erreur**, **Délai dépassé** (toujours au travail après quatre heures) ;

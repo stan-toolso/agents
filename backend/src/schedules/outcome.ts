@@ -6,7 +6,7 @@ export interface RunSummary {
   cost: number;
   durationMs: number | null;
   error: string | null;
-  /** Outils dont l'appel a été refusé (mode « Ne jamais me demander », refus d'une demande), sans doublon. */
+  /** Outils dont l'appel a été refusé (mode « Refuser sans demander », refus d'une demande), sans doublon. */
   denied: string[];
   /** Dernière réponse de l'agent (résultat du dernier tour réussi). */
   answer: string | null;

@@ -3385,7 +3385,7 @@ enum ScheduleRunStatus {
   RUNNING
   "Terminée sans erreur ni refus."
   DONE
-  "Un appel d'outil a été refusé (mode « Ne jamais me demander », refus d'un humain) ou une demande est restée sans réponse : le travail n'a pas pu aller au bout."
+  "Un appel d'outil a été refusé (mode « Refuser sans demander », refus d'un humain) ou une demande est restée sans réponse : le travail n'a pas pu aller au bout."
   BLOCKED
   FAILED
   "Toujours au travail après le délai d'attente (4 h)."
@@ -3460,7 +3460,7 @@ input CreateScheduledSessionInput {
 }
 
 enum ScheduleToolSuggestionSource {
-  "Refusé pendant une exécution passée (mode « Ne jamais me demander », refus, demande sans réponse)."
+  "Refusé pendant une exécution passée (mode « Refuser sans demander », refus, demande sans réponse)."
   DENIED
   "Demandé pendant une exécution passée, puis accordé par une personne."
   ASKED

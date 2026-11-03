@@ -113,6 +113,10 @@
 .cc-tool .cc-dot.warn { color: var(--cc-yellow); }
 /* Code de sortie d'une commande qui a tourné mais s'est terminée en non nul : seule cette ligne ressort. */
 .cc-exit { color: var(--cc-yellow); }
+/* Outil refusé par le mode « Refuser sans demander » : explication et bouton pour l'autoriser pour la session. */
+.cc-denied { white-space: normal; }
+.cc-denied .cc-desc { color: var(--cc-dim); }
+.cc-denied .cc-allowed { color: var(--cc-green); }
 .cc-tool .cc-name { font-weight: 600; }
 /* Étapes de l'agent repliées en une ligne (détail technique masqué), dépliées au clic.
    Une seule ligne, coupée par des points de suspension : la dernière étape qui change ne fait pas sauter le fil. */

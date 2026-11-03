@@ -18,7 +18,7 @@ function PermissionForm({ request, onAnswer, busy }: { request: HumanRequest; on
   const [message, setMessage] = useState('');
   const p = request.payload as { toolName?: string; input?: Record<string, unknown>; suggestions?: unknown[] };
   // Règles à mémoriser : suggestions du SDK généralisées par préfixe, modifiables avant de répondre.
-  const proposed = editableRules(p.suggestions);
+  const proposed = editableRules(p.suggestions, p.toolName, p.input);
   const [ruleText, setRuleText] = useState(proposed.join('\n'));
   const rules = [...suggestedModes(p.suggestions), ...parseRuleLines(ruleText)];
   const canAlways = proposed.length > 0 || rules.length > 0;

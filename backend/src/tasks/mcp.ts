@@ -25,7 +25,7 @@ const failure = (t: string) => ({ content: [{ type: 'text' as const, text: t }],
  * Outils du serveur `tasks` autorisés d'office (réversibles, sans coût, sans effet hors de la base). `pr_open`
  * n'y est pas : il pousse la branche et ouvre une pull request sur GitHub avec le compte de la personne, donc
  * passe par la demande d'autorisation. `pr_merge` y est parce qu'il pose lui-même sa demande (`approveMerge`) :
- * la personne qui l'accepte fusionne avec son compte, même en mode « ne jamais demander » ; en mode « Tout autoriser », la
+ * la personne qui l'accepte fusionne avec son compte, même en mode « refuser sans demander » ; en mode « Tout autoriser », la
  * personne qui pilote la session (au moins membre) l'accepte implicitement (`implicitMergeApprover`).
  * `request_approval` y est aussi : il ne fait que poser une demande d'accord à un administrateur (ou constater l'accord
  * implicite de la personne qui a demandé le travail), sans rien exécuter. `ci_status` ne fait que lire l'état de la CI.

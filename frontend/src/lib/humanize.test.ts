@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { clockTime, dayLabel, describeTool, editableRules, formatCost, formatDuration, generalizeBashRule, parseRuleLines, requestNote, requestTitle, sessionStateHint, suggestedRules, taskChipOf, timeAgo } from './humanize';
+import { DONT_ASK_DENIAL, clockTime, dayLabel, describeTool, dontAskConsequences, editableRules, ruleForCall, splitAllowedTools, formatCost, formatDuration, generalizeBashRule, parseRuleLines, requestNote, requestTitle, sessionStateHint, suggestedRules, taskChipOf, timeAgo } from './humanize';
 
 describe('describeTool', () => {
   it('décrit une commande Bash et tronque une longue commande dans la demande', () => {
@@ -156,5 +156,36 @@ describe('taskChipOf', () => {
     expect(taskChipOf(task, { status: 'RUNNING', activity: 'IDLE' })).toEqual({ text: 'terminée', cls: 'done', tag: 'PR #80 à fusionner', note: null });
     expect(taskChipOf(task, null).text).toBe('terminée');
     expect(taskChipOf({ status: 'IN_PROGRESS', statusTag: null }, { status: 'RUNNING', activity: 'BUSY' })).toMatchObject({ text: 'en cours', cls: 'in_progress' });
+  });
+});
+
+describe('mode « Refuser sans demander »', () => {
+  it('propose des règles pour une commande Bash composée sans suggestion du SDK', () => {
+    expect(editableRules([], 'Bash', { command: 'grep -n save $(ls src); sed -n 1,20p src/WorkoutService.js' })).toEqual(['Bash(grep *)', 'Bash(sed *)']);
+    // Commande dangereuse : pas de règle par préfixe proposée.
+    expect(editableRules([], 'Bash', { command: 'rm -rf build' })).toEqual([]);
+    // Suggestions du SDK présentes : elles priment.
+    expect(editableRules([{ type: 'addRules', behavior: 'allow', rules: [{ toolName: 'Bash', ruleContent: 'git status' }] }], 'Bash', { command: 'git status' })).toEqual(['Bash(git status *)']);
+  });
+
+  it('déduit la règle d’un outil refusé', () => {
+    expect(ruleForCall('Bash', { command: 'grep -n x a.js && sed -n 1p a.js' })).toBe('Bash(grep *)');
+    expect(ruleForCall('Bash', { command: 'rm -rf /' })).toBe('Bash');
+    expect(ruleForCall('mcp__vault__sql_query', { item: 'production', sql: 'select 1' })).toBe('mcp__vault__sql_query(production)');
+    expect(ruleForCall('mcp__tasks__pr_open', {})).toBe('mcp__tasks__pr_open');
+  });
+
+  it('reconnaît le refus du CLI et découpe les outils pré-autorisés', () => {
+    expect(DONT_ASK_DENIAL.test("Permission to use mcp__connections__sql_query has been denied because Claude Code is running in don't ask mode.")).toBe(true);
+    expect(DONT_ASK_DENIAL.test('Permission to use Bash has been denied.')).toBe(false);
+    expect(splitAllowedTools(' Read, Bash(git:*) ,')).toEqual(['Read', 'Bash(git:*)']);
+    expect(splitAllowedTools(undefined)).toEqual([]);
+  });
+
+  it('dit ce qui sera refusé, connexions avec approbation et planification comprises', () => {
+    const lines = dontAskConsequences({ approvalConnections: ['production'], scheduleName: 'Revue Curso' });
+    expect(lines.join('\n')).toContain('« production »');
+    expect(lines.join('\n')).toContain('planification « Revue Curso »');
+    expect(dontAskConsequences({}).some((l) => l.includes('planification'))).toBe(false);
   });
 });

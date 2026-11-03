@@ -31,7 +31,7 @@ const PERMISSION_MODES = ['default', 'acceptEdits', 'dontAsk', 'bypassPermission
 /** Ce que le mode d'autorisation implique pour une exécution sans personne devant l'écran. */
 function permissionHint(mode: string): string {
   if (mode === 'bypassPermissions') return 'Tout est autorisé : rien ne bloque une exécution, y compris les accès du coffre qui exigent votre approbation.';
-  if (mode === 'dontAsk') return 'Les outils soumis à autorisation sont refusés sans demande : l’exécution est alors notée « Bloquée » et vous êtes prévenu.';
+  if (mode === 'dontAsk') return 'Tout outil qui n’est pas autorisé d’avance (règles du projet, outils pré-autorisés ci-dessous) est refusé sans demande : l’exécution est alors notée « Bloquée » et vous êtes prévenu. Pour ne plus être sollicité, préférez « Tout autoriser » ou pré-autorisez les outils nécessaires.';
   if (mode === 'plan') return 'L’agent ne fait que réfléchir, sans rien modifier ni exécuter.';
   return 'Une demande d’autorisation attend votre réponse : sans réponse après 10 minutes, l’exécution est notée « Bloquée » et vous êtes prévenu.';
 }
@@ -277,7 +277,15 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
             </Form.Group>
           )}
           <Form.Group className="mb-3">
-            <Form.Label className="mb-1">Autorisations pendant les exécutions</Form.Label>
+            <Form.Label className="mb-1">
+              Autorisations pendant les exécutions
+              {!creating && (
+                <span className="text-secondary fw-normal small">
+                  {' '}
+                  · mode actuel de la session : {permissionModeShortLabels[currentMode] ?? currentMode}
+                </span>
+              )}
+            </Form.Label>
             <Form.Select value={permissionMode} onChange={(e) => setPermissionMode(e.target.value)}>
               {[...new Set([...PERMISSION_MODES, permissionMode])].map((m) => (
                 <option key={m} value={m}>
@@ -287,8 +295,15 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
             </Form.Select>
             <Form.Text>
               {permissionHint(permissionMode)}
-              {!creating && ' Réglage de la session, aussi appliqué quand vous lui écrivez.'}
+              {!creating && ' Réglage de la session, aussi appliqué quand vous lui écrivez (le changer sur la page de la session change aussi celui des exécutions).'}
             </Form.Text>
+            {permissionMode === 'dontAsk' && (
+              <Alert variant="warning" className="mt-2 mb-0 py-2 small">
+                <i className="bi bi-exclamation-triangle me-1" />
+                {currentMode === 'dontAsk' && !creating ? 'Cette session est en mode « Refuser sans demander » : ' : 'En mode « Refuser sans demander », '}
+                l’agent n’aura accès qu’à ce qui est autorisé d’avance ; tout le reste sera refusé pendant les exécutions.
+              </Alert>
+            )}
           </Form.Group>
           <ScheduleTools value={allowedTools} onChange={setAllowedTools} projectId={session?.project.id ?? projectId} sessionId={existing ? session!.id : null} prompt={prompt} permissionMode={permissionMode} />
           <Form.Group className="mb-2">

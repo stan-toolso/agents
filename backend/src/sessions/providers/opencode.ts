@@ -136,7 +136,7 @@ export class OpencodeProvider implements SessionProvider {
             { value: 'default', label: 'Me demander avant chaque action sensible', description: 'Chaque modification de fichier ou commande vous est soumise (recommandé).' },
             { value: 'acceptEdits', label: 'Modifier les fichiers librement', description: 'Les modifications de fichiers sont autorisées ; les commandes restent soumises.' },
             { value: 'plan', label: 'Réfléchir seulement, sans rien modifier', description: "L'agent « plan » d'OpenCode analyse et propose un plan, sans toucher aux fichiers." },
-            { value: 'dontAsk', label: 'Ne jamais me demander', description: 'Les actions non autorisées sont refusées automatiquement.' },
+            { value: 'dontAsk', label: 'Refuser sans demander', description: "Les actions non autorisées d'avance sont refusées ; aucune demande ne vous sera faite. Pour ne plus être dérangé, préférez « Modifier les fichiers librement » ou « Tout autoriser »." },
             { value: 'bypassPermissions', label: 'Tout autoriser (risqué)', description: "L'agent agit sans aucune confirmation." },
           ],
         },
@@ -901,7 +901,7 @@ class OpencodeRun {
     // Outils pré-autorisés de la planification, pendant ses seules exécutions.
     const scheduled = await activeScheduleRules(ctx.session.id);
     if (scheduled && scheduleAllows(scheduled, tool.name, tool.input, ctx.cwd)) return true;
-    if (this.mode === 'dontAsk') return "Action non autorisée à l'avance : la session ne pose pas de question (mode « ne jamais demander »).";
+    if (this.mode === 'dontAsk') return "Action non autorisée à l'avance : la session ne pose pas de question (mode « refuser sans demander »).";
 
     const response = (await ctx.ask({ type: 'permission', title: opts.title ?? `Autoriser l'outil ${tool.name}`, message: null, payload: { toolName: tool.name, input: tool.input, suggestions: opts.suggestions, blockedPath: opts.blockedPath } }, signal)) as Partial<PermissionResponse>;
     if (response.decision !== 'allow') return response.message || "Refusé par l'utilisateur";
