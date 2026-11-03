@@ -111,6 +111,7 @@
 .cc-tool .cc-dot.ok { color: var(--cc-green); }
 .cc-tool .cc-dot.error { color: var(--cc-red); }
 .cc-tool .cc-dot.warn { color: var(--cc-yellow); }
+.cc-tool .cc-dot.declined { color: var(--cc-dim); }
 /* Code de sortie d'une commande qui a tourné mais s'est terminée en non nul : seule cette ligne ressort. */
 .cc-exit { color: var(--cc-yellow); }
 /* Outil refusé par le mode « Refuser sans demander » : explication et bouton pour l'autoriser pour la session. */

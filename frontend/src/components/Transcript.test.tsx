@@ -102,6 +102,22 @@ describe('Transcript', () => {
     expect(out).toContain('cc-group');
   });
 
+  it('montre une question écartée par une personne sans le texte brut ni le rouge d’une erreur (03/11/2026)', () => {
+    const rejected = "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.";
+    const out = html([
+      ev('instruction', { text: 'fais le push alors' }),
+      tool('q1', 'AskUserQuestion', { questions: [{ question: 'Pousser avec quel compte ?' }] }),
+      result('q1', rejected, true),
+      ev('claude.user', { message: { content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] } }),
+      ev('claude.result', { subtype: 'error_during_execution', is_error: true, terminal_reason: 'aborted_tools', errors: ['[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use'] }),
+    ]);
+    expect(out).toContain('Question écartée');
+    expect(out).not.toContain("doesn't want to proceed");
+    expect(out).not.toContain('ede_diagnostic');
+    expect(out).not.toContain('cc-result error');
+    expect(out).toContain('Interrompu');
+  });
+
   it('nomme la dernière étape d’un tour en cours', () => {
     const out = html([ev('instruction', { text: 'Go' }), tool('t1', 'Read', { file_path: '/w/a.ts' }), result('t1', 'x'), tool('t2', 'Bash', { command: 'npm test' })]);
     expect(out).toContain('Bash(npm test)…');

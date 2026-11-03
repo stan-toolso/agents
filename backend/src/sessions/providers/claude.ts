@@ -62,7 +62,7 @@ import { attachmentsNote, inlineBlocks, publicAttachment } from '../attachments.
 import type { Attachment } from '../types.js';
 import type { DescribeContext, ProviderDescription, RunContext, RunningHandle, RunResult, SessionProvider } from './provider.js';
 import { isNoise } from './claudeNoise.js';
-import { isEmptyNotificationResult, resultError } from './claudeResult.js';
+import { isEmptyNotificationResult, isLastResultEcho, resultError } from './claudeResult.js';
 import { liveDraftService } from '../live.js';
 import { SESSION_ENV } from '../../runners/stats.js';
 import { log } from '../../log.js';
@@ -521,6 +521,13 @@ export class ClaudeProvider implements SessionProvider {
         }
       } catch (err) {
         if (closedByServer() || err instanceof AbortError) return { exitCode: null, closedByServer: true };
+        // Processus arrêté entre deux tours (fin demandée : prise en main, inactivité…) alors que le dernier tour s'était
+        // clos en erreur : le SDK remplace la sortie du CLI par le texte de ce résultat (`isLastResultEcho`). Le tour
+        // est déjà jugé par son résultat — un tour interrompu n'est pas une erreur de la session.
+        if (lastResult && !turnInProgress && isLastResultEcho(err)) {
+          const error = resultError(lastResult, { interruptedIsError: false });
+          return error ? { exitCode: 1, error } : { exitCode: 0 };
+        }
         return { exitCode: 1, error: (err as Error).message };
       } finally {
         liveDraftService.clear(ctx.session.id);

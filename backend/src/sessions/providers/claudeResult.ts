@@ -49,3 +49,17 @@ export function isEmptyNotificationResult(payload: ResultLike & { origin?: unkno
   const origin = payload.origin as { kind?: unknown } | null | undefined;
   return origin?.kind === 'task-notification' && payload.num_turns === 0;
 }
+
+/** Préfixe de l'erreur que lève le SDK quand le CLI sort après un dernier résultat en erreur (SDK 0.3.284). */
+const LAST_RESULT_ECHO = 'Claude Code returned an error result:';
+
+/**
+ * Vrai pour l'erreur que le SDK lève à la sortie du CLI quand le dernier résultat reçu était en erreur : il remplace
+ * l'erreur de sortie par le texte de ce résultat (`Claude Code returned an error result: [ede_diagnostic] …`). Cas
+ * observé le 03/11/2026 (session c3589558) : une personne écarte la question de l'agent (tour clos en
+ * `aborted_tools`), puis prend la main ; la fin du processus qui s'ensuit marquait la session « terminée avec une
+ * erreur », alors que rien n'avait échoué.
+ */
+export function isLastResultEcho(err: unknown): boolean {
+  return err instanceof Error && err.message.startsWith(LAST_RESULT_ECHO);
+}
