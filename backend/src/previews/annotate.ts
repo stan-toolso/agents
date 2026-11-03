@@ -10,6 +10,7 @@ import { sessionService } from '../sessions/service.js';
 import type { Session } from '../sessions/types.js';
 import { userRepository } from '../users/repository.js';
 import type { PreviewRow } from './repository.js';
+import { personAuthor } from '../sessions/instructionAuthor.js';
 
 /**
  * Annotations sur l'aperçu (« je pointe, l'agent corrige ») : le proxy injecte dans chaque page HTML de l'aperçu un
@@ -214,7 +215,7 @@ export async function handleAnnotateRoute(req: IncomingMessage, res: ServerRespo
     if (!session) return json(res, 409, { error: "Aucune session sur cette branche : ouvrez-en une dans Skipper pour lui envoyer vos annotations." }), true;
     const user = await userRepository.findById(userId);
     try {
-      const sent = await sessionService.sendMessage(session.id, formatInstruction(batch, user?.name || user?.email || 'un membre du projet'));
+      const sent = await sessionService.sendMessage(session.id, formatInstruction(batch, user?.name || user?.email || 'un membre du projet'), null, { author: user ? personAuthor(user) : null });
       log.info(`[previews] ${batch.annotations.length} annotation(s) envoyée(s) à la session ${session.id} par ${userId}`);
       json(res, 200, { session: sessionState(sent) });
     } catch (err) {

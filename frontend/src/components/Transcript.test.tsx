@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '../graphql/operations';
-import Transcript, { linkSessionIds, nonZeroExit } from './Transcript';
+import Transcript, { linkSessionIds, nonZeroExit, type ChatParticipants } from './Transcript';
 
 // Le module des adresses de l'API lit window au chargement ; sans navigateur, on le remplace.
 vi.mock('../apollo', () => ({ apiBaseUrl: '' }));
@@ -26,10 +26,10 @@ const turn = [
   ev('claude.result', { duration_ms: 1000 }),
 ];
 // Les identifiants de session des outils `sessions` sont des liens : il faut un routeur.
-const html = (events: SessionEvent[], technical = false) =>
+const html = (events: SessionEvent[], technical = false, participants: ChatParticipants | null = null) =>
   renderToStaticMarkup(
     <MemoryRouter>
-      <Transcript events={events} technical={technical} autoScroll={false} />
+      <Transcript events={events} technical={technical} autoScroll={false} participants={participants} />
     </MemoryRouter>,
   );
 
@@ -128,5 +128,44 @@ describe('Transcript', () => {
     const folded = html([ev('instruction', { text: 'Go' }), tool('t1', 'Read', { file_path: '/w/a.ts' }), result('t1', 'x'), ev('task_note', { text: note }), tool('t2', 'Read', { file_path: '/w/b.ts' }), result('t2', 'y'), text('Fini.')]);
     expect(folded).not.toContain('cc-task-feed');
     expect(html([ev('task_note', { text: note })])).toContain('cc-task-feed quiet');
+  });
+
+  it('se lit comme une conversation sans le détail technique : un message par interlocuteur et par tour', () => {
+    const people: ChatParticipants = { human: { name: 'Alice Martin' }, agent: { name: 'Ben', projectAgent: { name: 'Ben', avatar: { emoji: '🛠', color: null } } } };
+    const out = html(turn, false, people);
+    expect(out).toContain('cc-transcript cc-chat');
+    expect(out.split('cc-chat-msg human').length - 1).toBe(1);
+    // Tout le tour de l'agent (étapes repliées et dernier message) tient dans un seul message.
+    expect(out.split('cc-chat-msg agent').length - 1).toBe(1);
+    expect(out).toContain('Alice Martin');
+    expect(out).toContain('AM');
+    expect(out).toContain('🛠');
+    expect(out).toContain('3 étapes · 1 message · Read · Bash ×2');
+    expect(out).toContain('Le bug est corrigé.');
+    // Pas de marques du terminal ni de ligne de fin de tour réussi.
+    expect(out).not.toContain('cc-user');
+    expect(out).not.toContain('Terminé');
+    // Le détail technique garde le rendu du terminal.
+    const tech = html(turn, true, people);
+    expect(tech).not.toContain('cc-chat');
+    expect(tech).toContain('Terminé');
+  });
+
+  it('signe chaque instruction de son auteur journalisé, à défaut de la personne qui pilote la session', () => {
+    const people: ChatParticipants = { human: { name: 'Alice Martin' }, agent: { name: 'Claude' } };
+    const events = [
+      ev('instruction', { text: 'Ancienne consigne' }),
+      ev('instruction', { text: 'Regarde aussi le mobile', author: { type: 'user', id: 'u2', name: 'Bruno Petit', email: 'bruno@toolso.io' } }),
+      ev('instruction', { text: 'Fais le point', author: { type: 'session', id: 'parent-1', name: 'Release de novembre' } }),
+      ev('instruction', { text: 'Exécution planifiée', author: { type: 'system', name: 'Planification « Revue »' } }),
+    ];
+    const out = html(events, false, people);
+    expect(out).toContain('Alice Martin');
+    expect(out).toContain('Bruno Petit');
+    expect(out).toContain('href="/sessions/parent-1"');
+    expect(out).toContain('Planification « Revue »');
+    expect(out).toContain('bi-gear');
+    // En mode technique, le nom reste lisible à côté de l'heure.
+    expect(html(events, true, people)).toContain('Bruno Petit');
   });
 });

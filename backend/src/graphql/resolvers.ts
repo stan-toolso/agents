@@ -103,6 +103,7 @@ import { userService } from '../users/service.js';
 import type { ProjectMember, ProjectRole } from '../users/types.js';
 import { log } from '../log.js';
 import { previewService } from '../previews/service.js';
+import { personAuthor } from '../sessions/instructionAuthor.js';
 
 type Ctx = AuthContext;
 /** Message d'un canal enrichi par le résolveur de la liste : ses réactions et ses réponses, lues en une fois. */
@@ -1698,7 +1699,7 @@ export const resolvers = {
     },
     sendSessionMessage: async (_: unknown, args: { id: string; text: string; attachments?: AttachmentInput[] | null }, ctx: Ctx) => {
       await guardSession(ctx, args.id, 'member');
-      return sessionService.sendMessage(args.id, args.text, args.attachments, { byPerson: true });
+      return sessionService.sendMessage(args.id, args.text, args.attachments, { byPerson: true, author: personAuthor(requireUser(ctx)) });
     },
     endSession: async (_: unknown, args: { id: string }, ctx: Ctx) => {
       await guardSession(ctx, args.id, 'member');
@@ -1859,7 +1860,7 @@ export const resolvers = {
     },
     resumeTaskSession: async (_: unknown, args: { id: string; text: string }, ctx: Ctx) => {
       await guardTask(ctx, args.id, 'member');
-      return resumeTaskSession(args.id, args.text);
+      return resumeTaskSession(args.id, args.text, personAuthor(requireUser(ctx)));
     },
     createProjectApiKey: async (_: unknown, args: { projectId: string; name: string }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId, 'admin');

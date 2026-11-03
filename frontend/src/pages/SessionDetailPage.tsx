@@ -22,7 +22,7 @@ import AttachmentChips from '../components/AttachmentChips';
 import RequestPrompt from '../components/RequestPrompt';
 import { SessionChildren, SessionParentNote, parentStateHint, useSessionActions } from '../components/SessionControls';
 import { ContextBanner, ContextGauge } from '../components/ContextGauge';
-import Transcript from '../components/Transcript';
+import Transcript, { type ChatParticipants } from '../components/Transcript';
 import { fileToolResultCount } from '../lib/sessionChanges';
 import { isImageType, toAttachmentInputs, usePendingAttachments } from '../lib/attachments';
 import { confirmedPending, newPendingInstruction, withPendingInstructions, type PendingInstruction } from '../lib/pendingInstructions';
@@ -161,6 +161,16 @@ export default function SessionDetailPage() {
   // Chat : conversation légère de l'espace personnel, sans dossier de travail (ni panneau de droite, ni planification).
   const chat = session?.kind === 'CHAT';
   const archived = Boolean(session?.archivedAt);
+  // Interlocuteurs de la conversation (rendu sans détail technique) : la personne qui pilote la session (qui a pris
+  // la main, qui l'a demandée à l'agent, ou sa propriétaire), sinon la session d'agent qui l'a lancée ; en face,
+  // l'agent de projet qui la joue, sinon le modèle.
+  const participants = useMemo<ChatParticipants | null>(() => {
+    if (!session) return null;
+    const person = session.takenOverBy ?? session.requestedBy ?? (session.owner && session.owner.kind !== 'AGENT' ? session.owner : null);
+    const human = person ? { name: person.id === user?.id ? (user?.name ?? person.name) : person.name } : session.parentSession ? { name: session.parentSession.name, agent: true } : { name: user?.name ?? 'Vous' };
+    const agent = session.agent ? { name: session.agent.name, projectAgent: session.agent } : { name: session.provider === 'claude' ? 'Claude' : 'Agent' };
+    return { human, agent, me: user ? { name: user.name } : null };
+  }, [session?.takenOverBy, session?.requestedBy, session?.owner, session?.parentSession, session?.agent, session?.provider, user?.id, user?.name]);
   const running = session?.status === 'RUNNING';
   const busy = running && session?.activity === 'BUSY';
   const pending = session?.requests ?? [];
@@ -419,7 +429,7 @@ export default function SessionDetailPage() {
 
       {/* Sur mobile, la ligne vit dans le détail repliable de l'en-tête, avec les boutons. */}
       <div className="cc-toggle d-none d-md-flex">{technicalToggle}</div>
-      <Transcript events={shownEvents} draft={draft} loading={!eventsLoaded} technical={technical} />
+      <Transcript events={shownEvents} draft={draft} loading={!eventsLoaded} technical={technical} participants={participants} />
       {actions.modals}
 
       {pending.length > 0 && (

@@ -152,7 +152,7 @@ describe('reprise de la conversation de la tâche', () => {
 
   it('envoie le message dans la conversation existante, sans créer de session', async () => {
     await resumeTaskSession('t1', 'Continue');
-    expect(sessionService.sendMessage).toHaveBeenCalledWith('s-prev', 'Continue');
+    expect(sessionService.sendMessage).toHaveBeenCalledWith('s-prev', 'Continue', null, { author: null });
     expect(state.created).toHaveLength(0);
     expect(tasks.update).toHaveBeenCalledWith('t1', expect.objectContaining({ status: 'in_progress', sessionId: 's-prev' }));
   });
@@ -163,6 +163,6 @@ describe('reprise de la conversation de la tâche', () => {
     await resumeTaskSession('t1', 'Continue');
     expect(sessionService.archive).toHaveBeenCalledWith('s-other');
     expect(sessionService.unarchive).toHaveBeenCalledWith('s-prev');
-    expect(sessionService.sendMessage).toHaveBeenCalledWith('s-prev', 'Continue');
+    expect(sessionService.sendMessage).toHaveBeenCalledWith('s-prev', 'Continue', null, { author: null });
   });
 });

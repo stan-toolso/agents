@@ -40,6 +40,8 @@ export interface SessionCleanup {
 export interface QueuedStart {
   message: string | null;
   attachments: Attachment[];
+  /** Auteur de l'instruction mise en attente (`InstructionAuthor`, relu par `parseAuthor`). */
+  author?: unknown;
 }
 
 /** Souvenir d'une work session supprimée, gardé par ses sessions archivées. */
