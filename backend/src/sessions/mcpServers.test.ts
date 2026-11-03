@@ -33,7 +33,7 @@ const googleAccount = { id: 'g', name: 'gmail', email: 'a@example.org', displayN
 
 const servers: Record<string, () => McpSdkServerConfigWithInstance> = {
   context: () => createContextMcpServer(project, 's', { agentLibraries: [], defaultAgentId: null }),
-  tasks: () => createTasksMcpServer(project, 's', 'Agent', undefined, { approveMerge: async () => undefined }),
+  tasks: () => createTasksMcpServer(project, 's', 'Agent', undefined, { approveMerge: async () => '' }),
   'tasks (espace personnel)': () => createTasksMcpServer(project, 's', 'Agent', scope),
   conversations: () => createConversationsMcpServer(project, 's', 'Agent'),
   agents: () => createAgentsMcpServer(project, 's'),
