@@ -4,6 +4,7 @@ import { INBOX_COUNTS } from '../graphql/operations';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { displayCombo } from '../lib/shortcuts';
 import { useShortcut } from '../lib/useShortcut';
+import MessagesButton from './MessagesPanel';
 import NotificationBell from './NotificationBell';
 import { useTabs, type Tab, type TabKind } from './TabsContext';
 import { useGitPanel } from './GitTargetContext';
@@ -289,6 +290,7 @@ export default function TabBar({ onToggleSidebar, sidebarOpen = false, sidebarCo
             {menuOpen && <TabsMenu tabs={tabs} activeKey={activeKey} onClose={() => setMenuOpen(false)} />}
           </div>
         )}
+        <MessagesButton />
         <NotificationBell />
         {gitPanel.target && !gitPanel.open && (
           <button type="button" className="wb-bell-btn wb-git-btn" title={gitPanel.target.tasks?.length ? 'Tâches et suivi git' : 'Suivi git'} aria-label="Ouvrir le panneau git" onClick={() => gitPanel.setOpen(true)}>

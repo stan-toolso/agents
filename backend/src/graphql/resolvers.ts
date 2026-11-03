@@ -1274,6 +1274,12 @@ export const resolvers = {
     },
     inbox: async (_: unknown, __: unknown, ctx: Ctx) => inboxService.build(await accessibleProjectIds(ctx)),
     inboxCounts: async (_: unknown, __: unknown, ctx: Ctx) => inboxService.counts(await accessibleProjectIds(ctx)),
+    unreadMessagesByProject: async (_: unknown, __: unknown, ctx: Ctx) => {
+      const user = requireUser(ctx);
+      const projects = await projectService.listForUser(user.id, { includePersonal: false });
+      const counts = await conversationService.unreadByProject(projects.map((p) => p.id), user.id);
+      return projects.map((project) => ({ project, count: counts.get(project.id) ?? 0 }));
+    },
     tasks: async (_: unknown, args: { projectId?: string | null; status?: GqlTaskStatus[] | null; priority?: GqlTaskPriority | null; assignee?: string | null; reporter?: string | null; tag?: string | null; mine?: boolean | null; limit?: number | null }, ctx: Ctx) => {
       if (args.projectId) await requireProject(ctx, args.projectId);
       return taskService.list({

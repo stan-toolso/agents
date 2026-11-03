@@ -1188,6 +1188,10 @@ partagé avec `TaskThread`), mais des tables à part (`conversations`, `messages
 `conversation_sessions`, `conversation_reads` ; module `backend/src/conversations`). L'espace personnel n'a pas de
 canaux (ses chats en tiennent lieu).
 
+- **Partout dans l'application**, le bouton « Messages » de la barre du haut (à côté de la cloche, raccourci
+  `Alt+M`) montre le total des messages non lus de mes projets (requête `unreadMessagesByProject`) et ouvre un
+  panneau latéral non modal (`workbench/MessagesPanel.tsx`) : projet affiché par défaut (sinon celui qui a le plus de
+  non-lus), canaux en pastilles avec leurs non-lus, le canal choisi et sa zone de saisie, et un lien vers la page.
 - **Mentionner une personne** (`@Nom`, `@e-mail`) la notifie (`conversation.mentioned`, famille « Mentions et
   réponses ») ; l'auteur d'un message auquel on répond reçoit `conversation.replied`. Le lien
   `/projects/<id>/conversations/<slug>#m-<id>` amène au message.

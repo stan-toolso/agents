@@ -2053,6 +2053,12 @@ type AppSettings {
 
 # ---- File « À traiter » -------------------------------------------------------------------------
 
+"Non-lus des canaux d'un projet."
+type ProjectUnreadMessages {
+  project: Project!
+  count: Int!
+}
+
 "Compteurs de la file « À traiter »."
 type InboxCounts {
   "Demandes (autorisation, question, saisie) en attente de réponse."
@@ -2768,6 +2774,8 @@ type Query {
   inbox: Inbox!
   "Compteurs seuls de la file « À traiter » (légers : sondés par la sidebar)."
   inboxCounts: InboxCounts!
+  "Messages non lus des canaux, par projet dont je suis membre (hors espace personnel), pour le bouton Messages de la barre du haut."
+  unreadMessagesByProject: [ProjectUnreadMessages!]!
   "Tâches, tous projets confondus (par défaut : ouvertes). assignee / reporter : texte cherché dans le nom ou l'e-mail ; mine : tâches dont le responsable a mon e-mail ; tag : tâches portant cette étiquette (sans tenir compte de la casse)."
   tasks(projectId: ID, status: [TaskStatus!], priority: TaskPriority, assignee: String, reporter: String, tag: String, mine: Boolean, limit: Int): [Task!]!
   task(id: ID!): Task

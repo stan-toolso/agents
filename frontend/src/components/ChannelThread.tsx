@@ -8,7 +8,7 @@ import { useDialogs } from './Dialogs';
 import { Composer, RootMessage, ThreadProvider, groupThread, useThreadAnchor, type ThreadApi } from './Thread';
 
 /** Requêtes à rafraîchir après une écriture : le canal lui-même, la liste des canaux (non-lus) et l'onglet. */
-const REFETCH = ['ConversationMessages', 'ProjectConversations', 'ProjectUnreadMessages', 'ProjectDashboard'];
+const REFETCH = ['ConversationMessages', 'ProjectConversations', 'ProjectUnreadMessages', 'UnreadMessagesByProject', 'ProjectDashboard'];
 /** Sondage du canal affiché : assez serré pour voir arriver une réponse d'agent sans abonnement. */
 const POLL_MS = 4000;
 
@@ -28,7 +28,7 @@ export default function ChannelThread({ conversationId, canWrite, compact = fals
   const [post] = useMutation(POST_MESSAGE, { refetchQueries: REFETCH });
   const [update] = useMutation(UPDATE_MESSAGE, { refetchQueries: ['ConversationMessages'] });
   const [remove] = useMutation(DELETE_MESSAGE, { refetchQueries: REFETCH });
-  const [markRead] = useMutation(MARK_CONVERSATION_READ, { refetchQueries: ['ProjectConversations', 'ProjectUnreadMessages', 'ProjectDashboard'] });
+  const [markRead] = useMutation(MARK_CONVERSATION_READ, { refetchQueries: ['ProjectConversations', 'ProjectUnreadMessages', 'UnreadMessagesByProject', 'ProjectDashboard'] });
   const toggle = useCallback((messageId: string | null, emoji: string) => messageId && void toggleReaction({ variables: { messageId, emoji } }), [toggleReaction]);
   const api = useMemo<ThreadApi>(
     () => ({
