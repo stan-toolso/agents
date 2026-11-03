@@ -255,3 +255,139 @@ export const SET_PUSH_PREFERENCE = gql`
     }
   }
 `;
+
+export interface NotificationChannel {
+  id: string;
+  projectId: string | null;
+  userId: string | null;
+  kind: 'slack' | 'discord' | 'email';
+  targetHint: string;
+  categories: string[];
+  enabled: boolean;
+  lastSentAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+}
+
+const CHANNEL_FIELDS = gql`
+  fragment NotificationChannelFields on NotificationChannel {
+    id
+    projectId
+    userId
+    kind
+    targetHint
+    categories
+    enabled
+    lastSentAt
+    lastError
+    createdAt
+  }
+`;
+
+export const MY_NOTIFICATION_CHANNELS = gql`
+  query MyNotificationChannels {
+    myNotificationChannels {
+      ...NotificationChannelFields
+    }
+    emailNotificationsAvailable
+  }
+  ${CHANNEL_FIELDS}
+`;
+
+export const PROJECT_NOTIFICATION_CHANNELS = gql`
+  query ProjectNotificationChannels($projectId: ID!) {
+    projectNotificationChannels(projectId: $projectId) {
+      ...NotificationChannelFields
+    }
+    emailNotificationsAvailable
+  }
+  ${CHANNEL_FIELDS}
+`;
+
+export const CREATE_NOTIFICATION_CHANNEL = gql`
+  mutation CreateNotificationChannel($input: NotificationChannelInput!) {
+    createNotificationChannel(input: $input) {
+      ...NotificationChannelFields
+    }
+  }
+  ${CHANNEL_FIELDS}
+`;
+
+export const UPDATE_NOTIFICATION_CHANNEL = gql`
+  mutation UpdateNotificationChannel($id: ID!, $patch: NotificationChannelPatch!) {
+    updateNotificationChannel(id: $id, patch: $patch) {
+      ...NotificationChannelFields
+    }
+  }
+  ${CHANNEL_FIELDS}
+`;
+
+export const DELETE_NOTIFICATION_CHANNEL = gql`
+  mutation DeleteNotificationChannel($id: ID!) {
+    deleteNotificationChannel(id: $id)
+  }
+`;
+
+export const TEST_NOTIFICATION_CHANNEL = gql`
+  mutation TestNotificationChannel($id: ID!) {
+    testNotificationChannel(id: $id) {
+      ...NotificationChannelFields
+    }
+  }
+  ${CHANNEL_FIELDS}
+`;
+
+export interface SmtpSettings {
+  source: 'env' | 'settings' | 'none';
+  host: string | null;
+  port: number | null;
+  secure: boolean;
+  user: string | null;
+  from: string | null;
+  hasPassword: boolean;
+}
+
+const SMTP_FIELDS = gql`
+  fragment SmtpSettingsFields on SmtpSettings {
+    source
+    host
+    port
+    secure
+    user
+    from
+    hasPassword
+  }
+`;
+
+export const SMTP_SETTINGS = gql`
+  query SmtpSettings {
+    smtpSettings {
+      ...SmtpSettingsFields
+    }
+  }
+  ${SMTP_FIELDS}
+`;
+
+export const UPDATE_SMTP_SETTINGS = gql`
+  mutation UpdateSmtpSettings($input: SmtpSettingsInput!) {
+    updateSmtpSettings(input: $input) {
+      ...SmtpSettingsFields
+    }
+  }
+  ${SMTP_FIELDS}
+`;
+
+export const CLEAR_SMTP_SETTINGS = gql`
+  mutation ClearSmtpSettings {
+    clearSmtpSettings {
+      ...SmtpSettingsFields
+    }
+  }
+  ${SMTP_FIELDS}
+`;
+
+export const SEND_TEST_EMAIL = gql`
+  mutation SendTestEmail {
+    sendTestEmail
+  }
+`;

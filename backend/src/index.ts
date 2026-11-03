@@ -10,6 +10,8 @@ import { handleAttachmentRoute } from './sessions/attachmentRoute.js';
 import { handleTaskAttachmentRoute } from './tasks/attachmentRoute.js';
 import { handleMessageAttachmentRoute } from './conversations/attachmentRoute.js';
 import { handleSharedPageRoute } from './sharedPages/viewRoute.js';
+import { handlePushActionRoute } from './notifications/pushActions.js';
+import { notificationChannelService } from './notifications/channels.js';
 import { handleFileViewRoute } from './files/viewRoute.js';
 import { handleTasksApiRoute } from './tasks/api.js';
 import { handleExportRoute } from './exports/routes.js';
@@ -223,6 +225,7 @@ async function main() {
       .then((handled) => handled || handleTaskAttachmentRoute(req, res))
       .then((handled) => handled || handleMessageAttachmentRoute(req, res))
       .then((handled) => handled || handleSharedPageRoute(req, res))
+      .then((handled) => handled || handlePushActionRoute(req, res))
       .then((handled) => handled || handleFileViewRoute(req, res))
       .then((handled) => handled || handlePreviewOpenRoute(req, res))
       .then((handled) => handled || handleTasksApiRoute(req, res))
@@ -268,6 +271,8 @@ async function main() {
     await leadership.release();
     containerMonitor.stop();
     loginService.shutdown();
+    // Notifications retenues par l'anti-rafale des canaux (Slack, Discord, e-mail) : envoyées avant de partir.
+    await notificationChannelService.flush().catch(() => undefined);
     const [interrupted] = await Promise.all([sessionService.shutdown(), terminalService.shutdown()]);
     if (interrupted) log.info(`[sessions] ${interrupted} session(s) marquée(s) comme interrompue(s)`);
     // Les autres instances relancent les sessions interrompues ici (reprise automatique), puis oublient celle-ci.

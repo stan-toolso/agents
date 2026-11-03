@@ -75,7 +75,7 @@ describe.skipIf(!adminUrl)('journal d’audit (PostgreSQL)', () => {
     expect(await m.lookupTarget('task', '00000000-0000-0000-0000-000000000000')).toBeNull();
     expect(await m.lookupTarget('task', 'pas-un-uuid')).toBeNull();
     // Chaque requête de lookups.ts est valide sur le schéma réel.
-    const kinds = ['project', 'session', 'task', 'request', 'worksession', 'vault_item', 'vault_link', 'permission_rule', 'api_key', 'pull_request', 'agent', 'env_file', 'context_folder', 'context_instruction', 'workflow', 'workflow_run', 'conversation', 'shared_page', 'user'] as const;
+    const kinds = ['project', 'session', 'task', 'request', 'worksession', 'vault_item', 'vault_link', 'permission_rule', 'api_key', 'pull_request', 'notification_channel', 'agent', 'env_file', 'context_folder', 'context_instruction', 'workflow', 'workflow_run', 'conversation', 'shared_page', 'user'] as const;
     for (const kind of kinds) await expect(m.lookupTarget(kind, '00000000-0000-0000-0000-000000000000'), kind).resolves.toBeNull();
   });
 });
