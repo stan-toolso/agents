@@ -70,6 +70,16 @@ const project = (id, name, slug, description, gitUrl, extra = {}) => ({
   apiKeys: [],
   conversations: () => conversations.filter((c) => c.project.id === id),
   unreadMessages: () => conversations.filter((c) => c.project.id === id).reduce((n, c) => n + c.unreadCount, 0),
+  // Fils de tâches suivis : les tâches du projet qui ont des messages, la plus récemment commentée d'abord.
+  followedTaskThreads: () =>
+    tasks
+      .filter((t) => t.project.id === id && comments.some((c) => c.taskId === t.id))
+      .map((t) => {
+        const own = comments.filter((c) => c.taskId === t.id);
+        const last = own.map((c) => c.createdAt).sort().at(-1) ?? null;
+        return { __typename: 'TaskThreadSummary', id: `cv-${t.id}`, slug: `task-${t.id}`, task: t, messageCount: own.length, lastMessageAt: last };
+      })
+      .sort((a, b) => String(b.lastMessageAt).localeCompare(String(a.lastMessageAt))),
   permissionRules: [],
   ...extra,
 });

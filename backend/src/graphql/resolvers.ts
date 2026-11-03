@@ -413,6 +413,9 @@ export const resolvers = {
     user: (n: Notification, _: unknown, ctx: Ctx) => userOrNull(ctx, n.userId),
   },
 
+  TaskThreadSummary: {
+    task: (t: { taskId: string }) => taskService.get(t.taskId),
+  },
   Task: {
     status: (t: Task) => t.status.toUpperCase(),
     priority: (t: Task) => t.priority.toUpperCase(),
@@ -787,6 +790,12 @@ export const resolvers = {
     apiKeys: async (project: Project, _: unknown, ctx: Ctx) => ((await roleFor(ctx, project.id)) === 'admin' ? apiKeyService.list(project.id) : []),
     // Un espace personnel n'a pas de canaux (ses chats suffisent).
     conversations: (project: Project, args: { includeArchived?: boolean | null }) => (isPersonalProject(project) ? [] : conversationService.list(project.id, { includeArchived: Boolean(args.includeArchived) })),
+    followedTaskThreads: async (project: Project, args: { limit?: number | null }, ctx: Ctx) => {
+      if (!ctx.user || isPersonalProject(project)) return [];
+      const limit = Math.min(Math.max(args.limit ?? 30, 1), 100);
+      const threads = await conversationService.followedTaskThreads(project.id, ctx.user.id, ctx.user.email ?? null, limit);
+      return threads.map((t) => ({ id: t.conversation.id, slug: t.conversation.slug, taskId: t.conversation.taskId, messageCount: t.messageCount, lastMessageAt: t.conversation.lastMessageAt }));
+    },
     unreadMessages: async (project: Project, _: unknown, ctx: Ctx) => (ctx.user && !isPersonalProject(project) ? ((await conversationService.unreadByProject([project.id], ctx.user.id)).get(project.id) ?? 0) : 0),
     approvalConnections: async (project: Project, _: unknown, ctx: Ctx) => vaultService.approvalNames(await vaultService.agentItems(project.id, ctx.user?.id ?? null)),
     tasks: (project: Project, args: { status?: GqlTaskStatus[] | null }) => taskService.list({ projectId: project.id, status: fromGqlTaskStatuses(args.status) }),

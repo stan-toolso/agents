@@ -4,11 +4,12 @@ import { Alert, Badge, Button, Form, Modal } from 'react-bootstrap';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import AgentAvatar from '../components/AgentAvatar';
 import ChannelThread from '../components/ChannelThread';
+import ConversationTaskThread from '../components/ConversationTaskThread';
 import { useDialogs } from '../components/Dialogs';
 import { ProjectPageLoading } from '../components/PageLoading';
 import ProjectHeader from '../components/ProjectHeader';
 import { agentKindLabels } from '../graphql/agents';
-import { CREATE_CONVERSATION, PROJECT_CONVERSATIONS, SET_CONVERSATION_ARCHIVED, UPDATE_CONVERSATION, type Conversation } from '../graphql/conversations';
+import { CREATE_CONVERSATION, FOLLOWED_TASK_THREADS, PROJECT_CONVERSATIONS, SET_CONVERSATION_ARCHIVED, UPDATE_CONVERSATION, type Conversation, type FollowedTaskThread } from '../graphql/conversations';
 import { timeAgo } from '../lib/humanize';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { initialsOf } from '../workbench/WorkspaceTabs';
@@ -30,6 +31,9 @@ interface ProjectAgent {
 interface Data {
   project: { id: string; name: string; description: string | null; myRole: 'ADMIN' | 'MEMBER' | 'VIEWER'; isPersonal: boolean; unreadMessages: number; conversations: Conversation[]; members: Member[]; agents: ProjectAgent[] } | null;
 }
+
+/** `task-<id>` : le fil d'une tâche ouvert dans l'onglet (fils de tâches suivis). */
+const TASK_SLUG = /^task-(.+)$/;
 
 /** Formulaire de création ou de modification d'un canal (nom, sujet). */
 function ChannelModal({ projectId, channel, onClose }: { projectId: string; channel: Conversation | null; onClose: (created?: Conversation) => void }) {
@@ -119,7 +123,9 @@ function useFillHeight<T extends HTMLElement>(ready: boolean) {
 /**
  * Page Conversations d'un projet : la liste des canaux à gauche (non-lus en évidence), le canal ouvert au centre avec
  * ses fils, et à droite qui est là (membres et agents, à mentionner d'un clic). Route /projects/:id/conversations/:slug?
- * (le général par défaut) ; `#m-<id>` amène à un message.
+ * (le général par défaut) ; `#m-<id>` amène à un message. Sous les canaux, les fils de tâches que je suis (j'y ai
+ * écrit, réagi ou été mentionné, ou je suis responsable ou rapporteur de la tâche) : `task-<id>` ouvre le fil de la
+ * tâche au centre, le même que sur sa page.
  */
 export default function ConversationsPage() {
   const { id = '', slug } = useParams();
@@ -130,14 +136,20 @@ export default function ConversationsPage() {
   const { confirm, showError } = useDialogs();
   const fill = useFillHeight<HTMLDivElement>(Boolean(data?.project));
   const [setArchived] = useMutation(SET_CONVERSATION_ARCHIVED, { refetchQueries: ['ProjectConversations'], onError: (e) => void showError(e) });
+  const { data: followedData } = usePollingQuery<{ project: { id: string; followedTaskThreads: FollowedTaskThread[] } | null }>(FOLLOWED_TASK_THREADS, { variables: { id }, pollInterval: 30_000 });
+  const [showTasks, setShowTasks] = useState(true);
   const project = data?.project ?? null;
   const channels = useMemo(() => project?.conversations ?? [], [project]);
-  const current = useMemo(() => channels.find((c) => c.slug === (slug ?? 'general')) ?? channels.find((c) => c.slug === 'general') ?? channels[0] ?? null, [channels, slug]);
-  useTabTitle(current ? `#${current.slug}` : 'Conversations');
+  const followed = followedData?.project?.followedTaskThreads ?? [];
+  // Un canal qui s'appellerait « task-… » garde la priorité.
+  const taskId = slug && !channels.some((c) => c.slug === slug) ? (TASK_SLUG.exec(slug)?.[1] ?? null) : null;
+  const current = useMemo(() => (taskId ? null : (channels.find((c) => c.slug === (slug ?? 'general')) ?? channels.find((c) => c.slug === 'general') ?? channels[0] ?? null)), [channels, slug, taskId]);
+  const currentTask = taskId ? followed.find((t) => t.task.id === taskId) : undefined;
+  useTabTitle(current ? `#${current.slug}` : currentTask ? currentTask.task.title : 'Conversations');
   // Un slug inconnu ramène au canal général.
   useEffect(() => {
-    if (project && slug && channels.length && !channels.some((c) => c.slug === slug)) navigate(`/projects/${id}/conversations`, { replace: true });
-  }, [project, slug, channels, id, navigate]);
+    if (project && slug && !taskId && channels.length && !channels.some((c) => c.slug === slug)) navigate(`/projects/${id}/conversations`, { replace: true });
+  }, [project, slug, taskId, channels, id, navigate]);
 
   if (loading && !data) return <ProjectPageLoading id={id} />;
   if (error && !data) return <Alert variant="danger">Erreur : {error.message}</Alert>;
@@ -204,10 +216,31 @@ export default function ConversationsPage() {
               <i className="bi bi-plus" /> Nouveau canal
             </button>
           )}
+          {followed.length > 0 && (
+            <div className="ch-task-threads">
+              <button type="button" className="ch-side-title ch-side-title-toggle" onClick={() => setShowTasks((v) => !v)} title="Fils des tâches où vous avez écrit, réagi ou été mentionné, et des tâches dont vous êtes responsable ou rapporteur">
+                <i className={`bi ${showTasks ? 'bi-chevron-down' : 'bi-chevron-right'}`} /> Fils de tâches
+              </button>
+              {showTasks && (
+                <ul className="ch-channel-list">
+                  {followed.map((t) => (
+                    <li key={t.id}>
+                      <Link to={`/projects/${id}/conversations/${t.slug}`} className={`ch-channel ch-task-thread${taskId === t.task.id ? ' active' : ''}${t.task.status === 'DONE' || t.task.status === 'CANCELLED' ? ' archived' : ''}`} title={`${t.task.title} · ${t.messageCount} message${t.messageCount > 1 ? 's' : ''}${t.lastMessageAt ? ` · ${timeAgo(t.lastMessageAt)}` : ''}`}>
+                        <i className="bi bi-check2-square ch-hash" />
+                        <span className="ch-channel-name">{t.task.title}</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </aside>
 
         <section className="ch-main">
-          {current ? (
+          {taskId ? (
+            <ConversationTaskThread key={taskId} taskId={taskId} canWrite={canWrite} />
+          ) : current ? (
             <>
               <div className="ch-head">
                 <div className="ch-head-title">

@@ -3890,8 +3890,21 @@ type MessageAttachment {
 extend type Project {
   "Canaux du projet (le général d'abord, créé au besoin)."
   conversations(includeArchived: Boolean): [Conversation!]!
-  "Messages non lus par l'utilisateur connecté, tous canaux confondus."
+  "Messages non lus par l'utilisateur connecté, tous canaux confondus (hors fils de tâches)."
   unreadMessages: Int!
+  "Fils de tâches que l'utilisateur connecté suit (il y a écrit, réagi ou y est mentionné ; ou il est responsable ou rapporteur de la tâche), le plus récemment actif d'abord (limit, défaut 30)."
+  followedTaskThreads(limit: Int): [TaskThreadSummary!]!
+}
+
+"Fil d'une tâche (sa conversation), tel qu'il apparaît dans l'onglet Conversations : on le lit et on y écrit comme dans la tâche."
+type TaskThreadSummary {
+  "Identifiant de la conversation de la tâche."
+  id: ID!
+  "Nom technique (« task-<id de la tâche> »), utilisé dans l'adresse de l'onglet Conversations."
+  slug: String!
+  task: Task!
+  messageCount: Int!
+  lastMessageAt: DateTime
 }
 
 extend type Query {

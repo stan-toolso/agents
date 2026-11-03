@@ -65,18 +65,25 @@ export const conversationService = {
     return conversationRepository.list(projectId, opts);
   },
 
+  /**
+   * Un canal. Le fil d'une tâche est aussi une conversation, mais il ne se lit ni ne s'écrit par les canaux : ses
+   * effets (notifications, sessions reliées à la tâche, convocations) sont ceux de la tâche (taskService.addComment…).
+   */
   async get(id: string): Promise<Conversation> {
     const c = await conversationRepository.findById(id);
-    if (!c) throw new NotFoundError('Canal introuvable');
+    if (!c || c.kind !== 'channel') throw new NotFoundError('Canal introuvable');
     return c;
   },
+
+  /** Fils de tâches que la personne suit dans le projet (onglet Conversations). */
+  followedTaskThreads: (projectId: string, userId: string, email: string | null, limit?: number) => conversationRepository.followedTaskThreads(projectId, userId, email, limit),
 
   /** Canal désigné par son identifiant, son slug (« général », « #general ») ou son nom, dans le projet. */
   async resolve(projectId: string, ref: string): Promise<Conversation> {
     const r = ref.trim();
     if (UUID_RE.test(r)) {
       const c = await conversationRepository.findById(r);
-      if (c && c.projectId === projectId) return c;
+      if (c && c.projectId === projectId && c.kind === 'channel') return c;
       throw new NotFoundError(`Canal ${r} introuvable dans ce projet`);
     }
     const wanted = fold(r.replace(/^#/, ''));
@@ -219,7 +226,7 @@ export const conversationService = {
 
   /** Supprime un message (et ses réponses, en cascade) avec leurs fichiers (les lignes partent en cascade, les fichiers ici). */
   async deleteMessage(id: string): Promise<boolean> {
-    await this.getMessage(id);
+    await this.get((await this.getMessage(id)).conversationId);
     const attachments = await conversationRepository.listAttachmentsWithReplies(id);
     const deleted = await conversationRepository.deleteMessage(id);
     if (deleted) await removeMessageAttachmentFiles(attachments);
@@ -230,7 +237,7 @@ export const conversationService = {
   async toggleReaction(messageId: string, emoji: string, actor: MessageActor): Promise<{ reaction: MessageReaction; added: boolean }> {
     const message = await this.getMessage(messageId);
     const conversation = await this.get(message.conversationId);
-    const result = await conversationRepository.toggleReaction(messageId, normalizeEmoji(emoji), { type: actor.type, userId: actor.userId, sessionId: actor.sessionId, name: authorName(actor) });
+    const result = await conversationRepository.toggleReaction({ conversationId: conversation.id, messageId }, normalizeEmoji(emoji), { type: actor.type, userId: actor.userId, sessionId: actor.sessionId, name: authorName(actor) });
     notifyChanged({ kind: 'reacted', conversation, message, reaction: result.reaction, added: result.added });
     return result;
   },
