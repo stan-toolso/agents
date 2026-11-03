@@ -2161,9 +2161,16 @@ type MemoryHealth {
 }
 
 type SessionsHealth {
+  "Sessions dont le processus tourne sur cette instance."
   running: Int!
+  "Parmi elles, au travail (tour en cours)."
   busy: Int!
+  "Parmi elles, en attente d'instructions (processus actif, qui occupe sa place et sa mémoire)."
   idle: Int!
+  "Garées : en attente d'instructions sans processus (après un drainage bleu/vert), sur tout le serveur."
+  parked: Int!
+  "Terminées-reprenables depuis 24 h (non archivées, conversation conservée) : un message les relance, rien ne tourne d'ici là."
+  resumable: Int!
   queued: Int!
   "0 : illimité."
   maxConcurrent: Int!
