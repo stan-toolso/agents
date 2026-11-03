@@ -336,6 +336,16 @@ describe('installation des dépendances à la création d’une work session', (
     expect(exit).not.toBe(0);
     expect(await readFile(path.join(state, 'events'), 'utf8')).toMatch(/exited 1/);
     const orphan = Number((await readFile(pidFile, 'utf8')).trim());
-    expect(() => process.kill(orphan, 0)).toThrow();
+    // Tué (KILL), le processus peut rester un instant zombie avant d'être ramassé par init : on lui laisse 2 s.
+    const alive = () => {
+      try {
+        process.kill(orphan, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    for (let i = 0; i < 40 && alive(); i++) await new Promise((r) => setTimeout(r, 50));
+    expect(alive()).toBe(false);
   });
 });
