@@ -16,6 +16,7 @@ const m = vi.hoisted(() => ({
   taskStatus: 'in_progress' as string,
   taskSessionIds: [] as string[],
   blockedBy: [] as string[],
+  check: { status: 'none' } as Record<string, unknown>,
   assertUnblocked: async (t: { blockedByIds: string[] }) => {
     if (t.blockedByIds.length) throw new Error(`La tâche est bloquée par ${t.blockedByIds.join(', ')}`);
   },
@@ -40,6 +41,9 @@ vi.mock('../agents/service.js', () => ({
   },
 }));
 vi.mock('../git/agentEnv.js', () => ({ gitAccountFor: async (a: typeof accounts) => ({ host: 'github', userId: a.githubUserId, readOnly: a.githubReadOnly, pullRequests: a.githubPullRequests }) }));
+vi.mock('../worksessions/service.js', () => ({ worksessionService: { get: async (id: string) => ({ id, name: 'dossier' }) }, worksessionPath: (_p: unknown, w: { name: string }) => `/tmp/${w.name}` }));
+vi.mock('../runners/index.js', () => ({ runner: {} }));
+vi.mock('../pullRequests/localCheck.js', async (orig) => ({ ...(await orig<typeof import('../pullRequests/localCheck.js')>()), localCheck: { run: async (...a: unknown[]) => (m.calls.push(['check', a]), m.check) } }));
 vi.mock('../sessions/service.js', () => ({ sessionService: { get: async () => m.session } }));
 vi.mock('../personal/scope.js', () => ({
   inScope: async (_p: Project, _s: unknown, projectId: string) => projectId === 'p',
@@ -316,6 +320,39 @@ describe('serveur MCP tasks', () => {
     expect(allowed.isError).toBeFalsy();
     expect(textOf(allowed)).toContain('Pull request ouverte');
     accounts.githubReadOnly = false;
+  });
+
+  it('pr_open lance le contrôle local avant d’ouvrir, refuse s’il échoue, et force le saute', async () => {
+    const client = await connect();
+    // Rien de déclaré : on ouvre.
+    m.calls = [];
+    m.check = { status: 'none' };
+    expect((await client.callTool({ name: 'pr_open', arguments: { task_id: 't1', title: 'x' } })).isError).toBeFalsy();
+    expect(m.calls.map(([n]) => n)).toEqual(['check', 'open']);
+    expect(m.calls[0][1]).toEqual([project, '/tmp/dossier']);
+    // Contrôle réussi : on ouvre.
+    m.calls = [];
+    m.check = { status: 'passed', seconds: 40, command: 'npm run ci' };
+    expect((await client.callTool({ name: 'pr_open', arguments: { task_id: 't1', title: 'x' } })).isError).toBeFalsy();
+    // Échec : pas de PR, le journal et la façon de forcer sont dans le refus.
+    m.calls = [];
+    m.check = { status: 'failed', seconds: 12, command: 'npm run ci', code: 1, timedOut: false, log: 'TS2322 dans a.ts' };
+    const refused = await client.callTool({ name: 'pr_open', arguments: { task_id: 't1', title: 'x' } });
+    expect(refused.isError).toBe(true);
+    expect(textOf(refused)).toContain('npm run ci');
+    expect(textOf(refused)).toContain('TS2322 dans a.ts');
+    expect(textOf(refused)).toContain('force: true');
+    expect(m.calls.map(([n]) => n)).toEqual(['check']);
+    // Configuration invalide : refus aussi.
+    m.check = { status: 'config_error', error: '.skipper/ci.json : « command » est obligatoire' };
+    expect((await client.callTool({ name: 'pr_open', arguments: { task_id: 't1', title: 'x' } })).isError).toBe(true);
+    // force : ni lancé ni bloquant. Un autre dépôt (path) n'est pas contrôlé non plus.
+    m.calls = [];
+    m.check = { status: 'failed', seconds: 1, command: 'npm run ci', code: 1, timedOut: false, log: '' };
+    expect((await client.callTool({ name: 'pr_open', arguments: { task_id: 't1', title: 'x', force: true } })).isError).toBeFalsy();
+    expect((await client.callTool({ name: 'pr_open', arguments: { task_id: 't1', title: 'x', path: 'vendor/lib' } })).isError).toBeFalsy();
+    expect(m.calls.map(([n]) => n)).toEqual(['open', 'open']);
+    m.check = { status: 'none' };
   });
 
   it("pr_open est refusé à un Product Manager, sauf quand une personne a pris la main (avec son compte)", async () => {

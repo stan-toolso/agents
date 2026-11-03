@@ -6,9 +6,11 @@ import { inScope, targetProject, withProjectParam, type ProjectScope } from '../
 import type { Project } from '../projects/types.js';
 import { pullRequestService, type MergeMethod } from '../git/pullRequests.js';
 import type { MergeApproval } from '../pullRequests/mergeApproval.js';
+import { localCheck, localCheckRefusal } from '../pullRequests/localCheck.js';
 import { foreignRepoOf, trackedPullRequestService } from '../pullRequests/service.js';
 import { describePullRequest, pullRequestRef, PR_STAGES, SETTABLE_PR_STATUSES, type PullRequestStage, type TrackedPullRequest, type TrackedPullRequestStatus } from '../pullRequests/types.js';
 import { sessionService } from '../sessions/service.js';
+import { worksessionPath, worksessionService } from '../worksessions/service.js';
 import { describeAttachments, imageBlocks, type McpContent } from './attachments.js';
 import { assertUnblocked, dependencyText, describeThread, formatPerson, statusTagText, summarizeReactions, taskService } from './service.js';
 import { TASK_PRIORITIES, TASK_STATUSES, type Task, type TaskActor, type TaskAttachment, type TaskComment, type TaskReaction } from './types.js';
@@ -120,7 +122,7 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
   return createSdkMcpServer({
     name: 'tasks',
     version: '1.0.0',
-    instructions: `Tableau de tâches ${scope ? `de tes projets (par défaut : l'espace personnel "${project.name}" ; paramètre project pour un autre projet)` : `du projet "${project.name}"`}. Statuts : todo, in_progress, done, cancelled ; une étiquette d'état (court libellé libre, ex. « en revue », « bloquée ») dit où en est le travail dans le statut. Les tâches peuvent porter des étiquettes libres. Priorités : low, medium, high, urgent. Prends une tâche avec claim avant de t'en occuper (plusieurs sessions peuvent se partager une tâche, et une session en mener plusieurs ; release la rend), passe-la en done quand elle est terminée (travail fini, poussé, PR prête : pas avant), repasse-la en in_progress si tu la reprends ensuite (nouvelle instruction, corrections), commente-la pour rendre compte, et crée des tâches pour le travail à faire plus tard. Une tâche peut dépendre d'autres tâches du projet (depends_on de create et update, pas de cycle) : tant qu'une dépendance n'est pas terminée, elle est bloquée (claim et le lancement d'un agent sont refusés) ; auto_start la confie à une session dès que sa dernière dépendance passe à done. Une tâche créée directement en in_progress ou done t'est rattachée (assign_to_me) ; passer en in_progress ou done une tâche que personne n'a prise te la rattache aussi. Le fil d'une tâche est une conversation : comment poste un message (reply_to pour répondre dans le fil d'un message), react pose ou retire un emoji, une mention (« @Nom » ou « @e-mail » d'un membre, « @session:<id> » d'une session d'agent ; people liste qui l'on peut mentionner) prévient la personne ou transmet le message à la session, qui est alors reliée à la tâche. Les pull requests d'une tâche se suivent avec pr_open (ouvre la PR sur GitHub, ou la merge request sur GitLab, depuis la branche courante, ou depuis un autre dépôt cloné dans un sous-dossier), pr_register (déclare une PR déjà ouverte, dans le dépôt du projet ou un autre), pr_merge (fusionne une PR quand une personne te le demande : elle accepte la demande et la fusion est faite avec son compte), pr_update (statut open/merged/closed, note, tâche) et pr_list (par étape : pending = en préparation, c'est-à-dire une branche avec des modifications sans PR ouverte, draft, to_merge, merged, cancelled).`,
+    instructions: `Tableau de tâches ${scope ? `de tes projets (par défaut : l'espace personnel "${project.name}" ; paramètre project pour un autre projet)` : `du projet "${project.name}"`}. Statuts : todo, in_progress, done, cancelled ; une étiquette d'état (court libellé libre, ex. « en revue », « bloquée ») dit où en est le travail dans le statut. Les tâches peuvent porter des étiquettes libres. Priorités : low, medium, high, urgent. Prends une tâche avec claim avant de t'en occuper (plusieurs sessions peuvent se partager une tâche, et une session en mener plusieurs ; release la rend), passe-la en done quand elle est terminée (travail fini, poussé, PR prête : pas avant), repasse-la en in_progress si tu la reprends ensuite (nouvelle instruction, corrections), commente-la pour rendre compte, et crée des tâches pour le travail à faire plus tard. Une tâche peut dépendre d'autres tâches du projet (depends_on de create et update, pas de cycle) : tant qu'une dépendance n'est pas terminée, elle est bloquée (claim et le lancement d'un agent sont refusés) ; auto_start la confie à une session dès que sa dernière dépendance passe à done. Une tâche créée directement en in_progress ou done t'est rattachée (assign_to_me) ; passer en in_progress ou done une tâche que personne n'a prise te la rattache aussi. Le fil d'une tâche est une conversation : comment poste un message (reply_to pour répondre dans le fil d'un message), react pose ou retire un emoji, une mention (« @Nom » ou « @e-mail » d'un membre, « @session:<id> » d'une session d'agent ; people liste qui l'on peut mentionner) prévient la personne ou transmet le message à la session, qui est alors reliée à la tâche. Les pull requests d'une tâche se suivent avec pr_open (ouvre la PR sur GitHub, ou la merge request sur GitLab, depuis la branche courante, ou depuis un autre dépôt cloné dans un sous-dossier ; après le contrôle local du dépôt s'il en déclare un), pr_register (déclare une PR déjà ouverte, dans le dépôt du projet ou un autre), pr_merge (fusionne une PR quand une personne te le demande : elle accepte la demande et la fusion est faite avec son compte), pr_update (statut open/merged/closed, note, tâche) et pr_list (par étape : pending = en préparation, c'est-à-dire une branche avec des modifications sans PR ouverte, draft, to_merge, merged, cancelled).`,
     tools: [
       tool(
         'list',
@@ -321,7 +323,7 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
       ),
       tool(
         'pr_open',
-        "Pousse la branche courante du dossier de travail de cette session et ouvre une pull request sur GitHub (compte GitHub de la personne qui pilote la session ; une merge request avec son compte GitLab quand le dépôt du projet est sur GitLab), puis la suit au niveau de la tâche. Commite d'abord ; la base est la branche principale du projet. Avec path, la PR est ouverte sur le dépôt d'un autre clone (sous-dossier du dossier de travail), sa base par défaut étant la branche par défaut de ce dépôt.",
+        "Pousse la branche courante du dossier de travail de cette session et ouvre une pull request sur GitHub (compte GitHub de la personne qui pilote la session ; une merge request avec son compte GitLab quand le dépôt du projet est sur GitLab), puis la suit au niveau de la tâche. Commite d'abord ; la base est la branche principale du projet. Avec path, la PR est ouverte sur le dépôt d'un autre clone (sous-dossier du dossier de travail), sa base par défaut étant la branche par défaut de ce dépôt. Si le dépôt déclare un contrôle local (.skipper/ci.json, ex. `npm run ci`), Skipper le lance d'abord dans ton dossier de travail et n'ouvre pas la PR s'il échoue : corrige puis rappelle. `force: true` saute ce contrôle, seulement si une personne te le demande explicitement.",
         {
           task_id: z.string().describe('Tâche à laquelle rattacher la PR (celle que tu réalises)'),
           title: z.string().describe('Titre de la PR'),
@@ -330,8 +332,9 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
           draft: z.boolean().optional().describe('Ouvrir en brouillon'),
           note: z.string().optional().describe('Note de suivi (« attend la CI », « à relire par X »…)'),
           path: z.string().optional().describe("Sous-dossier du dossier de travail contenant un autre dépôt git (clone d'un autre dépôt GitHub) ; absent : le dossier de travail lui-même"),
+          force: z.boolean().optional().describe("Ouvre la PR sans le contrôle local (.skipper/ci.json) ou malgré son échec. Seulement si une personne l'a demandé explicitement ; jamais de ta propre initiative"),
         },
-        async ({ task_id, title, body, base, draft, note, path }) =>
+        async ({ task_id, title, body, base, draft, note, path, force }) =>
           run(async () => {
             const t = await own(task_id);
             if (t.projectId !== project.id) throw new Error('pr_open ouvre une PR du projet de cette session seulement');
@@ -346,6 +349,13 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
             const accounts = await agentService.accountsForSession(s);
             const account = accounts ? await gitAccountFor(accounts, path?.trim() ? null : project.gitUrl) : null;
             if (account?.readOnly && !account.pullRequests) throw new Error(`Ton compte ${account.host === 'gitlab' ? 'GitLab' : 'GitHub'} est prêté en lecture seule : tu ne peux ni pousser ni ouvrir de pull request. Si le changement relève du développement, crée une tâche et confie-la à l'agent développeur du projet ; sinon demande dans le fil de la tâche à une personne de prendre la main sur cette session (bouton « Prendre la main ») ou de pousser elle-même.`);
+            // Contrôle local (typecheck, build, tests) avant de pousser : l'agent corrige avant que quelqu'un attende la CI. Un autre dépôt
+            // (path) n'est pas celui du projet : le contrôle du projet ne s'y applique pas.
+            if (!force && !path?.trim()) {
+              const ws = await worksessionService.get(s.worksessionId);
+              const refusal = localCheckRefusal(await localCheck.run(project, worksessionPath(project, ws)));
+              if (refusal) throw new Error(refusal);
+            }
             const pr = await trackedPullRequestService.open({ projectId: project.id, worksessionId: s.worksessionId }, account?.userId ?? s.ownerId, { title, body, base, draft, path }, { taskId: task_id, note }, prActor);
             return `Pull request ouverte et suivie :\n${describePullRequest(pr, projectRepo)}`;
           }),

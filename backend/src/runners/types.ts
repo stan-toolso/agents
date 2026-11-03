@@ -126,8 +126,12 @@ export interface Runner {
    * backend (aperçus). Les variables sont visibles dans le conteneur et sur la ligne de commande : jamais de secret.
    */
   execDetached(project: Project, cwd: string, command: string[], env?: Record<string, string>): Promise<void>;
-  /** Commande courte dans l'environnement du projet (sans démarrer le conteneur) ; `code` non nul si elle échoue. */
-  exec(project: Project, command: string[]): Promise<{ stdout: string; code: number }>;
+  /**
+   * Commande courte dans l'environnement du projet (sans démarrer le conteneur) ; `code` non nul si elle échoue.
+   * `cwd` : dossier d'exécution ; `timeoutSeconds` : la commande est arrêtée au-delà (code 124) ; `output` : renvoie
+   * aussi stderr dans `stdout` (stdout puis stderr), pour lire le journal d'une commande qui échoue.
+   */
+  exec(project: Project, command: string[], opts?: { cwd?: string; timeoutSeconds?: number; output?: boolean }): Promise<{ stdout: string; code: number }>;
   /** Adresse IP du conteneur sur son réseau Docker, joignable depuis le serveur (proxy des aperçus) ; null s'il n'existe pas. */
   containerAddress(project: Project): Promise<string | null>;
   /** Adresse à laquelle un processus de l'environnement joint le serveur Skipper (ponts MCP d'OpenCode). */
