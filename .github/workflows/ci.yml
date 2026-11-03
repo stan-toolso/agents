@@ -2,13 +2,12 @@ name: CI
 
 # Typecheck, build et tests. Le déploiement reste manuel (DEPLOY.md).
 #
-# Une seule exécution par changement : les branches sont testées par leur pull request (le commit de fusion
-# avec main, ce qui attrape aussi les conflits sémantiques), et main l'est à chaque push. Avant, chaque push
-# d'une branche ayant une PR lançait deux runs identiques (push et pull_request).
+# Une seule exécution par changement, au push (toutes les branches, main comprise) : GitHub affiche ces checks
+# dans la PR, puisqu'ils portent sur son dernier commit. Pas de déclencheur pull_request : avec les deux, chaque
+# push d'une branche ayant une PR lançait deux runs identiques. Ce qu'on perd : le test du commit de fusion
+# avec main (l'ordre des migrations reste contrôlé par rapport à origin/main).
 on:
   push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 permissions:
