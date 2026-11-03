@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { INBOX_COUNTS } from '../graphql/operations';
 import { usePollingQuery } from '../lib/usePollingQuery';
-import { displayCombo } from '../lib/shortcuts';
+import { displayCombo, displayComboText } from '../lib/shortcuts';
+import { useSearchPalette } from '../components/SearchPalette';
 import { useShortcut } from '../lib/useShortcut';
 import NotificationBell from './NotificationBell';
 import { useTabs, type Tab, type TabKind } from './TabsContext';
@@ -173,6 +174,7 @@ export default function TabBar({ onToggleSidebar, sidebarOpen = false, sidebarCo
   const [menuOpen, setMenuOpen] = useState(false);
   const [ctx, setCtx] = useState<{ tab: Tab; index: number; x: number; y: number } | null>(null);
   const gitPanel = useGitPanel();
+  const { openSearch } = useSearchPalette();
 
   // Raccourcis d'onglets, sur Alt/Option : Ctrl/⌘+W et +T appartiennent au navigateur. Alt+W tape ∑ sur un
   // clavier Mac français, d'où l'alternative Alt+< (touche physique à gauche du W ou du X).
@@ -271,6 +273,10 @@ export default function TabBar({ onToggleSidebar, sidebarOpen = false, sidebarCo
         </div>
       </div>
       <div className="wb-tabbar-right">
+        {/* Sur mobile, le bouton « Rechercher… » de la sidebar est caché dans le tiroir : la palette s'ouvre aussi d'ici. */}
+        <button type="button" className="wb-bell-btn d-md-none" title={`Rechercher (${displayComboText('mod+k')})`} aria-label="Rechercher" onClick={() => openSearch()}>
+          <i className="bi bi-search" />
+        </button>
         {tabs.length > 0 && (
           <div className="wb-tabs-menu-anchor">
             <button
