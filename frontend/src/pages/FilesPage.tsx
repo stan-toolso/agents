@@ -1,4 +1,6 @@
 import { useApolloClient, useMutation, useQuery } from '@apollo/client';
+import GoneNotice from '../components/GoneNotice';
+import { isGoneError } from '../lib/gone';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Spinner } from 'react-bootstrap';
@@ -27,6 +29,8 @@ function DirTree({ wsRef, path, depth, expanded, toggle, actions, active, onOpen
         <Spinner size="sm" className="me-2" /> chargement…
       </div>
     );
+  // Racine d'un dossier de travail supprimé (onglet restauré) : la page entière dit qu'il n'existe plus.
+  if (depth === 0 && isGoneError(error)) return <GoneNotice what="Ce dossier de travail" />;
   if (error)
     return (
       <div className="fx-row text-danger" style={{ paddingLeft: 14 + depth * 16 }}>
@@ -228,8 +232,9 @@ export default function FilesPage() {
   const [deleteEntry] = useMutation(DELETE_WORKSPACE_ENTRY, { refetchQueries: ['WorkspaceEntries'], onError });
 
   if (loading && !info) return <PageLoading />;
+  if (isGoneError(error) || (!error && !info)) return <GoneNotice what="Ce dossier de travail" />;
   if (error) return <Alert variant="danger">Erreur : {error.message}</Alert>;
-  if (!info || !wsRef || !urlRef) return <Alert variant="warning">Projet ou session introuvable.</Alert>;
+  if (!info || !wsRef || !urlRef) return null;
 
   const actions: TreeActions = {
     createEntry: async (dir, kind) => {

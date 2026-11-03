@@ -1,3 +1,4 @@
+import { auditService } from '../audit/service.js';
 import { createSdkMcpServer, tool, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type { Actor } from '../context/types.js';
@@ -7,6 +8,7 @@ import { worksessionService } from '../worksessions/service.js';
 import { sessionRepository } from './repository.js';
 import { sessionService } from './service.js';
 import type { Session } from './types.js';
+import { sessionAuthor } from './instructionAuthor.js';
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
 const failure = (t: string) => ({ content: [{ type: 'text' as const, text: t }], isError: true });
@@ -46,9 +48,9 @@ export function archivePromptSummary(opts: { agent?: boolean; child?: boolean; a
   const own = opts.child
     ? "Cette session a été lancée par une autre session : c'est elle qui l'archivera une fois ta réponse lue ; ne l'archive pas toi-même."
     : opts.auto
-      ? "Cette session a été ouverte sans personne pour la piloter (déclencheur ou convocation par une autre session) : Skipper l'archive d'office à la fin de chacun de tes tours, inutile d'appeler `sessions.archive`. Avant de terminer ton tour, commite et pousse ce qui doit l'être, et écris dans le fil de la tâche (ou du canal) ce qu'il faut savoir pour la suite : un message dans ce fil te convoquera à nouveau. Si tu attends une réponse, pose la question dans le fil, pas dans cette session. Seule exception : une session que tu as lancée et qui tourne encore retient la tienne ; termine-la (`sessions.end`) ou attends sa réponse (`sessions.wait`) avant de finir."
+      ? "Cette session a été ouverte sans personne pour la piloter (déclencheur ou convocation par une autre session) : Skipper l'archive d'office à la fin de chacun de tes tours, inutile d'appeler `sessions.archive`, sauf tant que la PR de ton dossier est ouverte : la session reste alors active jusqu'à sa fusion ou sa fermeture. Avant de terminer ton tour, commite et pousse ce qui doit l'être, et écris dans le fil de la tâche (ou du canal) ce qu'il faut savoir pour la suite : un message dans ce fil te convoquera à nouveau. Si tu attends une réponse, pose la question dans le fil, pas dans cette session. Seule exception : une session que tu as lancée et qui tourne encore retient la tienne ; termine-la (`sessions.end`) ou attends sa réponse (`sessions.wait`) avant de finir."
     : opts.agent
-      ? "Tu es un agent : range tes sessions toi-même. Archive cette session quand ton travail y est fini, c'est-à-dire quand tout ceci est vrai : ce qu'on t'a demandé est fait ou rendu (tâche passée au bon statut ou à la bonne étiquette d'état, PR ouverte, compte rendu posté dans le fil de la tâche ou réponse donnée) ; rien n'est en attente dans le dossier (modifications commitées et poussées, ou sans valeur) ; aucune session que tu as lancée ne tourne encore ; et tu n'attends pas de réponse dans cette session même (conversation en cours avec la personne qui l'a demandée). Une réponse attendue dans le fil d'une tâche ou d'un canal (question, retour d'essai, revue, accord) ne retient pas la session : le message te convoquera à nouveau (dans un canal, ta session sur le fil est restaurée avec son contexte). Dans un canal, archive donc dès ta réponse postée si rien d'autre n'est en cours. Avant d'archiver, écris dans le fil de la tâche ce qu'il faut savoir pour la suite : si on te convoque plus tard sur cette tâche, une nouvelle session repartira de là."
+      ? "Tu es un agent : range tes sessions toi-même. Archive cette session quand ton travail y est fini, c'est-à-dire quand tout ceci est vrai : ce qu'on t'a demandé est fait ou rendu (tâche passée au bon statut ou à la bonne étiquette d'état, compte rendu posté dans le fil de la tâche ou réponse donnée) ; la PR de ton dossier, s'il y en a une, n'est plus ouverte (une session qui porte une PR ouverte reste active pour traiter la revue, la CI ou les conflits avec son contexte : Skipper refuse alors l'archivage et la range lui-même à la fusion ou à la fermeture de la PR) ; rien n'est en attente dans le dossier (modifications commitées et poussées, ou sans valeur) ; aucune session que tu as lancée ne tourne encore ; et tu n'attends pas de réponse dans cette session même (conversation en cours avec la personne qui l'a demandée). Une réponse attendue dans le fil d'une tâche ou d'un canal (question, retour d'essai, revue, accord) ne retient pas la session : le message te convoquera à nouveau (dans un canal, ta session sur le fil est restaurée avec son contexte). Dans un canal, archive donc dès ta réponse postée si rien d'autre n'est en cours. Avant d'archiver, écris dans le fil de la tâche ce qu'il faut savoir pour la suite : si on te convoque plus tard sur cette tâche, une nouvelle session repartira de là."
       : "Cette session est pilotée par une personne : ne l'archive que si elle le demande.";
   return [
     "Archiver une session (outil `sessions.archive`, sans `id` pour cette session) la range : elle disparaît des sessions actives, son dossier de travail est archivé (terminaux fermés, fichiers et branche conservés) ; transcript, coût et liens de tâche restent consultables, et on la restaure ou la relance depuis l'historique. Pour cette session, l'archivage a lieu à la fin de ton tour : appelle l'outil en dernier, puis termine ta réponse.",
@@ -161,12 +163,14 @@ export function createSessionsMcpServer(project: Project, sessionId: string, sco
                 // Sans work session indiquée : une nouvelle, nommée d'après la consigne.
                 newWorksession: new_branch ? { branch: new_branch, baseRef: base_ref ?? null } : worksessionId ? null : { baseRef: base_ref ?? null },
                 name: (name?.trim() || prompt.trim().split('\n')[0]).slice(0, 80),
+                autoTitle: !name?.trim(),
                 provider: me.kind === 'chat' ? 'claude' : me.provider,
                 prompt,
                 config,
               },
               actor,
             );
+            await auditService.record({ projectId: p.id, actor: { sessionId }, action: 'session.create', targetType: 'session', targetId: session.id, targetLabel: session.name, details: { provider: session.provider, worksessionId: session.worksessionId, parentSessionId: sessionId } });
             return `Session lancée :\n${await describe(session)}\nUtilise sessions.wait avec cet id pour obtenir sa réponse.`;
           }),
       ),
@@ -190,7 +194,7 @@ export function createSessionsMcpServer(project: Project, sessionId: string, sco
         async ({ id, text: message }) =>
           run(async () => {
             const child = await getChild(id);
-            const s = await sessionService.sendMessage(child.id, message);
+            const s = await sessionService.sendMessage(child.id, message, null, { author: await sessionAuthor(sessionId) });
             return `Instruction envoyée :\n${await describe(s)}`;
           }),
       ),
@@ -199,6 +203,7 @@ export function createSessionsMcpServer(project: Project, sessionId: string, sco
           const child = await getChild(id);
           if (child.status !== 'running' && child.status !== 'queued') return `La session est déjà ${stateOf(child)}.`;
           const s = await sessionService.end(child.id);
+          await auditService.record({ projectId: s.projectId, actor: { sessionId }, action: 'session.end', targetType: 'session', targetId: s.id, targetLabel: s.name });
           return `Fin demandée :\n${await describe(s)}`;
         }),
       ),
@@ -214,6 +219,7 @@ export function createSessionsMcpServer(project: Project, sessionId: string, sco
             const target = id && id !== sessionId ? await getChild(id) : await getInScope(sessionId);
             if (target.archivedAt) return 'La session est déjà archivée.';
             const deferred = await sessionService.archiveWhenDone(target.id, reason?.trim() || null);
+            await auditService.record({ projectId: target.projectId, actor: { sessionId }, action: 'session.archive', targetType: 'session', targetId: target.id, targetLabel: target.name, details: { reason: reason?.trim() || undefined } });
             if (target.id === sessionId) return deferred ? "Cette session sera archivée à la fin de ce tour : termine ta réponse maintenant, sans autre outil." : 'Session archivée.';
             return deferred ? `La session termine son tour, puis sera archivée :\n${await describe(target)}` : 'Session archivée.';
           }),

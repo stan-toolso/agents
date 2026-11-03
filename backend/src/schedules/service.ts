@@ -12,9 +12,13 @@ import type { Session, SessionCleanup } from '../sessions/types.js';
 import { claudeSettings } from '../settings/claude.js';
 import { CronError, isValidTimeZone, nextRun, nextRuns, parseCron } from './cron.js';
 import { RUN_STATUS_LABELS, runOutcome, summarizeEvents } from './outcome.js';
+import { forgetScheduleRules } from './activeRules.js';
+import { MAX_SCHEDULE_RULES, normalizeRules, suggestionsFromPrompt, suggestionsFromRuns, type PastRun, type ToolSuggestion } from './permissions.js';
+import { vaultService } from '../vault/service.js';
 import { scheduleRepository } from './repository.js';
 import type { ScheduleRun, ScheduleRunStatus, SessionSchedule, SessionScheduleInput } from './types.js';
 import { log } from '../log.js';
+import { systemAuthor } from '../sessions/instructionAuthor.js';
 
 /** Fréquence de vérification des échéances. */
 const TICK_MS = 30_000;
@@ -74,10 +78,19 @@ function parseOrThrow(cron: string) {
 
 /** Titre et type de la notification de fin d'une exécution, selon son issue. */
 function notificationOf(status: ScheduleRunStatus, label: string): { type: string; title: string } {
-  if (status === 'blocked') return { type: 'schedule.blocked', title: `« ${label} » bloquée : l'agent n'a pas pu faire son travail` };
+  if (status === 'blocked') return { type: 'schedule.blocked', title: `« ${label} » bloquée : autorisation refusée ou demande sans réponse` };
   if (status === 'failed') return { type: 'schedule.failed', title: `« ${label} » en erreur` };
   if (status === 'timeout') return { type: 'schedule.failed', title: `« ${label} » toujours en cours après le délai d'attente` };
   return { type: 'schedule.run', title: `« ${label} » terminée` };
+}
+
+/** Règles d'une planification validées pour l'enregistrement ; undefined : inchangées. */
+function validRules(list: string[] | null | undefined): string[] | undefined {
+  if (list === undefined || list === null) return undefined;
+  const { rules, invalid } = normalizeRules(list);
+  if (invalid.length) throw new AppError(`Règle d'autorisation illisible : ${invalid.join(', ')} (forme attendue : Outil ou Outil(motif), ex. Bash(git status *))`);
+  if (rules.length > MAX_SCHEDULE_RULES) throw new AppError(`Au plus ${MAX_SCHEDULE_RULES} outils pré-autorisés par planification`);
+  return rules;
 }
 
 /** Exécutions suivies par cette instance (identifiant d'exécution par session). */
@@ -94,6 +107,7 @@ async function finish(run: ScheduleRun, session: Session, schedule: SessionSched
   const { status, message } = runOutcome(summary, { stillBusy: opts.stillBusy, pendingRequest: opts.pendingRequest ?? null });
   const durationMs = summary.durationMs ?? Date.now() - opts.startedAt;
   const closed = await scheduleRepository.finishRun(run.id, { status, costUsd: summary.cost, durationMs, message, answer: summary.answer });
+  forgetScheduleRules(id);
   if (!closed) return null;
   const cost = await describeCost(summary.cost);
   const details = [formatDuration(durationMs), cost].join(' · ');
@@ -104,10 +118,11 @@ async function finish(run: ScheduleRun, session: Session, schedule: SessionSched
   void notificationService.notify({
     ...n,
     message: message ? `${message} · ${details}` : details,
-    link: `/sessions/${id}`,
+    // Bloquée : la notification ouvre la planification, où l'on pré-autorise les outils refusés.
+    link: status === 'blocked' ? `/projects/${session.projectId}/schedules?edit=${id}` : `/sessions/${id}`,
     projectId: session.projectId,
     sessionId: id,
-    payload: { runId: run.id, status, cost: summary.cost, durationMs },
+    payload: { runId: run.id, status, cost: summary.cost, durationMs, ...(status === 'blocked' ? { denied: summary.denied, sessionLink: `/sessions/${id}` } : {}) },
   });
   return closed;
 }
@@ -118,6 +133,30 @@ export const scheduleService = {
   listForProjects: (projectIds: string[]) => scheduleRepository.listForProjects(projectIds),
   listRuns: (sessionId: string, limit?: number) => scheduleRepository.listRuns(sessionId, limit),
   listRecentRuns: (sessionIds: string[], perSession: number) => scheduleRepository.listRecentRuns(sessionIds, perSession),
+
+  /**
+   * Outils à pré-autoriser pour une planification : refusés ou demandés pendant ses dernières exécutions, et
+   * éléments du coffre « avec approbation » que cite l'instruction. Sans session (nouvelle planification) :
+   * seulement ceux de l'instruction.
+   */
+  async permissionSuggestions(opts: { sessionId?: string | null; projectId: string; ownerId: string | null; prompt?: string | null; runs?: number }): Promise<ToolSuggestion[]> {
+    const past: PastRun[] = [];
+    if (opts.sessionId) {
+      const runs = (await scheduleRepository.listRuns(opts.sessionId, opts.runs ?? 10)).filter((r) => r.startEventId);
+      for (const run of runs) {
+        const [events, requests] = await Promise.all([
+          scheduleRepository.runResultEvents(opts.sessionId, run.startEventId!, run.finishedAt),
+          scheduleRepository.runPermissionRequests(opts.sessionId, run.startedAt, run.finishedAt),
+        ]);
+        past.push({ startedAt: run.startedAt, events, requests });
+      }
+    }
+    const fromRuns = suggestionsFromRuns(past);
+    const prompt = opts.prompt?.trim();
+    const items = prompt ? await vaultService.agentItems(opts.projectId, opts.ownerId).catch(() => []) : [];
+    const fromPrompt = prompt ? suggestionsFromPrompt(prompt, items).filter((s) => !fromRuns.some((r) => r.rule.toLowerCase() === s.rule.toLowerCase())) : [];
+    return [...fromRuns, ...fromPrompt];
+  },
 
   /** Les prochaines échéances d'une expression (aperçu pour l'interface). Lève AppError si l'expression est invalide. */
   preview(cron: string, timezone: string | null | undefined, count = 5): Date[] {
@@ -138,6 +177,7 @@ export const scheduleService = {
     const spec = parseOrThrow(input.cron);
     const name = input.name === undefined ? undefined : input.name?.trim().slice(0, 120) || null;
     const enabled = input.enabled ?? true;
+    const allowedTools = validRules(input.allowedTools);
     // Le nettoyage de la conversation accompagne la planification : sans lui, le contexte grossit à chaque exécution.
     if (input.cleanup) await cleanupService.set(sessionId, input.cleanup);
     const schedule = await scheduleRepository.upsert(sessionId, {
@@ -148,7 +188,9 @@ export const scheduleService = {
       enabled,
       endAfterRun: input.endAfterRun ?? true,
       nextRunAt: enabled ? nextRun(spec, new Date(), timezone) : null,
+      allowedTools,
     });
+    forgetScheduleRules(sessionId);
     await emit(sessionId, 'schedule', { action: enabled ? 'set' : 'disabled', cron: schedule.cron, timezone, nextRunAt: schedule.nextRunAt, name: schedule.name });
     // Une session planifiée porte le nom de sa planification : c'est lui qu'on lit dans la sidebar et les onglets.
     if (name && name !== session.name) await sessionService.rename(sessionId, name);
@@ -184,6 +226,7 @@ export const scheduleService = {
     // Valide tout avant de créer quoi que ce soit (pas de session orpheline sur une expression invalide).
     if (!input.prompt.trim()) throw new AppError("L'instruction à envoyer à chaque exécution est vide");
     parseOrThrow(input.cron);
+    validRules(input.allowedTools);
     if (input.timezone && !isValidTimeZone(input.timezone.trim())) throw new AppError(`Fuseau horaire inconnu : ${input.timezone}`);
     const session = await sessionService.create({
       projectId: input.projectId,
@@ -279,8 +322,9 @@ export const scheduleService = {
     await scheduleRepository.setResult(id, 'En cours');
     scheduledRuns.add(id);
     localRuns.set(id, run.id);
+    forgetScheduleRules(id);
     try {
-      await sessionService.sendMessage(id, schedule.prompt);
+      await sessionService.sendMessage(id, schedule.prompt, null, { author: systemAuthor(`Planification « ${schedule.name} »`) });
     } catch (err) {
       scheduledRuns.delete(id);
       localRuns.delete(id);

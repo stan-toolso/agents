@@ -9,6 +9,7 @@ interface Row {
   prompt: string;
   enabled: boolean;
   end_after_run: boolean;
+  allowed_tools: string[] | null;
   next_run_at: Date | null;
   last_run_at: Date | null;
   last_result: string | null;
@@ -40,6 +41,7 @@ const toSchedule = (r: Row): SessionSchedule => ({
   prompt: r.prompt,
   enabled: r.enabled,
   endAfterRun: r.end_after_run,
+  allowedTools: r.allowed_tools ?? [],
   nextRunAt: r.next_run_at,
   lastRunAt: r.last_run_at,
   lastResult: r.last_result,
@@ -88,17 +90,18 @@ export const scheduleRepository = {
     return rows.map((r) => ({ ...toSchedule(r), projectId: r.project_id }));
   },
 
-  /** Crée ou remplace la planification d'une session. `name` undefined : nom inchangé. */
-  async upsert(sessionId: string, values: { name?: string | null; cron: string; timezone: string; prompt: string; enabled: boolean; endAfterRun: boolean; nextRunAt: Date | null }): Promise<SessionSchedule> {
+  /** Crée ou remplace la planification d'une session. `name` ou `allowedTools` undefined : inchangés. */
+  async upsert(sessionId: string, values: { name?: string | null; cron: string; timezone: string; prompt: string; enabled: boolean; endAfterRun: boolean; nextRunAt: Date | null; allowedTools?: string[] }): Promise<SessionSchedule> {
     const { rows } = await pool.query<Row>(
-      `INSERT INTO session_schedules (session_id, cron, timezone, prompt, enabled, end_after_run, next_run_at, name)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO session_schedules (session_id, cron, timezone, prompt, enabled, end_after_run, next_run_at, name, allowed_tools)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($10::text[], '{}'))
        ON CONFLICT (session_id) DO UPDATE SET
          cron = EXCLUDED.cron, timezone = EXCLUDED.timezone, prompt = EXCLUDED.prompt, enabled = EXCLUDED.enabled,
          end_after_run = EXCLUDED.end_after_run, next_run_at = EXCLUDED.next_run_at,
-         name = CASE WHEN $9 THEN EXCLUDED.name ELSE session_schedules.name END, updated_at = now()
+         name = CASE WHEN $9 THEN EXCLUDED.name ELSE session_schedules.name END,
+         allowed_tools = COALESCE($10::text[], session_schedules.allowed_tools), updated_at = now()
        RETURNING *`,
-      [sessionId, values.cron, values.timezone, values.prompt, values.enabled, values.endAfterRun, values.nextRunAt, values.name ?? null, values.name !== undefined],
+      [sessionId, values.cron, values.timezone, values.prompt, values.enabled, values.endAfterRun, values.nextRunAt, values.name ?? null, values.name !== undefined, values.allowedTools ?? null],
     );
     return toSchedule(rows[0]);
   },
@@ -203,6 +206,42 @@ export const scheduleRepository = {
     }
     for (const list of out.values()) list.sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime());
     return out;
+  },
+
+  /**
+   * Outils pré-autorisés de la planification si une de ses exécutions est en cours, sinon null : ils ne valent
+   * que pendant un tour lancé par la planification (l'exécution est ouverte avant l'envoi de l'instruction et
+   * close après la fin du tour).
+   */
+  async activeRunRules(sessionId: string): Promise<string[] | null> {
+    const { rows } = await pool.query<{ allowed_tools: string[] | null }>(
+      `SELECT sc.allowed_tools FROM session_schedules sc
+       WHERE sc.session_id = $1 AND EXISTS (SELECT 1 FROM session_schedule_runs r WHERE r.session_id = sc.session_id AND r.status = 'running')`,
+      [sessionId],
+    );
+    return rows[0] ? (rows[0].allowed_tools ?? []) : null;
+  },
+
+  /** Résultats de tour (`claude.result`) d'une exécution : après son jalon de début, jusqu'à sa fin (ou maintenant). */
+  async runResultEvents(sessionId: string, startEventId: string, until: Date | null): Promise<{ type: string; payload: Record<string, unknown> }[]> {
+    const { rows } = await pool.query<{ type: string; payload: Record<string, unknown> }>(
+      `SELECT type, payload FROM session_events
+       WHERE session_id = $1 AND id > $2 AND type = 'claude.result' AND ($3::timestamptz IS NULL OR created_at <= $3)
+       ORDER BY id LIMIT 200`,
+      [sessionId, startEventId, until],
+    );
+    return rows;
+  },
+
+  /** Demandes d'autorisation créées pendant une exécution. */
+  async runPermissionRequests(sessionId: string, from: Date, until: Date | null): Promise<{ type: string; status: string; payload: Record<string, unknown>; response: Record<string, unknown> | null }[]> {
+    const { rows } = await pool.query<{ type: string; status: string; payload: Record<string, unknown>; response: Record<string, unknown> | null }>(
+      `SELECT type, status, payload, response FROM requests
+       WHERE session_id = $1 AND type = 'permission' AND created_at >= $2 AND ($3::timestamptz IS NULL OR created_at <= $3)
+       ORDER BY created_at LIMIT 200`,
+      [sessionId, from, until],
+    );
+    return rows;
   },
 
   /** Exécutions encore « en cours » ouvertes avant `before` (reprise de celles dont le suivi a été perdu). */

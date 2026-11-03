@@ -1,7 +1,9 @@
 import AgentAvatar from '../components/AgentAvatar';
+import GoneNotice from '../components/GoneNotice';
+import { isGoneError } from '../lib/gone';
 import { useMutation, useQuery } from '@apollo/client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Spinner } from 'react-bootstrap';
+import { Alert, Button, Spinner } from 'react-bootstrap';
 import { Link, useParams } from 'react-router-dom';
 import { useTabTitle } from '../workbench/TabsContext';
 import { canAutoFocus } from '../lib/device';
@@ -20,7 +22,7 @@ import AttachmentChips from '../components/AttachmentChips';
 import RequestPrompt from '../components/RequestPrompt';
 import { SessionChildren, SessionParentNote, parentStateHint, useSessionActions } from '../components/SessionControls';
 import { ContextBanner, ContextGauge } from '../components/ContextGauge';
-import Transcript from '../components/Transcript';
+import Transcript, { type ChatParticipants } from '../components/Transcript';
 import { fileToolResultCount } from '../lib/sessionChanges';
 import { isImageType, toAttachmentInputs, usePendingAttachments } from '../lib/attachments';
 import { confirmedPending, newPendingInstruction, withPendingInstructions, type PendingInstruction } from '../lib/pendingInstructions';
@@ -159,6 +161,16 @@ export default function SessionDetailPage() {
   // Chat : conversation légère de l'espace personnel, sans dossier de travail (ni panneau de droite, ni planification).
   const chat = session?.kind === 'CHAT';
   const archived = Boolean(session?.archivedAt);
+  // Interlocuteurs de la conversation (rendu sans détail technique) : la personne qui pilote la session (qui a pris
+  // la main, qui l'a demandée à l'agent, ou sa propriétaire), sinon la session d'agent qui l'a lancée ; en face,
+  // l'agent de projet qui la joue, sinon le modèle.
+  const participants = useMemo<ChatParticipants | null>(() => {
+    if (!session) return null;
+    const person = session.takenOverBy ?? session.requestedBy ?? (session.owner && session.owner.kind !== 'AGENT' ? session.owner : null);
+    const human = person ? { name: person.id === user?.id ? (user?.name ?? person.name) : person.name } : session.parentSession ? { name: session.parentSession.name, agent: true } : { name: user?.name ?? 'Vous' };
+    const agent = session.agent ? { name: session.agent.name, projectAgent: session.agent } : { name: session.provider === 'claude' ? 'Claude' : 'Agent' };
+    return { human, agent, me: user ? { name: user.name } : null };
+  }, [session?.takenOverBy, session?.requestedBy, session?.owner, session?.parentSession, session?.agent, session?.provider, user?.id, user?.name]);
   const running = session?.status === 'RUNNING';
   const busy = running && session?.activity === 'BUSY';
   const pending = session?.requests ?? [];
@@ -239,8 +251,22 @@ export default function SessionDetailPage() {
         </div>
       </div>
     );
+  if (isGoneError(error) || (!error && !session))
+    return (
+      <GoneNotice what="Cette session">
+        {text.trim() && (
+          <div className="mt-3">
+            <div className="small text-secondary mb-1">Votre texte, non envoyé :</div>
+            <textarea className="form-control font-monospace small" rows={Math.min(10, text.split('\n').length + 1)} readOnly value={text} onFocus={(e) => e.currentTarget.select()} />
+            <Button size="sm" variant="outline-secondary" className="mt-2" onClick={() => void navigator.clipboard?.writeText(text)}>
+              <i className="bi bi-clipboard me-1" /> Copier
+            </Button>
+          </div>
+        )}
+      </GoneNotice>
+    );
   if (error) return <Alert variant="danger">Erreur : {error.message}</Alert>;
-  if (!session) return <Alert variant="warning">Session introuvable.</Alert>;
+  if (!session) return null;
 
   const actionError = sendError ?? configError;
   const schedule = session.schedule;
@@ -407,7 +433,7 @@ export default function SessionDetailPage() {
 
       {/* Sur mobile, la ligne vit dans le détail repliable de l'en-tête, avec les boutons. */}
       <div className="cc-toggle d-none d-md-flex">{technicalToggle}</div>
-      <Transcript events={shownEvents} draft={draft} loading={!eventsLoaded} technical={technical} />
+      <Transcript events={shownEvents} draft={draft} loading={!eventsLoaded} technical={technical} participants={participants} />
       {actions.modals}
 
       {pending.length > 0 && !readOnly && (

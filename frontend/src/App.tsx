@@ -26,6 +26,7 @@ import PageLoading from './components/PageLoading';
 const ProjectFormPage = lazy(() => import('./pages/ProjectFormPage'));
 const ContextPage = lazy(() => import('./pages/ContextPage'));
 const SessionHistoryPage = lazy(() => import('./pages/SessionHistoryPage'));
+const AuditPage = lazy(() => import('./pages/AuditPage'));
 const BrowserPage = lazy(() => import('./pages/BrowserPage'));
 const TerminalPage = lazy(() => import('./pages/TerminalPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
@@ -70,6 +71,7 @@ function PageRoutes({ location, isAdmin }: { location: Location; isAdmin: boolea
       <Route path="/projects/:id/vault" element={<ProjectVaultPage />} />
       <Route path="/projects/:id/env" element={<ProjectEnvPage />} />
       <Route path="/projects/:id/history" element={<SessionHistoryPage />} />
+      <Route path="/projects/:id/audit" element={<AuditPage />} />
       <Route path="/projects/:id/connections" element={<RedirectToVault />} />
       <Route path="/tasks" element={<TasksPage />} />
       <Route path="/tasks/:id" element={<TaskPage />} />

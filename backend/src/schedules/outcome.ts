@@ -34,7 +34,10 @@ export function summarizeEvents(events: { type: string; payload: Record<string, 
       if (Array.isArray(denials)) {
         for (const d of denials) {
           const name = d && typeof d === 'object' ? (d as { tool_name?: unknown }).tool_name : null;
-          if (typeof name === 'string' && name) denied.add(toolLabel(name));
+          const input = d && typeof d === 'object' ? (d as { tool_input?: Record<string, unknown> }).tool_input : null;
+          // Élément du coffre ou commande : « vault.sql_query (production) », « Bash (git push) ».
+          const target = typeof input?.item === 'string' ? input.item : typeof input?.command === 'string' ? input.command.trim().split(/\s+/).slice(0, 2).join(' ') : null;
+          if (typeof name === 'string' && name) denied.add(target ? `${toolLabel(name)} (${target})` : toolLabel(name));
         }
       }
     }

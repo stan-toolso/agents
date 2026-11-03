@@ -79,6 +79,7 @@ export function describeTool(rawName: string, input: Record<string, unknown> = {
           people: ['Consultation des personnes et sessions mentionnables', 'consulter qui peut être mentionné'],
           pr_list: ['Consultation des pull requests suivies', 'consulter les pull requests suivies'],
           pr_open: [`Ouverture de la pull request « ${title ?? ''} » sur GitHub (branche poussée avec votre compte)`, `ouvrir la pull request « ${title ?? ''} » sur GitHub`],
+          pr_merge: [`Fusion de la pull request ${str(input, 'pr') ?? str(input, 'id') ?? ''} avec votre compte`, `fusionner la pull request ${str(input, 'pr') ?? str(input, 'id') ?? ''}${str(input, 'title') ? ` « ${str(input, 'title')} »` : ''} avec votre compte, à votre nom`],
           pr_register: ["Suivi d'une pull request existante", 'suivre une pull request existante'],
           pr_update: [`Mise à jour d'une pull request suivie${str(input, 'status') ? ` (${str(input, 'status')})` : ''}`, 'mettre à jour une pull request suivie'],
         };

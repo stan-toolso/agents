@@ -12,6 +12,29 @@ export function uniqueName(worksessions: { name: string }[], base: string): stri
 }
 
 /**
+ * Nom de dossier et branche dérivés (pas choisis) rendus libres ensemble : `base`/`branchBase`, sinon
+ * `base-2`/`branchBase-2`… jusqu'à ce que le dossier ne soit porté par aucune work session et que la branche
+ * n'existe pas (localement, sur origin, ou extraite dans un autre dossier de travail). Une consigne qui commence
+ * comme une autre (le même lien, par exemple) ne doit ni échouer ni reprendre la branche d'un autre travail.
+ */
+export function uniqueNameAndBranch(
+  base: string,
+  branchBase: string,
+  takenNames: Iterable<string>,
+  takenBranches: Iterable<string>,
+): { name: string; branch: string } {
+  const names = new Set(takenNames);
+  const branches = new Set(takenBranches);
+  let name = base;
+  let branch = branchBase;
+  for (let i = 2; names.has(name) || branches.has(branch); i++) {
+    name = `${base.slice(0, 60)}-${i}`;
+    branch = `${branchBase.slice(0, 60)}-${i}`;
+  }
+  return { name, branch };
+}
+
+/**
  * Noms d'une work session dérivés de ce dont elle parle (première consigne de sa session, titre d'une
  * tâche) : le libellé est la première ligne, le dossier (et la branche) un slug de ses premiers mots.
  * Pur : le frontend en a le miroir (`frontend/src/lib/worksessions.ts`).
