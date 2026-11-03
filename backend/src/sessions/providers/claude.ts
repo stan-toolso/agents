@@ -47,6 +47,7 @@ import { createWorksessionsMcpServer } from '../../worksessions/mcp.js';
 import { createEnvMcpServer } from '../../envFiles/mcp.js';
 import { envFileService } from '../../envFiles/service.js';
 import { archivePromptSummary, createSessionsMcpServer, sessionsPromptSummary } from '../mcp.js';
+import { archivesWhenIdle } from '../autoArchive.js';
 import { claudeSettings, cliEnv } from '../../settings/claude.js';
 import { usageService } from '../../settings/usage.js';
 import { describeRejection, rateLimitService } from '../../settings/rateLimits.js';
@@ -268,7 +269,7 @@ export class ClaudeProvider implements SessionProvider {
         vaultService.promptSummary(vaultItems, ctx.project),
         chat ? '' : await envFileService.promptSummary(ctx.project.id),
         sessionsPromptSummary(ctx.project, { chat }),
-        archivePromptSummary({ agent: Boolean(agent), child: Boolean(ctx.session.parentSessionId) }),
+        archivePromptSummary({ agent: Boolean(agent), child: Boolean(ctx.session.parentSessionId), auto: archivesWhenIdle(ctx.session) }),
         googleAccountService.promptSummary(googleAccounts),
         chat ? '' : sharedPagesPrompt(),
         ctx.session.worksessionId && !chat ? previewPrompt(previewsEnabled(), ctx.session.worksessionId) : '',

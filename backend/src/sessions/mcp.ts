@@ -42,9 +42,11 @@ async function line(s: Session, sessionId: string, project: Project, scope: Proj
  * projet, qui range ses sessions sans qu'on le lui demande ; `child` : session lancée par une autre session, qui la
  * range ; sinon la session est pilotée par une personne, dont elle attend l'accord.
  */
-export function archivePromptSummary(opts: { agent?: boolean; child?: boolean } = {}): string {
+export function archivePromptSummary(opts: { agent?: boolean; child?: boolean; auto?: boolean } = {}): string {
   const own = opts.child
     ? "Cette session a été lancée par une autre session : c'est elle qui l'archivera une fois ta réponse lue ; ne l'archive pas toi-même."
+    : opts.auto
+      ? "Cette session a été ouverte sans personne pour la piloter (déclencheur ou convocation par une autre session) : Skipper l'archive d'office à la fin de chacun de tes tours, inutile d'appeler `sessions.archive`. Avant de terminer ton tour, commite et pousse ce qui doit l'être, et écris dans le fil de la tâche (ou du canal) ce qu'il faut savoir pour la suite : un message dans ce fil te convoquera à nouveau. Si tu attends une réponse, pose la question dans le fil, pas dans cette session. Seule exception : une session que tu as lancée et qui tourne encore retient la tienne ; termine-la (`sessions.end`) ou attends sa réponse (`sessions.wait`) avant de finir."
     : opts.agent
       ? "Tu es un agent : range tes sessions toi-même. Archive cette session quand ton travail y est fini, c'est-à-dire quand tout ceci est vrai : ce qu'on t'a demandé est fait ou rendu (tâche passée au bon statut ou à la bonne étiquette d'état, PR ouverte, compte rendu posté dans le fil de la tâche ou réponse donnée) ; rien n'est en attente dans le dossier (modifications commitées et poussées, ou sans valeur) ; aucune session que tu as lancée ne tourne encore ; et tu n'attends pas de réponse dans cette session même (conversation en cours avec la personne qui l'a demandée). Une réponse attendue dans le fil d'une tâche ou d'un canal (question, retour d'essai, revue, accord) ne retient pas la session : le message te convoquera à nouveau (dans un canal, ta session sur le fil est restaurée avec son contexte). Dans un canal, archive donc dès ta réponse postée si rien d'autre n'est en cours. Avant d'archiver, écris dans le fil de la tâche ce qu'il faut savoir pour la suite : si on te convoque plus tard sur cette tâche, une nouvelle session repartira de là."
       : "Cette session est pilotée par une personne : ne l'archive que si elle le demande.";

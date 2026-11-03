@@ -19,6 +19,7 @@ import { userRepository } from '../users/repository.js';
 import { userService } from '../users/service.js';
 import { ROLE_RANK, type User } from '../users/types.js';
 import { worksessionRepository } from '../worksessions/repository.js';
+import { autoArchiveConfig } from '../sessions/autoArchive.js';
 import { agentRepository } from './repository.js';
 import { AGENT_TEMPLATES, templateFor } from './templates.js';
 import { AGENT_KINDS, AGENT_PROVIDERS, type Agent, type AgentAccountKind, type AgentAction, type AgentActionInput, type AgentInput, type AgentManagerRole, type AgentStats, type AgentTemplate, type OwnerAccounts, normalizeAvatar, ownAccounts, normalizeTriggers } from './types.js';
@@ -44,6 +45,11 @@ export interface SummonOptions {
   requestedById?: string | null;
   /** Qui agit (pour les sessions créées). */
   actor?: Actor;
+  /**
+   * Session lancée sans personne pour la piloter (déclencheur, autre session) : une session créée pour l'occasion est
+   * archivée d'office à la fin de chaque tour (sessions/autoArchive.ts). Sans effet sur une session existante.
+   */
+  autoArchive?: boolean;
 }
 
 function actionKey(input: AgentActionInput, taken: Set<string>): string {
@@ -438,7 +444,7 @@ export const agentService = {
           ownerId: agent.id,
           requestedById: opts.requestedById ?? null,
           provider: this.providerOf(agent),
-          config: this.sessionConfig(agent, null),
+          config: this.sessionConfig(agent, opts.autoArchive ? autoArchiveConfig() : null),
           instructions: text,
         });
       }
@@ -461,7 +467,7 @@ export const agentService = {
         provider: this.providerOf(agent),
         prompt: text,
         attachments: opts.attachments ?? null,
-        config: this.sessionConfig(agent, null),
+        config: this.sessionConfig(agent, opts.autoArchive ? autoArchiveConfig() : null),
         ownerId: agent.id,
         requestedById: opts.requestedById ?? null,
       },
@@ -525,7 +531,7 @@ export const agentService = {
         provider: this.providerOf(agent),
         prompt,
         attachments: opts.attachments ?? null,
-        config: this.sessionConfig(agent, null),
+        config: this.sessionConfig(agent, opts.autoArchive ? autoArchiveConfig() : null),
         ownerId: agent.id,
         requestedById: opts.requestedById ?? null,
         autoStart: false,
@@ -548,7 +554,7 @@ export const agentService = {
         provider: this.providerOf(agent),
         prompt,
         attachments: opts.attachments ?? null,
-        config: this.sessionConfig(agent, null),
+        config: this.sessionConfig(agent, opts.autoArchive ? autoArchiveConfig() : null),
         ownerId: agent.id,
         requestedById: opts.requestedById ?? null,
         autoStart: false,
