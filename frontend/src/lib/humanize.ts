@@ -254,7 +254,7 @@ export const permissionModeLabels: Record<string, string> = {
   default: 'Vous demande avant chaque action sensible',
   acceptEdits: 'Modifie les fichiers librement',
   plan: 'Réfléchit seulement, sans rien modifier',
-  dontAsk: 'Ne demande jamais',
+  dontAsk: "Refuse sans demander ce qui n'est pas autorisé d'avance",
   bypassPermissions: 'Tout est autorisé',
 };
 
@@ -263,9 +263,52 @@ export const permissionModeShortLabels: Record<string, string> = {
   default: 'Demander avant d\'agir',
   acceptEdits: 'Modifier les fichiers',
   plan: 'Plan seulement',
-  dontAsk: 'Ne jamais demander',
+  dontAsk: 'Refuser sans demander',
   bypassPermissions: 'Tout autoriser',
 };
+
+/**
+ * Ce que le mode « Refuser sans demander » (dontAsk) refuse, pour l'expliquer avant d'y passer : ce mode ne veut pas
+ * dire « ne plus me déranger » mais « refuser tout ce qui n'est pas autorisé d'avance ». Les éléments du coffre avec
+ * approbation, eux, restent soumis à un humain quel que soit le mode (vault/mcp.ts, gate).
+ */
+export function dontAskConsequences(opts: { approvalConnections?: string[]; scheduleName?: string | null }): string[] {
+  const out = [
+    'les commandes et modifications de fichiers qui ne sont couvertes ni par une règle du projet ni par les outils pré-autorisés de la session ;',
+    'les outils de Skipper soumis à autorisation (ouvrir une pull request, lancer une session, convoquer un agent…) ;',
+    'les actions du navigateur (clic, saisie, navigation) et les écritures dans les comptes Google ;',
+  ];
+  const connections = opts.approvalConnections ?? [];
+  if (connections.length) {
+    out.push(`les connexions avec approbation (${connections.map((c) => `« ${c} »`).join(', ')}) vous seront toujours soumises : sans réponse, l'agent reste bloqué.`);
+  }
+  if (opts.scheduleName) {
+    out.push(`cette session porte la planification « ${opts.scheduleName} » : ses exécutions tourneront aussi dans ce mode, et chaque outil refusé les notera « Bloquée ».`);
+  }
+  return out;
+}
+
+/** Refus d'un outil par le mode « Refuser sans demander » (message du CLI Claude Code dans le résultat de l'outil). */
+export const DONT_ASK_DENIAL = /has been denied because Claude Code is running in don't ask mode/;
+
+/**
+ * Règle proposée pour autoriser un outil refusé : `Bash(grep *)` d'après la première commande (sous-commande gardée
+ * pour git, npm…), `mcp__vault__sql_query(production)` pour un élément du coffre, sinon l'outil entier.
+ */
+export function ruleForCall(toolName: string, input: Record<string, unknown> | null | undefined): string {
+  const args = input ?? {};
+  if (toolName === 'Bash' && typeof args.command === 'string') {
+    const rules = generalizeBashRule(args.command).filter((r) => !/["'`$()]/.test(r) && r.endsWith(' *'));
+    return rules.length ? `Bash(${rules[0]})` : 'Bash';
+  }
+  if (toolName.startsWith('mcp__vault__') && typeof args.item === 'string' && args.item.trim()) return `${toolName}(${args.item.trim()})`;
+  return toolName;
+}
+
+/** Liste d'outils pré-autorisés d'une session (« Read,Bash(git:*) »), découpée comme le fait le serveur. */
+export function splitAllowedTools(value: unknown): string[] {
+  return typeof value === 'string' ? value.split(',').map((t) => t.trim()).filter(Boolean) : [];
+}
 
 /** Avertissement pour le mode « tout autoriser » : les appels aux connexions soumises à approbation passent sans demande. */
 export function bypassConnectionsWarning(connections: string[]): string | null {
@@ -442,8 +485,16 @@ export function generalizeBashRule(content: string): string[] {
  * Règles proposées à la mémorisation (`Outil` ou `Outil(motif)`), à partir des suggestions du SDK, les commandes
  * Bash exactes étant généralisées par préfixe. L'humain peut les modifier avant de répondre (champ `rules` de la réponse).
  */
-export function editableRules(suggestions: unknown[] | undefined | null): string[] {
+export function editableRules(suggestions: unknown[] | undefined | null, toolName?: string, input?: Record<string, unknown> | null): string[] {
   const out: string[] = [];
+  // Commande Bash pour laquelle le SDK ne suggère rien (commande composée avec substitution `$(…)`, sous-shell…) :
+  // règles déduites de ses commandes simples (`grep *`, `sed *`), pour pouvoir ne plus être sollicité en un clic.
+  const hasRules = (suggestions ?? []).some((s) => (s as { type?: string })?.type === 'addRules');
+  if (!hasRules && toolName === 'Bash' && typeof input?.command === 'string') {
+    return generalizeBashRule(input.command)
+      .filter((r) => r.endsWith(' *') && !/["'`$()<>]/.test(r))
+      .map((r) => `Bash(${r})`);
+  }
   for (const s of (suggestions ?? []) as Array<{ type?: string; behavior?: string; rules?: Array<{ toolName?: string; ruleContent?: string | null }> }>) {
     if (s?.type !== 'addRules' || (s.behavior ?? 'allow') !== 'allow') continue;
     for (const r of s.rules ?? []) {

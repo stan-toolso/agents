@@ -67,7 +67,7 @@ export function sessionMergeApprover(ctx: { session: { id: string }; ask: (input
 /**
  * Demande à une personne du projet d'accepter la fusion d'une PR et renvoie son identifiant : la fusion est faite
  * avec son compte (GitHub, GitLab, Forgejo), à son nom. Jamais mémorisable (pas de suggestion de règle), et posée même
- * en mode « ne jamais demander » : sans réponse, on ne saurait pas au nom de qui fusionner. Exception : `implicit`
+ * en mode « refuser sans demander » : sans réponse, on ne saurait pas au nom de qui fusionner. Exception : `implicit`
  * (mode « Tout autoriser » d'une session pilotée par une personne) renvoie directement cette personne. Lève si la demande est
  * refusée, annulée, ou si la personne qui accepte n'est pas au moins membre du projet.
  */

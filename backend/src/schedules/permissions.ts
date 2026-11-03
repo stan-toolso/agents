@@ -98,7 +98,7 @@ export type SuggestionSource = 'denied' | 'asked' | 'prompt';
 
 export interface ToolSuggestion {
   rule: string;
-  /** `denied` : refusé (mode « Ne jamais me demander », refus, demande expirée) ; `asked` : demandé puis accordé ; `prompt` : élément du coffre cité par l'instruction. */
+  /** `denied` : refusé (mode « Refuser sans demander », refus, demande expirée) ; `asked` : demandé puis accordé ; `prompt` : élément du coffre cité par l'instruction. */
   source: SuggestionSource;
   /** Nombre d'exécutions passées où l'outil a été refusé ou demandé. */
   count: number;

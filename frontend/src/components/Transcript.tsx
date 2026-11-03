@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { SessionEvent, SessionLiveDraft } from '../graphql/operations';
 import { describeCron } from '../lib/cron';
 import { attachmentUrl, formatSize, isImageType, type AttachmentRef } from '../lib/attachments';
 import type { LocalAttachment } from '../lib/pendingInstructions';
-import { clockTime, dayLabel, describeTool, formatCost, formatDuration, permissionModeLabels } from '../lib/humanize';
+import { DONT_ASK_DENIAL, clockTime, dayLabel, describeTool, formatCost, formatDuration, permissionModeLabels, ruleForCall } from '../lib/humanize';
 import { describeTaskFeed, type TaskFeedSummary } from '../lib/taskFeed';
 import Markdown from './Markdown';
 import AgentAvatar from './AgentAvatar';
@@ -445,6 +445,55 @@ type Severity = 'pending' | 'ok' | 'warn' | 'error';
 /** Issue d'un appel d'outil : une commande sortie en code non nul est un avertissement, pas un échec (voir nonZeroExit). */
 const toolSeverity = (name: string, result?: ToolResult): Severity => (!result ? 'pending' : nonZeroExit(name, result) ? 'warn' : result.isError ? 'error' : 'ok');
 
+/**
+ * Autoriser depuis le transcript un outil refusé par le mode « Refuser sans demander » : fourni par la page de session
+ * (contexte plutôt que prop, pour ne pas reconstruire les nœuds mémorisés du transcript), absent en lecture seule.
+ */
+export interface ToolPermissionActions {
+  /** Outils pré-autorisés de la session (règles au format Claude Code). */
+  allowed: string[];
+  allow(rule: string): Promise<void>;
+}
+export const ToolPermissionContext = createContext<ToolPermissionActions | null>(null);
+
+/** Refus par le mode « Refuser sans demander » : dit pourquoi, et propose d'autoriser l'outil pour la session. */
+function DontAskDenial({ name, input }: { name: string; input: Input }) {
+  const actions = useContext(ToolPermissionContext);
+  const [busy, setBusy] = useState(false);
+  const rule = ruleForCall(name, input);
+  const allowed = actions?.allowed.includes(rule) ?? false;
+  return (
+    <span className="cc-denied">
+      Refusé sans vous demander : la session est en mode « Refuser sans demander », et cet outil n'était pas autorisé d'avance.
+      {actions && (
+        <>
+          {' '}
+          {allowed ? (
+            <span className="cc-allowed">
+              <i className="bi bi-check2" /> {rule} est désormais autorisé pour la session.
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-primary py-0 ms-1"
+              disabled={busy}
+              title={`Ajoute ${rule} aux outils pré-autorisés de cette session (appliqué tout de suite et aux prochaines exécutions)`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setBusy(true);
+                void actions.allow(rule).finally(() => setBusy(false));
+              }}
+            >
+              Autoriser cet outil pour la session
+            </button>
+          )}
+          {!allowed && <span className="cc-desc"> · {rule}</span>}
+        </>
+      )}
+    </span>
+  );
+}
+
 function ToolCall({ name, input, result, subCalls, rel }: { name: string; input: Input; result?: ToolResult; subCalls: number; rel: (path: string) => string }) {
   const [expanded, setExpanded] = useState(false);
   const header = name === 'AskUserQuestion' ? { name: result && !result.isError ? "Réponses aux questions de l'agent" : "Question de l'agent", args: '' } : toolHeader(name, input, rel);
@@ -456,7 +505,8 @@ function ToolCall({ name, input, result, subCalls, rel }: { name: string; input:
   const toggle = () => {
     if (!window.getSelection()?.toString()) setExpanded((v) => !v);
   };
-  const body = toolBody({ name, input, result, subCalls, expanded, rel });
+  const deniedByMode = Boolean(result?.isError && DONT_ASK_DENIAL.test(result.text));
+  const body = deniedByMode ? <DontAskDenial name={name} input={input} /> : toolBody({ name, input, result, subCalls, expanded, rel });
   const severity = toolSeverity(name, result);
   return (
     <div className="cc-tool">
@@ -937,7 +987,9 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
                 ? `autorisations : ${permissionModeLabels[String(value ?? 'default')] ?? String(value)}`
                 : key === 'model'
                   ? `modèle : ${value ? String(value) : 'réglage général'}`
-                  : `${key} : ${value === null ? '(retiré)' : JSON.stringify(value)}`;
+                  : key === 'allowedTools'
+                    ? `outils pré-autorisés : ${value ? String(value).split(',').join(', ') : '(aucun)'}`
+                    : `${key} : ${value === null ? '(retiré)' : JSON.stringify(value)}`;
             return applied.has(key) ? label : `${label} (au prochain lancement)`;
           });
           nodes.push(

@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '../graphql/operations';
-import Transcript, { linkSessionIds, nonZeroExit, type ChatParticipants } from './Transcript';
+import Transcript, { ToolPermissionContext, linkSessionIds, nonZeroExit, type ChatParticipants, type ToolPermissionActions } from './Transcript';
 
 // Le module des adresses de l'API lit window au chargement ; sans navigateur, on le remplace.
 vi.mock('../apollo', () => ({ apiBaseUrl: '' }));
@@ -34,6 +34,32 @@ const html = (events: SessionEvent[], technical = false, participants: ChatParti
   );
 
 describe('Transcript', () => {
+  it('explique un refus du mode « Refuser sans demander » et propose d’autoriser l’outil pour la session', () => {
+    const denied = [
+      tool('t1', 'Bash', { command: 'grep -n save src/WorkoutService.js' }),
+      result('t1', "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: …", true),
+    ];
+    const render = (actions: ToolPermissionActions | null) =>
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <ToolPermissionContext.Provider value={actions}>
+            <Transcript events={denied} technical autoScroll={false} />
+          </ToolPermissionContext.Provider>
+        </MemoryRouter>,
+      );
+    const allow = vi.fn(async () => undefined);
+    const out = render({ allowed: [], allow });
+    expect(out).toContain('Refusé sans vous demander');
+    expect(out).toContain('Autoriser cet outil pour la session');
+    expect(out).toContain('Bash(grep *)');
+    expect(out).not.toContain("don't ask mode");
+    // Déjà autorisé : plus de bouton ; en lecture seule (pas d'actions) : l'explication seule.
+    expect(render({ allowed: ['Bash(grep *)'], allow })).toContain('est désormais autorisé pour la session');
+    const readOnly = render(null);
+    expect(readOnly).toContain('Refusé sans vous demander');
+    expect(readOnly).not.toContain('Autoriser cet outil');
+  });
+
   it('affiche les tâches et instructions touchées par l’agent en cartes cliquables, hors des étapes repliées', () => {
     const out = html([
       ev('instruction', { text: 'Go' }),

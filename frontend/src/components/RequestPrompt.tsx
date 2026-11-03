@@ -60,7 +60,7 @@ function PermissionPrompt({ request, answer, busy }: { request: HumanRequest; an
   const [denying, setDenying] = useState(false);
   const [message, setMessage] = useState('');
   // Règles à mémoriser : suggestions du SDK généralisées par préfixe, modifiables avant de répondre.
-  const proposed = editableRules(p.suggestions);
+  const proposed = editableRules(p.suggestions, p.toolName, p.input);
   const [ruleText, setRuleText] = useState(proposed.join('\n'));
   const rules = parseRuleLines(ruleText);
   const modes = suggestedModes(p.suggestions);

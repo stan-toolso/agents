@@ -10,6 +10,7 @@ import { canAutoFocus } from '../lib/device';
  *   if (await confirm({ message: 'Supprimer ?', danger: true })) …
  *   const name = await prompt({ title: 'Nom du dossier' });   // null si annulé
  *   mutation().catch(showError);
+ *   const pick = await choose({ message: '…', choices: [{ value: 'a', label: 'A' }, …] });   // null si annulé
  */
 
 export interface ConfirmOptions {
@@ -37,6 +38,24 @@ export interface PromptOptions {
   required?: boolean;
 }
 
+export interface Choice {
+  value: string;
+  label: string;
+  /** Style du bouton (défaut « outline-primary »). */
+  variant?: 'primary' | 'outline-primary' | 'danger' | 'outline-danger' | 'outline-secondary';
+  /** Choix par défaut : focus et touche Entrée (défaut : le dernier). */
+  primary?: boolean;
+}
+
+export interface ChooseOptions {
+  title?: string;
+  message: ReactNode;
+  /** Boutons proposés, dans l'ordre d'affichage (à droite d'« Annuler »). */
+  choices: Choice[];
+  cancelLabel?: string;
+  danger?: boolean;
+}
+
 export interface AlertOptions {
   title?: string;
   message: ReactNode;
@@ -50,6 +69,8 @@ export interface Dialogs {
   confirm(opts: ConfirmOptions): Promise<boolean>;
   /** Saisie d'un texte : `null` si annulé, sinon la valeur (espaces de bord retirés). */
   prompt(opts: PromptOptions): Promise<string | null>;
+  /** Choix entre plusieurs actions : `null` si annulé, sinon la valeur du bouton. */
+  choose(opts: ChooseOptions): Promise<string | null>;
   alert(opts: AlertOptions | string): Promise<void>;
   /** Affiche le message d'une erreur (à brancher sur un `.catch`). */
   showError(err: unknown): Promise<void>;
@@ -58,6 +79,7 @@ export interface Dialogs {
 type Pending =
   | { id: number; kind: 'confirm'; opts: ConfirmOptions & { checkbox?: ConfirmCheckbox }; resolve: (v: boolean | { checked: boolean } | null) => void }
   | { id: number; kind: 'prompt'; opts: PromptOptions; resolve: (v: string | null) => void }
+  | { id: number; kind: 'choose'; opts: ChooseOptions; resolve: (v: string | null) => void }
   | { id: number; kind: 'alert'; opts: AlertOptions; resolve: () => void };
 
 const DialogsContext = createContext<Dialogs | null>(null);
@@ -81,11 +103,12 @@ export function DialogProvider({ children }: { children: ReactNode }) {
     const confirm = ((opts: ConfirmOptions & { checkbox?: ConfirmCheckbox }) =>
       new Promise<boolean | { checked: boolean } | null>((resolve) => enqueue({ kind: 'confirm', opts, resolve }))) as Dialogs['confirm'];
     const prompt: Dialogs['prompt'] = (opts) => new Promise((resolve) => enqueue({ kind: 'prompt', opts, resolve }));
+    const choose: Dialogs['choose'] = (opts) => new Promise((resolve) => enqueue({ kind: 'choose', opts, resolve }));
     const alert: Dialogs['alert'] = (opts) =>
       new Promise((resolve) => enqueue({ kind: 'alert', opts: typeof opts === 'string' ? { message: opts } : opts, resolve }));
     const showError: Dialogs['showError'] = (err) =>
       alert({ title: 'Erreur', danger: true, message: err instanceof Error ? err.message : String(err) });
-    return { confirm, prompt, alert, showError };
+    return { confirm, prompt, choose, alert, showError };
   }, [enqueue]);
 
   const current = queue[0];
@@ -104,6 +127,8 @@ export function DialogProvider({ children }: { children: ReactNode }) {
   );
 }
 
+const defaultChoice = (choices: Choice[]): Choice | undefined => choices.find((c) => c.primary) ?? choices[choices.length - 1];
+
 function DialogModal({ pending, show, onSettled, onExited }: { pending: Pending; show: boolean; onSettled: () => void; onExited: () => void }) {
   const [value, setValue] = useState(pending.kind === 'prompt' ? (pending.opts.defaultValue ?? '') : '');
   const [checked, setChecked] = useState(pending.kind === 'confirm' ? (pending.opts.checkbox?.defaultChecked ?? false) : false);
@@ -118,14 +143,18 @@ function DialogModal({ pending, show, onSettled, onExited }: { pending: Pending;
   const cancel = () =>
     finish(() => {
       if (pending.kind === 'confirm') pending.resolve(pending.opts.checkbox ? null : false);
-      else if (pending.kind === 'prompt') pending.resolve(null);
+      else if (pending.kind === 'prompt' || pending.kind === 'choose') pending.resolve(null);
       else pending.resolve();
     });
+  const pick = (value: string) => finish(() => pending.kind === 'choose' && pending.resolve(value));
   const ok = () =>
     finish(() => {
       if (pending.kind === 'confirm') pending.resolve(pending.opts.checkbox ? { checked } : true);
       else if (pending.kind === 'prompt') pending.resolve(value.trim());
-      else pending.resolve();
+      else if (pending.kind === 'choose') {
+        const main = defaultChoice(pending.opts.choices);
+        pending.resolve(main ? main.value : null);
+      } else pending.resolve();
     });
 
   const promptInvalid = pending.kind === 'prompt' && (pending.opts.required ?? true) && !value.trim();
@@ -161,6 +190,17 @@ function DialogModal({ pending, show, onSettled, onExited }: { pending: Pending;
             <Button type="submit" variant={danger ? 'danger' : 'primary'} autoFocus>
               {pending.opts.closeLabel ?? 'Fermer'}
             </Button>
+          ) : pending.kind === 'choose' ? (
+            <>
+              <Button variant="outline-secondary" onClick={cancel}>
+                {pending.opts.cancelLabel || 'Annuler'}
+              </Button>
+              {pending.opts.choices.map((c) => (
+                <Button key={c.value} variant={c.variant ?? 'outline-primary'} onClick={() => pick(c.value)} autoFocus={c === defaultChoice(pending.opts.choices)}>
+                  {c.label}
+                </Button>
+              ))}
+            </>
           ) : (
             <>
               <Button variant="outline-secondary" onClick={cancel}>

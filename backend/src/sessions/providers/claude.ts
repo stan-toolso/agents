@@ -81,6 +81,10 @@ interface ClaudeConfig {
   allowedTools?: string;
 }
 
+/** Liste d'outils pré-autorisés d'une session (« Read,Bash(git:*) »). */
+export const splitAllowedTools = (value: unknown): string[] =>
+  value ? String(value).split(',').map((t) => t.trim()).filter(Boolean) : [];
+
 const permissionModes: PermissionMode[] = ['default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions'];
 
 /**
@@ -152,7 +156,7 @@ export class ClaudeProvider implements SessionProvider {
             { value: 'default', label: 'Me demander avant chaque action sensible', description: 'Chaque modification de fichier ou commande vous est soumise (recommandé).' },
             { value: 'acceptEdits', label: 'Modifier les fichiers librement', description: 'Les modifications de fichiers sont autorisées ; les commandes restent soumises.' },
             { value: 'plan', label: 'Réfléchir seulement, sans rien modifier', description: "L'agent analyse et propose un plan, sans toucher aux fichiers." },
-            { value: 'dontAsk', label: 'Ne jamais me demander', description: 'Les actions non autorisées sont refusées automatiquement.' },
+            { value: 'dontAsk', label: 'Refuser sans demander', description: "Les actions non autorisées d'avance sont refusées ; aucune demande ne vous sera faite. Pour ne plus être dérangé, préférez « Modifier les fichiers librement » ou « Tout autoriser »." },
             { value: 'bypassPermissions', label: 'Tout autoriser (risqué)', description: "L'agent agit sans aucune confirmation." },
           ],
         },
@@ -290,7 +294,11 @@ export class ClaudeProvider implements SessionProvider {
     // pas l'outil Skill (aucun outil intégré) : il lit le contexte par les outils MCP.
     const pluginDir = chat || review || !projectContext ? null : await materializeSkills(ctx.project);
     const agentPluginDir = chat || review || !agent ? null : await materializeSkills(ctx.project, agent.id);
-    const allowedTools = cfg.allowedTools ? String(cfg.allowedTools).split(',').map((t) => t.trim()).filter(Boolean) : [];
+    const allowedTools = splitAllowedTools(cfg.allowedTools);
+    // Outils pré-autorisés ajoutés en cours de session (« Autoriser cet outil pour la session » du transcript) : le CLI
+    // ne relit pas allowedTools à chaud, le hook PreToolUse les applique (sa décision passe avant le mode, y compris
+    // « Refuser sans demander »). Au prochain lancement, ils rejoignent allowedTools.
+    let liveAllowed: string[] = [];
     // Autorisations mémorisées pour le projet (« ne plus demander dans ce projet »).
     const projectRules = await permissionRuleService.list(ctx.project.id);
     const ruleUsage: RuleUsage = { rules: projectRules, asked: new Set(), pending: new Map() };
@@ -410,13 +418,16 @@ export class ClaudeProvider implements SessionProvider {
         ? undefined
         : {
             // Outils pré-autorisés de la planification : appliqués aux seuls tours qu'elle lance, y compris en mode
-            // « Ne jamais me demander » (le SDK n'y appelle pas canUseTool ; la décision d'un hook passe avant le mode).
+            // « Refuser sans demander » (le SDK n'y appelle pas canUseTool ; la décision d'un hook passe avant le mode).
             PreToolUse: [
               {
                 hooks: [
                   async (input) => {
                     const { tool_name: toolName, tool_input: toolInput } = input as { tool_name?: string; tool_input?: Record<string, unknown> };
                     if (!toolName) return {};
+                    if (liveAllowed.length && scheduleAllows(liveAllowed, toolName, toolInput ?? {}, ctx.cwd)) {
+                      return { hookSpecificOutput: { hookEventName: 'PreToolUse' as const, permissionDecision: 'allow' as const, permissionDecisionReason: 'Autorisé pour la session' } };
+                    }
                     const rules = await activeScheduleRules(ctx.session.id);
                     if (!rules || !scheduleAllows(rules, toolName, toolInput ?? {}, ctx.cwd)) return {};
                     await this.noteScheduleAllowed(ctx, toolName);
@@ -558,6 +569,12 @@ export class ClaudeProvider implements SessionProvider {
           if (!permissionModes.includes(mode)) throw new AppError(`permissionMode invalide : ${String(mode)}`);
           await stream.setPermissionMode(mode);
           applied.push('permissionMode');
+        }
+        if ('allowedTools' in patch && !review) {
+          const next = splitAllowedTools(patch.allowedTools);
+          liveAllowed = next.filter((rule) => !allowedTools.includes(rule));
+          // Un outil retiré de la liste de départ reste autorisé jusqu'au prochain lancement : changement non appliqué.
+          if (allowedTools.every((rule) => next.includes(rule))) applied.push('allowedTools');
         }
         if ('model' in patch) {
           const fresh = await claudeSettings.forSession(accounts?.claudeUserId ?? null);
