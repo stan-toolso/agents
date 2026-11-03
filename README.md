@@ -379,7 +379,8 @@ fréquence, masqué après 30 s) ; la clé privée SSH et le jeton Google ne qui
 avec `restrict,command="…"`), clé d'hôte mémorisée à la première connexion et vérifiée ensuite, liste
 blanche de préfixes de commandes (qui désactive alors enchaînements et transferts). PostgreSQL : rôle
 dédié recommandé, « lecture seule » force des transactions `READ ONLY`, TLS avec certificat d'autorité
-optionnel (Cloud SQL), une seule instruction par appel, résultats tronqués à 200 lignes. Le champ « base de
+optionnel (Cloud SQL ; pour un hôte `*.<région>.rds.amazonaws.com` sans certificat, le bundle RDS de la
+région est téléchargé et gardé en cache, nom d'hôte vérifié), une seule instruction par appel, résultats tronqués à 200 lignes. Le champ « base de
 données » est facultatif : vide, l'élément couvre **le serveur entier** et l'agent nomme la base à chaque
 appel (paramètre `database` de `sql_query` et `sql_schema`, base de maintenance `postgres` par défaut ;
 `sql_schema` sans base liste les bases du serveur). API : l'agent
