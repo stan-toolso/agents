@@ -105,7 +105,7 @@ export function useSessionActions(session: ControlledSession | null | undefined)
           type="button"
           className="cc-btn accent"
           disabled={resuming}
-          title={session.activity === 'BUSY' ? "L'agent reprend le travail coupé par le redémarrage du serveur" : "Rouvre la conversation ; l'agent attend votre prochaine instruction"}
+          title={session.activity === 'BUSY' ? "L'agent reprend le travail coupé par le redémarrage du serveur" : "Rend la session reprenable sans lancer de tour (rien n'est facturé) : votre prochain message la relance"}
           onClick={() => resumeSession({ variables: { id } })}
         >
           <i className="bi bi-play-fill" /> Reprendre

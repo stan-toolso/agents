@@ -251,3 +251,37 @@ describe('sessions inactives', () => {
     expect(await sessionService.endIdleSessions(Date.now() + 24 * 3_600_000)).toEqual([]);
   });
 });
+
+describe('tâche terminée', () => {
+  it('une session inactive se termine tout de suite, sans notification ni délai', async () => {
+    const { sessionService } = await load({ idleSessionTimeoutMinutes: 60 });
+    const fake = fakeProvider();
+    providers.current = fake.provider;
+    const a = await sessionService.create({ projectId: 'p', worksessionId: 'w1', name: 'a', provider: 'fake', prompt: 'x' });
+    await fake.handles.get(a.id)!.ctx.setActivity('idle');
+
+    expect(await sessionService.endForTask(a.id, 'tâche terminée')).toBe('ended');
+    await settle();
+    expect(session(a.id).status).toBe('completed');
+    expect(eventsOf(a.id).some((e) => e.payload.reason === 'task_done' && e.payload.message === 'tâche terminée')).toBe(true);
+    expect(notifications.notify).not.toHaveBeenCalled();
+    // Déjà terminée : rien à faire.
+    expect(await sessionService.endForTask(a.id, 'tâche terminée')).toBe('none');
+  });
+
+  it('une session au travail se termine à la fin de son tour', async () => {
+    const { sessionService } = await load({ idleSessionTimeoutMinutes: 60 });
+    const fake = fakeProvider();
+    providers.current = fake.provider;
+    const a = await sessionService.create({ projectId: 'p', worksessionId: 'w1', name: 'a', provider: 'fake', prompt: 'x' });
+
+    expect(await sessionService.endForTask(a.id, 'tâche terminée')).toBe('deferred');
+    await settle();
+    expect(session(a.id).status).toBe('running');
+    await fake.handles.get(a.id)!.ctx.setActivity('idle');
+    await settle();
+    expect(session(a.id).status).toBe('completed');
+    expect(eventsOf(a.id).some((e) => e.payload.reason === 'task_done')).toBe(true);
+    expect(notifications.notify).not.toHaveBeenCalled();
+  });
+});

@@ -23,6 +23,7 @@ import { instanceRegistry } from '../instances/registry.js';
 import { callInstance } from '../instances/client.js';
 import type { Attachment, AttachmentInput, CreateSessionInput, RelaunchInput, Session, SessionFilter, SessionStatus } from './types.js';
 import { log } from '../log.js';
+import { claudeSettings } from '../settings/claude.js';
 import { reviewOf } from '../reviews/types.js';
 import { pullRequestRepository } from '../pullRequests/repository.js';
 import type { TrackedPullRequest } from '../pullRequests/types.js';
@@ -45,6 +46,11 @@ const slots = new Map<string, string>();
 const idleSince = new Map<string, number>();
 /** Sessions terminées par le serveur (inactivité, remise à zéro de la conversation à la limite de contexte) : leur fin n'est pas notifiée. */
 const endedForIdle = new Set<string>();
+/**
+ * Sessions à terminer à la fin de leur tour, avec le message du transcript : leur tâche est passée à « terminée »
+ * pendant qu'elles travaillaient (`sessionService.endForTask`). En mémoire, comme le processus.
+ */
+const endAfterTurn = new Map<string, string>();
 /** Traitement de fin de session (mise à jour du statut) en cours, par id de session. */
 const finishing = new Map<string, Promise<void>>();
 /**
@@ -105,9 +111,9 @@ const INTERRUPTION_NOTICES: Record<InterruptionReason, string> = {
 const resumeMessage = (reason: InterruptionReason) =>
   `${INTERRUPTION_CAUSES[reason]} pendant ton tour et l'a interrompu. Reprends là où tu en étais : vérifie l'état des fichiers et des commandes en cours avant de continuer. Les demandes d'autorisation ou questions en attente ont été annulées : refais l'action ou repose la question si elle est encore utile.`;
 
-/** Reprise d'une session qui attendait des instructions : rouvrir la conversation sans lui donner de travail. */
-const idleResumeMessage = (reason: InterruptionReason) =>
-  `${INTERRUPTION_CAUSES[reason]} pendant que tu attendais une instruction ; la conversation reprend. Ne fais rien d'autre que répondre « Prêt » et attends la suite.`;
+
+/** Ce qu'une session interrompue en attente devient à la reprise (transcript). */
+const IDLE_SETTLED_NOTICE = "Session prête à reprendre : elle attendait des instructions, aucun tour n'est relancé. Envoyez un message pour la continuer.";
 
 /**
  * Cause de l'interruption des sessions interrompues par ce serveur (mémoire du serveur) : après un
@@ -141,6 +147,19 @@ async function interruptSession(id: string, reason: InterruptionReason): Promise
   pubSub.publish('sessionUpdated', session);
   await requestService.cancelAllForSession(id, 'expired');
   return session;
+}
+
+/**
+ * « Reprise » d'une session interrompue alors qu'elle attendait des instructions : aucun tour n'est lancé (il réécrirait
+ * tout le contexte, cache expiré, pour un « Prêt » sans travail). Elle passe à « terminée », comme après `idle_timeout` :
+ * sa conversation est conservée et le prochain message la relance. Null si elle n'est plus interrompue.
+ */
+async function settleIdleInterrupted(id: string, message: string, reason: string): Promise<Session | null> {
+  const current = await sessionRepository.findById(id);
+  if (current?.status !== 'interrupted') return null;
+  await emitEvent(id, 'system', { message, notice: true, reason, activity: current.activity });
+  await emitEvent(id, 'status', { status: 'completed' });
+  return publishSession(await sessionRepository.update(id, { status: 'completed', activity: null }));
 }
 
 /** Attend la fin de session de ces sessions (mise à jour finale du statut), sans jamais bloquer plus de `timeoutMs`. */
@@ -333,6 +352,23 @@ async function drainOnce(): Promise<void> {
   }
 }
 
+/** Modèle fixé par la configuration d'une session (chaîne non vide), sinon null. */
+const configModel = (config: Record<string, unknown> | null | undefined): string | null => (typeof config?.model === 'string' && config.model.trim() ? config.model.trim() : null);
+
+/** Le compte Claude qui servira la session de ce propriétaire (le sien, ou celui prêté à un agent) autorise-t-il ce modèle ? */
+async function modelAllowedForOwner(ownerId: string | null, model: string): Promise<boolean> {
+  if (!ownerId) return false;
+  try {
+    const accounts = await agentService.accountsForOwner(ownerId);
+    const settings = await claudeSettings.forUser(accounts?.claudeUserId ?? ownerId);
+    settings.assertModelAllowed(model);
+    return true;
+  } catch {
+    log.info(`[sessions] modèle du projet ${model} ignoré : non autorisé pour le propriétaire ${ownerId}`);
+    return false;
+  }
+}
+
 /**
  * PR encore ouverte du dossier de travail d'une session. Une session d'agent qui porte une PR ouverte ne s'archive pas
  * (ni par l'outil `sessions.archive`, ni d'office en fin de tour) : elle garde son contexte et son dossier pour les
@@ -432,6 +468,14 @@ export const sessionService = {
         throw new AppError(`Au plus ${MAX_RUNNING_CHILDREN} sessions lancées par cette session peuvent tourner en même temps : termine-en une (sessions.end) avant d'en lancer une autre`);
       }
       parentSessionId = parent.id;
+    }
+
+    // Modèle : celui choisi (ou celui de l'agent), sinon celui que le projet propose pour ce lancement (priorité de la
+    // tâche, puis défaut du projet), pourvu que le compte Claude du propriétaire l'autorise ; sinon rien n'est fixé et le
+    // modèle par défaut du propriétaire s'applique au démarrage.
+    if (input.provider === 'claude' && !configModel(input.config)) {
+      const proposed = input.defaultModel?.trim() || project.defaultModel;
+      if (proposed && (await modelAllowedForOwner(ownerId, proposed))) input = { ...input, config: { ...input.config, model: proposed } };
     }
 
     let worksessionId = input.worksessionId ?? null;
@@ -597,6 +641,8 @@ export const sessionService = {
           if (activity === 'idle') idleSince.set(id, Date.now());
           else idleSince.delete(id);
           await publishSession(await sessionRepository.update(id, { activity }));
+          const endNotice = activity === 'idle' ? endAfterTurn.get(id) : undefined;
+          if (endNotice !== undefined) endAfterTurn.delete(id);
           // Fin du premier tour d'une session au nom provisoire : titre court généré en arrière-plan.
           if (activity === 'idle') void autoTitleService.afterTurn(id, publishSession);
           if (activity === 'idle' && drainingInstance) void park(id);
@@ -608,6 +654,11 @@ export const sessionService = {
               .archiveAfterTurn(id)
               .then(async (archived) => {
                 if (archived) return;
+                // Sa tâche est terminée depuis le début du tour : la session se termine plutôt que d'attendre le délai d'inactivité.
+                if (endNotice !== undefined) {
+                  await sessionService.endForTask(id, endNotice);
+                  return;
+                }
                 const { cleanupService } = await import('./cleanup.js');
                 await cleanupService.afterTurn(id);
               })
@@ -652,6 +703,7 @@ export const sessionService = {
       running.delete(id);
       slots.delete(id);
       idleSince.delete(id);
+      endAfterTurn.delete(id);
       const idleEnd = endedForIdle.delete(id);
       // La place libérée revient à la première session de la file d'attente.
       this.drainQueue();
@@ -1092,8 +1144,8 @@ export const sessionService = {
 
   /**
    * Reprise manuelle d'une session interrompue par un redémarrage (bouton « Reprendre ») : si l'agent
-   * travaillait, il reprend son tour avec l'instruction de reprise ; sinon la conversation est rouverte
-   * et l'agent attend la suite. Les demandes expirées ne sont pas rejouées.
+   * travaillait, il reprend son tour avec l'instruction de reprise ; sinon aucun tour n'est lancé (rien n'est
+   * facturé) : la session passe à « terminée » et le prochain message la relance. Les demandes expirées ne sont pas rejouées.
    */
   async resume(id: string): Promise<Session> {
     const session = await sessionRepository.findById(id);
@@ -1101,9 +1153,11 @@ export const sessionService = {
     assertNotArchived(session);
     if (session.status !== 'interrupted') throw new AppError("Seule une session interrompue peut être reprise ainsi : envoyez-lui un message");
     const reason = reasonOf(id);
-    const midTurn = session.activity === 'busy';
+    if (session.activity !== 'busy') {
+      return (await settleIdleInterrupted(id, IDLE_SETTLED_NOTICE, 'manual_resume')) ?? publishSession(await sessionRepository.findById(id));
+    }
     await emitEvent(id, 'system', { message: reason.startsWith('runner_') ? "Reprise après la recréation de l'environnement d'exécution" : 'Reprise après le redémarrage du serveur', notice: true, reason: 'manual_resume', activity: session.activity });
-    return this.start(id, midTurn ? resumeMessage(reason) : idleResumeMessage(reason));
+    return this.start(id, resumeMessage(reason));
   },
 
   /**
@@ -1130,8 +1184,8 @@ export const sessionService = {
 
   /**
    * Reprise de toutes les sessions interrompues par `interruptForRunner`, une fois l'environnement
-   * recréé : l'agent qui travaillait reprend son tour, celui qui attendait retrouve sa conversation
-   * ouverte. Une reprise impossible (limite, maintenance…) laisse la session interrompue, avec
+   * recréé : l'agent qui travaillait reprend son tour ; celle qui attendait passe à « terminée » sans tour (le
+   * prochain message la relance). Une reprise impossible (limite, maintenance…) laisse la session interrompue, avec
    * l'explication dans son transcript : le bouton « Reprendre » reste disponible.
    */
   async resumeAfterRunner(sessions: Session[]): Promise<string[]> {
@@ -1144,8 +1198,13 @@ export const sessionService = {
         await awaitFinished([session.id], RESUME_AFTER_RUNNER_TIMEOUT_MS);
         const current = await sessionRepository.findById(session.id);
         if (current?.status !== 'interrupted' || current.archivedAt) continue;
+        // Elle attendait des instructions : pas de tour à relancer, le prochain message la reprendra.
+        if (session.activity !== 'busy') {
+          if (await settleIdleInterrupted(session.id, IDLE_SETTLED_NOTICE, 'auto_resume')) resumed.push(session.id);
+          continue;
+        }
         await emitEvent(session.id, 'system', { message: "Reprise automatique après la recréation de l'environnement d'exécution", notice: true, reason: 'auto_resume' });
-        await this.start(session.id, session.activity === 'busy' ? resumeMessage(reason) : idleResumeMessage(reason));
+        await this.start(session.id, resumeMessage(reason));
         resumed.push(session.id);
       } catch (err) {
         log.error(`[sessions] reprise de ${session.id} après recréation de l'environnement impossible`, err);
@@ -1201,11 +1260,14 @@ export const sessionService = {
     for (const id of running.keys()) if (idleSince.has(id)) void park(id);
   },
 
-  /** Sessions actives sur ce serveur (à consulter avant un redémarrage). */
+  /** Sessions actives sur ce serveur (à consulter avant un redémarrage) : au travail et en attente, avec processus. */
   async activeSummary(): Promise<{ active: number; busy: number; idle: number }> {
     const ids = [...running.keys()];
     return { active: ids.length, ...(await sessionRepository.countByActivity(ids)) };
   },
+
+  /** Sessions sans processus mais reprenables : garées, et terminées-reprenables depuis 24 h (voir `countResumable`). */
+  resumableSummary: (now = Date.now()) => sessionRepository.countResumable(new Date(now - 24 * 60 * 60 * 1000)),
 
   /** Places occupées (sessions en cours ou en train de démarrer), au total et par projet. */
   slotUsage(): { total: number; byProject: Map<string, number> } {
@@ -1265,6 +1327,34 @@ export const sessionService = {
       }
     }
     return ended;
+  },
+
+  /**
+   * La tâche dont la session est en charge est terminée : une session qui attend des instructions (avec processus, ou
+   * garée) se termine tout de suite, sans attendre le délai d'inactivité ; une session au travail se terminera à la fin
+   * de son tour. Fin silencieuse (pas de notification) ; sa conversation est conservée et un message la relance.
+   * Renvoie ce qui a été fait ('none' : la session ne tourne pas, ou se termine déjà).
+   */
+  async endForTask(id: string, notice: string): Promise<'ended' | 'deferred' | 'none'> {
+    const handle = running.get(id);
+    if (!handle) {
+      if (instanceRegistry.hasPeers()) {
+        const holder = await instanceRegistry.holder((await sessionRepository.findById(id))?.instanceId);
+        if (holder) return callInstance<'ended' | 'deferred' | 'none'>(holder, 'session.endForTask', { id, notice });
+      }
+      const session = await sessionRepository.findById(id);
+      if (!session?.parkedAt || session.status !== 'running') return 'none';
+      await emitEvent(id, 'system', { message: notice, notice: true, reason: 'task_done' });
+      return (await endParked(id, 'completed')) ? 'ended' : 'none';
+    }
+    if (endedForIdle.has(id) || archiveWhenDone.has(id) || parking.has(id) || stopping) return 'none';
+    if (!idleSince.has(id)) {
+      endAfterTurn.set(id, notice);
+      return 'deferred';
+    }
+    await emitEvent(id, 'system', { message: notice, notice: true, reason: 'task_done' });
+    await this.end(id, { quiet: true });
+    return 'ended';
   },
 
   /** Lance la minuterie de la file d'attente et de l'arrêt des sessions inactives (au démarrage du serveur). */

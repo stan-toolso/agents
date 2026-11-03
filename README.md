@@ -1933,6 +1933,16 @@ l'application sont repris au démarrage dans le coffre et les réglages du premi
 - **Modèles** : modèles proposés à la création d'une session (`allowedModels`, vide = tous), modèle
   par défaut et modèle de repli. Le champ « Modèle » du formulaire de session devient une liste
   déroulante ; un modèle hors liste est refusé côté serveur.
+- **Modèle par projet, par planification et par tâche** : un projet peut fixer le modèle de ses nouvelles
+  sessions (`projects.default_model`) et celui des sessions de tâches selon la priorité (`projects.task_models`,
+  ex. `{"low": "sonnet"}`), dans son formulaire. À la création d'une session Claude sans modèle choisi
+  (`sessionService.create`), on prend celui de la priorité de la tâche (`startTaskSession`), sinon celui du
+  projet, **seulement s'il est autorisé** par le compte Claude du propriétaire (sinon son modèle par défaut) ;
+  il est alors écrit dans `config.model`. Le modèle d'un agent l'emporte. Une planification choisit le modèle
+  de sa session (modale de planification) : elle peut tourner sur Sonnet pendant que les sessions manuelles
+  restent sur Opus. « Confier à un agent » préremplit le modèle proposé pour la priorité. `Session.model`
+  (configuration, sinon défaut du propriétaire) s'affiche dans la sidebar quand ce n'est pas Opus. Rien ne
+  change tant que ces réglages sont vides.
 - **Facturation** : plafond mensuel (USD, toutes les sessions de la personne), budget par défaut par
   session (`maxBudgetUsd` du SDK) et nombre d'étapes par défaut. À chaque fin de tour, le delta de
   `total_cost_usd` est enregistré dans `usage_ledger` (par session, projet et personne, ventilé par

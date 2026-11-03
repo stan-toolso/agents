@@ -165,6 +165,12 @@ describe('feedsFor (sessions reliées)', () => {
     ]);
     expect(feeds.find((f) => f.sessionId === 's1')!.text).toContain('Tiens-en compte dans ton travail');
   });
+  it('une tâche fermée par une personne n’ouvre pas de tour : la session en charge (qui va se terminer) en reçoit une note', () => {
+    for (const status of ['done', 'cancelled'] as const) {
+      const feeds = feedsFor({ kind: 'updated', addedAttachments: [], before: task, task: { ...task, status }, actor: alice });
+      expect(feeds.map((f) => [f.sessionId, f.quiet, f.restart])).toEqual([['s1', true, false]]);
+    }
+  });
   it('une réaction n’est signalée qu’à la session autrice du message, sans relance', () => {
     const reaction: TaskReaction = { id: 'r1', taskId: 't1', commentId: 'c1', emoji: '👍', actorType: 'human', userId: 'u1', sessionId: null, actorName: 'Alice', createdAt: new Date() };
     const target = comment({ authorType: 'agent', authorSessionId: 's2', authorName: 'Session 2', body: 'Fait.' });

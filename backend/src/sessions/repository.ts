@@ -376,6 +376,21 @@ export const sessionRepository = {
     return { busy: Number(rows[0].busy), idle: Number(rows[0].idle) };
   },
 
+  /**
+   * Sessions sans processus mais reprenables, sur tout le serveur : garées (« running », attendent une instruction sans
+   * processus depuis un drainage) et terminées-reprenables (terminées, arrêtées ou interrompues depuis `since`, non
+   * archivées, avec une conversation : un message les relance sans rien coûter avant).
+   */
+  async countResumable(since: Date): Promise<{ parked: number; resumable: number }> {
+    const { rows } = await pool.query<{ parked: string; resumable: string }>(
+      `SELECT count(*) FILTER (WHERE status = 'running' AND parked_at IS NOT NULL)::text AS parked,
+              count(*) FILTER (WHERE status IN ('completed', 'stopped', 'interrupted') AND external_id IS NOT NULL AND archived_at IS NULL AND ended_at >= $1)::text AS resumable
+       FROM sessions WHERE status = 'running' OR ended_at >= $1`,
+      [since],
+    );
+    return { parked: Number(rows[0]?.parked ?? 0), resumable: Number(rows[0]?.resumable ?? 0) };
+  },
+
   async addEvent(sessionId: string, type: string, payload: Record<string, unknown> = {}): Promise<SessionEvent> {
     const { rows } = await pool.query<EventRow>(
       `INSERT INTO session_events (session_id, type, payload)
