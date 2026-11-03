@@ -38,6 +38,9 @@ import { fileService, type WorkspaceRef } from '../files/service.js';
 import { parseRepoFullName, pullRequestService, type MergeCleanup, type MergeMethod, type PullRequest, type PullRequestFilter } from '../git/pullRequests.js';
 import { foreignRepoOf, projectRepoName, trackedPullRequestService } from '../pullRequests/service.js';
 import { pullRequestSession, requestConflictResolution } from '../pullRequests/conflicts.js';
+import { deliveryService } from '../deliveries/service.js';
+import type { Delivery, DeployConfig, DeployConfigInput } from '../deliveries/types.js';
+import { ciVerdict } from '../git/pullRequests.js';
 import { requestGitConflictResolution } from '../git/conflicts.js';
 import { reviewService } from '../reviews/service.js';
 import { reviewOf, type SessionReview } from '../reviews/types.js';
@@ -543,6 +546,20 @@ export const resolvers = {
     session: (pr: TrackedPullRequest) => pullRequestSession(pr),
   },
 
+  Delivery: {
+    kind: (d: Delivery) => d.kind.toUpperCase(),
+    status: (d: Delivery) => d.status.toUpperCase(),
+    requestedBy: (d: Delivery, _: unknown, ctx: Ctx) => userOrNull(ctx, d.requestedById),
+    joinedBy: async (d: Delivery, _: unknown, ctx: Ctx) => (await Promise.all(d.joinedByIds.map((id) => userOrNull(ctx, id)))).filter(Boolean),
+    session: (d: Delivery) => (d.sessionId ? sessionService.get(d.sessionId).catch(() => null) : null),
+    task: (d: Delivery) => (d.taskId ? taskService.get(d.taskId).catch(() => null) : null),
+    cancellable: (d: Delivery) => (d.status === 'queued' || d.status === 'running') && !d.steps.some((st) => st.phase === 'command'),
+    durationSeconds: (d: Delivery) => (d.startedAt ? Math.round(((d.finishedAt ?? new Date()).getTime() - d.startedAt.getTime()) / 1000) : null),
+  },
+  DeployConfig: {
+    updatedBy: (c: DeployConfig, _: unknown, ctx: Ctx) => userOrNull(ctx, c.updatedById),
+  },
+
   VaultItem: {
     kind: (i: VaultItem) => i.kind,
     ownerUser: (i: VaultItem, _: unknown, ctx: Ctx) => userOrNull(ctx, i.ownerUserId),
@@ -991,6 +1008,27 @@ export const resolvers = {
     githubPullRequestDraft: async (_: unknown, args: WorkspaceRef, ctx: Ctx) => {
       await requireProject(ctx, args.projectId, 'member');
       return pullRequestService.draft(args, requireUser(ctx).id);
+    },
+    deliveries: async (_: unknown, args: { projectId: string; worksessionId?: string | null; taskId?: string | null; kind?: string | null; limit?: number | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId);
+      const kind = args.kind?.toLowerCase();
+      return deliveryService.list({ projectId: args.projectId, worksessionId: args.worksessionId ?? undefined, taskId: args.taskId ?? undefined, kind: kind === 'merge' || kind === 'deploy' ? kind : undefined, limit: args.limit ?? 50 });
+    },
+    delivery: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      const d = await deliveryService.get(args.id);
+      if (!d) return null;
+      await requireProject(ctx, d.projectId);
+      return d;
+    },
+    deployConfig: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId);
+      return deliveryService.getConfig(args.projectId);
+    },
+    ciStatus: async (_: unknown, args: { projectId: string; ref?: string | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId);
+      const project = await projectService.get(args.projectId);
+      const ci = await pullRequestService.ciStatus(args.projectId, requireUser(ctx).id, args.ref?.trim() || project.gitBranch || 'main');
+      return { ...ci, verdict: ciVerdict(ci.state, ci.checks) };
     },
     pullRequests: async (_: unknown, args: { projectId?: string | null; taskId?: string | null; status?: string[] | null; stage?: string[] | null; limit?: number | null }, ctx: Ctx) => {
       if (args.projectId) {
@@ -1462,6 +1500,31 @@ export const resolvers = {
     syncPullRequests: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId);
       return trackedPullRequestService.sync(args.projectId, requireUser(ctx).id, { force: true });
+    },
+    deliver: async (_: unknown, args: { sessionId?: string | null; taskId?: string | null; deploy?: boolean | null }, ctx: Ctx) => {
+      if (args.sessionId) await guardSession(ctx, args.sessionId, 'member');
+      else if (args.taskId) await requireProject(ctx, (await taskService.get(args.taskId)).projectId, 'member');
+      else throw new AppError('Livrer quoi ? Une session ou une tâche est attendue');
+      const userId = requireUser(ctx).id;
+      if (args.deploy) {
+        const projectId = args.sessionId ? await projectOfSession(args.sessionId) : (await taskService.get(args.taskId!)).projectId;
+        await requireProject(ctx, projectId, 'admin');
+      }
+      return deliveryService.deliver({ sessionId: args.sessionId, taskId: args.taskId, userId, deploy: Boolean(args.deploy) });
+    },
+    requestDeploy: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'admin');
+      return deliveryService.requestDeploy(args.projectId, requireUser(ctx).id);
+    },
+    cancelDelivery: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      const d = await deliveryService.get(args.id);
+      if (!d) throw new NotFoundError('Livraison introuvable');
+      await requireProject(ctx, d.projectId, d.kind === 'deploy' ? 'admin' : 'member');
+      return deliveryService.cancel(args.id, requireUser(ctx).id);
+    },
+    setDeployConfig: async (_: unknown, args: { projectId: string; input?: DeployConfigInput | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'admin');
+      return deliveryService.setConfig(args.projectId, args.input ?? null, requireUser(ctx).id);
     },
     watchPullRequests: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId);

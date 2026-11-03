@@ -176,7 +176,7 @@ describe('serveur MCP tasks', () => {
   it('déclare tous ses outils (schémas acceptés par le SDK), dont ceux des pull requests', async () => {
     const client = await connect();
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
-    expect(names).toEqual(['claim', 'comment', 'create', 'get', 'list', 'people', 'pr_list', 'pr_merge', 'pr_open', 'pr_register', 'pr_update', 'react', 'release', 'request_approval', 'update']);
+    expect(names).toEqual(['ci_status', 'claim', 'comment', 'create', 'get', 'list', 'people', 'pr_list', 'pr_merge', 'pr_open', 'pr_register', 'pr_update', 'react', 'release', 'request_approval', 'update']);
     // Tout outil libre existe ; pr_open (pousse et ouvre sur GitHub) n'est pas libre.
     for (const free of TASKS_FREE_TOOLS) expect(names).toContain(free.replace('mcp__tasks__', ''));
     expect(TASKS_FREE_TOOLS).not.toContain('mcp__tasks__pr_open');

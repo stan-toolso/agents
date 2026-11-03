@@ -107,6 +107,9 @@ export interface MergeCleanup {
   completeTasks?: boolean | null;
 }
 
+export { ciVerdict, describeCi, type CiStatus, type CiVerdict } from './ci.js';
+import type { CiStatus } from './ci.js';
+
 export interface MergeResult {
   pullRequest: PullRequest;
   sha: string | null;
@@ -220,6 +223,13 @@ async function graphql<T>(token: string, query: string, variables: Record<string
   return data!.data as T;
 }
 
+/** Checks d'un commit (état agrégé et détail), partagés par les PR et par `ciStatus`. */
+const CHECK_ROLLUP = `statusCheckRollup { state contexts(first: 30) { nodes {
+      __typename
+      ... on CheckRun { name status conclusion detailsUrl }
+      ... on StatusContext { context state targetUrl }
+    } } }`;
+
 const PR_FIELDS = `
   number title body url state isDraft createdAt updatedAt mergedAt closedAt
   author { login avatarUrl }
@@ -228,14 +238,18 @@ const PR_FIELDS = `
   additions deletions changedFiles
   commits(last: 1) {
     totalCount
-    nodes { commit { statusCheckRollup { state contexts(first: 30) { nodes {
-      __typename
-      ... on CheckRun { name status conclusion detailsUrl }
-      ... on StatusContext { context state targetUrl }
-    } } } } }
+    nodes { commit { ${CHECK_ROLLUP} } }
   }
   latestReviews(first: 20) { nodes { author { login } state } }
 `;
+
+type GqlRollup = {
+  state: string;
+  contexts: { nodes: Array<{ __typename: string; name?: string; status?: string; conclusion?: string | null; detailsUrl?: string | null; context?: string; state?: string; targetUrl?: string | null }> };
+} | null;
+
+/** Détail des checks d'un état agrégé GitHub. */
+const checksOf = (rollup: GqlRollup): PullRequestCheck[] => (rollup?.contexts.nodes ?? []).map((c) => ({ name: c.name ?? c.context ?? '?', state: checkState(c), url: c.detailsUrl ?? c.targetUrl ?? null }));
 
 interface GqlPullRequest {
   number: number;
@@ -311,7 +325,7 @@ function toPullRequest(projectId: string, repo: GithubRepoRef, p: GqlPullRequest
     mergeStateStatus: p.mergeStateStatus,
     reviewDecision: p.reviewDecision,
     checksState: rollup?.state ?? null,
-    checks: (rollup?.contexts.nodes ?? []).map((c) => ({ name: c.name ?? c.context ?? '?', state: checkState(c), url: c.detailsUrl ?? c.targetUrl ?? null })),
+    checks: checksOf(rollup),
     reviews: p.latestReviews.nodes.map((r) => ({ author: r.author?.login ?? '?', state: r.state })),
     additions: p.additions,
     deletions: p.deletions,
@@ -624,6 +638,28 @@ export const pullRequestService = {
     }
     invalidate(repo);
     return this.get(ref.projectId, userId, created.number, sameAsProject ? null : repo);
+  },
+
+  /**
+   * CI d'une branche ou d'un commit du dépôt du projet (GitHub seulement) : même lecture des checks que les PR.
+   * `ref` : nom de branche, SHA (abrégé accepté) ou toute expression git que GitHub sait résoudre.
+   */
+  async ciStatus(projectId: string, userId: string | null | undefined, ref: string): Promise<CiStatus> {
+    const expr = ref.trim();
+    if (!expr || !/^[A-Za-z0-9][A-Za-z0-9._\/~^-]*$/.test(expr) || expr.includes('..')) throw new AppError(`Référence invalide : ${ref}`);
+    const project = await projectService.get(projectId);
+    const repo = parseGithubRepo(project.gitUrl);
+    if (!repo || project.gitHosted) throw new AppError("L'état de la CI n'est disponible que pour un dépôt GitHub");
+    const token = await requireToken(projectId, userId);
+    const data = await graphql<{ repository: { object: { oid?: string; statusCheckRollup?: GqlRollup } | null } }>(
+      token,
+      `query($owner: String!, $name: String!, $expr: String!) { repository(owner: $owner, name: $name) { object(expression: $expr) { ... on Commit { oid ${CHECK_ROLLUP} } } } }`,
+      { owner: repo.owner, name: repo.name, expr },
+    );
+    const commit = data.repository.object;
+    if (!commit?.oid) throw new AppError(`Branche ou commit introuvable dans ${repoFullName(repo)} : ${expr}`);
+    const rollup = commit.statusCheckRollup ?? null;
+    return { ref: expr, sha: commit.oid, state: rollup?.state ?? null, checks: checksOf(rollup) };
   },
 
   /** Poste un commentaire sur la PR (fil de conversation GitHub) avec le compte de la personne ; renvoie son URL. */

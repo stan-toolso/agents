@@ -496,9 +496,11 @@ export const gitService = {
     const cwd = await resolveRoot(ref);
     const branch = (await gitRaw(['rev-parse', '--abbrev-ref', 'HEAD'], cwd)).stdout.trim();
     if (branch === 'HEAD') throw new AppError('HEAD détaché : rien à pousser');
-    const hasUpstream = (await gitRaw(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], cwd)).code === 0;
+    const upstream = await gitRaw(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], cwd);
     const auth = await authOf(ref, actorId);
-    return hasUpstream ? git(['push'], cwd, auth) : git(['push', '-u', 'origin', branch], cwd, auth);
+    // Branche qui suit sa propre branche distante : simple push. Sans suivi, ou qui suit une autre branche (worktree
+    // créé depuis origin/main : « upstream branch does not match »), on pousse sous son nom et on la fait suivre.
+    return upstream.code === 0 && upstream.stdout.trim() === `origin/${branch}` ? git(['push'], cwd, auth) : git(['push', '-u', 'origin', branch], cwd, auth);
   },
 
   /**

@@ -78,6 +78,7 @@ export function describeTool(rawName: string, input: Record<string, unknown> = {
           react: [`Réaction ${str(input, 'emoji') ?? ''} sur une tâche`, 'réagir sur une tâche'],
           people: ['Consultation des personnes et sessions mentionnables', 'consulter qui peut être mentionné'],
           pr_list: ['Consultation des pull requests suivies', 'consulter les pull requests suivies'],
+          ci_status: [`Lecture de l'état de la CI${str(input, 'ref') ? ` de ${str(input, 'ref')}` : ''}`, "lire l'état de la CI"],
           pr_open: [`Ouverture de la pull request « ${title ?? ''} » sur GitHub (branche poussée avec votre compte)`, `ouvrir la pull request « ${title ?? ''} » sur GitHub`],
           pr_merge: [`Fusion de la pull request ${str(input, 'pr') ?? str(input, 'id') ?? ''} avec votre compte`, `fusionner la pull request ${str(input, 'pr') ?? str(input, 'id') ?? ''}${str(input, 'title') ? ` « ${str(input, 'title')} »` : ''} avec votre compte, à votre nom`],
           pr_register: ["Suivi d'une pull request existante", 'suivre une pull request existante'],
