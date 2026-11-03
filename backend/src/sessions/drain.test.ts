@@ -13,7 +13,7 @@ const store = vi.hoisted(() => ({
 const repo = vi.hoisted(() => ({
   list: vi.fn(async () => []),
   create: vi.fn(async (input: Record<string, unknown>) => {
-    const s = { id: `s${++store.seq}`, projectId: 'p', worksessionId: null, parentSessionId: null, name: input.name, provider: input.provider, status: 'pending', activity: null, prompt: input.prompt, promptAttachments: [], config: {}, externalId: null, exitCode: null, error: null, instanceId: null, parkedAt: null };
+    const s = { id: `s${++store.seq}`, projectId: 'p', worksessionId: (input.worksessionId as string) ?? null, parentSessionId: null, name: input.name, provider: input.provider, status: 'pending', activity: null, prompt: input.prompt, promptAttachments: [], config: {}, externalId: null, exitCode: null, error: null, instanceId: null, parkedAt: null };
     store.sessions.set(s.id, s);
     return { ...s };
   }),
@@ -182,7 +182,7 @@ describe('session garée', () => {
     const { sessionService } = await load();
     const fake = fakeProvider();
     providers.current = fake.provider;
-    store.sessions.set('g', { id: 'g', projectId: 'p', name: 'g', provider: 'fake', status: 'running', activity: 'idle', prompt: 'p', promptAttachments: [], config: {}, externalId: 'conv', instanceId: null, parkedAt: new Date() });
+    store.sessions.set('g', { id: 'g', projectId: 'p', worksessionId: 'w1', name: 'g', provider: 'fake', status: 'running', activity: 'idle', prompt: 'p', promptAttachments: [], config: {}, externalId: 'conv', instanceId: null, parkedAt: new Date() });
     await sessionService.sendMessage('g', 'continue');
     expect(repo.claimParked).toHaveBeenCalledWith('g', 'me');
     expect(fake.handles.get('g')!.messages).toEqual(['continue']);
@@ -192,7 +192,7 @@ describe('session garée', () => {
   it("s'arrête sans processus, et une interruption n'a rien à faire", async () => {
     const { sessionService } = await load();
     providers.current = fakeProvider().provider;
-    store.sessions.set('g', { id: 'g', projectId: 'p', name: 'g', provider: 'fake', status: 'running', activity: 'idle', prompt: 'p', promptAttachments: [], config: {}, externalId: 'conv', instanceId: null, parkedAt: new Date() });
+    store.sessions.set('g', { id: 'g', projectId: 'p', worksessionId: 'w1', name: 'g', provider: 'fake', status: 'running', activity: 'idle', prompt: 'p', promptAttachments: [], config: {}, externalId: 'conv', instanceId: null, parkedAt: new Date() });
     expect((await sessionService.interrupt('g')).status).toBe('running');
     await sessionService.stop('g');
     expect(session('g')).toMatchObject({ status: 'stopped', activity: null, parkedAt: null });
@@ -204,7 +204,7 @@ describe('session tenue par une autre instance', () => {
     const { sessionService } = await load();
     providers.current = fakeProvider().provider;
     instances.peers = [peer('blue', true)];
-    store.sessions.set('r', { id: 'r', projectId: 'p', name: 'r', provider: 'fake', status: 'running', activity: 'busy', prompt: 'p', promptAttachments: [], config: {}, externalId: 'conv', instanceId: 'blue', parkedAt: null });
+    store.sessions.set('r', { id: 'r', projectId: 'p', worksessionId: 'w1', name: 'r', provider: 'fake', status: 'running', activity: 'busy', prompt: 'p', promptAttachments: [], config: {}, externalId: 'conv', instanceId: 'blue', parkedAt: null });
     await sessionService.sendMessage('r', 'et aussi ceci');
     await sessionService.interrupt('r');
     await sessionService.stop('r');

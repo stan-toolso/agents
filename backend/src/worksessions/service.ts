@@ -418,8 +418,9 @@ export const worksessionService = {
   },
 
   /**
-   * Dossier de travail effectif d'une session ou d'un terminal : sa work session (recréée au besoin). Seules
-   * les sessions d'avant les work sessions n'en ont pas : elles reprennent dans le checkout principal.
+   * Dossier de travail effectif d'une session ou d'un terminal : sa work session (recréée au besoin). Sans work
+   * session : le checkout principal, réservé aux chats et aux terminaux d'avant les work sessions ; une session
+   * sans work session n'arrive pas jusqu'ici (`assertHasWorksession` dans sessions/service.ts).
    */
   async resolveCwd(project: Project, worksessionId: string | null | undefined): Promise<string> {
     if (!worksessionId) return ensureWorkspace(project);

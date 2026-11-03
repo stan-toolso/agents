@@ -163,6 +163,9 @@ export default function SessionDetailPage() {
   // Chat : conversation légère de l'espace personnel, sans dossier de travail (ni panneau de droite, ni planification).
   const chat = session?.kind === 'CHAT';
   const archived = Boolean(session?.archivedAt);
+  // Dossier de travail supprimé (à la fusion de sa PR, par exemple) : la session ne reprend plus, le serveur refuse
+  // toute instruction ; on la relance dans un nouveau dossier.
+  const folderGone = Boolean(session && !chat && !session.worksession && session.status !== 'RUNNING');
   // Interlocuteurs de la conversation (rendu sans détail technique) : la personne qui pilote la session (qui a pris
   // la main, qui l'a demandée à l'agent, ou sa propriétaire), sinon la session d'agent qui l'a lancée ; en face,
   // l'agent de projet qui la joue, sinon le modèle.
@@ -236,7 +239,7 @@ export default function SessionDetailPage() {
     canInterrupt,
   );
 
-  const canSend = Boolean(text.trim() || attachments.items.length) && !sending && !encoding && !archived;
+  const canSend = Boolean(text.trim() || attachments.items.length) && !sending && !encoding && !archived && !folderGone;
   const submit = async () => {
     if (!canSend) return;
     const value = text.trim();
@@ -334,6 +337,8 @@ export default function SessionDetailPage() {
         : "L'agent travaille… (Échap deux fois pour l'interrompre)"
       : running
         ? "⏵ L'agent attend vos instructions"
+        : folderGone
+          ? `■ Dossier de travail supprimé${session.formerWorksession ? ` (branche ${session.formerWorksession.branch})` : ''} — la session ne peut plus reprendre : relancez-la dans un nouveau dossier${archived ? '' : ', ou archivez-la'}`
         : archived
           ? "■ Session archivée — restaurez-la pour reprendre la conversation, ou relancez-en une nouvelle"
           : session.status === 'QUEUED'
@@ -504,7 +509,7 @@ export default function SessionDetailPage() {
         </span>
       </div>
 
-      {!archived && !readOnly && (
+      {!archived && !folderGone && !readOnly && (
       <div
         className="cc-input"
         onClick={(e) => {

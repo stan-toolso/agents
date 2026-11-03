@@ -12,7 +12,7 @@ const store = vi.hoisted(() => ({
 const repo = vi.hoisted(() => ({
   list: vi.fn(async () => []),
   create: vi.fn(async (input: Record<string, unknown>) => {
-    const s = { id: `s${++store.seq}`, projectId: (input.projectId as string) ?? 'p', worksessionId: null, parentSessionId: null, name: input.name, provider: input.provider, status: 'pending', activity: null, prompt: input.prompt, promptAttachments: [], config: {}, externalId: null, exitCode: null, error: null };
+    const s = { id: `s${++store.seq}`, projectId: (input.projectId as string) ?? 'p', worksessionId: (input.worksessionId as string) ?? null, parentSessionId: null, name: input.name, provider: input.provider, status: 'pending', activity: null, prompt: input.prompt, promptAttachments: [], config: {}, externalId: null, exitCode: null, error: null };
     store.sessions.set(s.id, s);
     return { ...s };
   }),
@@ -176,7 +176,7 @@ describe('reprise automatique au démarrage', () => {
     const { sessionService, serverSettings } = await load();
     const starts: (string | null)[] = [];
     providers.current = { ...fakeProvider().provider, start: async (ctx) => (starts.push(ctx.initialMessage), { wait: () => new Promise(() => undefined), stop: async () => undefined }) };
-    store.sessions.set('x', { id: 'x', projectId: 'p', name: 'x', provider: 'fake', status: 'interrupted', activity: 'busy', prompt: 'p', promptAttachments: [], config: {}, externalId: 'conv' });
+    store.sessions.set('x', { id: 'x', projectId: 'p', worksessionId: 'w1', name: 'x', provider: 'fake', status: 'interrupted', activity: 'busy', prompt: 'p', promptAttachments: [], config: {}, externalId: 'conv' });
     repo.listInterruptedMidTurn.mockResolvedValue([{ ...store.sessions.get('x') }]);
 
     await serverSettings.update({ autoResumeInterrupted: false });
@@ -195,7 +195,7 @@ describe('reprise manuelle (bouton « Reprendre »)', () => {
     const { sessionService } = await load();
     const starts: (string | null)[] = [];
     providers.current = { ...fakeProvider().provider, start: async (ctx) => (starts.push(ctx.initialMessage), { wait: () => new Promise(() => undefined), stop: async () => undefined }) };
-    const base = { projectId: 'p', provider: 'fake', status: 'interrupted', prompt: 'consigne initiale', promptAttachments: [], config: {}, externalId: 'conv' };
+    const base = { projectId: 'p', worksessionId: 'w1', provider: 'fake', status: 'interrupted', prompt: 'consigne initiale', promptAttachments: [], config: {}, externalId: 'conv' };
     store.sessions.set('b', { ...base, id: 'b', name: 'b', activity: 'busy' });
     store.sessions.set('i', { ...base, id: 'i', name: 'i', activity: 'idle' });
     store.sessions.set('c', { ...base, id: 'c', name: 'c', activity: null, status: 'completed' });

@@ -139,7 +139,8 @@ export function useSessionActions(session: ControlledSession | null | undefined)
       </button>
       {archived || chat ? (
         <>
-          {archived && (
+          {/* Dossier supprimé depuis : restaurée, elle ne pourrait pas reprendre (le serveur refuse) ; on la relance. */}
+          {archived && (chat || session.worksession) && (
             <button type="button" className="cc-btn accent" title="Remet la session parmi les sessions actives" onClick={() => unarchiveSession({ variables: { id } })}>
               Restaurer
             </button>
