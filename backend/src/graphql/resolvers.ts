@@ -46,6 +46,7 @@ import { importProjectArchive, MAX_IMPORT_BYTES } from '../exports/service.js';
 import { runner, type RunnerConfig } from '../runners/index.js';
 import { containerMonitor } from '../runners/monitor.js';
 import { runnerLifecycle } from '../runners/lifecycle.js';
+import { checkBrowser } from '../browser/check.js';
 import type { ContextChange, ContextInstruction, ContextInstructionVersion } from '../context/types.js';
 import { projectService } from '../projects/service.js';
 import { isPersonalProject } from '../projects/types.js';
@@ -1628,6 +1629,10 @@ export const resolvers = {
       const project = await projectService.get(args.id);
       await runnerLifecycle.reset(project);
       return project;
+    },
+    testProjectBrowser: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.id, 'member');
+      return checkBrowser(await projectService.get(args.id));
     },
     deleteProject: async (_: unknown, args: { id: string; deleteHostedRepo?: boolean | null }, ctx: Ctx) => {
       await requireProject(ctx, args.id, 'admin');

@@ -2694,3 +2694,59 @@ export const INBOX = gql`
     }
   }
 `;
+
+/** Contrôle du navigateur headless d'un projet (carte « Navigateur headless » des réglages). */
+export interface BrowserCheck {
+  ok: boolean;
+  enabled: boolean;
+  image: string | null;
+  probe: {
+    arch: string | null;
+    chromiumPath: string | null;
+    chromiumVersion: string | null;
+    browsers: string[];
+    mcpPath: string | null;
+    mcpVersion: string | null;
+    memoryLimitMb: number | null;
+    memoryUsedMb: number | null;
+    memoryAvailableMb: number | null;
+  } | null;
+  problems: { level: 'error' | 'warning'; code: string; message: string }[];
+  steps: { label: string; ok: boolean; detail: string | null; durationMs: number }[];
+  screenshot: string | null;
+  durationMs: number;
+}
+
+export const TEST_PROJECT_BROWSER = gql`
+  mutation TestProjectBrowser($id: ID!) {
+    testProjectBrowser(id: $id) {
+      ok
+      enabled
+      image
+      probe {
+        arch
+        chromiumPath
+        chromiumVersion
+        browsers
+        mcpPath
+        mcpVersion
+        memoryLimitMb
+        memoryUsedMb
+        memoryAvailableMb
+      }
+      problems {
+        level
+        code
+        message
+      }
+      steps {
+        label
+        ok
+        detail
+        durationMs
+      }
+      screenshot
+      durationMs
+    }
+  }
+`;

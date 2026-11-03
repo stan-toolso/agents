@@ -23,6 +23,7 @@ import { contextService } from '../../context/service.js';
 import { materializeSkills } from '../../context/skills.js';
 import { AppError } from '../../errors.js';
 import { liveBrowserService } from '../../browser/live.js';
+import { BROWSER_FIELD_READERS, browserPrompt, explainBrowserFailure } from '../../browser/check.js';
 import { createGoogleMcpServer } from '../../google/mcp.js';
 import { googleAccountService, googleReadTools } from '../../google/service.js';
 import { permissionRuleService, suggestedMode, withEditedRules } from '../../permissions/service.js';
@@ -275,9 +276,6 @@ export class ClaudeProvider implements SessionProvider {
         chat ? '' : sharedPagesPrompt(),
         ctx.session.worksessionId && !chat ? previewPrompt(previewsEnabled(), ctx.session.worksessionId) : '',
         previewWorksession ? previewMcpPrompt() : '',
-        browserEnabled
-          ? "Un navigateur headless (Chromium) est disponible via les outils `mcp__playwright__*` : navigue, lis la page (`browser_snapshot`), clique et remplis des formulaires pour tester les interfaces web. Le serveur de développement à tester se lance dans l'environnement du projet ; ses URL en localhost y sont accessibles. Pour te connecter à un site web du coffre, clique le champ du formulaire puis appelle `browser_fill` : Skipper y saisit la valeur, que tu ne vois jamais."
-          : '',
       ]
     )
       .filter(Boolean)
@@ -292,11 +290,21 @@ export class ClaudeProvider implements SessionProvider {
     const ruleUsage: RuleUsage = { rules: projectRules, asked: new Set(), pending: new Map() };
     // Le navigateur ne reçoit aucun secret à l'avance : le coffre les saisit à la demande (browser_fill).
     let browserServer: Awaited<ReturnType<typeof runner.browserMcpCommand>> | null = null;
+    // Navigateur qui ne démarre pas : la session part sans lui, avec la raison dans le transcript et dans le prompt
+    // (sinon l'agent passe des tours à tenter d'installer Chromium lui-même).
+    let browserUnavailable: string | null = null;
     if (browserEnabled) {
-      browserServer = await runner.browserMcpCommand(ctx.project, ctx.cwd, { sessionId: ctx.session.id });
-      // Vue en direct du navigateur dans l'interface (le backend s'y attache par CDP quand quelqu'un regarde).
-      liveBrowserService.register(ctx.session.id, ctx.project, browserServer.cdp);
+      try {
+        browserServer = await runner.browserMcpCommand(ctx.project, ctx.cwd, { sessionId: ctx.session.id });
+        // Vue en direct du navigateur dans l'interface (le backend s'y attache par CDP quand quelqu'un regarde).
+        liveBrowserService.register(ctx.session.id, ctx.project, browserServer.cdp);
+      } catch (err) {
+        browserUnavailable = await explainBrowserFailure(ctx.project, (err as Error).message);
+        log.warn(`[browser] session ${ctx.session.id} : ${browserUnavailable}`);
+        await ctx.emit('system', { notice: true, browser: true, message: `Navigateur headless indisponible pour cette session : ${browserUnavailable}` });
+      }
     }
+    const fullSystemPrompt = browserEnabled ? [systemPrompt, browserPrompt({ prefix: 'mcp__playwright__', fill: 'browser_fill', unavailable: browserUnavailable })].join('\n\n') : systemPrompt;
     // Approbations mémorisées « pour la session » sur les éléments du coffre (outil|clé).
     const vaultApprovals = new Set<string>();
     const vaultContext = {
@@ -325,7 +333,7 @@ export class ClaudeProvider implements SessionProvider {
 
     const options: Options = {
       cwd: ctx.cwd,
-      systemPrompt: { type: 'preset', preset: 'claude_code', append: systemPrompt },
+      systemPrompt: { type: 'preset', preset: 'claude_code', append: fullSystemPrompt },
       mcpServers: review ? { context: createContextMcpServer(ctx.project, ctx.session.id) } : {
         context: createContextMcpServer(ctx.project, ctx.session.id, { agentLibraries, defaultAgentId: agent?.id ?? null }),
         tasks: createTasksMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name, scope),
@@ -375,7 +383,7 @@ export class ClaudeProvider implements SessionProvider {
       allowedTools: review ? REVIEW_ALLOWED_TOOLS : [...allowedTools, ...projectRules.map(formatRule), 'mcp__context', ...TASKS_FREE_TOOLS, ...CONVERSATIONS_FREE_TOOLS, 'mcp__vault', 'mcp__worksessions__list', 'mcp__worksessions__create', 'mcp__sessions__list', 'mcp__sessions__get', 'mcp__sessions__wait', 'mcp__sessions__end', 'mcp__sessions__archive', 'mcp__pages__list', 'mcp__projects', ...AGENTS_FREE_TOOLS, ...(chat ? [] : ['mcp__env']), ...(previewWorksession ? ['mcp__preview'] : []), ...(browserServer ? browserReadTools : []), ...(googleAccounts.length ? googleReadTools(googleAccounts) : [])],
       ...(review ? { disallowedTools: REVIEW_DISALLOWED_TOOLS } : {}),
       // Le coffre saisit des secrets dans le navigateur : les outils qui pourraient relire la valeur sont retirés à l'agent.
-      ...(browserServer && vaultBrowser ? { disallowedTools: ['mcp__playwright__browser_evaluate', 'mcp__playwright__browser_run_code'] } : {}),
+      ...(browserServer && vaultBrowser ? { disallowedTools: BROWSER_FIELD_READERS.map((t) => `mcp__playwright__${t}`) } : {}),
       // Reprise de la conversation Claude si la session a déjà tourné et que le CLI la retrouve encore.
       resume: (await this.resumableConversation(ctx)) ?? undefined,
       pathToClaudeCodeExecutable: claudeExecutable,
@@ -407,7 +415,7 @@ export class ClaudeProvider implements SessionProvider {
 
     await ctx.emit('system', {
       message: `Lancement via Claude Agent SDK${options.resume ? ` (reprise de ${options.resume})` : ''}`,
-      options: { cwd: options.cwd, project: ctx.project.slug, chat, personalScope: Boolean(scope), systemPromptLength: systemPrompt.length, contextPlugin: pluginDir, browser: browserEnabled, vaultItems: vaultItems.map((i) => i.name), googleAccounts: googleAccounts.map((a) => a.email), model: options.model, fallbackModel: options.fallbackModel, authMode: general.authMode, permissionMode: options.permissionMode, maxTurns: options.maxTurns, maxBudgetUsd: options.maxBudgetUsd, allowedTools: options.allowedTools, owner: ownerId },
+      options: { cwd: options.cwd, project: ctx.project.slug, chat, personalScope: Boolean(scope), systemPromptLength: fullSystemPrompt.length, contextPlugin: pluginDir, browser: browserEnabled, vaultItems: vaultItems.map((i) => i.name), googleAccounts: googleAccounts.map((a) => a.email), model: options.model, fallbackModel: options.fallbackModel, authMode: general.authMode, permissionMode: options.permissionMode, maxTurns: options.maxTurns, maxBudgetUsd: options.maxBudgetUsd, allowedTools: options.allowedTools, owner: ownerId },
     });
 
     const queue = new MessageQueue();
@@ -716,6 +724,14 @@ export class ClaudeProvider implements SessionProvider {
     // Tour refusé pour cause de limite : le message du CLI (« You've reached your … limit ») est peu explicite.
     if (message.type === 'assistant' && message.error === 'rate_limit') {
       await ctx.emit('system', { notice: true, rateLimit: true, message: describeRejection(rateLimitService.current()) });
+    }
+    // Serveur MCP du navigateur qui n'a pas démarré dans le CLI (playwright-mcp absent, plantage) : explication dans le transcript.
+    if (message.type === 'system' && message.subtype === 'init') {
+      const playwright = message.mcp_servers.find((m) => m.name === 'playwright');
+      if (playwright && playwright.status !== 'connected' && playwright.status !== 'pending') {
+        const reason = await explainBrowserFailure(ctx.project, `le serveur MCP playwright est « ${playwright.status} » dans le CLI.`);
+        await ctx.emit('system', { notice: true, browser: true, message: `Navigateur headless indisponible : ${reason}` });
+      }
     }
     // Premier outil du navigateur utilisé par l'agent : la vue en direct est proposée dans la sidebar.
     if (message.type === 'assistant' && message.message.content.some((b) => b.type === 'tool_use' && b.name.startsWith('mcp__playwright__'))) {
