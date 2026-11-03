@@ -1,4 +1,6 @@
 import { useMutation, useQuery } from '@apollo/client';
+import GoneNotice from '../components/GoneNotice';
+import { isGoneError } from '../lib/gone';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Spinner } from 'react-bootstrap';
 import { Link, useParams } from 'react-router-dom';
@@ -139,8 +141,9 @@ export default function TerminalPage() {
         </div>
       </div>
     );
+  if (isGoneError(error) || (!error && !terminal)) return <GoneNotice what="Ce terminal" scope="page" />;
   if (error) return <Alert variant="danger" className="m-3">Erreur : {error.message}</Alert>;
-  if (!terminal) return <Alert variant="warning" className="m-3">Terminal introuvable.</Alert>;
+  if (!terminal) return null;
 
   const live = terminal.status === 'RUNNING';
   return (

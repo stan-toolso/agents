@@ -13,6 +13,8 @@ const yoga = createYoga({
         refused: String!
         missing: String!
         broken: String!
+        anonymous: String!
+        badId: String!
       }
     `,
     resolvers: {
@@ -23,6 +25,13 @@ const yoga = createYoga({
         },
         missing: () => {
           throw new NotFoundError('Tâche introuvable');
+        },
+        anonymous: () => {
+          throw new AppError('Connexion requise', 'UNAUTHENTICATED');
+        },
+        // Ce que lève node-postgres pour un identifiant qui n'est pas un UUID.
+        badId: () => {
+          throw Object.assign(new Error('invalid input syntax for type uuid: "x"'), { code: '22P02' });
         },
         broken: () => {
           throw new TypeError("Cannot read properties of undefined (reading 'id')");
@@ -76,6 +85,21 @@ describe('journal GraphQL', () => {
     const lines = err[0].split('\n');
     expect(lines[0]).toMatch(/ ERROR \[graphql\] broken : TypeError : Cannot read properties of undefined \(reading 'id'\)$/);
     expect(lines.slice(1).some((l) => /^\s+at /.test(l))).toBe(true);
+  });
+
+  it("« Connexion requise » (session expirée) n'apparaît qu'en debug", async () => {
+    const { body } = await query('query Providers { anonymous }');
+    expect(body.errors?.[0]).toMatchObject({ message: 'Connexion requise', extensions: { code: 'UNAUTHENTICATED' } });
+    expect(err).toEqual([]);
+    setLogLevel('debug');
+    await query('query Providers { anonymous }');
+    expect(out).toContainEqual(expect.stringMatching(/DEBUG \[graphql\] Providers · anonymous · stan@example.com : Connexion requise$/));
+  });
+
+  it('un identifiant qui n\'est pas un UUID renvoie « introuvable », journalisé en une ligne sans trace', async () => {
+    const { body } = await query('query SessionChanges { badId }');
+    expect(body.errors?.[0]).toMatchObject({ message: 'Ressource introuvable', extensions: { code: 'NOT_FOUND' } });
+    expect(err).toEqual([expect.stringMatching(/WARN  \[graphql\] SessionChanges · badId · stan@example.com : Ressource introuvable$/)]);
   });
 
   it('une requête réussie ne journalise rien au niveau info', async () => {
