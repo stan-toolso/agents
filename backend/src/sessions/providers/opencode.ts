@@ -32,7 +32,7 @@ import { projectBudget } from '../../projects/budget.js';
 import { createSharedPagesMcpServer, sharedPagesPrompt } from '../../sharedPages/mcp.js';
 import { previewPrompt } from '../../previews/config.js';
 import { previewsEnabled } from '../../previews/hosts.js';
-import { askMergeApproval } from '../../pullRequests/mergeApproval.js';
+import { sessionMergeApprover } from '../../pullRequests/mergeApproval.js';
 import { createTasksMcpServer, TASKS_FREE_TOOLS } from '../../tasks/mcp.js';
 import { CONVERSATIONS_FREE_TOOLS, conversationsMcpPrompt, createConversationsMcpServer } from '../../conversations/mcp.js';
 import { conversationService, linkedThreadsPrompt } from '../../conversations/service.js';
@@ -355,7 +355,7 @@ class OpencodeRun {
     };
     const factories: Record<string, McpFactory> = {
       context: () => createContextMcpServer(ctx.project, ctx.session.id, { agentLibraries, defaultAgentId: agent?.id ?? null }),
-      tasks: () => createTasksMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name, undefined, { approveMerge: (approval) => askMergeApproval((input) => ctx.ask(input), approval) }),
+      tasks: () => createTasksMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name, undefined, { approveMerge: sessionMergeApprover(ctx) }),
       ...(channels.length ? { conversations: () => createConversationsMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name) } : {}),
       ...(vaultTools ? { vault: () => createVaultMcpServer(vaultContext) } : {}),
       worksessions: () => createWorksessionsMcpServer(ctx.project, ctx.session.id),

@@ -25,7 +25,8 @@ const failure = (t: string) => ({ content: [{ type: 'text' as const, text: t }],
  * Outils du serveur `tasks` autorisés d'office (réversibles, sans coût, sans effet hors de la base). `pr_open`
  * n'y est pas : il pousse la branche et ouvre une pull request sur GitHub avec le compte de la personne, donc
  * passe par la demande d'autorisation. `pr_merge` y est parce qu'il pose lui-même sa demande (`approveMerge`) :
- * la personne qui l'accepte fusionne avec son compte, même en mode « ne jamais demander », et jamais d'office.
+ * la personne qui l'accepte fusionne avec son compte, même en mode « ne jamais demander » ; en mode « Tout autoriser », la
+ * personne qui pilote la session (au moins membre) l'accepte implicitement (`implicitMergeApprover`).
  * `request_approval` y est aussi : il ne fait que poser une demande d'accord à un administrateur (ou constater l'accord
  * implicite de la personne qui a demandé le travail), sans rien exécuter.
  */
@@ -414,7 +415,7 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
       ),
       tool(
         'pr_merge',
-        "Fusionne une pull request suivie du projet, seulement quand une personne te l'a demandé. Pose une demande d'autorisation : la personne qui l'accepte fusionne avec son propre compte (GitHub, GitLab ou Forgejo), à son nom ; le compte prêté à cette session ne sert pas. Supprime ensuite la branche distante et passe à « terminée » les tâches de la branche ; le dossier de travail est gardé.",
+        "Fusionne une pull request suivie du projet, seulement quand une personne te l'a demandé. Pose une demande d'autorisation : la personne qui l'accepte fusionne avec son propre compte (GitHub, GitLab ou Forgejo), à son nom (en mode « Tout autoriser », la personne qui pilote la session l'accepte d'office) ; le compte prêté à cette session ne sert pas. Supprime ensuite la branche distante et passe à « terminée » les tâches de la branche ; le dossier de travail est gardé.",
         {
           id: z.string().describe('Identifiant de la PR suivie (donné par pr_list ou get), son numéro dans le dépôt du projet (« 42 », « #42 ») ou son URL'),
           method: z.enum(['merge', 'squash', 'rebase']).optional().describe('Méthode de fusion ; défaut : merge'),
