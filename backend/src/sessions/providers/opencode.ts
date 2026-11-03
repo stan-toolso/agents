@@ -5,6 +5,7 @@ import net from 'node:net';
 import { createInterface } from 'node:readline';
 import { createOpencodeClient, type Event as OpencodeEvent, type OpencodeClient, type Part, type PermissionRequest, type QuestionRequest } from '@opencode-ai/sdk/v2';
 import { liveBrowserService } from '../../browser/live.js';
+import { BROWSER_FIELD_READERS, browserPrompt, explainBrowserFailure } from '../../browser/check.js';
 import { createContextMcpServer } from '../../context/mcp.js';
 import { agentService } from '../../agents/service.js';
 import { agentIdentityPrompt } from '../../agents/prompt.js';
@@ -79,7 +80,6 @@ const SUGGESTED_MODELS: { value: string; label: string; description?: string }[]
 /** Outils du navigateur en lecture, libres ; les actions passent par les demandes d'autorisation. */
 const BROWSER_READ_TOOLS = ['browser_snapshot', 'browser_take_screenshot', 'browser_console_messages', 'browser_network_requests', 'browser_wait_for'];
 /** Retirés quand le coffre saisit des valeurs dans le navigateur : ils reliraient une valeur tapée. */
-const BROWSER_FIELD_READERS = ['browser_evaluate', 'browser_run_code'];
 
 /** Outils des serveurs MCP de Skipper autorisés d'office (mêmes règles que pour une session Claude). */
 const SKIPPER_FREE_TOOLS = ['mcp__context', ...TASKS_FREE_TOOLS, ...CONVERSATIONS_FREE_TOOLS, 'mcp__vault', 'mcp__worksessions__list', 'mcp__worksessions__create', 'mcp__sessions__list', 'mcp__sessions__get', 'mcp__sessions__wait', 'mcp__sessions__end', 'mcp__sessions__archive', 'mcp__pages__list', 'mcp__env'];
@@ -330,9 +330,6 @@ class OpencodeRun {
       googleAccountService.promptSummary(googleAccounts),
       sharedPagesPrompt(),
       ctx.session.worksessionId ? previewPrompt(previewsEnabled(), ctx.session.worksessionId) : '',
-      browserEnabled
-        ? "Un navigateur headless (Chromium) est disponible via les outils `playwright_*` : navigue, lis la page (`playwright_browser_snapshot`), clique et remplis des formulaires pour tester les interfaces web. Le serveur de développement à tester se lance dans l'environnement du projet ; ses URL en localhost y sont accessibles. Pour te connecter à un site web du coffre, clique le champ du formulaire puis appelle `vault_browser_fill` : Skipper y saisit la valeur, que tu ne vois jamais."
-        : '',
     ]
       .filter(Boolean)
       .join('\n\n');
@@ -365,10 +362,18 @@ class OpencodeRun {
       ...(googleAccounts.length ? { google: () => createGoogleMcpServer({ project: ctx.project, accounts: googleAccounts, sessionId: ctx.session.id, cwd: ctx.cwd, emit: ctx.emit }) } : {}),
     };
     // Le navigateur ne reçoit aucun secret à l'avance : le coffre les saisit à la demande (browser_fill).
+    // Navigateur qui ne démarre pas : la session part sans lui, avec la raison dans le transcript et dans le prompt.
+    let browserUnavailable: string | null = null;
     if (browserEnabled) {
-      this.browserServer = await runner.browserMcpCommand(ctx.project, ctx.cwd, { sessionId: ctx.session.id });
-      liveBrowserService.register(ctx.session.id, ctx.project, this.browserServer.cdp);
+      try {
+        this.browserServer = await runner.browserMcpCommand(ctx.project, ctx.cwd, { sessionId: ctx.session.id });
+        liveBrowserService.register(ctx.session.id, ctx.project, this.browserServer.cdp);
+      } catch (err) {
+        browserUnavailable = await explainBrowserFailure(ctx.project, (err as Error).message);
+        await ctx.emit('system', { notice: true, browser: true, message: `Navigateur headless indisponible pour cette session : ${browserUnavailable}` });
+      }
     }
+    if (browserEnabled) this.systemPrompt = [this.systemPrompt, browserPrompt({ prefix: 'playwright_', fill: 'vault_browser_fill', unavailable: browserUnavailable })].join('\n\n');
     this.bridges = await startMcpBridges(await runner.hostAddress(ctx.project), factories, (server, err) => void ctx.emit('stderr', { text: `[mcp ${server}] ${err.message}` }));
     this.mcpServerNames = [...Object.keys(factories), ...(this.browserServer ? ['playwright'] : [])];
     const googleFree = googleAccounts.length ? googleReadTools(googleAccounts) : [];

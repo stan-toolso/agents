@@ -1181,6 +1181,50 @@ type RunnerStatus {
   zombies: Int
 }
 
+"Ce que le conteneur d'un projet dit de son navigateur headless."
+type BrowserProbe {
+  arch: String
+  "Binaire « headless shell » trouvé dans /opt/ms-playwright ; null : absent de l'image."
+  chromiumPath: String
+  chromiumVersion: String
+  "Entrées de /opt/ms-playwright."
+  browsers: [String!]!
+  mcpPath: String
+  mcpVersion: String
+  memoryLimitMb: Int
+  memoryUsedMb: Int
+  "Mémoire encore disponible pour le navigateur (limite du conteneur moins utilisée, bornée par l'hôte)."
+  memoryAvailableMb: Int
+}
+
+"Problème repéré sur le navigateur : level « error » (il ne peut pas marcher) ou « warning »."
+type BrowserProblem {
+  level: String!
+  code: String!
+  message: String!
+}
+
+type BrowserCheckStep {
+  label: String!
+  ok: Boolean!
+  detail: String
+  durationMs: Int!
+}
+
+"Résultat du contrôle du navigateur headless d'un projet (testProjectBrowser)."
+type BrowserCheck {
+  ok: Boolean!
+  "L'option « navigateur headless » est activée sur le projet."
+  enabled: Boolean!
+  image: String
+  probe: BrowserProbe
+  problems: [BrowserProblem!]!
+  steps: [BrowserCheckStep!]!
+  "Capture de la page de test (data URL PNG)."
+  screenshot: String
+  durationMs: Int!
+}
+
 "Mesure du conteneur d'un projet (cgroup v2, lu dans le conteneur)."
 type ContainerStats {
   sampledAt: DateTime!
@@ -2850,6 +2894,8 @@ type Mutation {
   stopProjectRunner(id: ID!): Project!
   "Supprime le conteneur (pour repartir d'une image à jour) ; les fichiers sont conservés."
   resetProjectRunner(id: ID!): Project!
+  "Contrôle du navigateur headless dans le conteneur du projet (démarré au besoin) : Chromium, playwright-mcp, ouverture d'une page locale et capture, comme pour une session."
+  testProjectBrowser(id: ID!): BrowserCheck!
   "Supprime le projet et tout ce qui en dépend : sessions, terminaux, work sessions, conteneur, dossier de travail. Irréversible. Dépôt hébergé (Forgejo) : supprimé avec deleteHostedRepo, sinon conservé dans Forgejo, archivé (lecture seule) et renommé."
   deleteProject(id: ID!, deleteHostedRepo: Boolean = false): Boolean!
   "Importe une archive d'export de projet (tar.gz encodé en base64, produite par GET /api/projects/<id>/export.tar.gz) : contexte avec ses versions, tâches avec leur fil, réglages. Administrateurs du projet."

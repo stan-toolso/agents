@@ -688,6 +688,25 @@ L'hébergement ne se désactive pas.
   passent par les demandes d'autorisation, avec « toujours » possible. Les captures vont dans
   `.playwright-mcp/` du dossier de travail. Compter 300 à 500 Mo de mémoire par session.
 
+  Disposition de `/opt/ms-playwright` (le nom du sous-dossier dépend de l'architecture) :
+  `chromium_headless_shell-<révision>/chrome-headless-shell-linux64/chrome-headless-shell` en x86_64,
+  `chromium_headless_shell-<révision>/chrome-headless-shell-linux-arm64/chrome-headless-shell` en arm64
+  (skipper-1), à côté de `chromium-<révision>/` (Chromium complet, inutilisé) et `ffmpeg-<révision>/`.
+  Skipper prend le dernier `chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell` : ne jamais
+  chercher l'ancien chemin `chrome-linux/headless_shell`.
+
+  **Diagnostic** (`backend/src/browser/check.ts`) : si Chromium ne démarre pas, la session part quand même, sans
+  navigateur ; le transcript reçoit un avis « Navigateur headless indisponible : … » avec la cause lue dans le
+  conteneur (playwright-mcp ou Chromium absents : image à reconstruire ; mémoire disponible sous 400 Mo), et le
+  prompt système le dit à l'agent. Même avis si le CLI annonce le serveur MCP `playwright` en échec à son
+  démarrage. Le prompt précise toujours que le navigateur est fourni par le serveur MCP `playwright` et qu'il ne
+  faut pas tenter d'installer Chromium. La carte « Navigateur headless » des réglages du projet a un bouton
+  « Tester » (mutation `testProjectBrowser`) qui refait le chemin d'une session dans le conteneur : relevé
+  (version de Chromium, de playwright-mcp, architecture, mémoire disponible), lancement de Chromium,
+  `playwright-mcp` par `docker exec -i` et client MCP, ouverture d'une page `data:` locale et capture, affichée
+  avec la durée de chaque étape. Quand le coffre saisit des secrets, `browser_evaluate`, `browser_run_code` et
+  `browser_run_code_unsafe` (nouveau nom) sont retirés à l'agent (`BROWSER_FIELD_READERS`).
+
 - **Vue en direct du navigateur** (`backend/src/browser/`) : dès que l'agent a utilisé un outil
   `mcp__playwright__*`, une entrée « Navigateur » apparaît sous la session dans la sidebar
   (`Session.browserActive`) ; elle ouvre `/sessions/<id>/browser`, qui affiche en direct l'onglet
