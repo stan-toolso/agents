@@ -28,6 +28,7 @@ import type { TrackedPullRequest } from '../pullRequests/types.js';
 import { agentService } from '../agents/service.js';
 import { normalizeContextLimit } from './context.js';
 import { AUTO_ARCHIVE_KEY, archivesWhenIdle, withoutAutoArchive } from './autoArchive.js';
+import { autoTitleConfig, autoTitleService, withoutAutoTitle } from './autoTitle.js';
 
 /** Texte d'une instruction sans texte : les fichiers joints sont l'instruction. */
 const ATTACHMENTS_ONLY_TEXT = 'Voir les fichiers joints.';
@@ -380,6 +381,9 @@ export const sessionService = {
       input = { ...input, config: { ...input.config, permissionMode: project.defaultPermissionMode } };
     }
     provider.validateConfig?.(input.config ?? {});
+    // Nom provisoire : drapeau du titre généré après le premier tour ; un nom explicite ne le porte jamais (pas même hérité).
+    const { autoTitle, ...withoutFlag } = input;
+    input = { ...withoutFlag, config: autoTitle ? { ...(input.config ?? {}), ...autoTitleConfig() } : withoutAutoTitle(input.config ?? {}) };
     // Limite de contexte : celle choisie au lancement (objet vide : aucune), sinon le défaut du projet (sessions de
     // tâches, lancées par un agent…). Jamais d'autre limite que celle qu'une personne a choisie.
     input = { ...input, cleanup: (input.cleanup ? normalizeContextLimit(input.cleanup) : project.defaultContextCleanup) ?? {} };
@@ -590,6 +594,8 @@ export const sessionService = {
           if (activity === 'idle') idleSince.set(id, Date.now());
           else idleSince.delete(id);
           await publishSession(await sessionRepository.update(id, { activity }));
+          // Fin du premier tour d'une session au nom provisoire : titre court généré en arrière-plan.
+          if (activity === 'idle') void autoTitleService.afterTurn(id, publishSession);
           if (activity === 'idle' && drainingInstance) void park(id);
           // Fin d'un tour ordinaire : la limite de contexte choisie pour la session s'applique (rien sans limite). Les
           // exécutions planifiées appliquent la leur avant de démarrer (schedules/service.ts).
@@ -788,7 +794,10 @@ export const sessionService = {
     const trimmed = name.trim();
     if (!trimmed) throw new AppError('Le nom est vide');
     if (trimmed.length > 120) throw new AppError('Le nom dépasse 120 caractères');
-    return publishSession(await sessionRepository.update(id, { name: trimmed }));
+    const session = await sessionRepository.findById(id);
+    if (!session) throw new NotFoundError('Session introuvable');
+    // Un nom choisi par une personne n'est jamais remplacé par un titre généré.
+    return publishSession(await sessionRepository.update(id, { name: trimmed, config: withoutAutoTitle(session.config) }));
   },
 
   /**

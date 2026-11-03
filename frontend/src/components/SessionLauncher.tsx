@@ -222,6 +222,8 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
             projectId: project.id,
             newWorksession,
             name: prompt.trim().split('\n')[0].slice(0, 60) || attachments.items[0]?.name.slice(0, 60) || 'Session',
+            // Nom provisoire : un titre court le remplace après la première réponse (réglage Paramètres → Claude).
+            autoTitle: true,
             provider: provider!.type,
             prompt: prompt || null,
             attachments: attachments.items.length ? await toAttachmentInputs(attachments.items) : null,
