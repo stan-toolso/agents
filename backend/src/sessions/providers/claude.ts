@@ -41,7 +41,7 @@ import { RequestCancelledError } from '../../requests/service.js';
 import { runner } from '../../runners/index.js';
 import { agentGitEnv } from '../../git/agentEnv.js';
 import { gitServer } from '../../gitServer/service.js';
-import { askMergeApproval } from '../../pullRequests/mergeApproval.js';
+import { sessionMergeApprover } from '../../pullRequests/mergeApproval.js';
 import { createTasksMcpServer, TASKS_FREE_TOOLS } from '../../tasks/mcp.js';
 import { CONVERSATIONS_FREE_TOOLS, conversationsMcpPrompt, createConversationsMcpServer } from '../../conversations/mcp.js';
 import { conversationService, linkedThreadsPrompt } from '../../conversations/service.js';
@@ -348,7 +348,7 @@ export class ClaudeProvider implements SessionProvider {
       systemPrompt: { type: 'preset', preset: 'claude_code', append: fullSystemPrompt },
       mcpServers: review ? { context: createContextMcpServer(ctx.project, ctx.session.id) } : {
         context: createContextMcpServer(ctx.project, ctx.session.id, { agentLibraries, defaultAgentId: agent?.id ?? null }),
-        tasks: createTasksMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name, scope, { approveMerge: (approval) => askMergeApproval((input) => ctx.ask(input), approval) }),
+        tasks: createTasksMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name, scope, { approveMerge: sessionMergeApprover(ctx) }),
         ...(scope || channels.length ? { conversations: createConversationsMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name, scope) } : {}),
         ...(projectAgents.length ? { agents: createAgentsMcpServer(ctx.project, ctx.session.id) } : {}),
         ...(scopedAgents.length ? { agents: createAgentsMcpServer(ctx.project, ctx.session.id, scope) } : {}),

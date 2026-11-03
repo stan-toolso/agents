@@ -857,8 +857,8 @@ relevé au lieu de plusieurs centaines ; une opération GraphQL de plus de 500 m
 **Tableau de bord** (page d'accueil, `frontend/src/pages/DashboardPage.tsx`) : ce qui attend
 l'utilisateur sur l'ensemble de ses projets. Quatre tuiles (demandes en attente, agents au travail
 et en attente d'instructions, tâches ouvertes avec les retards, consommation du mois avec le
-plafond), puis la liste « À traiter » (demandes, sessions qui attendent des instructions, sessions
-en erreur depuis 24 h), les agents au travail, les tâches à surveiller (urgentes, hautes, en retard
+plafond), puis la liste « À traiter » (demandes, sessions en erreur ou interrompues depuis 24 h ;
+une session qui attend simplement des instructions n'y figure pas, elle ne demande rien), les agents au travail, les tâches à surveiller (urgentes, hautes, en retard
 ou à échéance proche), la consommation (par jour sur 30 jours, sessions les plus coûteuses du
 mois), l'activité récente et une ligne par projet (espace personnel compris). Tout vient de la query `dashboard`
 (`backend/src/dashboard/service.ts`), agrégée en SQL et restreinte aux projets de l'utilisateur ;
@@ -868,8 +868,8 @@ une question, le mode d'autorisation et le modèle, et un chat de l'espace perso
 liste de cartes. Sans projet, la page redevient le parcours d'accueil en trois étapes, sous la zone de chat.
 
 **À traiter** (`/inbox`, `frontend/src/pages/InboxPage.tsx`, entrée de la sidebar) : la file unifiée de ce qui attend une action
-humaine sur tous les projets — demandes en attente (réponse sur place via `RequestCard`), sessions en attente
-d'instructions, en erreur ou interrompues depuis 24 h (bouton « Reprendre »), pull requests ouvertes (la puce ouvre la fenêtre de
+humaine sur tous les projets — demandes en attente (réponse sur place via `RequestCard`), sessions en erreur ou
+interrompues depuis 24 h (pas celles qui attendent simplement des instructions) (bouton « Reprendre »), pull requests ouvertes (la puce ouvre la fenêtre de
 revue et de fusion). Tri par urgence puis ancienneté, filtres par projet et par nature (`lib/inbox.ts`, pur et testé), rendu
 mobile en cartes. Backend : `backend/src/inbox/service.ts`, queries `inbox` (éléments, sondée toutes les 5 s par la page) et
 `inboxCounts` (une requête SQL, sondée par la sidebar pour le badge). Les tâches « à livrer » n'y sont pas encore (voir la tâche
@@ -1237,7 +1237,7 @@ La page d'un projet (`/projects/:id`, `pages/ProjectDetailPage.tsx`) est son **t
 `projectDashboard`, `dashboard/service.ts` : la vue d'ensemble de l'accueil restreinte au projet, plus l'équipe, les
 tâches abandonnées, les planifications et les tâches des 13 dernières semaines) : tuiles de santé (demandes, agents,
 tâches, consommation ou pull requests), le canal `#général` embarqué pour parler à l'équipe, « À traiter » (demandes,
-sessions qui attendent ou en erreur, tâches en cours sans agent dessus, tâches « à valider », PR à fusionner),
+sessions en erreur ou interrompues, tâches en cours sans agent dessus, tâches « à valider », PR à fusionner),
 « L'équipe en ce moment » (chaque membre, ses sessions et les tâches qu'elles ont en charge), les tâches à
 surveiller, le **flux des tâches** par étiquette d'état (vocabulaire des agents : à cadrer → prête → en dev → à
 valider → à livrer), le **débit hebdomadaire** (créées / terminées, `lib/taskStats.ts`), les prochaines échéances et
