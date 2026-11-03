@@ -9,7 +9,7 @@ import ResumeSessionModal from '../components/ResumeSessionModal';
 import StatusBadge from '../components/StatusBadge';
 import { DELETE_SESSION, type Session } from '../graphql/operations';
 import { ARCHIVED_SESSIONS, HISTORY_PROJECT, UNARCHIVE_SESSION } from '../graphql/sessions';
-import { timeAgo } from '../lib/humanize';
+import { formatCost, timeAgo } from '../lib/humanize';
 import { useTabTitle } from '../workbench/TabsContext';
 import ProjectHeader from '../components/ProjectHeader';
 
@@ -84,6 +84,7 @@ export default function SessionHistoryPage() {
             <th className="d-none d-md-table-cell">Par</th>
             <th className="d-none d-md-table-cell">Créée</th>
             <th className="d-none d-md-table-cell">Archivée</th>
+            <th className="d-none d-md-table-cell text-end">Coût</th>
             <th />
           </tr>
         </thead>
@@ -105,6 +106,7 @@ export default function SessionHistoryPage() {
               <td className="d-none d-md-table-cell">{s.owner?.name ?? '—'}</td>
               <td className="d-none d-md-table-cell" title={fmt(s.createdAt)}>{timeAgo(s.createdAt)}</td>
               <td className="d-none d-md-table-cell" title={s.archivedAt ? fmt(s.archivedAt) : ''}>{s.archivedAt ? timeAgo(s.archivedAt) : ''}</td>
+              <td className="d-none d-md-table-cell text-end text-nowrap">{s.costUsd > 0 ? formatCost(s.costUsd) : <span className="text-secondary">—</span>}</td>
               <td className="text-end text-nowrap">
                 {s.worksession && (
                   <Button size="sm" variant="link" className="p-0 px-1" title="Restaure la session et lui envoie un message : elle reprend sa conversation là où elle s’était arrêtée" onClick={() => setResume(s)}>
@@ -141,7 +143,7 @@ export default function SessionHistoryPage() {
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={7} className="text-secondary fst-italic">
+              <td colSpan={8} className="text-secondary fst-italic">
                 {sessionsQ.loading ? 'Chargement…' : query ? 'Aucune session archivée ne correspond.' : 'Aucune session archivée.'}
               </td>
             </tr>

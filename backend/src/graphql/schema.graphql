@@ -112,6 +112,10 @@ type Project {
   defaultPermissionMode: String!
   "Limite de contexte des nouvelles sessions qui n'en choisissent pas (tâches, sessions lancées par un agent), présélectionnée au lancement : contextAction « compact » ou « reset » au-delà de contextMaxTokens. Null : aucune limite (l'interface propose au-delà du seuil de signalement)."
   defaultContextCleanup: SessionCleanup
+  "Budget mensuel du projet : atteint, le projet ne lance plus de session ni de tour (BUDGET_EXCEEDED) ; alerte des membres à 80 %. Null : aucun."
+  monthlyBudgetUsd: Float
+  "Consommation du mois calendaire en cours (toutes les sessions du projet)."
+  monthUsd: Float!
   "Noms des éléments du coffre dont les usages par les agents sont soumis à l'approbation d'un humain (même en mode bypassPermissions)."
   approvalConnections: [String!]!
   "Faux quand l'utilisateur atteint le projet en tant que super administrateur sans en être membre."
@@ -1752,6 +1756,58 @@ type UsageBySession {
   usd: Float!
 }
 
+"Consommation d'un jour (ou d'une semaine : day est alors son lundi), d'après usage_ledger."
+type UsageReportDay {
+  day: String!
+  usd: Float!
+  turns: Int!
+}
+
+type UsageReportProject {
+  "Null : projet supprimé depuis."
+  projectId: ID
+  projectName: String!
+  isPersonal: Boolean!
+  usd: Float!
+  turns: Int!
+  sessions: Int!
+  "Consommation du mois calendaire en cours (celle que le budget compare), quelle que soit la période."
+  monthUsd: Float!
+  monthlyBudgetUsd: Float
+}
+
+type UsageReportModel {
+  model: String!
+  usd: Float!
+  turns: Int!
+}
+
+type UsageReportSession {
+  sessionId: ID
+  sessionName: String
+  projectId: ID
+  projectName: String
+  ownerName: String
+  usd: Float!
+  turns: Int!
+}
+
+"Relevé de consommation sur les days derniers jours (aujourd'hui compris), d'après usage_ledger : un enregistrement par tour facturé. Les totaux par projet, jour, semaine et session se recoupent ; la ventilation par modèle est à l'arrondi près."
+type UsageReport {
+  from: DateTime!
+  to: DateTime!
+  days: Int!
+  usd: Float!
+  turns: Int!
+  sessions: Int!
+  byProject: [UsageReportProject!]!
+  byModel: [UsageReportModel!]!
+  byDay: [UsageReportDay!]!
+  byWeek: [UsageReportDay!]!
+  "Les sessions les plus coûteuses de la période (15 au plus)."
+  topSessions: [UsageReportSession!]!
+}
+
 "Consommation estimée des sessions de la personne (d'après total_cost_usd du SDK : une estimation au tarif API, pas une facture)."
 type UsageSummary {
   monthStart: DateTime!
@@ -2750,6 +2806,8 @@ input CreateSessionInput {
 }
 
 type Mutation {
+  "Budget mensuel d'un projet (unité d'affichage des coûts) ; null ou 0 : aucun. Administrateurs du projet ou de l'application."
+  setProjectBudget(projectId: ID!, monthlyBudgetUsd: Float): Project!
   "Écrit un fichier. Avec expectedModifiedAt, refuse (FILE_CONFLICT) si le fichier a changé depuis."
   writeWorkspaceFile(projectId: ID!, worksessionId: ID, path: String!, content: String!, expectedModifiedAt: DateTime): FileContent!
   createWorkspaceEntry(projectId: ID!, worksessionId: ID, path: String!, kind: FileEntryKind!): FileEntry!
@@ -3784,4 +3842,6 @@ type ProjectDashboard {
 
 extend type Query {
   projectDashboard(id: ID!): ProjectDashboard!
+  "Consommation des days derniers jours (1 à 366, défaut 30) : d'un projet (ses membres), ou de tous les projets sans projectId (administrateurs)."
+  usageReport(projectId: ID, days: Int): UsageReport!
 }

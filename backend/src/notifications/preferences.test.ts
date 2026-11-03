@@ -28,6 +28,8 @@ const KNOWN_TYPES = [
   'task.autostart_failed',
   'task.mentioned',
   'task.replied',
+  'project.budget_warning',
+  'project.budget_exceeded',
   'conversation.mentioned',
   'conversation.replied',
   'pull_request.opened',

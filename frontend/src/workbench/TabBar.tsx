@@ -34,6 +34,7 @@ const icons: Record<TabKind, string> = {
   settings: 'bi-gear',
   users: 'bi-people',
   billing: 'bi-receipt',
+  usage: 'bi-bar-chart-line',
   files: 'bi-folder2-open',
   file: 'bi-file-earmark-code',
   workspace: 'bi-chat-dots',

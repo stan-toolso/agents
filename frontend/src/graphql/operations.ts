@@ -1473,6 +1473,7 @@ export const SIDEBAR = gql`
   fragment SidebarSession on Session {
     id
     name
+    costUsd
     schedule {
       sessionId
       name

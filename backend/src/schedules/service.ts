@@ -10,6 +10,7 @@ import { serverSettings } from '../settings/server.js';
 import { sessionService } from '../sessions/service.js';
 import type { Session, SessionCleanup } from '../sessions/types.js';
 import { claudeSettings } from '../settings/claude.js';
+import { projectBudget } from '../projects/budget.js';
 import { CronError, isValidTimeZone, nextRun, nextRuns, parseCron } from './cron.js';
 import { RUN_STATUS_LABELS, runOutcome, summarizeEvents } from './outcome.js';
 import { scheduleRepository } from './repository.js';
@@ -257,6 +258,7 @@ export const scheduleService = {
         const owner = await claudeSettings.forSession(session.ownerId);
         owner.assertCredentials();
         await owner.assertBudgetAvailable();
+        await projectBudget.assertAvailable(session.projectId);
       } catch (err) {
         return skip((err as Error).message);
       }

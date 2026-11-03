@@ -43,6 +43,7 @@ const WorkflowPage = lazy(() => import('./pages/WorkflowPage'));
 const WorkflowRunPage = lazy(() => import('./pages/WorkflowRunPage'));
 const ChatsPage = lazy(() => import('./pages/ChatsPage'));
 const ProjectPullRequestsPage = lazy(() => import('./pages/ProjectPullRequestsPage'));
+const ProjectUsagePage = lazy(() => import('./pages/ProjectUsagePage'));
 const RepoPage = lazy(() => import('./pages/RepoPage'));
 const ProjectAgentsPage = lazy(() => import('./pages/ProjectAgentsPage'));
 const AgentPage = lazy(() => import('./pages/AgentPage'));
@@ -65,6 +66,7 @@ function PageRoutes({ location, isAdmin }: { location: Location; isAdmin: boolea
       <Route path="/projects/:id/agents" element={<ProjectAgentsPage />} />
       <Route path="/projects/:id/agents/:agentId" element={<AgentPage />} />
       <Route path="/projects/:id/pull-requests" element={<ProjectPullRequestsPage />} />
+      <Route path="/projects/:id/usage" element={<ProjectUsagePage />} />
       <Route path="/projects/:id/repo" element={<RepoPage />} />
       <Route path="/projects/:id/vault" element={<ProjectVaultPage />} />
       <Route path="/projects/:id/env" element={<ProjectEnvPage />} />

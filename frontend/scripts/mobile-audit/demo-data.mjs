@@ -80,6 +80,12 @@ P.api = project('p-api', 'API Facturation', 'api-facturation', 'Service de factu
 P.mobile = project('p-mobile', 'Appli Scouts', 'appli-scouts', 'Application mobile des groupes scouts : inscriptions aux camps, cotisations et messagerie des parents.', 'https://github.com/toolso/appli-scouts');
 P.data = project('p-data', 'Data & reporting', 'data-reporting', 'Tableaux de bord et rapports hebdomadaires (dbt, Metabase).', 'https://github.com/toolso/data-reporting');
 const teamProjects = [P.site, P.api, P.mobile, P.data];
+// Budgets mensuels (page Consommation) : l'API Facturation a passé 80 %, l'appli Scouts est loin du sien.
+const PROJECT_MONTH = { 'p-perso': 3.1, 'p-site': 38.4, 'p-api': 104.2, 'p-mobile': 27.5, 'p-data': 12.9 };
+for (const p of [P.perso, ...teamProjects]) {
+  p.monthUsd = PROJECT_MONTH[p.id];
+  p.monthlyBudgetUsd = p.id === 'p-api' ? 120 : p.id === 'p-mobile' ? 150 : null;
+}
 
 // ---- Agents de projet ---------------------------------------------------------------------------------------------
 
@@ -626,7 +632,42 @@ const projectDashboard = (id) => {
   };
 };
 
+/** Relevé de consommation cohérent : jours → semaines, parts fixes par projet et par modèle, sessions existantes. */
+const usageReport = (a = {}) => {
+  const days = a.days ?? 30;
+  const projects = a.projectId ? allProjects.filter((p) => p.id === a.projectId) : allProjects;
+  const share = { 'p-perso': 0.03, 'p-site': 0.3, 'p-api': 0.42, 'p-mobile': 0.17, 'p-data': 0.08 };
+  const k = projects.reduce((n, p) => n + share[p.id], 0);
+  const round = (v) => Math.round(v * 100) / 100;
+  const byDay = Array.from({ length: days }, (_, i) => {
+    const usd = round((4 + 6 * Math.abs(Math.sin(i * 1.7)) + (i % 7 < 5 ? 3 : 0)) * k);
+    return { __typename: 'UsageReportDay', day: day(i - days + 1), usd, turns: Math.round(usd * 9) };
+  });
+  const weeks = new Map();
+  for (const d of byDay) {
+    const dt = new Date(`${d.day}T00:00:00`);
+    const monday = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate() - ((dt.getDay() + 6) % 7));
+    const key = `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+    const w = weeks.get(key) ?? { __typename: 'UsageReportDay', day: key, usd: 0, turns: 0 };
+    w.usd = round(w.usd + d.usd);
+    w.turns += d.turns;
+    weeks.set(key, w);
+  }
+  const usd = round(byDay.reduce((n, d) => n + d.usd, 0));
+  const turns = byDay.reduce((n, d) => n + d.turns, 0);
+  const top = sessions.filter((s) => projects.includes(s.project) && s.costUsd > 0).sort((x, y) => y.costUsd - x.costUsd).slice(0, 15);
+  return {
+    __typename: 'UsageReport', from: ago(60 * 24 * days), to: new Date().toISOString(), days, usd, turns, sessions: Math.max(top.length, Math.round(turns / 40)),
+    byProject: projects.map((p) => ({ __typename: 'UsageReportProject', projectId: p.id, projectName: p.name, isPersonal: p.isPersonal, usd: round((usd * share[p.id]) / k), turns: Math.round((turns * share[p.id]) / k), sessions: Math.max(1, Math.round((turns * share[p.id]) / k / 40)), monthUsd: p.monthUsd, monthlyBudgetUsd: p.monthlyBudgetUsd })).sort((x, y) => y.usd - x.usd),
+    byModel: [['claude-opus-5-5', 0.71], ['claude-sonnet-5-5', 0.24], ['claude-haiku-5-5', 0.05]].map(([model, f]) => ({ __typename: 'UsageReportModel', model, usd: round(usd * f), turns: Math.round(turns * f) })),
+    byDay,
+    byWeek: [...weeks.values()],
+    topSessions: top.map((s) => ({ __typename: 'UsageReportSession', sessionId: s.id, sessionName: s.name, projectId: s.project.id, projectName: s.project.name, ownerName: s.owner?.name ?? null, usd: s.costUsd, turns: Math.round(s.costUsd * 9) })),
+  };
+};
+
 export const demoRoot = {
+  usageReport,
   me: U.me,
   users: Object.values(U),
   sidebarProjects: allProjects,

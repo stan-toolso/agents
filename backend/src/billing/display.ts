@@ -63,6 +63,12 @@ export const COST_FIELDS: Record<string, string[]> = {
   DashboardUsageDay: ['usd'],
   DashboardUsage: ['monthUsd', 'globalMonthUsd', 'monthlyBudgetUsd', 'todayUsd', 'last7DaysUsd', 'previous7DaysUsd'],
   DashboardProject: ['monthUsd'],
+  Project: ['monthlyBudgetUsd', 'monthUsd'],
+  UsageReport: ['usd'],
+  UsageReportDay: ['usd'],
+  UsageReportProject: ['usd', 'monthUsd', 'monthlyBudgetUsd'],
+  UsageReportModel: ['usd'],
+  UsageReportSession: ['usd'],
 };
 
 /**

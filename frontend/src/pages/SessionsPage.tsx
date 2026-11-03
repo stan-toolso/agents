@@ -8,6 +8,7 @@ import { useSessionLauncher } from '../components/SessionLauncher';
 import StatusBadge from '../components/StatusBadge';
 import { PROJECTS, SESSIONS, STOP_SESSION, type Project, type Session, type SessionStatus } from '../graphql/operations';
 import { SESSION_OWNERS } from '../graphql/sessions';
+import { formatCost } from '../lib/humanize';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { useDeletions } from '../workbench/useDeletions';
 import { useTabTitle } from '../workbench/TabsContext';
@@ -106,13 +107,14 @@ export default function SessionsPage() {
               <th>Statut</th>
               <th>Créée</th>
               <th>Terminée</th>
+              <th className="text-end">Coût</th>
               <th />
             </tr>
           </thead>
           <tbody>
             {data.sessions.length === 0 && (
               <tr>
-                <td colSpan={7} className="text-secondary">
+                <td colSpan={8} className="text-secondary">
                   Aucune session.
                 </td>
               </tr>
@@ -139,6 +141,7 @@ export default function SessionsPage() {
                 </td>
                 <td className="text-secondary small">{new Date(s.createdAt).toLocaleString()}</td>
                 <td className="text-secondary small">{s.endedAt ? new Date(s.endedAt).toLocaleString() : '—'}</td>
+                <td className="small text-end text-nowrap">{s.costUsd > 0 ? formatCost(s.costUsd) : <span className="text-secondary">—</span>}</td>
                 <td className="text-end">
                   <ButtonGroup size="sm">
                     {s.status === 'RUNNING' && (
