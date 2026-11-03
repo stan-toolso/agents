@@ -165,6 +165,46 @@ function QuestionPrompt({ request, answer, busy }: { request: HumanRequest; answ
   );
 }
 
+/** Demande d'accord officielle (tasks.request_approval) : accorder, ou refuser avec un motif. Réservée aux administrateurs. */
+function ApprovalPrompt({ request, answer, busy }: { request: HumanRequest; answer: (r: Record<string, unknown>) => void; busy: boolean }) {
+  const [denying, setDenying] = useState(false);
+  const [message, setMessage] = useState('');
+  const p = request.payload as { taskId?: string; taskTitle?: string };
+  const options: Option[] = [
+    { label: 'Oui, accorder', description: 'la décision est postée dans le fil de la tâche', value: () => ({ decision: 'approve' }) },
+    { label: 'Non, refuser et expliquer pourquoi', value: () => 'deny-with-message' as const },
+  ];
+  return (
+    <div className="cc-prompt">
+      <div className="cc-prompt-title">L'agent demande l'accord d'un administrateur du projet</div>
+      <div className="cc-prompt-body">{request.title}</div>
+      {p.taskTitle && <div className="cc-desc">Tâche : {p.taskTitle}</div>}
+      {request.message && <Markdown className="cc-prompt-body" text={request.message} />}
+      <div>Donnez-vous votre accord ?</div>
+      {!denying ? (
+        <OptionList
+          options={options}
+          disabled={busy}
+          onPick={(o) => {
+            const v = o.value();
+            if (v === 'deny-with-message') setDenying(true);
+            else answer(v);
+          }}
+        />
+      ) : (
+        <form
+          onSubmit={(ev) => {
+            ev.preventDefault();
+            answer({ decision: 'deny', message: message || undefined });
+          }}
+        >
+          <input autoFocus={canAutoFocus()} placeholder="Motif du refus (Entrée pour envoyer, vide = simple refus)" value={message} onChange={(e) => setMessage(e.target.value)} />
+        </form>
+      )}
+    </div>
+  );
+}
+
 function InputPrompt({ request, answer, busy }: { request: HumanRequest; answer: (r: Record<string, unknown>) => void; busy: boolean }) {
   const [text, setText] = useState('');
   return (
@@ -196,6 +236,8 @@ export default function RequestPrompt({ request }: { request: HumanRequest }) {
         <PermissionPrompt request={request} answer={answer} busy={busy} />
       ) : request.type === 'question' ? (
         <QuestionPrompt request={request} answer={answer} busy={busy} />
+      ) : request.type === 'approval' ? (
+        <ApprovalPrompt request={request} answer={answer} busy={busy} />
       ) : (
         <InputPrompt request={request} answer={answer} busy={busy} />
       )}

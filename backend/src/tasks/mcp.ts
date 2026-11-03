@@ -1,4 +1,5 @@
 import { auditService } from '../audit/service.js';
+import { approvalService } from '../approvals/service.js';
 import { agentService } from '../agents/service.js';
 import { gitAccountFor } from '../git/agentEnv.js';
 import { createSdkMcpServer, tool, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
@@ -25,8 +26,10 @@ const failure = (t: string) => ({ content: [{ type: 'text' as const, text: t }],
  * n'y est pas : il pousse la branche et ouvre une pull request sur GitHub avec le compte de la personne, donc
  * passe par la demande d'autorisation. `pr_merge` y est parce qu'il pose lui-même sa demande (`approveMerge`) :
  * la personne qui l'accepte fusionne avec son compte, même en mode « ne jamais demander », et jamais d'office.
+ * `request_approval` y est aussi : il ne fait que poser une demande d'accord à un administrateur (ou constater l'accord
+ * implicite de la personne qui a demandé le travail), sans rien exécuter.
  */
-export const TASKS_FREE_TOOLS = ['list', 'get', 'create', 'update', 'claim', 'release', 'comment', 'react', 'people', 'pr_list', 'pr_register', 'pr_update', 'pr_merge'].map((t) => `mcp__tasks__${t}`);
+export const TASKS_FREE_TOOLS = ['list', 'get', 'create', 'update', 'claim', 'release', 'comment', 'react', 'people', 'request_approval', 'pr_list', 'pr_register', 'pr_update', 'pr_merge'].map((t) => `mcp__tasks__${t}`);
 
 /** Ce que le provider de la session fournit au serveur `tasks`. */
 export interface TasksMcpOptions {
@@ -130,7 +133,7 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
   return createSdkMcpServer({
     name: 'tasks',
     version: '1.0.0',
-    instructions: `Tableau de tâches ${scope ? `de tes projets (par défaut : l'espace personnel "${project.name}" ; paramètre project pour un autre projet)` : `du projet "${project.name}"`}. Statuts : todo, in_progress, done, cancelled ; une étiquette d'état (court libellé libre, ex. « en revue », « bloquée ») dit où en est le travail dans le statut. Les tâches peuvent porter des étiquettes libres. Priorités : low, medium, high, urgent. Prends une tâche avec claim avant de t'en occuper (plusieurs sessions peuvent se partager une tâche, et une session en mener plusieurs ; release la rend), passe-la en done quand elle est terminée (travail fini, poussé, PR prête : pas avant), repasse-la en in_progress si tu la reprends ensuite (nouvelle instruction, corrections), commente-la pour rendre compte, et crée des tâches pour le travail à faire plus tard. Une tâche peut dépendre d'autres tâches du projet (depends_on de create et update, pas de cycle) : tant qu'une dépendance n'est pas terminée, elle est bloquée (claim et le lancement d'un agent sont refusés) ; auto_start la confie à une session dès que sa dernière dépendance passe à done. Une tâche créée directement en in_progress ou done t'est rattachée (assign_to_me) ; passer en in_progress ou done une tâche que personne n'a prise te la rattache aussi. Le fil d'une tâche est une conversation : comment poste un message (reply_to pour répondre dans le fil d'un message), react pose ou retire un emoji, une mention (« @Nom » ou « @e-mail » d'un membre, « @session:<id> » d'une session d'agent ; people liste qui l'on peut mentionner) prévient la personne ou transmet le message à la session, qui est alors reliée à la tâche. Les pull requests d'une tâche se suivent avec pr_open (ouvre la PR sur GitHub, ou la merge request sur GitLab, depuis la branche courante, ou depuis un autre dépôt cloné dans un sous-dossier ; après le contrôle local du dépôt s'il en déclare un), pr_register (déclare une PR déjà ouverte, dans le dépôt du projet ou un autre), pr_merge (fusionne une PR quand une personne te le demande : elle accepte la demande et la fusion est faite avec son compte), pr_update (statut open/merged/closed, note, tâche) et pr_list (par étape : pending = en préparation, c'est-à-dire une branche avec des modifications sans PR ouverte, draft, to_merge, merged, cancelled).`,
+    instructions: `Tableau de tâches ${scope ? `de tes projets (par défaut : l'espace personnel "${project.name}" ; paramètre project pour un autre projet)` : `du projet "${project.name}"`}. Statuts : todo, in_progress, done, cancelled ; une étiquette d'état (court libellé libre, ex. « en revue », « bloquée ») dit où en est le travail dans le statut. Les tâches peuvent porter des étiquettes libres. Priorités : low, medium, high, urgent. Prends une tâche avec claim avant de t'en occuper (plusieurs sessions peuvent se partager une tâche, et une session en mener plusieurs ; release la rend), passe-la en done quand elle est terminée (travail fini, poussé, PR prête : pas avant), repasse-la en in_progress si tu la reprends ensuite (nouvelle instruction, corrections), commente-la pour rendre compte, et crée des tâches pour le travail à faire plus tard. Une tâche peut dépendre d'autres tâches du projet (depends_on de create et update, pas de cycle) : tant qu'une dépendance n'est pas terminée, elle est bloquée (claim et le lancement d'un agent sont refusés) ; auto_start la confie à une session dès que sa dernière dépendance passe à done. Une tâche créée directement en in_progress ou done t'est rattachée (assign_to_me) ; passer en in_progress ou done une tâche que personne n'a prise te la rattache aussi. Le fil d'une tâche est une conversation : comment poste un message (reply_to pour répondre dans le fil d'un message), react pose ou retire un emoji, request_approval demande officiellement l'accord d'un administrateur avant une action sensible (jamais un simple message), une mention (« @Nom » ou « @e-mail » d'un membre, « @session:<id> » d'une session d'agent ; people liste qui l'on peut mentionner) prévient la personne ou transmet le message à la session, qui est alors reliée à la tâche. Les pull requests d'une tâche se suivent avec pr_open (ouvre la PR sur GitHub, ou la merge request sur GitLab, depuis la branche courante, ou depuis un autre dépôt cloné dans un sous-dossier ; après le contrôle local du dépôt s'il en déclare un), pr_register (déclare une PR déjà ouverte, dans le dépôt du projet ou un autre), pr_merge (fusionne une PR quand une personne te le demande : elle accepte la demande et la fusion est faite avec son compte), pr_update (statut open/merged/closed, note, tâche) et pr_list (par étape : pending = en préparation, c'est-à-dire une branche avec des modifications sans PR ouverte, draft, to_merge, merged, cancelled).`,
     tools: [
       tool(
         'list',
@@ -315,6 +318,23 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
             const all = await taskService.mentionables(p.id);
             if (!all.length) return 'Personne à mentionner.';
             return all.map((m) => `- ${m.text} → ${m.kind === 'user' ? 'membre' : 'session'} ${m.label}${m.detail ? ` (${m.detail})` : ''}${m.kind === 'session' && m.id === sessionId ? ' (cette session)' : ''}`).join('\n');
+          }),
+      ),
+
+      tool(
+        'request_approval',
+        "Demande officiellement l'accord d'un administrateur du projet avant une action sensible (mise en production, modification d'un serveur, action irréversible) à propos d'une tâche. N'utilise jamais un simple message du fil pour demander un accord : cet outil pose une vraie demande (zone des demandes, notification aux administrateurs, session signalée « en attente ») et trace la demande dans le fil. Si la personne qui t'a demandé ce travail est administrateur du projet, son accord est déjà donné : l'outil le constate (accord implicite) et tu poursuis sans attendre. Sinon la demande est posée et tu termines ton tour sans faire l'action : la décision (accordée, refusée, écartée) t'arrivera en message dans le fil de la tâche.",
+        {
+          id: z.string().describe('Tâche concernée (ex. la tâche de release)'),
+          action: z.string().describe("Ce que tu feras une fois l'accord donné, en une phrase (ex. « Mettre en production main (48a9d04) sur skipper-1 »)"),
+          details: z.string().optional().describe('Ce qui change, risques, retour arrière (Markdown), montré dans la demande et le fil'),
+        },
+        async ({ id, action, details }) =>
+          run(async () => {
+            const t = await own(id);
+            const outcome = await approvalService.request({ projectId: t.projectId, sessionId, taskId: t.id, action, details, actor });
+            if (outcome.implicit) return `Accord implicite : ${outcome.approver.name || outcome.approver.email}, administrateur du projet, t'a demandé ce travail. Aucune demande n'est posée ; tu peux faire l'action (c'est tracé dans le fil de la tâche).`;
+            return `Demande d'accord posée (${outcome.request.id}) aux administrateurs du projet et annoncée dans le fil de la tâche. Ne fais pas l'action maintenant : termine ton tour. La décision t'arrivera en message dans le fil de la tâche ; un accord donné en réponse dans le fil par un administrateur vaut aussi.`;
           }),
       ),
 

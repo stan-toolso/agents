@@ -67,7 +67,7 @@ export function normalizeEmoji(emoji: string): string {
 
 /** Mode d'emploi du fil d'une tâche pour un agent : réponses, mentions, réactions. */
 export const THREAD_HINT =
-  "Le fil d'une tâche se lit comme une conversation : `tasks.comment` y poste un message (`reply_to` pour répondre dans le fil d'un message), `tasks.react` pose ou retire un emoji sur un message ou sur la tâche, et une mention (« @Nom », « @e-mail » pour un membre du projet ; « @session:<id> » pour une session d'agent ; `tasks.people` liste qui l'on peut mentionner) prévient la personne ou transmet le message à la session.";
+  "Le fil d'une tâche se lit comme une conversation : `tasks.comment` y poste un message (`reply_to` pour répondre dans le fil d'un message), `tasks.react` pose ou retire un emoji sur un message ou sur la tâche, et une mention (« @Nom », « @e-mail » pour un membre du projet ; « @session:<id> » pour une session d'agent ; `tasks.people` liste qui l'on peut mentionner) prévient la personne ou transmet le message à la session. Pour obtenir l'accord d'une personne avant une action sensible (mise en production, serveur, action irréversible), utilise `tasks.request_approval` plutôt qu'un simple message : c'est une vraie demande, et elle constate d'elle-même l'accord de la personne qui t'a demandé le travail quand elle est administrateur.";
 
 /** Nom lisible d'une personne : « Nom <e-mail> », ou ce qui est renseigné. */
 export function formatPerson(p: TaskPerson | null | undefined): string {

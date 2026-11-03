@@ -17,6 +17,7 @@ import { handleSessionShareRoute } from './sessionShares/route.js';
 import { handleGitHttpRoute } from './gitServer/httpRoute.js';
 import { gitServer } from './gitServer/service.js';
 import { registerTaskSessionFeed } from './tasks/sessionFeed.js';
+import { registerApprovalTaskListener } from './approvals/service.js';
 import { registerAgentTriggers } from './agents/triggers.js';
 import { registerConversationSessionFeed } from './conversations/feed.js';
 import { archiveSessionCascade } from './projects/cleanup.js';
@@ -127,6 +128,7 @@ async function main() {
   const legacy = await migrateLegacyCredentials();
   if (legacy.length) log.info(`[settings] identifiants historiques transférés : ${legacy.join(', ')}`);
   registerTaskSessionFeed();
+  registerApprovalTaskListener();
   registerTaskAutoStart();
   registerTaskSessionEnd();
   registerWorkflowTriggers();
