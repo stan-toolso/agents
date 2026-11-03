@@ -69,7 +69,7 @@ export async function taskWorksession(task: Task, actorId?: string | null): Prom
   const existing = await worksessionService.forTask(task.id);
   if (existing) return existing;
   const { label, name, branch } = taskWorksessionNames(task, await worksessionRepository.listByProject(task.projectId, { includeArchived: true }));
-  return worksessionService.create(task.projectId, { name, branch, label, taskId: task.id }, actorId);
+  return worksessionService.create(task.projectId, { name, branch, label, taskId: task.id, uniqueBranch: true }, actorId);
 }
 
 /**
