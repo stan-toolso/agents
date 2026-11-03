@@ -15,6 +15,8 @@ import { contextService, HUMAN } from '../context/service.js';
 import { accountOf, googleAccountService } from '../google/service.js';
 import { pushPreferencesService } from '../notifications/preferences.js';
 import { pushService, type PushSubscriptionInput } from '../notifications/push.js';
+import { notificationChannelService, type ChannelInput, type ChannelPatch } from '../notifications/channels.js';
+import { smtpService, type SmtpInput } from '../notifications/smtp.js';
 import { searchService, type SearchKind } from '../search/service.js';
 import { sharedPageService } from '../sharedPages/service.js';
 import { envFileService } from '../envFiles/service.js';
@@ -174,6 +176,14 @@ const ownerDefaultModelOf = (ctx: Ctx, ownerId: string): Promise<string | null> 
     byOwner.set(ownerId, pending);
   }
   return pending;
+};
+/** Canal de notification : son propriétaire pour un canal personnel, un administrateur du projet sinon. */
+const guardNotificationChannel = async (ctx: Ctx, id: string) => {
+  const user = requireUser(ctx);
+  const channel = await notificationChannelService.get(id);
+  if (channel.projectId) await requireProject(ctx, channel.projectId, 'admin');
+  else if (channel.userId !== user.id) throw new NotFoundError('Canal de notification introuvable');
+  return user;
 };
 const guardRequest = async (ctx: Ctx, id: string, min: ProjectRole) => requireProject(ctx, await projectOfRequest(id), min);
 const guardTask = async (ctx: Ctx, id: string, min: ProjectRole) => requireProject(ctx, (await taskService.get(id)).projectId, min);
@@ -1111,6 +1121,19 @@ export const resolvers = {
     pushPreferences: (_: unknown, __: unknown, ctx: Ctx) => {
       const user = requireUser(ctx);
       return pushPreferencesService.list(user.id, user.isAdmin);
+    },
+    myNotificationChannels: (_: unknown, __: unknown, ctx: Ctx) => notificationChannelService.list({ userId: requireUser(ctx).id }),
+    projectNotificationChannels: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'member');
+      return notificationChannelService.list({ projectId: args.projectId });
+    },
+    smtpSettings: (_: unknown, __: unknown, ctx: Ctx) => {
+      requireAdmin(ctx);
+      return smtpService.view();
+    },
+    emailNotificationsAvailable: (_: unknown, __: unknown, ctx: Ctx) => {
+      requireUser(ctx);
+      return smtpService.configured();
     },
     settings: (_: unknown, __: unknown, ctx: Ctx) => appSettings(ctx),
     vaultAwsAccounts: (_: unknown, args: { id: string }, ctx: Ctx) => awsService.accounts(vaultActor(ctx), args.id),
@@ -2088,6 +2111,41 @@ export const resolvers = {
     setPushPreference: (_: unknown, args: { category: string; enabled: boolean }, ctx: Ctx) => {
       const user = requireUser(ctx);
       return pushPreferencesService.set(user.id, user.isAdmin, args.category, args.enabled);
+    },
+    createNotificationChannel: async (_: unknown, args: { input: ChannelInput & { projectId?: string | null } }, ctx: Ctx) => {
+      const user = requireUser(ctx);
+      const projectId = args.input.projectId ?? null;
+      if (projectId) await requireProject(ctx, projectId, 'admin');
+      return notificationChannelService.create({ projectId, userId: projectId ? null : user.id, admin: user.isAdmin }, args.input, user.id);
+    },
+    updateNotificationChannel: async (_: unknown, args: { id: string; patch: ChannelPatch }, ctx: Ctx) => {
+      const user = await guardNotificationChannel(ctx, args.id);
+      return notificationChannelService.update(args.id, user.isAdmin, args.patch);
+    },
+    deleteNotificationChannel: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      await guardNotificationChannel(ctx, args.id);
+      return notificationChannelService.delete(args.id);
+    },
+    testNotificationChannel: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      await guardNotificationChannel(ctx, args.id);
+      return notificationChannelService.test(args.id);
+    },
+    updateSmtpSettings: (_: unknown, args: { input: SmtpInput }, ctx: Ctx) => {
+      requireAdmin(ctx);
+      return smtpService.update(args.input);
+    },
+    clearSmtpSettings: (_: unknown, __: unknown, ctx: Ctx) => {
+      requireAdmin(ctx);
+      return smtpService.clear();
+    },
+    sendTestEmail: async (_: unknown, __: unknown, ctx: Ctx) => {
+      const user = requireAdmin(ctx);
+      try {
+        await smtpService.send({ to: user.email, subject: 'Skipper : test des notifications par e-mail', text: 'Le serveur SMTP de Skipper fonctionne.' });
+      } catch (err) {
+        throw new AppError(`Envoi impossible : ${(err as Error).message}`);
+      }
+      return true;
     },
     closeTerminal: async (_: unknown, args: { id: string }, ctx: Ctx) => {
       await guardTerminal(ctx, args.id, 'member');

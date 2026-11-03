@@ -1883,6 +1883,27 @@ familles coupées : une famille ajoutée plus tard est reçue par défaut). Il f
 pas le focus ; la cloche elle-même affiche tout. Un type de notification absent des familles est toujours
 envoyé. API : `pushPreferences`, `setPushPreference(category, enabled)`.
 
+Une notification push de **demande d'autorisation** porte les boutons « Autoriser » et « Refuser » là où le
+navigateur les affiche (Chrome, Edge, Android ; ailleurs, le clic ouvre la session). Le service worker répond par
+`POST /api/push/action` avec un jeton signé propre au destinataire et à la demande (HMAC dérivé de la clé maîtresse,
+24 h, `notifications/pushActions.ts`) : le serveur revérifie que la personne est toujours membre du projet, répond à
+la demande en son nom et l'inscrit au journal d'audit (`request.answer`, `via: push`).
+
+**Canaux hors navigateur** (`notifications/channels.ts`, table `notification_channels`) : webhook **Slack**, webhook
+**Discord** ou **e-mail**, en plus de la cloche et du push. Un canal appartient à un projet (Réglages du projet,
+administrateurs : les notifications adressées à tous ses membres y sont relayées) ou à une personne (Paramètres ›
+Notifications : tout ce qu'elle verrait dans sa cloche). Chaque canal choisit ses familles (mêmes clés que
+`PUSH_CATEGORIES` ; par défaut demandes, sessions, tâches et budget), peut être mis en pause et testé ; l'adresse du
+webhook est chiffrée et n'est jamais renvoyée (seuls l'hôte et ses quatre derniers caractères). Seules les adresses
+`https://hooks.slack.com/…` et `https://discord.com/api/webhooks/…` sont acceptées. Le message porte un lien absolu
+(`APP_URL`) vers la demande ou la session. **Anti-rafale** (`notifications/batcher.ts`) : par canal, la première
+notification part aussitôt, les suivantes de la minute sont envoyées ensemble à la fin de la fenêtre ; une demande
+d'un agent part toujours aussitôt. La mémoire de l'anti-rafale est celle de l'instance, vidée à l'arrêt. L'e-mail
+passe par le serveur SMTP réglé dans Paramètres › Serveur (mot de passe chiffré, e-mail de test) ou par les variables
+`SMTP_URL` (ex. `smtps://user:mot-de-passe@smtp.exemple.fr:465`) et `SMTP_FROM`, qui l'emportent. API :
+`myNotificationChannels`, `projectNotificationChannels`, `create/update/delete/testNotificationChannel`,
+`smtpSettings`, `updateSmtpSettings`, `clearSmtpSettings`, `sendTestEmail`.
+
 ## Apparence
 
 Paramètres › Apparence : thème **Système**, **Clair** ou **Sombre**, mémorisé dans le navigateur

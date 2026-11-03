@@ -11,6 +11,7 @@ import PageLoading from '../components/PageLoading';
 import RateLimitGauges from '../components/RateLimitGauges';
 import ServerHealthCard from '../components/ServerHealthCard';
 import NotificationsSection from '../components/settings/NotificationsSection';
+import SmtpCard from '../components/settings/SmtpCard';
 import OpencodeSection from '../components/settings/OpencodeSection';
 import VaultTokenPicker from '../components/settings/VaultTokenPicker';
 import {
@@ -608,6 +609,7 @@ function ServerSection({ server }: { server: ServerState }) {
     <>
       <ServerHealthCard memoryAlertThresholdMb={server.memoryAlertThresholdMb} />
       <SessionLimitsCard server={server} />
+      <SmtpCard />
       <Card className="mb-4">
         <Card.Header>
           Mode maintenance

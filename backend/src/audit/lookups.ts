@@ -18,6 +18,7 @@ const QUERIES = {
   vault_link: 'SELECT l.project_id, i.name AS label FROM vault_item_links l JOIN vault_items i ON i.id = l.item_id WHERE l.id = $1',
   permission_rule: `SELECT project_id, tool_name || COALESCE('(' || NULLIF(rule_content, '') || ')', '') AS label FROM project_permission_rules WHERE id = $1`,
   api_key: 'SELECT project_id, name AS label FROM project_api_keys WHERE id = $1',
+  notification_channel: "SELECT project_id, kind || ' ' || target_hint AS label FROM notification_channels WHERE id = $1",
   pull_request: `SELECT project_id, '#' || number || ' ' || COALESCE(title, '') AS label FROM pull_requests WHERE id = $1`,
   agent: 'SELECT a.project_id, COALESCE(u.name, u.email) AS label FROM agent_profiles a JOIN users u ON u.id = a.user_id WHERE a.user_id = $1',
   env_file: 'SELECT project_id, path AS label FROM project_env_files WHERE id = $1',

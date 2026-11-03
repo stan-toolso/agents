@@ -1,5 +1,6 @@
 import { NotFoundError } from '../errors.js';
 import { pubSub } from '../pubsub.js';
+import { notificationChannelService } from './channels.js';
 import { pushService } from './push.js';
 import { notificationRepository } from './repository.js';
 import type { Notification, NotificationScope, NotifyInput } from './types.js';
@@ -21,6 +22,8 @@ export const notificationService = {
       const notification = await notificationRepository.create(input);
       pubSub.publish('notificationCreated', notification);
       void pushService.deliver(notification);
+      // Canaux hors navigateur (Slack, Discord, e-mail), avec anti-rafale.
+      void notificationChannelService.relay(notification);
       return notification;
     } catch (err) {
       log.error('[notifications] création impossible', err);

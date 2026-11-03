@@ -4,6 +4,7 @@ import { AppError } from '../errors.js';
 import { decryptSecret, encryptSecret } from '../settings/crypto.js';
 import { settingsRepository } from '../settings/repository.js';
 import { pushPreferencesService, wantsPush } from './preferences.js';
+import { signActionToken } from './pushActions.js';
 import { pushRepository } from './pushRepository.js';
 import { notificationRepository } from './repository.js';
 import type { Notification } from './types.js';
@@ -61,7 +62,15 @@ interface Payload {
   tag: string;
   /** Nombre de notifications non lues du destinataire ; -1 : inconnu (ne pas toucher au badge). */
   unread: number;
+  /** Demande d'autorisation : boutons « Autoriser » / « Refuser » et jeton signé pour y répondre (pushActions.ts). */
+  actions?: { action: 'allow' | 'deny'; title: string }[];
+  actionToken?: string;
 }
+
+const PERMISSION_ACTIONS: Payload['actions'] = [
+  { action: 'allow', title: 'Autoriser' },
+  { action: 'deny', title: 'Refuser' },
+];
 
 async function send(sub: { id: string; endpoint: string; keys: string }, payload: Payload, urgency: 'high' | 'normal'): Promise<void> {
   const keys = JSON.parse(decryptSecret(sub.keys)) as { p256dh: string; auth: string };
@@ -117,11 +126,21 @@ export const pushService = {
         }
         return p;
       };
+      // Une demande d'autorisation se règle depuis la notification (si le navigateur affiche les boutons).
+      const requestId = n.type === 'request.created' && n.payload.requestType === 'permission' && typeof n.payload.requestId === 'string' ? n.payload.requestId : null;
       await Promise.all(
         recipients.map(async (sub) =>
           send(
             sub,
-            { id: n.id, title: n.title, body: n.message ? (n.message.length > 1000 ? `${n.message.slice(0, 1000)}…` : n.message) : null, link: n.link, tag: `skipper-${n.id}`, unread: await unreadOf(sub.userId, sub.isAdmin) },
+            {
+              id: n.id,
+              title: n.title,
+              body: n.message ? (n.message.length > 1000 ? `${n.message.slice(0, 1000)}…` : n.message) : null,
+              link: n.link,
+              tag: `skipper-${n.id}`,
+              unread: await unreadOf(sub.userId, sub.isAdmin),
+              ...(requestId ? { actions: PERMISSION_ACTIONS, actionToken: signActionToken(requestId, sub.userId) } : {}),
+            },
             n.type === 'request.created' ? 'high' : 'normal',
           ),
         ),
