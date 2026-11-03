@@ -386,6 +386,8 @@ const usableItems = async (ctx: Ctx, kinds: VaultItemKind[]) => vaultService.lis
 export const resolvers = {
   JSON: JSONResolver,
   DateTime: DateTimeResolver,
+  // Champ obsolète gardé pour les frontends encore ouverts sur une ancienne version (bleu/vert).
+  InboxCounts: { idleSessions: () => 0 },
   DashboardUsage: {
     rateLimits: () => rateLimitView(),
   },

@@ -2063,6 +2063,8 @@ type ProjectUnreadMessages {
 type InboxCounts {
   "Demandes (autorisation, question, saisie) en attente de réponse."
   requests: Int!
+  "Toujours 0 : une session qui attend des instructions n'est plus « à traiter » (gardé pour les onglets ouverts sur une ancienne version)."
+  idleSessions: Int! @deprecated(reason: "Les sessions en attente d'instructions ne sont plus dans la file « À traiter »")
   "Sessions en erreur depuis 24 h."
   failedSessions: Int!
   "Sessions coupées en plein tour depuis 24 h."
