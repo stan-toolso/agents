@@ -5,6 +5,7 @@ import net from 'node:net';
 import { createInterface } from 'node:readline';
 import { createOpencodeClient, type Event as OpencodeEvent, type OpencodeClient, type Part, type PermissionRequest, type QuestionRequest } from '@opencode-ai/sdk/v2';
 import { liveBrowserService } from '../../browser/live.js';
+import { BROWSER_FIELD_READERS, browserPrompt, explainBrowserFailure } from '../../browser/check.js';
 import { createContextMcpServer } from '../../context/mcp.js';
 import { agentService } from '../../agents/service.js';
 import { agentIdentityPrompt } from '../../agents/prompt.js';
@@ -16,6 +17,8 @@ import { agentGitEnv } from '../../git/agentEnv.js';
 import { createGoogleMcpServer } from '../../google/mcp.js';
 import { googleAccountService, googleReadTools } from '../../google/service.js';
 import { permissionRuleService, suggestedMode, withEditedRules } from '../../permissions/service.js';
+import { activeScheduleRules } from '../../schedules/activeRules.js';
+import { scheduleAllows, scheduleAllowsVault } from '../../schedules/permissions.js';
 import { formatRule, type PermissionRule } from '../../permissions/types.js';
 import type { Project } from '../../projects/types.js';
 import { RequestCancelledError } from '../../requests/service.js';
@@ -28,6 +31,7 @@ import { usageService } from '../../settings/usage.js';
 import { createSharedPagesMcpServer, sharedPagesPrompt } from '../../sharedPages/mcp.js';
 import { previewPrompt } from '../../previews/config.js';
 import { previewsEnabled } from '../../previews/hosts.js';
+import { askMergeApproval } from '../../pullRequests/mergeApproval.js';
 import { createTasksMcpServer, TASKS_FREE_TOOLS } from '../../tasks/mcp.js';
 import { CONVERSATIONS_FREE_TOOLS, conversationsMcpPrompt, createConversationsMcpServer } from '../../conversations/mcp.js';
 import { conversationService, linkedThreadsPrompt } from '../../conversations/service.js';
@@ -76,7 +80,6 @@ const SUGGESTED_MODELS: { value: string; label: string; description?: string }[]
 /** Outils du navigateur en lecture, libres ; les actions passent par les demandes d'autorisation. */
 const BROWSER_READ_TOOLS = ['browser_snapshot', 'browser_take_screenshot', 'browser_console_messages', 'browser_network_requests', 'browser_wait_for'];
 /** Retirés quand le coffre saisit des valeurs dans le navigateur : ils reliraient une valeur tapée. */
-const BROWSER_FIELD_READERS = ['browser_evaluate', 'browser_run_code'];
 
 /** Outils des serveurs MCP de Skipper autorisés d'office (mêmes règles que pour une session Claude). */
 const SKIPPER_FREE_TOOLS = ['mcp__context', ...TASKS_FREE_TOOLS, ...CONVERSATIONS_FREE_TOOLS, 'mcp__vault', 'mcp__worksessions__list', 'mcp__worksessions__create', 'mcp__sessions__list', 'mcp__sessions__get', 'mcp__sessions__wait', 'mcp__sessions__end', 'mcp__sessions__archive', 'mcp__pages__list', 'mcp__env'];
@@ -327,9 +330,6 @@ class OpencodeRun {
       googleAccountService.promptSummary(googleAccounts),
       sharedPagesPrompt(),
       ctx.session.worksessionId ? previewPrompt(previewsEnabled(), ctx.session.worksessionId) : '',
-      browserEnabled
-        ? "Un navigateur headless (Chromium) est disponible via les outils `playwright_*` : navigue, lis la page (`playwright_browser_snapshot`), clique et remplis des formulaires pour tester les interfaces web. Le serveur de développement à tester se lance dans l'environnement du projet ; ses URL en localhost y sont accessibles. Pour te connecter à un site web du coffre, clique le champ du formulaire puis appelle `vault_browser_fill` : Skipper y saisit la valeur, que tu ne vois jamais."
-        : '',
     ]
       .filter(Boolean)
       .join('\n\n');
@@ -344,13 +344,15 @@ class OpencodeRun {
       emit: ctx.emit,
       remembered: async (toolName: string, key: string, projectRules: boolean) => {
         if (this.vaultApprovals.has(`${toolName}|${key.toLowerCase()}`)) return true;
+        const scheduled = await activeScheduleRules(this.ctx.session.id);
+        if (scheduled && scheduleAllowsVault(scheduled, toolName, key)) return true;
         return projectRules && this.ruleUsage.rules.some((r) => r.toolName === toolName && r.ruleContent?.trim().toLowerCase() === key.toLowerCase());
       },
       approve: (approval: VaultApproval) => this.approveVaultUse(approval),
     };
     const factories: Record<string, McpFactory> = {
       context: () => createContextMcpServer(ctx.project, ctx.session.id, { agentLibraries, defaultAgentId: agent?.id ?? null }),
-      tasks: () => createTasksMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name),
+      tasks: () => createTasksMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name, undefined, { approveMerge: (approval) => askMergeApproval((input) => ctx.ask(input), approval) }),
       ...(channels.length ? { conversations: () => createConversationsMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name) } : {}),
       ...(vaultTools ? { vault: () => createVaultMcpServer(vaultContext) } : {}),
       worksessions: () => createWorksessionsMcpServer(ctx.project, ctx.session.id),
@@ -360,10 +362,18 @@ class OpencodeRun {
       ...(googleAccounts.length ? { google: () => createGoogleMcpServer({ project: ctx.project, accounts: googleAccounts, sessionId: ctx.session.id, cwd: ctx.cwd, emit: ctx.emit }) } : {}),
     };
     // Le navigateur ne reçoit aucun secret à l'avance : le coffre les saisit à la demande (browser_fill).
+    // Navigateur qui ne démarre pas : la session part sans lui, avec la raison dans le transcript et dans le prompt.
+    let browserUnavailable: string | null = null;
     if (browserEnabled) {
-      this.browserServer = await runner.browserMcpCommand(ctx.project, ctx.cwd, { sessionId: ctx.session.id });
-      liveBrowserService.register(ctx.session.id, ctx.project, this.browserServer.cdp);
+      try {
+        this.browserServer = await runner.browserMcpCommand(ctx.project, ctx.cwd, { sessionId: ctx.session.id });
+        liveBrowserService.register(ctx.session.id, ctx.project, this.browserServer.cdp);
+      } catch (err) {
+        browserUnavailable = await explainBrowserFailure(ctx.project, (err as Error).message);
+        await ctx.emit('system', { notice: true, browser: true, message: `Navigateur headless indisponible pour cette session : ${browserUnavailable}` });
+      }
     }
+    if (browserEnabled) this.systemPrompt = [this.systemPrompt, browserPrompt({ prefix: 'playwright_', fill: 'vault_browser_fill', unavailable: browserUnavailable })].join('\n\n');
     this.bridges = await startMcpBridges(await runner.hostAddress(ctx.project), factories, (server, err) => void ctx.emit('stderr', { text: `[mcp ${server}] ${err.message}` }));
     this.mcpServerNames = [...Object.keys(factories), ...(this.browserServer ? ['playwright'] : [])];
     const googleFree = googleAccounts.length ? googleReadTools(googleAccounts) : [];
@@ -881,6 +891,9 @@ class OpencodeRun {
     if (this.mode === 'bypassPermissions') return true;
     if (this.mode === 'acceptEdits' && opts.isEdit) return true;
     if (opts.useRules && allowedByRules([...this.allowedTools, ...this.ruleUsage.rules.map(formatRule), ...this.ruleUsage.session, ...SKIPPER_FREE_TOOLS], tool, ctx.cwd)) return true;
+    // Outils pré-autorisés de la planification, pendant ses seules exécutions.
+    const scheduled = await activeScheduleRules(ctx.session.id);
+    if (scheduled && scheduleAllows(scheduled, tool.name, tool.input, ctx.cwd)) return true;
     if (this.mode === 'dontAsk') return "Action non autorisée à l'avance : la session ne pose pas de question (mode « ne jamais demander »).";
 
     const response = (await ctx.ask({ type: 'permission', title: opts.title ?? `Autoriser l'outil ${tool.name}`, message: null, payload: { toolName: tool.name, input: tool.input, suggestions: opts.suggestions, blockedPath: opts.blockedPath } }, signal)) as Partial<PermissionResponse>;

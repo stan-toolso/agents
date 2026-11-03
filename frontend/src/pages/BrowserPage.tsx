@@ -1,4 +1,6 @@
 import { usePollingQuery } from '../lib/usePollingQuery';
+import GoneNotice from '../components/GoneNotice';
+import { isGoneError } from '../lib/gone';
 import PageLoading from '../components/PageLoading';
 import { useEffect, useRef, useState } from 'react';
 import { Alert } from 'react-bootstrap';
@@ -76,8 +78,9 @@ export default function BrowserPage() {
   }, [id]);
 
   if (loading && !data) return <PageLoading className="m-3" />;
+  if (isGoneError(error) || (!error && !session)) return <GoneNotice what="Cette session" />;
   if (error) return <Alert variant="danger" className="m-3">Erreur : {error.message}</Alert>;
-  if (!session) return <Alert variant="warning" className="m-3">Session introuvable.</Alert>;
+  if (!session) return null;
 
   const stateLabel: Record<StreamState, string> = {
     connecting: 'connexion…',

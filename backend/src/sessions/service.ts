@@ -5,7 +5,7 @@ import { namesFromText } from '../worksessions/names.js';
 import { worksessionService } from '../worksessions/service.js';
 import { pubSub } from '../pubsub.js';
 import { notificationService } from '../notifications/service.js';
-import { requestService } from '../requests/service.js';
+import { ANSWERED_BY, requestService } from '../requests/service.js';
 import { removeSessionAttachments, storeAttachments } from './attachments.js';
 import { sessionRepository } from './repository.js';
 import { scheduledRuns } from './scheduledRuns.js';
@@ -24,9 +24,12 @@ import type { Attachment, AttachmentInput, CreateSessionInput, RelaunchInput, Se
 import { log } from '../log.js';
 import { claudeSettings } from '../settings/claude.js';
 import { reviewOf } from '../reviews/types.js';
+import { pullRequestRepository } from '../pullRequests/repository.js';
+import type { TrackedPullRequest } from '../pullRequests/types.js';
 import { agentService } from '../agents/service.js';
 import { normalizeContextLimit } from './context.js';
 import { AUTO_ARCHIVE_KEY, archivesWhenIdle, withoutAutoArchive } from './autoArchive.js';
+import { autoTitleConfig, autoTitleService, withoutAutoTitle } from './autoTitle.js';
 
 /** Texte d'une instruction sans texte : les fichiers joints sont l'instruction. */
 const ATTACHMENTS_ONLY_TEXT = 'Voir les fichiers joints.';
@@ -347,6 +350,23 @@ async function modelAllowedForOwner(ownerId: string | null, model: string): Prom
   }
 }
 
+/**
+ * PR encore ouverte du dossier de travail d'une session. Une session d'agent qui porte une PR ouverte ne s'archive pas
+ * (ni par l'outil `sessions.archive`, ni d'office en fin de tour) : elle garde son contexte et son dossier pour les
+ * retours de revue, la CI ou les conflits, et Skipper la range quand la PR est fusionnée ou fermée
+ * (`archiveAgentSessionsOfPullRequest`, projects/cleanup.ts). Les archivages par une personne ne sont pas concernés.
+ */
+async function openPullRequestOf(session: Pick<Session, 'worksessionId'>): Promise<TrackedPullRequest | null> {
+  if (!session.worksessionId) return null;
+  return pullRequestRepository.findOpenByWorksession(session.worksessionId).catch((err) => {
+    log.warn(`[sessions] PR ouverte du dossier ${session.worksessionId} non lue`, err);
+    return null;
+  });
+}
+
+export const openPullRequestRefusal = (pr: Pick<TrackedPullRequest, 'number'>) =>
+  `La PR #${pr.number} de ce dossier est encore ouverte : la session reste active jusqu'à sa fusion ou sa fermeture, pour traiter les retours de revue, la CI ou les conflits avec son contexte. Skipper l'archivera alors d'elle-même ; termine simplement ta réponse.`;
+
 export const sessionService = {
   list: (filter?: SessionFilter) => sessionRepository.list(filter),
   get: (id: string) => sessionRepository.findById(id),
@@ -379,6 +399,9 @@ export const sessionService = {
       input = { ...input, config: { ...input.config, permissionMode: project.defaultPermissionMode } };
     }
     provider.validateConfig?.(input.config ?? {});
+    // Nom provisoire : drapeau du titre généré après le premier tour ; un nom explicite ne le porte jamais (pas même hérité).
+    const { autoTitle, ...withoutFlag } = input;
+    input = { ...withoutFlag, config: autoTitle ? { ...(input.config ?? {}), ...autoTitleConfig() } : withoutAutoTitle(input.config ?? {}) };
     // Limite de contexte : celle choisie au lancement (objet vide : aucune), sinon le défaut du projet (sessions de
     // tâches, lancées par un agent…). Jamais d'autre limite que celle qu'une personne a choisie.
     input = { ...input, cleanup: (input.cleanup ? normalizeContextLimit(input.cleanup) : project.defaultContextCleanup) ?? {} };
@@ -442,7 +465,9 @@ export const sessionService = {
       // Sans nom ni branche ni libellé, la work session est nommée d'après la consigne (ou le nom de la session).
       const names = namesFromText(input.prompt?.trim() || input.name);
       const nw = input.newWorksession;
-      const worksession = await worksessionService.create(project.id, nw.name?.trim() || nw.branch?.trim() || nw.label?.trim() ? nw : { ...nw, ...names }, ownerId);
+      // Sans branche choisie, la branche est dérivée : suffixée si elle existe déjà plutôt que d'échouer ou de reprendre un autre travail.
+      const uniqueBranch = !nw.branch?.trim();
+      const worksession = await worksessionService.create(project.id, { ...(nw.name?.trim() || nw.branch?.trim() || nw.label?.trim() ? nw : { ...nw, ...names }), uniqueBranch }, ownerId);
       worksessionId = createdWorksessionId = worksession.id;
     }
     let session: Session;
@@ -595,6 +620,8 @@ export const sessionService = {
           if (activity === 'idle') idleSince.set(id, Date.now());
           else idleSince.delete(id);
           await publishSession(await sessionRepository.update(id, { activity }));
+          // Fin du premier tour d'une session au nom provisoire : titre court généré en arrière-plan.
+          if (activity === 'idle') void autoTitleService.afterTurn(id, publishSession);
           if (activity === 'idle' && drainingInstance) void park(id);
           // Fin d'un tour ordinaire : la limite de contexte choisie pour la session s'applique (rien sans limite). Les
           // exécutions planifiées appliquent la leur avant de démarrer (schedules/service.ts).
@@ -627,7 +654,9 @@ export const sessionService = {
               payload: { requestType: input.type, requestId: request.id },
             });
           });
-          await emit('request.answered', { type: input.type, title: input.title, response });
+          // Qui a répondu reste dans la table des demandes ; le transcript garde la réponse seule.
+          const { [ANSWERED_BY]: _answeredBy, ...shown } = response;
+          await emit('request.answered', { type: input.type, title: input.title, response: shown });
           return response;
         },
         isServerStopping: () => stopping,
@@ -791,26 +820,34 @@ export const sessionService = {
     const trimmed = name.trim();
     if (!trimmed) throw new AppError('Le nom est vide');
     if (trimmed.length > 120) throw new AppError('Le nom dépasse 120 caractères');
-    return publishSession(await sessionRepository.update(id, { name: trimmed }));
+    const session = await sessionRepository.findById(id);
+    if (!session) throw new NotFoundError('Session introuvable');
+    // Un nom choisi par une personne n'est jamais remplacé par un titre généré.
+    return publishSession(await sessionRepository.update(id, { name: trimmed, config: withoutAutoTitle(session.config) }));
   },
 
   /**
    * Archive la session dès qu'elle a fini : en cours, l'agent termine son tour (`end`), puis l'écouteur
    * `onArchiveWhenDone` l'archive ; sinon elle l'est tout de suite. Sert à une session qui s'archive elle-même
    * (outil `sessions.archive`) : l'archiver immédiatement couperait l'outil qui le demande. Renvoie `true` si
-   * l'archivage est différé à la fin du tour.
+   * l'archivage est différé à la fin du tour. Refusé tant que la PR du dossier est ouverte (`openPullRequestOf`), sauf
+   * `force` (Skipper range la session à la fin de sa PR).
    */
-  async archiveWhenDone(id: string, reason: string | null = null, opts: { auto?: boolean } = {}): Promise<boolean> {
+  async archiveWhenDone(id: string, reason: string | null = null, opts: { auto?: boolean; force?: boolean } = {}): Promise<boolean> {
     const session = await sessionRepository.findById(id);
     if (!session) throw new NotFoundError('Session introuvable');
     if (session.archivedAt) return false;
     if (archiveWhenDone.has(id)) return true; // déjà demandé : la fin du tour l'archivera
     if (!archiveWhenDoneListener) throw new AppError("L'archivage n'est pas disponible");
+    const open = opts.force ? null : await openPullRequestOf(session);
+    if (open) throw new AppError(openPullRequestRefusal(open));
     const deferred = running.has(id);
     const message = opts.auto
       ? "Session archivée d'office à la fin de son tour : lancée sans personne pour la piloter, elle se range seule (le fil de sa tâche ou de son canal rappellera l'agent)"
-      : `${deferred ? 'Session archivée par son agent à la fin de ce tour' : 'Session archivée par un agent'}${reason ? ` : ${reason}` : ''}`;
-    await emitEvent(id, 'system', { message, notice: true, reason: opts.auto ? 'auto_archive' : 'agent_archive' });
+      : opts.force
+        ? `Session archivée par Skipper${deferred ? ' à la fin de ce tour' : ''}${reason ? ` : ${reason}` : ''}`
+        : `${deferred ? 'Session archivée par son agent à la fin de ce tour' : 'Session archivée par un agent'}${reason ? ` : ${reason}` : ''}`;
+    await emitEvent(id, 'system', { message, notice: true, reason: opts.auto ? 'auto_archive' : opts.force ? 'pr_ended_archive' : 'agent_archive' });
     if (deferred) {
       archiveWhenDone.add(id);
       try {
@@ -842,6 +879,11 @@ export const sessionService = {
     ]);
     if (runningChildren.length || queuedChildren.length) {
       log.info(`[sessions] session ${id} non archivée d'office : une session qu'elle a lancée tourne encore`);
+      return false;
+    }
+    const open = await openPullRequestOf(session);
+    if (open) {
+      log.info(`[sessions] session ${id} non archivée d'office : sa PR #${open.number} est encore ouverte`);
       return false;
     }
     await this.archiveWhenDone(id, null, { auto: true });

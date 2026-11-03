@@ -46,6 +46,7 @@ import { importProjectArchive, MAX_IMPORT_BYTES } from '../exports/service.js';
 import { runner, type RunnerConfig } from '../runners/index.js';
 import { containerMonitor } from '../runners/monitor.js';
 import { runnerLifecycle } from '../runners/lifecycle.js';
+import { checkBrowser } from '../browser/check.js';
 import type { ContextChange, ContextInstruction, ContextInstructionVersion } from '../context/types.js';
 import { projectService } from '../projects/service.js';
 import { isPersonalProject } from '../projects/types.js';
@@ -1161,6 +1162,19 @@ export const resolvers = {
       }
       return scheduleService.listForProjects(await accessibleProjectIds(ctx));
     },
+    schedulePermissionSuggestions: async (_: unknown, args: { projectId: string; sessionId?: string | null; prompt?: string | null }, ctx: Ctx) => {
+      const user = requireUser(ctx);
+      await requireProject(ctx, args.projectId, 'member');
+      let ownerId: string | null = user.id;
+      if (args.sessionId) {
+        await guardSession(ctx, args.sessionId, 'member');
+        const session = await sessionService.get(args.sessionId);
+        if (!session || session.projectId !== args.projectId) throw new AppError("La session n'appartient pas à ce projet");
+        ownerId = session.ownerId;
+      }
+      const list = await scheduleService.permissionSuggestions({ sessionId: args.sessionId ?? null, projectId: args.projectId, ownerId, prompt: args.prompt });
+      return list.map((s) => ({ ...s, source: s.source.toUpperCase() }));
+    },
     scheduleNextRuns: (_: unknown, args: { cron: string; timezone?: string | null; count?: number | null }, ctx: Ctx) => {
       requireUser(ctx);
       return scheduleService.preview(args.cron, args.timezone, args.count ?? 5);
@@ -1652,6 +1666,10 @@ export const resolvers = {
       const project = await projectService.get(args.id);
       await runnerLifecycle.reset(project);
       return project;
+    },
+    testProjectBrowser: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.id, 'member');
+      return checkBrowser(await projectService.get(args.id));
     },
     deleteProject: async (_: unknown, args: { id: string; deleteHostedRepo?: boolean | null }, ctx: Ctx) => {
       await requireProject(ctx, args.id, 'admin');

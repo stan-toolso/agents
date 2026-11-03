@@ -193,7 +193,7 @@ const S = {
   chat2: session('c-compte-rendu', P.perso, 'Résumé du comité de pilotage', { kind: 'CHAT', age: 60 * 26, updated: 60 * 25, cost: 0.05 }),
   chat3: session('c-mail-client', P.perso, 'Réponse à un client mécontent', { kind: 'CHAT', age: 60 * 50, updated: 60 * 49, cost: 0.03 }),
 };
-S.hebdo.schedule = { __typename: 'SessionSchedule', sessionId: S.hebdo.id, name: 'Rapport du lundi', customName: 'Rapport du lundi', session: S.hebdo, project: P.data, cron: '0 8 * * 1', timezone: 'Europe/Paris', prompt: 'Prépare le rapport hebdomadaire des inscriptions et publie-le.', enabled: true, endAfterRun: false, nextRunAt: inDays(5), lastRunAt: ago(60 * 9), cleanup: null };
+S.hebdo.schedule = { __typename: 'SessionSchedule', sessionId: S.hebdo.id, name: 'Rapport du lundi', customName: 'Rapport du lundi', session: S.hebdo, project: P.data, cron: '0 8 * * 1', timezone: 'Europe/Paris', prompt: 'Prépare le rapport hebdomadaire des inscriptions et publie-le.', enabled: true, endAfterRun: false, allowedTools: ['Bash(npm run report *)'], nextRunAt: inDays(5), lastRunAt: ago(60 * 9), cleanup: null };
 const chats = sessions.filter((s) => s.kind === 'CHAT');
 
 // ---- Transcripts --------------------------------------------------------------------------------------------------
@@ -670,6 +670,10 @@ export const demoRoot = {
   vaultShareCandidates: [U.hugo, U.lea],
   contextInstruction: (a) => byId(contextInstructions, a.id),
   searchContext: (a) => contextInstructions.filter((i) => i.projectId === a.projectId && `${i.name} ${i.content}`.toLowerCase().includes(a.query.toLowerCase())),
+  schedulePermissionSuggestions: (a = {}) => [
+    ...(a.sessionId ? [{ __typename: 'ScheduleToolSuggestion', rule: 'mcp__vault__sql_query(production)', source: 'DENIED', count: 2, lastSeenAt: ago(60 * 9) }, { __typename: 'ScheduleToolSuggestion', rule: 'Bash(git log *)', source: 'ASKED', count: 1, lastSeenAt: ago(60 * 24 * 7) }] : []),
+    ...(/production/i.test(a.prompt ?? '') ? [{ __typename: 'ScheduleToolSuggestion', rule: 'mcp__vault__sql_query(production)', source: 'PROMPT', count: 0, lastSeenAt: null }] : []),
+  ].filter((x, i, all) => all.findIndex((y) => y.rule === x.rule) === i),
   sessionSchedules: (a = {}) => sessions.filter((s) => s.schedule && (!a.projectId || s.project.id === a.projectId)).map((s) => s.schedule),
   providers,
   myAgents: agents,
@@ -691,6 +695,28 @@ export const demoRoot = {
   },
   sessionChanges: (a) => ({ __typename: 'SessionChanges', mode: 'COMMIT', baseCommit: commits[2].hash, truncated: false, files: a.sessionId === S.tarifs.id ? branchFiles : [] }),
   terminal: null,
+  // « Tester » de la carte « Navigateur headless » (réglages du projet) : un contrôle réussi sur skipper-runner arm64.
+  testProjectBrowser: (a) => {
+    const step = (label, detail, durationMs) => ({ __typename: 'BrowserCheckStep', label, ok: true, detail, durationMs });
+    const page = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400"><rect width="100%" height="100%" fill="white"/><text x="40" y="80" font-family="sans-serif" font-size="32" font-weight="bold">Navigateur opérationnel</text><text x="40" y="130" font-family="sans-serif" font-size="20">Page de test de Skipper.</text></svg>';
+    return {
+      __typename: 'BrowserCheck', ok: true, enabled: Boolean(byId(allProjects, a.id)?.runnerConfig?.browser), image: 'skipper-runner:latest', problems: [], durationMs: 2840,
+      screenshot: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(page)}`,
+      probe: {
+        __typename: 'BrowserProbe', arch: 'aarch64', chromiumVersion: 'Google Chrome for Testing 156.0.7000.0', mcpPath: '/usr/local/bin/playwright-mcp', mcpVersion: 'Version 0.0.84',
+        chromiumPath: '/opt/ms-playwright/chromium_headless_shell-1247/chrome-headless-shell-linux-arm64/chrome-headless-shell', browsers: ['chromium-1247', 'chromium_headless_shell-1247', 'ffmpeg-1013'],
+        memoryLimitMb: 1536, memoryUsedMb: 612, memoryAvailableMb: 924,
+      },
+      steps: [
+        step('Conteneur du projet', 'image skipper-runner:latest', 40),
+        step('Navigateur dans l’image', 'Google Chrome for Testing 156.0.7000.0 · playwright-mcp Version 0.0.84 · aarch64', 910),
+        step('Lancement de Chromium', 'port CDP 41233', 520),
+        step('Démarrage de playwright-mcp', 'Playwright 1.65.0 · 25 outils', 1010),
+        step('Ouverture d’une page locale', 'data:text/html (page de test, sans réseau)', 230),
+        step('Capture de la page', '7 Ko', 130),
+      ],
+    };
+  },
 };
 
 // ---- Valeurs générées pour les champs absents ---------------------------------------------------------------------

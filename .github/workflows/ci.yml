@@ -1,9 +1,14 @@
 name: CI
 
-# Typecheck, build et tests à chaque push et pull request. Le déploiement reste manuel (DEPLOY.md).
+# Typecheck, build et tests. Le déploiement reste manuel (DEPLOY.md).
+#
+# Une seule exécution par changement, au push (toutes les branches, main comprise) : GitHub affiche ces checks
+# dans la PR, puisqu'ils portent sur son dernier commit. Pas de déclencheur pull_request : avec les deux, chaque
+# push d'une branche ayant une PR lançait deux runs identiques. Ce qu'on perd : le test du commit de fusion
+# avec main (l'ordre des migrations reste contrôlé par rapport à origin/main).
 on:
   push:
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -12,11 +17,55 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Trois jobs en parallèle plutôt qu'un seul séquentiel : le temps total est celui du plus long (≈ 1 min 15)
+# au lieu de la somme (≈ 2 min 15). Le dépôt est public, les minutes ne coûtent rien.
 jobs:
-  build-test:
-    name: Typecheck, build et tests
+  backend:
+    name: Backend (migrations, typecheck, build)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Installation
+        run: npm ci --no-audit --no-fund
+
+      # Nommage des migrations (échec sur un préfixe en double) et ordre par rapport à main (avertissement).
+      - name: Migrations
+        run: |
+          git fetch --no-tags --depth=1 origin main
+          npm run check:migrations -w backend -- origin/main
+
+      # Typecheck avec les tests (tsconfig.test.json), puis le build réel (tsconfig.json et copies dans dist/).
+      - name: Typecheck
+        run: npm run typecheck -w backend
+      - name: Build
+        run: npm run build -w backend
+
+  frontend:
+    name: Frontend (typecheck, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Installation
+        run: npm ci --no-audit --no-fund
+      # Le build du frontend contient déjà son typecheck (check-graphql + tsc --noEmit + vite build) :
+      # on ne le lance pas une deuxième fois à part.
+      - name: Typecheck et build
+        run: npm run build -w frontend
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     services:
       # Base de test : le test des migrations y crée puis supprime ses propres bases.
@@ -39,26 +88,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-
       - name: Installation
         run: npm ci --no-audit --no-fund
-
-      # Nommage des migrations (échec sur un préfixe en double) et ordre par rapport à main (avertissement).
-      - name: Migrations
-        run: |
-          git fetch --no-tags --depth=1 origin main
-          npm run check:migrations -w backend -- origin/main
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Build
-        run: npm run build
-
-      - name: Tests
-        run: npm test
+      - name: Tests backend
+        run: npm run test -w backend
+      - name: Tests frontend
+        run: npm run test -w frontend

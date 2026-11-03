@@ -95,8 +95,8 @@ export interface Runner {
   stop(project: Project): Promise<RunnerStatus>;
   /** Supprime l'environnement (conteneur) ; les fichiers du projet ne sont pas touchés. */
   remove(project: Project): Promise<void>;
-  /** Exécutable Claude Code à donner au SDK ; undefined = celui embarqué par le SDK. */
-  claudeExecutable(project: Project): Promise<string | undefined>;
+  /** Exécutable Claude Code à donner au SDK ; undefined = celui embarqué par le SDK. `cwd` : dossier de la session, rendu « trusted » avant le lancement. */
+  claudeExecutable(project: Project, cwd?: string): Promise<string | undefined>;
   /** Shell interactif dans `cwd` (terminal web) ; `rcfile` : fichier de démarrage bash (historique des commandes). */
   terminalCommand(project: Project, cwd: string, options?: { rcfile?: string }): Promise<SpawnSpec>;
   /** Écrit un fichier dans l'environnement du projet (hors des volumes du code : /tmp du conteneur). */

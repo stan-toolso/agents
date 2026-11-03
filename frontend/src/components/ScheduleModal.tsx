@@ -19,6 +19,7 @@ import { formatTokens, permissionModeShortLabels } from '../lib/humanize';
 import { modelOptions } from '../lib/models';
 import { useDialogs } from './Dialogs';
 import { RunHistory } from './ScheduleRuns';
+import ScheduleTools from './ScheduleTools';
 
 /** Conversation de l'agent entre deux exécutions : neuve à chaque fois (défaut), compactée ou oubliée au-delà d'un seuil, ou laissée telle quelle. */
 type ContextMode = 'fresh' | 'compact' | 'reset' | '';
@@ -63,6 +64,7 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
   const [prompt, setPrompt] = useState(existing?.prompt ?? session?.prompt ?? '');
   const [enabled, setEnabled] = useState(existing?.enabled ?? true);
   const [endAfterRun, setEndAfterRun] = useState(existing?.endAfterRun ?? true);
+  const [allowedTools, setAllowedTools] = useState<string[]>(existing?.allowedTools ?? []);
   const currentMode = String(session?.config.permissionMode ?? project?.defaultPermissionMode ?? 'default');
   const [permissionMode, setPermissionMode] = useState(currentMode);
   useEffect(() => {
@@ -114,7 +116,7 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
       contextAction: contextMode || null,
       contextMaxTokens: withThreshold(contextMode) ? Number(contextMaxK) * 1000 : null,
     };
-    const input = { name: name.trim() || null, cron, timezone, prompt: prompt.trim(), enabled, endAfterRun, cleanup };
+    const input = { name: name.trim() || null, cron, timezone, prompt: prompt.trim(), enabled, endAfterRun, allowedTools, cleanup };
     if (creating) {
       const res = await create({ variables: { input: { ...input, name: name.trim(), projectId, config: { permissionMode, ...(model ? { model } : {}) } } } }).catch(() => null);
       if (res?.data) {
@@ -288,6 +290,7 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
               {!creating && ' Réglage de la session, aussi appliqué quand vous lui écrivez.'}
             </Form.Text>
           </Form.Group>
+          <ScheduleTools value={allowedTools} onChange={setAllowedTools} projectId={session?.project.id ?? projectId} sessionId={existing ? session!.id : null} prompt={prompt} permissionMode={permissionMode} />
           <Form.Group className="mb-2">
             <Form.Label className="mb-1">Conversation de l'agent entre deux exécutions</Form.Label>
             <Form.Select value={contextMode} onChange={(e) => setContextMode(e.target.value as ContextMode)}>

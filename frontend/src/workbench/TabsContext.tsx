@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { SIDEBAR } from '../graphql/operations';
+import { withoutTabs } from './tabList';
 import { EMPTY_INDEX, WorkspaceIndex, openItemsOf, workspaceTitle, type SidebarProject } from './workspaces';
 
 export type TabKind =
@@ -59,6 +60,12 @@ interface TabsState {
   closeTab: (key: string) => void;
   /** Ferme d'un coup les onglets dont la clé vérifie `match` ; un onglet de dossier dont seule la page affichée correspond revient sur ses fichiers. */
   closeMatching: (match: (key: string) => boolean) => void;
+  /**
+   * Retire de la mémoire du navigateur (pas de l'écran) les onglets dont la clé vérifie `match` : une page qui n'existe
+   * plus ne revient pas au prochain chargement, même si on laisse son onglet ouvert. Même règle que `closeMatching`
+   * pour un onglet de dossier dont seule la page affichée correspond.
+   */
+  forgetTabs: (match: (key: string) => boolean) => void;
   closeOthers: (key: string) => void;
   closeRight: (key: string) => void;
   closeAll: () => void;
@@ -84,6 +91,7 @@ export function tabKey(pathname: string): string {
 }
 
 const pathOf = (url: string) => url.split('?')[0];
+
 
 /** Titre et type par défaut d'un onglet à partir de son chemin (les pages affinent le titre). */
 export function describeRoute(pathname: string): { title: string; kind: TabKind } {
@@ -186,6 +194,8 @@ export function TabsProvider({ children }: { children: ReactNode }) {
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
   const [closed, setClosed] = useState<Tab[]>([]);
+  // Pages qui n'existent plus (forgetTabs) : laissées à l'écran, mais jamais écrites dans la mémoire du navigateur.
+  const [forgotten, setForgotten] = useState<ReadonlyArray<(key: string) => boolean>>([]);
 
   // Les dossiers de travail viennent de la requête Sidebar, que la sidebar interroge ; ici on lit le cache et on
   // demande la liste une fois, avec les éléments ouverts (projets non membres d'un super administrateur).
@@ -212,18 +222,21 @@ export function TabsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(tabs));
+      const stored = forgotten.length ? withoutTabs(tabs, (key) => forgotten.some((m) => m(key))) : tabs;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
     } catch {
       /* stockage indisponible : les onglets ne sont simplement pas mémorisés */
     }
-  }, [tabs]);
+  }, [tabs, forgotten]);
+
+  const forgetTabs = useCallback((match: (key: string) => boolean) => setForgotten((prev) => [...prev, match]), []);
 
   const closeMatching = useCallback(
     (match: (key: string) => boolean) => {
       const current = tabsRef.current;
       const removed = current.filter((t) => match(t.key));
       // Un onglet de dossier dont seule la page affichée est retirée (terminal supprimé...) revient sur sa session ou ses fichiers.
-      const remaining = current.filter((t) => !match(t.key)).map((t) => (t.kind === 'workspace' && t.key !== pathOf(t.url) && match(pathOf(t.url)) ? { ...t, url: t.key } : t));
+      const remaining = withoutTabs(current, match);
       tabsRef.current = remaining;
       if (removed.length || remaining.some((t, i) => t !== current[i])) setTabs(remaining);
       if (removed.length) setClosed((prev) => [...prev, ...removed].slice(-REOPEN_MAX));
@@ -284,8 +297,8 @@ export function TabsProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<TabsState>(
-    () => ({ tabs, activeKey, workspaces, closeTab, closeMatching, closeOthers, closeRight, closeAll, reopenClosed, canReopen: closed.length > 0, setTitle, previous: () => step(-1), next: () => step(1), goTo }),
-    [tabs, activeKey, workspaces, closeTab, closeMatching, closeOthers, closeRight, closeAll, reopenClosed, closed.length, setTitle, step, goTo],
+    () => ({ tabs, activeKey, workspaces, closeTab, closeMatching, forgetTabs, closeOthers, closeRight, closeAll, reopenClosed, canReopen: closed.length > 0, setTitle, previous: () => step(-1), next: () => step(1), goTo }),
+    [tabs, activeKey, workspaces, closeTab, closeMatching, forgetTabs, closeOthers, closeRight, closeAll, reopenClosed, closed.length, setTitle, step, goTo],
   );
   return <TabsContext.Provider value={value}>{children}</TabsContext.Provider>;
 }
