@@ -176,6 +176,8 @@ export default function SessionDetailPage() {
       : null,
   );
   const actions = useSessionActions(session);
+  // Lecteur du projet : transcript seul, sans saisie, réponses aux demandes ni actions (le serveur les refuse aussi).
+  const readOnly = actions.readOnly;
 
   // Focus dans la zone de saisie à l'ouverture, sauf sur mobile (le clavier virtuel masquerait la page).
   useEffect(() => {
@@ -185,11 +187,11 @@ export default function SessionDetailPage() {
   // Échap interrompt le tour en cours, comme dans Claude Code.
   useEffect(() => {
     const handler = (ev: KeyboardEvent) => {
-      if (ev.key === 'Escape' && busy && pending.length === 0) interruptSession({ variables: { id } });
+      if (ev.key === 'Escape' && busy && pending.length === 0 && !readOnly) interruptSession({ variables: { id } });
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [busy, pending.length, id, interruptSession]);
+  }, [busy, pending.length, id, interruptSession, readOnly]);
 
   const canSend = Boolean(text.trim() || attachments.items.length) && !sending && !encoding && !archived;
   const submit = async () => {
@@ -265,7 +267,9 @@ export default function SessionDetailPage() {
     updateConfig({ variables: { id, config: { [field.key]: value || null } } });
   };
 
-  const statusLine = pending.length
+  const statusLine = readOnly
+    ? `👁 Lecture seule (rôle lecteur sur le projet) · ${pending.length ? "l'agent attend la réponse d'un membre du projet" : busy ? "l'agent travaille…" : (sessionStatusLabels[session.status] ?? session.status).toLowerCase()}${archived ? ' · archivée' : ''}`
+    : pending.length
     ? `⏸ L'agent attend votre réponse ci-dessus`
     : busy
       ? "L'agent travaille… (Échap pour l'interrompre)"
@@ -399,14 +403,14 @@ export default function SessionDetailPage() {
       )}
 
       {/* Le bandeau de contexte vit dans l'onglet « Session » du panneau de droite ; un chat n'a pas de panneau, il le garde ici. */}
-      {chat && <ContextBanner session={session} busy={Boolean(busy)} />}
+      {chat && !readOnly && <ContextBanner session={session} busy={Boolean(busy)} />}
 
       {/* Sur mobile, la ligne vit dans le détail repliable de l'en-tête, avec les boutons. */}
       <div className="cc-toggle d-none d-md-flex">{technicalToggle}</div>
       <Transcript events={shownEvents} draft={draft} loading={!eventsLoaded} technical={technical} />
       {actions.modals}
 
-      {pending.length > 0 && (
+      {pending.length > 0 && !readOnly && (
         <div className="cc-prompts">
           {pending.map((r) => (
             <RequestPrompt key={r.id} request={r} />
@@ -418,7 +422,7 @@ export default function SessionDetailPage() {
         <span>
           {busy && pending.length === 0 && <span className="cc-spinner">✻ </span>}
           {statusLine}
-          {session.status === 'INTERRUPTED' && !archived && (
+          {session.status === 'INTERRUPTED' && !archived && !readOnly && (
             <button
               type="button"
               className="cc-btn accent ms-2"
@@ -441,7 +445,7 @@ export default function SessionDetailPage() {
         </span>
       </div>
 
-      {!archived && (
+      {!archived && !readOnly && (
       <div
         className="cc-input"
         onClick={(e) => {

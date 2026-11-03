@@ -202,7 +202,10 @@ export interface Session {
   updatedAt: string;
   startedAt: string | null;
   endedAt: string | null;
-  project: Pick<Project, 'id' | 'name' | 'slug' | 'workspacePath' | 'approvalConnections'>;
+  /** `myRole` : requête Session seulement (un lecteur ne voit ni la saisie ni les actions). */
+  project: Pick<Project, 'id' | 'name' | 'slug' | 'workspacePath' | 'approvalConnections'> & { myRole?: ProjectRole | null };
+  /** Liens publics de lecture encore valables (requête Session seulement ; vide pour un lecteur). */
+  shares?: SessionShare[];
   worksession: Pick<Worksession, 'id' | 'name' | 'branch' | 'label' | 'path'> | null;
   /** Session d'agent qui a lancé celle-ci (outil MCP sessions.create), null pour une session lancée par un humain. */
   parentSession: { id: string; name: string; status: SessionStatus; activity: SessionActivity | null } | null;
@@ -931,8 +934,46 @@ export const SESSIONS = gql`
   }
 `;
 
+/** Lien public de lecture d'une session (/share/<token>), valable jusqu'à `expiresAt`. */
+export interface SessionShare {
+  id: string;
+  url: string;
+  expiresAt: string;
+  createdAt: string;
+  createdBy: { id: string; name: string } | null;
+}
+
+const SESSION_SHARE_FIELDS = gql`
+  fragment SessionShareFields on SessionShare {
+    id
+    url
+    expiresAt
+    createdAt
+    createdBy {
+      id
+      name
+    }
+  }
+`;
+
+export const CREATE_SESSION_SHARE = gql`
+  ${SESSION_SHARE_FIELDS}
+  mutation CreateSessionShare($sessionId: ID!, $expiresInDays: Float!) {
+    createSessionShare(sessionId: $sessionId, expiresInDays: $expiresInDays) {
+      ...SessionShareFields
+    }
+  }
+`;
+
+export const REVOKE_SESSION_SHARE = gql`
+  mutation RevokeSessionShare($id: ID!) {
+    revokeSessionShare(id: $id)
+  }
+`;
+
 export const SESSION = gql`
   ${SESSION_FIELDS}
+  ${SESSION_SHARE_FIELDS}
   ${REQUEST_FIELDS}
   query Session($id: ID!) {
     session(id: $id) {
@@ -941,6 +982,10 @@ export const SESSION = gql`
       project {
         id
         approvalConnections
+        myRole
+      }
+      shares {
+        ...SessionShareFields
       }
       review {
         branch
