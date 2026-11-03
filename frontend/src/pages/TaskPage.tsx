@@ -4,6 +4,7 @@ import { Alert, Badge, Button, Card, Col, Row, Table } from 'react-bootstrap';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import PageLoading from '../components/PageLoading';
 import { PullRequestChip } from '../components/PullRequests';
+import { DeliverButton } from '../components/Deliveries';
 import { RegisterPullRequestModal, TrackedPullRequestActions, TrackedPullRequestIndicators, PullRequestStageBadge } from '../components/TrackedPullRequests';
 import { forgeOfUrl, prRef, PULL_REQUESTS, type TrackedPullRequest } from '../graphql/pullRequests';
 import StatusBadge from '../components/StatusBadge';
@@ -298,6 +299,11 @@ export default function TaskPage() {
                       <i className="bi bi-git me-1" />
                       {current && current.worksession && alive ? <Link to={`/sessions/${current.id}/files`} title="Fichiers de la session en charge">{branch}</Link> : branch}
                       {!task.worksession && <span className="text-secondary"> (dossier de travail supprimé)</span>}
+                      {alive && canWrite && (
+                        <div className="mt-2" style={{ fontFamily: 'var(--bs-font-sans-serif)' }}>
+                          <DeliverButton projectId={task.project.id} taskId={task.id} worksessionId={task.worksession?.id} branch={branch} myRole={target?.myRole} look="bootstrap" />
+                        </div>
+                      )}
                     </div>
                   ) : null;
                 })()}

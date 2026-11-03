@@ -41,6 +41,7 @@ const icons: Record<TabKind, string> = {
   'project-settings': 'bi-gear',
   task: 'bi-check2-square',
   'pull-requests': 'bi-git',
+  deliveries: 'bi-rocket-takeoff',
   repo: 'bi-code-square',
   history: 'bi-clock-history',
   audit: 'bi-list-check',

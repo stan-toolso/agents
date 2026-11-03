@@ -247,6 +247,9 @@ backend/
       httpRoute.ts             # /api/forge/auth (connexion à Forgejo par la session Skipper, pour nginx), webhook, téléchargement des sauvegardes
       backups.ts               # table git_repository_backups
       browse.ts                # consultation d'un dépôt : références, historique, commit, arbre, fichier
+    deliveries/
+      service.ts               # livraisons : « Livrer » (base, push, PR, CI verte, fusion), déploiements sous verrou après CI verte, lots, reprise
+      repository.ts            # tables deliveries et deploy_configs
     pullRequests/
       types.ts                 # pull request suivie : statut, étape dérivée (en préparation, brouillon, à fusionner, fusionnée, annulée), dépôt, textes pour les agents
       repository.ts            # table pull_requests
@@ -952,6 +955,29 @@ API : query `pullRequests(projectId, taskId, status, stage, limit)`, `pullReques
 `Dashboard.pullRequests` et compteurs `openPullRequests` / `pendingPullRequests` ;
 mutations `registerPullRequest`, `updatePullRequest`, `deletePullRequest`, `syncPullRequests` ;
 `githubPullRequest` et `mergePullRequest` acceptent `repo` (« owner/name ») pour une PR d'un autre dépôt.
+
+**Livraisons** (`backend/src/deliveries/`, table `deliveries`, migration `20261103T1224_deliveries`) : le bouton
+**« Livrer »** (actions d'une session qui a un dossier de travail, carte Code de la fiche d'une tâche ; membres)
+remplace les « push sur main » tapés à la main. Il refuse tout de suite un dossier avec des fichiers non commités, une
+opération git en cours ou un agent au travail, puis, en arrière-plan : fusion de la branche de base dans la branche,
+push (sous le nom de la branche, même si elle suivait `origin/main`), PR reprise ou ouverte, **attente des checks**
+(relus toutes les 15 s ; rouge = échec sans fusion ; aucun check au bout de 2 min = fusion signalée), fusion avec le
+compte de la personne qui a cliqué (branche distante supprimée, tâches de la branche terminées). Chaque étape s'écrit
+dans la livraison et dans le transcript de la session (événement `system`) ; un conflit (à la fusion de la base, ou
+base qui bouge pendant l'attente) est confié à l'agent de la session (`requestGitConflictResolution` avec
+`delivery: true` : il résout, vérifie et pousse, puis la personne relance). Une livraison au plus par dossier (index
+unique partiel). Case « Puis mettre en production » (administrateurs, si un déploiement est configuré).
+**Déploiement** par projet (table `deploy_configs`, onglet **Livraisons** `/projects/:id/deliveries`) : une commande
+lancée par le backend sur un serveur SSH du coffre (`{sha}` et `{branch}` remplacés par le commit vérifié), à la
+demande d'un administrateur (son clic vaut accord), **seulement quand la CI de la branche déployée est verte** (en
+cours : attente ; rouge : refus), **jamais deux à la fois** (index unique partiel sur le déploiement en cours), et les
+demandes faites pendant un déploiement **se regroupent** en un seul déploiement en attente (un seul redémarrage par lot).
+Pour Skipper, la commande est `deploy/cellule/deploy.sh --ref {sha}` en bleu/vert : l'instance qui mène le déploiement
+reçoit SIGUSR2 et attend la fin de la livraison avant de s'arrêter (drainage), et une livraison d'une instance
+disparue passe en échec (tâche des orphelins). L'onglet montre aussi la CI de la branche et l'**historique** (qui,
+quel commit, durée, résultat, étapes et sortie). Les agents lisent l'état de la CI avec l'outil `tasks.ci_status`
+(branche ou commit, même lecture des checks que les PR, `git/ci.ts`). API : queries `deliveries`, `delivery`,
+`deployConfig`, `ciStatus` ; mutations `deliver`, `requestDeploy`, `cancelDelivery`, `setDeployConfig`.
 
 **Revue de code par un agent** (`backend/src/reviews/`) : « Faire relire par un agent » (section « Branche vs base »
 du panneau git, menu « ⋮ » d'une PR suivie ouverte ou en préparation) lance une session Claude **en lecture seule**

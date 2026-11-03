@@ -1412,6 +1412,74 @@ type PullRequestReview {
   state: String!
 }
 
+"Livraison d'un projet : « merge » (bouton Livrer : base fusionnée, push, PR, checks verts, fusion) ou « deploy » (commande de déploiement du projet, sous verrou, après CI verte)."
+type Delivery {
+  id: ID!
+  projectId: ID!
+  "MERGE ou DEPLOY"
+  kind: String!
+  "QUEUED, RUNNING, SUCCEEDED, FAILED, CONFLICT, CANCELLED"
+  status: String!
+  requestedBy: User
+  "Personnes dont la demande a été regroupée dans ce déploiement (lot)."
+  joinedBy: [User!]!
+  session: Session
+  task: Task
+  worksessionId: ID
+  branch: String
+  prNumber: Int
+  prUrl: String
+  "Commit livré (tête de la branche, puis commit de fusion) ou déployé."
+  sha: String
+  steps: [DeliveryStep!]!
+  "Fin de la sortie de la commande de déploiement."
+  output: String
+  error: String
+  "La livraison peut encore être annulée (en attente, ou en cours avant la commande de déploiement)."
+  cancellable: Boolean!
+  createdAt: DateTime!
+  startedAt: DateTime
+  finishedAt: DateTime
+  "Durée en secondes (jusqu'à maintenant si elle tourne encore)."
+  durationSeconds: Int
+}
+
+type DeliveryStep {
+  at: DateTime!
+  message: String!
+  "info, warn, error, success"
+  level: String!
+}
+
+"Commande de déploiement d'un projet, lancée par le backend sur un serveur SSH du coffre ; {sha} et {branch} y sont remplacés par le commit vérifié."
+type DeployConfig {
+  vaultItem: String!
+  command: String!
+  "Branche dont la CI doit être verte et qui est déployée (null : branche principale du projet)."
+  branch: String
+  timeoutMinutes: Int!
+  updatedBy: User
+  updatedAt: DateTime!
+}
+
+input DeployConfigInput {
+  vaultItem: String!
+  command: String!
+  branch: String
+  timeoutMinutes: Int
+}
+
+"État de la CI d'une branche ou d'un commit (GitHub) : checks de son dernier commit."
+type CiStatus {
+  ref: String!
+  sha: String!
+  "SUCCESS, FAILURE, PENDING, ERROR, EXPECTED, ou null"
+  state: String
+  "success, failure, pending, none"
+  verdict: String!
+  checks: [PullRequestCheck!]!
+}
+
 "Pull request GitHub du dépôt d'un projet, ou d'un autre dépôt (lue avec le jeton de la connexion GitHub) ; pour un dépôt hébergé par Skipper, pull request de sa forge Forgejo ; pour un dépôt GitLab, merge request (numéro = iid)."
 type PullRequest {
   "Dépôt « owner/name » (GitHub, ou Forgejo pour un dépôt hébergé) ; chemin complet du projet pour GitLab."
@@ -2832,6 +2900,13 @@ type Query {
   de l'utilisateur ; filtres par tâche, statut et étape. Celles qui attendent une action d'abord (à fusionner, à déployer).
   """
   pullRequests(projectId: ID, taskId: ID, status: [TrackedPullRequestStatus!], stage: [PullRequestStage!], limit: Int): [TrackedPullRequest!]!
+  "Livraisons d'un projet (historique), d'un dossier de travail ou d'une tâche, les plus récentes d'abord."
+  deliveries(projectId: ID!, worksessionId: ID, taskId: ID, kind: String, limit: Int): [Delivery!]!
+  delivery(id: ID!): Delivery
+  "Commande de déploiement du projet (null : pas de déploiement configuré)."
+  deployConfig(projectId: ID!): DeployConfig
+  "État de la CI d'une branche ou d'un commit du dépôt du projet (GitHub) ; défaut : branche principale."
+  ciStatus(projectId: ID!, ref: String): CiStatus
   pullRequest(id: ID!): TrackedPullRequest
   notifications(unreadOnly: Boolean = false, limit: Int): [Notification!]!
   unreadNotificationCount: Int!
@@ -3146,6 +3221,14 @@ type Mutation {
   syncPullRequests(projectId: ID!): [TrackedPullRequest!]!
   "L'onglet actif regarde ce projet : synchronise ses pull requests avec GitHub si la dernière synchronisation date de plus de 10 s, et renvoie les PR en cours (en préparation, brouillon, à fusionner) et celles fusionnées ou fermées depuis moins de 10 minutes."
   watchPullRequests(projectId: ID!): [TrackedPullRequest!]!
+  "Livrer le dossier de travail d'une session ou d'une tâche : base fusionnée, push, PR, checks verts, fusion avec le compte de la personne (membre) ; deploy : demander ensuite le déploiement du projet."
+  deliver(sessionId: ID, taskId: ID, deploy: Boolean): Delivery!
+  "Demande le déploiement du projet (administrateur) : rejoint celui qui attend déjà, sinon en met un en attente ; lancé sous verrou après CI verte."
+  requestDeploy(projectId: ID!): Delivery!
+  "Annule une livraison en attente, ou en cours tant que la commande de déploiement n'est pas lancée."
+  cancelDelivery(id: ID!): Delivery!
+  "Configure (ou retire, input null) la commande de déploiement du projet (administrateur)."
+  setDeployConfig(projectId: ID!, input: DeployConfigInput): DeployConfig
   "Demande à la session rattachée à la PR (TrackedPullRequest.session) de résoudre ses conflits avec la base : l'instruction lui est envoyée (la session est relancée si elle était terminée). Renvoie la session."
   resolvePullRequestConflicts(id: ID!): Session!
   "Fait relire une branche (dossier de travail) ou une PR suivie par un agent : session Claude en lecture seule dans le dossier de la branche, avec le diff par rapport à la base ; son rapport est publié dans le fil de la tâche et, pour une PR ouverte, en commentaire GitHub. Renvoie la session de relecture."

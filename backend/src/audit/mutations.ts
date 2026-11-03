@@ -213,6 +213,8 @@ export const AUDITED: Record<string, MutationAudit> = {
   addSharedPageMember: { action: 'page.share', lookup: ['shared_page', 'id'], details: (a) => ({ email: a.email }) },
   removeSharedPageMember: { action: 'page.unshare', lookup: ['shared_page', 'id'], details: (a) => ({ userId: a.userId }) },
   deleteSharedPage: { action: 'page.delete', lookup: ['shared_page', 'id'] },
+  // Livraisons : la configuration du déploiement (livrer, déployer et annuler sont inscrits par deliveries/service.ts).
+  setDeployConfig: { action: 'delivery.config', project: 'projectId', targetId: () => null, details: (a) => ({ vaultItem: a.input?.vaultItem ?? null, command: a.input?.command ?? null, branch: a.input?.branch ?? null }) },
   // Application (hors projet).
   inviteUser: { action: 'user.invite', app: true, targetId: (_a, r) => r?.id, label: (a) => a.email, details: (a) => ({ isAdmin: a.isAdmin }) },
   setUserAdmin: { action: 'user.admin', app: true, lookup: ['user', 'userId'], details: (a) => ({ isAdmin: a.isAdmin }) },
@@ -229,7 +231,7 @@ export const AUDITED: Record<string, MutationAudit> = {
 };
 
 /** Mutations sensibles inscrites par leur service (les agents passent par les mêmes chemins) : voir tasks/service.ts. */
-export const AUDITED_BY_SERVICE = new Set(['createTask', 'updateTask']);
+export const AUDITED_BY_SERVICE = new Set(['createTask', 'updateTask', 'deliver', 'requestDeploy', 'cancelDelivery']);
 
 /**
  * Mutations sans trace, et pourquoi : réglages et comptes personnels, lectures déguisées (synchronisations, liens),

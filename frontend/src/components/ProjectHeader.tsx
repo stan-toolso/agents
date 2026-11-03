@@ -5,7 +5,7 @@ import { PROJECT_UNREAD_MESSAGES } from '../graphql/conversations';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { useSessionLauncher } from './SessionLauncher';
 
-export type ProjectTab = 'overview' | 'conversations' | 'chats' | 'repo' | 'tasks' | 'agents' | 'pullRequests' | 'context' | 'vault' | 'env' | 'schedules' | 'workflows' | 'history' | 'audit' | 'usage' | 'settings';
+export type ProjectTab = 'overview' | 'conversations' | 'chats' | 'repo' | 'tasks' | 'agents' | 'pullRequests' | 'deliveries' | 'context' | 'vault' | 'env' | 'schedules' | 'workflows' | 'history' | 'audit' | 'usage' | 'settings';
 
 const TABS: { key: ProjectTab; label: string; path: string; icon: string; title?: string; absolute?: boolean }[] = [
   { key: 'overview', label: 'Tableau de bord', path: '', icon: 'bi-speedometer2', title: 'Ce qui attend une réponse, l’équipe au travail, le flux des tâches et la consommation du projet' },
@@ -14,6 +14,7 @@ const TABS: { key: ProjectTab; label: string; path: string; icon: string; title?
   { key: 'tasks', label: 'Tâches', path: '/tasks', icon: 'bi-check2-square' },
   { key: 'agents', label: 'Agents', path: '/agents', icon: 'bi-robot', title: 'Agents du projet (Product Manager, Developer…) : membres qui ne sont pas des personnes, avec leurs comptes, instructions et déclencheurs' },
   { key: 'pullRequests', label: 'Pull requests', path: '/pull-requests', icon: 'bi-git', title: 'Pull requests suivies : à fusionner, fusionnées' },
+  { key: 'deliveries', label: 'Livraisons', path: '/deliveries', icon: 'bi-rocket-takeoff', title: 'Livraisons et déploiements : CI de la branche principale, mise en production sous verrou, historique (qui, quel commit, durée, résultat)' },
   { key: 'context', label: 'Contexte', path: '/context', icon: 'bi-journal-text', title: 'Bibliothèque d’instructions consultée par les agents' },
   { key: 'vault', label: 'Coffre', path: '/vault', icon: 'bi-shield-lock', title: 'Serveurs, bases, API, sites et comptes utilisables par les agents' },
   { key: 'env', label: 'Environnement', path: '/env', icon: 'bi-file-earmark-lock', title: 'Fichiers .env (ou autres) écrits dans chaque nouvelle session, avec des valeurs du coffre' },

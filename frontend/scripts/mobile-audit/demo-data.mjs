@@ -463,6 +463,25 @@ const pullRequests = [
   pr(P.site, T.contact, 87, 'Formulaire de contact : champs empilés sous 400 px', 'formulaire-contact', 'TO_MERGE', { checks: 'FAILURE', age: 60 * 4 }),
 ];
 
+// ---- Livraisons (bouton « Livrer », déploiements) -----------------------------------------------------------------
+
+let deliverySeq = 0;
+const step = (minutesAgo, message, level = 'info') => ({ __typename: 'DeliveryStep', at: ago(minutesAgo), message, level });
+const delivery = (p, kind, status, by, minutesAgo, durationSeconds, opts = {}) => ({
+  __typename: 'Delivery', id: `dl-${++deliverySeq}`, projectId: p.id, kind, status, requestedBy: by, joinedBy: opts.joinedBy ?? [], session: opts.session ?? null, task: opts.task ?? null,
+  worksessionId: opts.session?.worksession?.id ?? null, branch: opts.branch ?? 'main', prNumber: opts.prNumber ?? null, prUrl: opts.prNumber ? `${p.gitUrl}/pull/${opts.prNumber}` : null,
+  sha: opts.sha ?? null, steps: opts.steps ?? [], output: opts.output ?? null, error: opts.error ?? null, cancellable: status === 'QUEUED' || status === 'RUNNING',
+  createdAt: ago(minutesAgo), startedAt: ago(minutesAgo), finishedAt: status === 'RUNNING' || status === 'QUEUED' ? null : ago(minutesAgo - Math.max(1, Math.round(durationSeconds / 60))), durationSeconds,
+});
+const deliveries = [
+  delivery(P.site, 'MERGE', 'RUNNING', U.me, 3, 170, { task: T.contact, session: S.contact, branch: 'formulaire-contact', prNumber: 87, sha: '4f2a9c1e7b', steps: [step(3, 'fusion de la branche de base dans formulaire-contact'), step(3, 'push de la branche'), step(3, 'pull request #87 reprise'), step(2, 'attente des checks de la pull request'), step(1, 'CI en cours · en cours : Tests')] }),
+  delivery(P.site, 'DEPLOY', 'SUCCEEDED', U.me, 60 * 5, 214, { sha: '9b1e3d0a2c', joinedBy: [U.hugo], steps: [step(60 * 5, 'déploiement demandé'), step(60 * 5, 'vérification de la CI de main'), step(60 * 5 - 1, 'CI verte sur main (9b1e3d0)', 'success'), step(60 * 5 - 1, 'commande lancée sur « site-prod » : ./deploy.sh --ref 9b1e3d0a2c'), step(60 * 5 - 4, 'déployé (9b1e3d0, 214 s)', 'success')], output: 'build… ok\npublication… ok\ndéployé 9b1e3d0a2c' }),
+  delivery(P.site, 'MERGE', 'SUCCEEDED', U.hugo, 60 * 5 + 10, 340, { task: T.tarifs, branch: 'page-tarifs-v1', prNumber: 84, sha: '9b1e3d0a2c', steps: [step(60 * 5 + 10, 'fusion de la branche de base dans page-tarifs-v1'), step(60 * 5 + 9, 'pull request #84 ouverte'), step(60 * 5 + 5, 'checks verts', 'success'), step(60 * 5 + 4, 'pull request #84 fusionnée (9b1e3d0)', 'success')] }),
+  delivery(P.site, 'DEPLOY', 'FAILED', U.lea, 60 * 26, 12, { sha: '1c0ffee42b', error: "CI rouge sur main (1c0ffee) : CI rouge · en échec : Tests ; rien n'est déployé", steps: [step(60 * 26, 'déploiement demandé'), step(60 * 26, "CI rouge sur main (1c0ffee) : CI rouge · en échec : Tests ; rien n'est déployé", 'error')] }),
+  delivery(P.site, 'MERGE', 'CONFLICT', U.me, 60 * 27, 25, { branch: 'blog-rss', error: 'Conflit avec la branche de base', steps: [step(60 * 27, 'fusion de la branche de base dans blog-rss'), step(60 * 27, "conflit en fusionnant la branche de base : résolution confiée à l'agent de la session ; relancez « Livrer » une fois la résolution poussée", 'warn')] }),
+];
+const deployConfigs = { [P.site.id]: { __typename: 'DeployConfig', vaultItem: 'site-prod', command: './deploy.sh --ref {sha}', branch: null, timeoutMinutes: 30, updatedBy: U.me, updatedAt: ago(60 * 24 * 3) } };
+
 // ---- Notifications ------------------------------------------------------------------------------------------------
 
 let notifSeq = 0;
@@ -755,6 +774,10 @@ export const demoRoot = {
   unreadMessagesByProject: () => teamProjects.map((p) => ({ __typename: 'ProjectUnreadMessages', project: p, count: typeof p.unreadMessages === 'function' ? p.unreadMessages() : 0 })),
   pullRequests: (a = {}) => pullRequests.filter((x) => (!a.projectId || x.project.id === a.projectId) && (!a.taskId || x.task?.id === a.taskId) && (!a.stage || a.stage.includes(x.stage)) && (!a.status || a.status.includes(x.status))),
   pullRequest: (a) => byId(pullRequests, a.id),
+  deliveries: (a = {}) => deliveries.filter((d) => d.projectId === a.projectId && (!a.worksessionId || d.worksessionId === a.worksessionId) && (!a.taskId || d.task?.id === a.taskId) && (!a.kind || d.kind === a.kind.toUpperCase())).slice(0, a.limit ?? 50),
+  delivery: (a) => byId(deliveries, a.id),
+  deployConfig: (a) => deployConfigs[a.projectId] ?? null,
+  ciStatus: (a) => ({ __typename: 'CiStatus', ref: a.ref ?? 'main', sha: '9b1e3d0a2c4f', state: 'SUCCESS', verdict: 'success', checks: [{ __typename: 'PullRequestCheck', name: 'Tests', state: 'SUCCESS', url: null }, { __typename: 'PullRequestCheck', name: 'Typecheck et build', state: 'SUCCESS', url: null }] }),
   worksession: (a) => sessions.map((s) => s.worksession).find((w) => w?.id === a.id) ?? null,
   vaultItems: (a = {}) => vaultItems.filter((v) => !a.kind || v.kind === a.kind),
   vaultItem: (a) => byId(vaultItems, a.id),
