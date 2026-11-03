@@ -19,6 +19,8 @@ export interface ContainerSpec {
   cpus: string;
   user: string;
   home: string;
+  /** Variables d'environnement `NOM=valeur` du conteneur (hors HOME) ; absent sur les conteneurs plus anciens. */
+  env?: string[];
   workdir: string;
   restart: string;
   /** Montages `hôte:conteneur[:ro]`. */
@@ -86,9 +88,9 @@ export function containerDrift(expected: ContainerSpec, actual: ContainerFacts, 
   if ((recorded.cpus ?? '') !== expected.cpus) reasons.push(`plafond CPU ${recorded.cpus || 'aucun'} → ${expected.cpus || 'aucun'}`);
   reasons.push(...listDiff(recorded.mounts ?? [], expected.mounts, 'montage', expected.home));
   reasons.push(...listDiff(recorded.tmpfs ?? [], expected.tmpfs, 'tmpfs', expected.home));
-  const simple: Record<string, string> = { user: 'utilisateur', home: 'dossier personnel', workdir: 'dossier de travail', restart: 'politique de redémarrage', hosts: 'hôtes supplémentaires', command: 'commande' };
+  const simple: Record<string, string> = { user: 'utilisateur', home: 'dossier personnel', workdir: 'dossier de travail', restart: 'politique de redémarrage', hosts: 'hôtes supplémentaires', command: 'commande', env: 'variables d’environnement' };
   for (const key of Object.keys(simple) as (keyof typeof simple & keyof ContainerSpec)[]) {
-    if (JSON.stringify(recorded[key] ?? null) !== JSON.stringify(expected[key])) reasons.push(`${simple[key]} modifié`);
+    if (JSON.stringify(recorded[key] ?? null) !== JSON.stringify(expected[key] ?? null)) reasons.push(`${simple[key]} modifié`);
   }
   // Paramètre ajouté au code et inconnu du conteneur (ou l'inverse) : signalé sans détail.
   const known = new Set(['image', 'imageId', 'init', 'memory', 'cpus', 'mounts', 'tmpfs', ...Object.keys(simple)]);

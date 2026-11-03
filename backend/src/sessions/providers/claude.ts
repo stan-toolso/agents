@@ -236,7 +236,7 @@ export class ClaudeProvider implements SessionProvider {
     if (chat) await mkdir(chatConfigDir(ctx.project), { recursive: true });
     // Script de relais qui exécute le CLI dans le conteneur du projet (avant le navigateur : rien à nettoyer s'il échoue) ;
     // un chat utilise le CLI du serveur (CLAUDE_BIN, sinon celui du SDK), comme la vérification des identifiants.
-    const claudeExecutable = chat ? config.claudeBin : await runner.claudeExecutable(ctx.project);
+    const claudeExecutable = chat ? config.claudeBin : await runner.claudeExecutable(ctx.project, ctx.cwd);
 
     const abortController = new AbortController();
     // Option « navigateur » du projet : un serveur MCP Playwright (Chromium headless) dans le conteneur du projet.
