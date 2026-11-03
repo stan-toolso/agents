@@ -11,6 +11,8 @@ import { describeCron } from '../lib/cron';
 import { timeUntil } from '../lib/schedules';
 import { useSessionEvents } from '../lib/sessionEvents';
 import { usePollingQuery } from '../lib/usePollingQuery';
+import { useShortcut } from '../lib/useShortcut';
+import { DOUBLE_ESCAPE_MS, nextEscape, overlayOpen } from '../lib/escapeInterrupt';
 import { useGitTarget } from '../workbench/GitTargetContext';
 import { useDialogs } from '../components/Dialogs';
 import { useCachedName } from '../components/PageLoading';
@@ -196,14 +198,43 @@ export default function SessionDetailPage() {
     if (canAutoFocus()) inputRef.current?.focus();
   }, [session?.id]);
 
-  // Échap interrompt le tour en cours, comme dans Claude Code.
+  // Échap deux fois interrompt le tour en cours (lib/escapeInterrupt.ts) ; un Échap qui ferme un panneau, un menu
+  // ou une fenêtre ne compte pas. L'état d'ouverture est relevé en phase de capture, avant que le panneau ne se ferme.
+  const canInterrupt = Boolean(busy) && pending.length === 0 && !readOnly;
+  const escapeOverOverlay = useRef(false);
+  const escArmedAt = useRef<number | null>(null);
+  const [escArmed, setEscArmed] = useState(false);
   useEffect(() => {
-    const handler = (ev: KeyboardEvent) => {
-      if (ev.key === 'Escape' && busy && pending.length === 0 && !readOnly) interruptSession({ variables: { id } });
+    if (!canInterrupt) return;
+    const capture = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') escapeOverOverlay.current = overlayOpen();
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [busy, pending.length, id, interruptSession, readOnly]);
+    window.addEventListener('keydown', capture, true);
+    return () => window.removeEventListener('keydown', capture, true);
+  }, [canInterrupt]);
+  useEffect(() => {
+    escArmedAt.current = null;
+    setEscArmed(false);
+  }, [canInterrupt, id]);
+  useEffect(() => {
+    if (!escArmed) return;
+    const t = window.setTimeout(() => {
+      escArmedAt.current = null;
+      setEscArmed(false);
+    }, DOUBLE_ESCAPE_MS);
+    return () => window.clearTimeout(t);
+  }, [escArmed]);
+  useShortcut(
+    { id: 'session.interrupt', keys: ['Escape'], label: "Interrompre l'agent (deux fois)", scope: 'page', area: 'Session', preventDefault: false },
+    (ev) => {
+      if (ev.defaultPrevented || escapeOverOverlay.current || overlayOpen()) return false;
+      const next = nextEscape(escArmedAt.current, Date.now());
+      escArmedAt.current = next.armedAt;
+      setEscArmed(!next.fire);
+      if (next.fire) void interruptSession({ variables: { id } });
+    },
+    canInterrupt,
+  );
 
   const canSend = Boolean(text.trim() || attachments.items.length) && !sending && !encoding && !archived;
   const submit = async () => {
@@ -298,7 +329,9 @@ export default function SessionDetailPage() {
     : pending.length
     ? `⏸ L'agent attend votre réponse ci-dessus`
     : busy
-      ? "L'agent travaille… (Échap pour l'interrompre)"
+      ? escArmed
+        ? "L'agent travaille… Appuyez de nouveau sur Échap pour l'interrompre"
+        : "L'agent travaille… (Échap deux fois pour l'interrompre)"
       : running
         ? "⏵ L'agent attend vos instructions"
         : archived
