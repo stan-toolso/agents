@@ -51,5 +51,7 @@ a.ch-person:hover { background: var(--cc-bg-hover); }
   .ch-side-title { display: none; }
   .ch-channel { border: 1px solid var(--cc-border); padding: 2px 8px; }
   .ch-head { padding: 8px 4px; }
-  .ch-body { padding: 4px 0; }
+  /* C'est la page qui défile ici : un .ch-body resté « auto + contain » sans rien à faire défiler bloque le geste
+     tactile commencé sur un message (Chrome Android n'enchaîne plus vers la page). */
+  .ch-body { padding: 4px 0; overflow: visible; overscroll-behavior: auto; }
 }
