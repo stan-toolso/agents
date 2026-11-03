@@ -5,7 +5,7 @@ import { namesFromText } from '../worksessions/names.js';
 import { worksessionService } from '../worksessions/service.js';
 import { pubSub } from '../pubsub.js';
 import { notificationService } from '../notifications/service.js';
-import { requestService } from '../requests/service.js';
+import { ANSWERED_BY, requestService } from '../requests/service.js';
 import { removeSessionAttachments, storeAttachments } from './attachments.js';
 import { sessionRepository } from './repository.js';
 import { scheduledRuns } from './scheduledRuns.js';
@@ -620,7 +620,9 @@ export const sessionService = {
               payload: { requestType: input.type, requestId: request.id },
             });
           });
-          await emit('request.answered', { type: input.type, title: input.title, response });
+          // Qui a répondu reste dans la table des demandes ; le transcript garde la réponse seule.
+          const { [ANSWERED_BY]: _answeredBy, ...shown } = response;
+          await emit('request.answered', { type: input.type, title: input.title, response: shown });
           return response;
         },
         isServerStopping: () => stopping,
