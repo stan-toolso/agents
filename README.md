@@ -232,7 +232,7 @@ backend/
       service.ts               # tâches : création, mise à jour, personnes, champs, fil de discussion (messages, réponses, mentions, réactions), sessions en charge, résumé pour le prompt
       mentions.ts              # mentions @Nom / @e-mail / @session:<id> : candidats et résolution dans un texte
       sessionFeed.ts           # changements, messages et réactions transmis aux sessions reliées à la tâche (en charge, passées par la tâche, mentionnées)
-      mcp.ts                   # serveur MCP `tasks` (list, get, create, update, claim, release, comment, react, people, pr_list, pr_open, pr_register, pr_update)
+      mcp.ts                   # serveur MCP `tasks` (list, get, create, update, claim, release, comment, react, people, pr_list, pr_open, pr_merge, pr_register, pr_update)
       launch.ts                # confier une tâche à un nouvel agent (refusé tant qu'elle est bloquée)
       dependencyGraph.ts       # dépendances entre tâches : détection des cycles (sans base)
       autoStart.ts             # enchaînement : tâche débloquée lancée automatiquement, notifiée
@@ -905,7 +905,12 @@ fusion comptent (un squash laisse les anciens commits « en avance »). Il naît
 session, soumis à son autorisation, avec un paramètre `path` pour ouvrir la PR sur le dépôt d'un autre clone présent
 dans un sous-dossier du dossier de travail ; `tasks.pr_register`, qui déclare une PR ouverte par un autre moyen, par
 l'URL de n'importe quel dépôt GitHub ou par son numéro dans le dépôt du projet ; `tasks.pr_update` tient à jour
-statut, note et tâche, mais une PR en préparation ne change pas de statut ainsi ; `tasks.pr_list` liste par
+statut, note et tâche, mais une PR en préparation ne change pas de statut ainsi ; `tasks.pr_merge` fusionne une PR
+ouverte quand une personne le demande : l'outil pose lui-même une demande d'autorisation, jamais mémorisable et posée
+même en mode « ne jamais demander », et la fusion est faite avec le compte de la personne qui l'accepte (`answered_by`
+de la demande, remis à l'outil par `requestService` sous la clé `answeredById` ; au moins membre du projet), à son nom,
+branche distante supprimée et tâches de la branche terminées, dossier de travail gardé (`pullRequests/mergeApproval.ts`) ;
+`tasks.pr_list` liste par
 étape ; `tasks.get` montre les PR d'une tâche ; les PR d'un autre dépôt sont désignées « owner/name#n »), par
 l'interface (création ou fusion depuis le panneau git, bouton « Suivre une PR » de la page des pull requests ou de
 la fiche d'une tâche), ou par la **synchronisation** (`trackedPullRequestService.sync`, à l'affichage de la page d'un
@@ -1367,7 +1372,8 @@ création et ne suivent pas les évolutions des modèles ; Skipper ajoute donc a
 soient ses instructions : un **Product Manager** ne modifie pas le code, ne commite, ne pousse ni n'ouvre de PR
 (`tasks.pr_open` le lui refuse) ; un changement de code nécessaire, y compris un bug qui bloque une release, devient une
 tâche « prête » confiée aussitôt à l'agent développeur, la tâche bloquée en dépendant. Un **Developer** ne met rien en
-production et ne fusionne pas. Ces règles sont levées quand une personne a pris la main.
+production et ne fusionne pas de sa propre initiative : quand une personne le lui demande, il passe par `tasks.pr_merge`,
+que cette personne accepte et qui fusionne avec son compte. Ces règles sont levées quand une personne a pris la main.
 
 **Type de session et modèles.** Le profil (carte « Sessions ») règle le **type de session par défaut**
 (`defaults.provider` : Claude Code ou OpenCode ; `agentService.providerOf`), le **modèle par défaut**
@@ -1710,7 +1716,17 @@ La relance travaille dans le dossier et sur la branche de la session d'origine (
 la session d'origine est archivée, arrêtée si elle tournait : une seule session par dossier), ou dans un
 nouveau dossier si le sien a été supprimé. Archiver une session archive son dossier (terminaux fermés,
 dossier et branche conservés) ; la restaurer le restaure ; un dossier disparu est recréé à la prochaine
-utilisation. Une session se renomme depuis la sidebar ou ses réglages.
+utilisation. Une session se renomme depuis la sidebar (menu « ⋮ »), ses réglages, ou d'un double-clic (ou clic droit)
+sur son onglet.
+
+**Titre généré** (`backend/src/sessions/autoTitle.ts`) : une session lancée sans nom explicite (lanceur, chat,
+`sessions.create` sans `name`) reçoit un nom provisoire (début de la consigne) et le drapeau `config.autoTitle`. À
+la fin de son premier tour, Haiku 4.5 (`claude-haiku-4-5-20251001`, par le SDK Agent avec les identifiants Claude
+de la session, clé API ou abonnement) propose un titre de 4 à 8 mots d'après la consigne et la première réponse ; il
+remplace le nom provisoire et le drapeau tombe (un échec garde le nom provisoire, sans réessayer). Un renommage
+manuel retire le drapeau et l'emporte toujours. Les sessions de tâches et planifiées gardent leur nom (pas de
+drapeau). Le coût est inscrit dans `usage_ledger`. Réglage par personne : Paramètres → Claude → Modèles,
+« Titrer les sessions automatiquement » (`ClaudeSettings.autoTitle`, activé par défaut).
 
 **Une session peut s'archiver elle-même** (outil MCP `sessions.archive`, libre) : sans `id`, la session
 courante, archivée **à la fin de son tour** (`sessionService.archiveWhenDone` : fin propre par `end`, puis

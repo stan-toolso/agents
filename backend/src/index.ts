@@ -18,6 +18,7 @@ import { registerTaskSessionFeed } from './tasks/sessionFeed.js';
 import { registerAgentTriggers } from './agents/triggers.js';
 import { registerConversationSessionFeed } from './conversations/feed.js';
 import { archiveSessionCascade } from './projects/cleanup.js';
+import { archiveAgentSessionsOfPullRequest } from './pullRequests/archiveOnEnd.js';
 import { registerTaskAutoStart } from './tasks/autoStart.js';
 import { registerTaskSessionEnd } from './tasks/endSessions.js';
 import { agentService } from './agents/service.js';
@@ -131,6 +132,8 @@ async function main() {
   registerConversationSessionFeed();
   // Une session qui s'archive elle-même (outil sessions.archive) l'est en fin de tour, avec son dossier de travail.
   sessionService.onArchiveWhenDone(archiveSessionCascade);
+  // Une session d'agent qui porte une PR ouverte reste active ; elle est rangée à la fusion ou à la fermeture de la PR.
+  trackedPullRequestService.onEnded('archive-agent-sessions', async (pr) => void (await archiveAgentSessionsOfPullRequest(pr)));
   const closedTerminals = await terminalService.recoverAfterRestart(liveInstances);
   if (closedTerminals) log.info(`[terminals] ${closedTerminals} terminal(aux) fermé(s)`);
   // Conteneurs créés avec d'anciens paramètres (ou une image depuis reconstruite) : supprimés maintenant que rien n'y

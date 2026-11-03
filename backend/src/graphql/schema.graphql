@@ -1738,6 +1738,8 @@ type ClaudeSettings {
   defaultMaxTurns: Int
   "Seuil (tokens) au-delà duquel ses pages signalent le contexte d'une session : jauge en couleur, pastille, bandeau « Compacter / Repartir d'une conversation neuve ». null : ne jamais signaler. Défaut : 150 000."
   contextWarnTokens: Int
+  "Titre court généré par un modèle léger (Haiku) après le premier tour des sessions lancées sans nom explicite. Défaut : true."
+  autoTitle: Boolean!
 }
 
 type UsageByModel {
@@ -2210,6 +2212,8 @@ input ClaudeSettingsInput {
   defaultMaxTurns: Int
   "Seuil de signalement du contexte (tokens) ; null explicite : ne jamais signaler."
   contextWarnTokens: Int
+  "Génération du titre des sessions après leur premier tour."
+  autoTitle: Boolean
 }
 
 "Éléments ouverts dans les onglets du workbench, par type (identifiants non UUID ignorés)."
@@ -2742,6 +2746,8 @@ input CreateSessionInput {
   "Crée d'abord cette work session et y lance la session (exclusif avec worksessionId)."
   newWorksession: NewWorksessionInput
   name: String!
+  "Nom provisoire (tiré de la consigne) : remplacé par un titre court généré après le premier tour, sauf si la personne l'a coupé (Paramètres → Claude)."
+  autoTitle: Boolean
   provider: String!
   "Première instruction. Facultative : sans consigne ni fichier joint, la session est créée sans démarrer et attend sa première instruction."
   prompt: String

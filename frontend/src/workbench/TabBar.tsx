@@ -7,6 +7,16 @@ import { useShortcut } from '../lib/useShortcut';
 import NotificationBell from './NotificationBell';
 import { useTabs, type Tab, type TabKind } from './TabsContext';
 import { useGitPanel } from './GitTargetContext';
+import { useRenameSession, type RenamableSession } from './RenameSession';
+import type { WorkspaceIndex } from './workspaces';
+
+/** Session ou chat affiché par un onglet (renommable par double-clic ou clic droit), sinon null. */
+function renamableOf(tab: Tab, workspaces: WorkspaceIndex): RenamableSession | null {
+  const session = workspaces.get(tab.key)?.session;
+  if (session) return { id: session.id, name: session.name };
+  const chat = tab.url.match(/^\/chats\/([0-9a-fA-F-]{36})(?:[/?#]|$)/);
+  return chat ? { id: chat[1], name: tab.title } : null;
+}
 
 const icons: Record<TabKind, string> = {
   dashboard: 'bi-speedometer2',
@@ -99,7 +109,9 @@ function TabsMenu({ tabs, activeKey, onClose }: { tabs: Tab[]; activeKey: string
 
 /** Menu contextuel d'un onglet (clic droit), positionné au curseur. */
 function TabContextMenu({ tab, index, x, y, onClose }: { tab: Tab; index: number; x: number; y: number; onClose: () => void }) {
-  const { tabs, closeTab, closeOthers, closeRight, closeAll, reopenClosed, canReopen } = useTabs();
+  const { tabs, closeTab, closeOthers, closeRight, closeAll, reopenClosed, canReopen, workspaces } = useTabs();
+  const { openRenameSession } = useRenameSession();
+  const renamable = renamableOf(tab, workspaces);
   useEffect(() => {
     const close = () => onClose();
     window.addEventListener('click', close);
@@ -117,6 +129,14 @@ function TabContextMenu({ tab, index, x, y, onClose }: { tab: Tab; index: number
   const left = Math.min(x, window.innerWidth - 240);
   return (
     <div className="wb-ctx-menu" style={{ left, top: y }} role="menu" onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()}>
+      {renamable && (
+        <>
+          <button type="button" role="menuitem" onClick={run(() => openRenameSession(renamable))}>
+            Renommer la session…
+          </button>
+          <div className="wb-ctx-sep" />
+        </>
+      )}
       <button type="button" role="menuitem" onClick={run(() => closeTab(tab.key))}>
         Fermer <Keys combo="alt+code:KeyW" />
       </button>
@@ -143,7 +163,8 @@ function TabContextMenu({ tab, index, x, y, onClose }: { tab: Tab; index: number
  * en vue, et un menu qui liste tous les onglets.
  */
 export default function TabBar({ onToggleSidebar, sidebarOpen = false, sidebarCollapsed = false }: { onToggleSidebar?: () => void; sidebarOpen?: boolean; sidebarCollapsed?: boolean }) {
-  const { tabs, activeKey, closeTab, reopenClosed, previous, next, goTo } = useTabs();
+  const { tabs, activeKey, closeTab, reopenClosed, previous, next, goTo, workspaces } = useTabs();
+  const { openRenameSession } = useRenameSession();
   const navigate = useNavigate();
   const stripRef = useRef<HTMLDivElement>(null);
   const [overflow, setOverflow] = useState({ left: false, right: false });
@@ -214,6 +235,12 @@ export default function TabBar({ onToggleSidebar, sidebarOpen = false, sidebarCo
               className={`wb-tab${tab.key === activeKey ? ' active' : ''}`}
               title={tab.title}
               onClick={() => navigate(tab.url)}
+              onDoubleClick={(e) => {
+                const renamable = renamableOf(tab, workspaces);
+                if (!renamable || (e.target as HTMLElement).closest('.wb-tab-close')) return;
+                e.preventDefault();
+                openRenameSession(renamable);
+              }}
               onAuxClick={(e) => {
                 if (e.button === 1) closeTab(tab.key);
               }}

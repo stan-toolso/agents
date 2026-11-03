@@ -116,3 +116,11 @@ describe('point de départ d’une nouvelle branche', () => {
     expect(git(dir, 'rev-parse', 'HEAD')).toBe(sha);
   });
 });
+
+describe('branche déjà extraite ailleurs', () => {
+  it('refuse avec un message clair une branche extraite dans un autre dossier de travail', async () => {
+    const first = path.join(base, 'ws-1');
+    await worksessionService.checkout(main, first, 'feature', {});
+    await expect(worksessionService.checkout(main, path.join(base, 'ws-2'), 'feature', {})).rejects.toThrow(/déjà extraite dans le dossier de travail ws-1/);
+  });
+});

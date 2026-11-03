@@ -79,6 +79,7 @@ export const personalService = {
       projectId: space.id,
       kind: 'chat',
       name: chatName(trimmed || 'Fichiers joints'),
+      autoTitle: true,
       provider: 'claude',
       prompt: trimmed,
       attachments: attachments ?? null,
