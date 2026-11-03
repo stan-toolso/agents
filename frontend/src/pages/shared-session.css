@@ -1,0 +1,9 @@
+/* Page publique d'une session partagée (/share/<token>) : hors de l'application, pleine fenêtre. */
+.shared-session { min-height: 100vh; padding: 16px; background: var(--cc-sidebar-bg); }
+.shared-session .cc { height: calc(100vh - 32px); max-width: 1100px; margin: 0 auto; }
+.shared-session-badge { font-family: var(--bs-font-sans-serif); font-size: 12px; white-space: nowrap; }
+.shared-session-center { min-height: 100vh; display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; }
+@media (max-width: 767.98px) {
+  .shared-session { padding: 0; }
+  .shared-session .cc { height: 100vh; border-radius: 0; }
+}

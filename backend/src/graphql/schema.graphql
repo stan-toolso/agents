@@ -3945,6 +3945,30 @@ extend type Query {
   usageReport(projectId: ID, days: Int): UsageReport!
 }
 
+# ---- Partage d'une session en lecture seule (lien public) ------------------------------------------------------------
+
+"Lien public de lecture d'une session (/share/<token>) : transcript sans connexion, secrets masqués, jusqu'à expiresAt."
+type SessionShare {
+  id: ID!
+  "Adresse à transmettre (/share/<token>)."
+  url: String!
+  expiresAt: DateTime!
+  createdBy: User
+  createdAt: DateTime!
+}
+
+extend type Session {
+  "Liens publics encore valables (membres du projet ; vide pour un lecteur)."
+  shares: [SessionShare!]!
+}
+
+extend type Mutation {
+  "Crée un lien public de lecture de la session, valable expiresInDays jours (30 au plus ; 0.04 ≈ une heure). Rôle membre."
+  createSessionShare(sessionId: ID!, expiresInDays: Float!): SessionShare!
+  "Révoque un lien public : il renvoie 404 aussitôt. Rôle membre."
+  revokeSessionShare(id: ID!): Boolean!
+}
+
 # ---- Journal d'audit -----------------------------------------------------------------------
 
 "Qui a fait l'action : une personne, une session d'agent, ou Skipper lui-même (automatismes, clé d'API)."

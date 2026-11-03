@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { Spinner } from 'react-bootstrap';
-import { Navigate, Route, Routes, type Location } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, type Location } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import Layout from './components/Layout';
 import { DialogProvider } from './components/Dialogs';
@@ -48,6 +48,7 @@ const ProjectUsagePage = lazy(() => import('./pages/ProjectUsagePage'));
 const RepoPage = lazy(() => import('./pages/RepoPage'));
 const ProjectAgentsPage = lazy(() => import('./pages/ProjectAgentsPage'));
 const AgentPage = lazy(() => import('./pages/AgentPage'));
+const SharedSessionPage = lazy(() => import('./pages/SharedSessionPage'));
 
 /** Routes des pages ; `location` est celle de l'onglet rendu (figée pour un onglet caché). */
 function PageRoutes({ location, isAdmin }: { location: Location; isAdmin: boolean }) {
@@ -140,6 +141,16 @@ function Gate() {
 }
 
 export default function App() {
+  // Lien public d'une session (/share/<token>) : lisible sans compte, hors de l'application (ni connexion, ni sidebar).
+  const { pathname } = useLocation();
+  if (pathname.startsWith('/share/'))
+    return (
+      <Suspense fallback={<PageLoading />}>
+        <Routes>
+          <Route path="/share/:token" element={<SharedSessionPage />} />
+        </Routes>
+      </Suspense>
+    );
   return (
     <AuthProvider>
       <DialogProvider>

@@ -11,16 +11,20 @@ import RelaunchModal from './RelaunchModal';
 import ResumeSessionModal from './ResumeSessionModal';
 import ScheduleModal from './ScheduleModal';
 import SessionSettingsModal from './SessionSettingsModal';
+import ShareSessionModal from './ShareSessionModal';
 
 /** Session telle que la requête `Session` la renvoie : le détail suffit aux actions et aux sous-agents. */
 export type ControlledSession = Session & { childSessions: ChildSession[] };
+
+/** Lecteur du projet (rôle viewer) : il lit la session, sans saisie ni action (le serveur les refuse de toute façon). */
+export const isReadOnlySession = (session: Pick<Session, 'project'> | null | undefined): boolean => session?.project.myRole === 'VIEWER';
 
 /**
  * Actions d'une session (réglages, planification, interrompre, terminer, arrêter, relancer, archiver…) et les
  * modales qu'elles ouvrent, partagées entre l'en-tête déplié de la page de session et l'onglet « Session » du
  * panneau de droite. Le hook accepte une session absente (page en cours de chargement) : il ne rend alors rien.
  */
-export function useSessionActions(session: ControlledSession | null | undefined): { buttons: ReactNode; modals: ReactNode; openSettings: () => void; openContextSettings: () => void; openSchedule: () => void } {
+export function useSessionActions(session: ControlledSession | null | undefined): { buttons: ReactNode; modals: ReactNode; readOnly: boolean; openSettings: () => void; openContextSettings: () => void; openSchedule: () => void } {
   const { confirm, showError } = useDialogs();
   const onError = (err: Error) => void showError(err);
   const [takeOverSession, { loading: takingOver }] = useMutation(TAKE_OVER_SESSION, { onError });
@@ -37,10 +41,15 @@ export function useSessionActions(session: ControlledSession | null | undefined)
   const [settingsOpen, setSettingsOpen] = useState<false | 'all' | 'context'>(false);
   const [relaunching, setRelaunching] = useState(false);
   const [resumingWith, setResumingWith] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const readOnly = isReadOnlySession(session);
+  const noop = () => undefined;
   const openSettings = () => setSettingsOpen('all');
   const openContextSettings = () => setSettingsOpen('context');
   const openSchedule = () => setScheduling(true);
-  if (!session) return { buttons: null, modals: null, openSettings, openContextSettings, openSchedule };
+  if (!session) return { buttons: null, modals: null, readOnly, openSettings, openContextSettings, openSchedule };
+  // Lecteur : ni boutons ni modales ; la jauge de contexte et la planification ne s'ouvrent pas.
+  if (readOnly) return { buttons: null, modals: null, readOnly, openSettings: noop, openContextSettings: noop, openSchedule: noop };
 
   const id = session.id;
   const archived = Boolean(session.archivedAt);
@@ -122,6 +131,9 @@ export function useSessionActions(session: ControlledSession | null | undefined)
           Arrêter
         </button>
       )}
+      <button type="button" className="cc-btn" title="Lien public de lecture du transcript, sans connexion, à durée limitée et révocable" onClick={() => setSharing(true)}>
+        <i className="bi bi-share" /> Partager{session.shares?.length ? ` (${session.shares.length})` : ''}
+      </button>
       <button type="button" className="cc-btn" title="Repart d'une nouvelle session (nouveau nom) avec un résumé de celle-ci ; pour continuer la même conversation, utilisez « Reprendre » ou écrivez un message" onClick={() => setRelaunching(true)}>
         <i className="bi bi-arrow-repeat" /> Relancer
       </button>
@@ -158,9 +170,10 @@ export function useSessionActions(session: ControlledSession | null | undefined)
         />
       )}
       {relaunching && <RelaunchModal session={session} projectName={session.project.name} onClose={() => setRelaunching(false)} />}
+      {sharing && <ShareSessionModal session={session} onClose={() => setSharing(false)} />}
     </>
   );
-  return { buttons, modals, openSettings, openContextSettings, openSchedule };
+  return { buttons, modals, readOnly, openSettings, openContextSettings, openSchedule };
 }
 
 /** Phrase d'état de la session parente (« travaille », « terminée »…), pour la note de sous-agent. */

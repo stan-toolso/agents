@@ -28,9 +28,10 @@ async function docker(args: string[], opts: { allowFail?: boolean } = {}): Promi
     const { stdout } = await execFileAsync('docker', args, { maxBuffer: 8 * 1024 * 1024 });
     return { stdout, code: 0 };
   } catch (err) {
-    const e = err as { code?: number | string; stderr?: string; message: string };
+    const e = err as { code?: number | string; stdout?: unknown; stderr?: string; message: string };
     if (e.code === 'ENOENT') throw new AppError("Docker n'est pas installé sur le serveur (commande docker introuvable)");
-    if (opts.allowFail && typeof e.code === 'number') return { stdout: '', code: e.code };
+    // La sortie d'une commande qui échoue est gardée (journal d'un contrôle qui échoue).
+    if (opts.allowFail && typeof e.code === 'number') return { stdout: typeof e.stdout === 'string' ? e.stdout : '', code: e.code };
     throw new AppError(`docker ${args[0]} a échoué : ${(e.stderr || e.message).trim().split('\n').slice(-2).join(' ')}`);
   }
 }
@@ -490,8 +491,11 @@ exec docker exec -i -w "$PWD" ${envFlags} ${this.containerName(project)} claude 
     await docker(['exec', '-d', '-w', cwd, ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]), this.containerName(project), ...command]);
   }
 
-  async exec(project: Project, command: string[]): Promise<{ stdout: string; code: number }> {
-    return docker(['exec', this.containerName(project), ...command], { allowFail: true });
+  async exec(project: Project, command: string[], opts: { cwd?: string; timeoutSeconds?: number; output?: boolean } = {}): Promise<{ stdout: string; code: number }> {
+    // `timeout` (coreutils) tue la commande dans le conteneur ; tuer `docker exec` ne l'arrêterait pas.
+    const wrapped = opts.timeoutSeconds ? ['timeout', '-k', '10', String(Math.ceil(opts.timeoutSeconds)), ...command] : command;
+    const args = ['exec', ...(opts.cwd ? ['-w', opts.cwd] : []), this.containerName(project), ...(opts.output ? ['sh', '-c', 'exec "$@" 2>&1', 'sh', ...wrapped] : wrapped)];
+    return docker(args, { allowFail: true });
   }
 
   async containerAddress(project: Project): Promise<string | null> {

@@ -10,6 +10,7 @@ export interface TargetInfo {
 const QUERIES = {
   project: 'SELECT id AS project_id, name AS label FROM projects WHERE id = $1',
   session: 'SELECT project_id, name AS label FROM sessions WHERE id = $1',
+  session_share: 'SELECT s.project_id, s.name AS label FROM session_shares sh JOIN sessions s ON s.id = sh.session_id WHERE sh.id = $1',
   task: 'SELECT project_id, title AS label FROM tasks WHERE id = $1',
   request: 'SELECT s.project_id, r.title AS label FROM requests r JOIN sessions s ON s.id = r.session_id WHERE r.id = $1',
   worksession: `SELECT project_id, COALESCE(NULLIF(label, ''), name) || ' (' || branch || ')' AS label FROM worksessions WHERE id = $1`,

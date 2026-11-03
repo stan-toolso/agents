@@ -1,6 +1,7 @@
 import { createSdkMcpServer, tool, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type { Project } from '../projects/types.js';
+import { traceSessionEvent } from '../sessions/events.js';
 import { fold } from '../tasks/mentions.js';
 import { contextService } from './service.js';
 import type { Actor, ContextTree } from './types.js';
@@ -105,7 +106,20 @@ export function createContextMcpServer(project: Project, sessionId: string, opts
         },
         async ({ path, content, description, change_note, library }) =>
           run(async () => {
-            const { instruction, created } = await contextService.writeInstructionAtPath(project.id, path, { content, description, changeNote: change_note }, actor, libraryId(library));
+            const agentId = libraryId(library);
+            const { instruction, created } = await contextService.writeInstructionAtPath(project.id, path, { content, description, changeNote: change_note }, actor, agentId);
+            // Carte de l'instruction dans le transcript (événement `context`), avec de quoi l'ouvrir dans la page Contexte.
+            await traceSessionEvent(sessionId, 'context', {
+              action: created ? 'created' : 'updated',
+              projectId: project.id,
+              instructionId: instruction.id,
+              path: instruction.path,
+              description: instruction.description ?? null,
+              version: instruction.version,
+              agentId,
+              library: agentId ? (libraries.find((l) => l.id === agentId)?.name ?? null) : null,
+              changeNote: change_note ?? null,
+            });
             return `${created ? 'Créée' : 'Mise à jour'} : ${instruction.path} (version ${instruction.version})`;
           }),
       ),

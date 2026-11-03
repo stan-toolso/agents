@@ -80,7 +80,8 @@ P.perso = project('p-perso', 'Espace de Camille', 'perso-camille', 'Mon espace p
 P.site = project('p-site', 'Site vitrine Toolso', 'site-vitrine', 'Le site public toolso.io : pages produit, tarifs, blog et formulaire de contact (Astro).', 'https://github.com/toolso/site-vitrine', { taskModels: { low: 'claude-sonnet-5-5' } });
 P.api = project('p-api', 'API Facturation', 'api-facturation', 'Service de facturation : abonnements Stripe, factures PDF, relances et exports comptables.', 'https://github.com/toolso/api-facturation');
 P.mobile = project('p-mobile', 'Appli Scouts', 'appli-scouts', 'Application mobile des groupes scouts : inscriptions aux camps, cotisations et messagerie des parents.', 'https://github.com/toolso/appli-scouts');
-P.data = project('p-data', 'Data & reporting', 'data-reporting', 'Tableaux de bord et rapports hebdomadaires (dbt, Metabase).', 'https://github.com/toolso/data-reporting');
+// Camille n'y est que lectrice : ses sessions s'ouvrent en lecture seule (ni saisie, ni actions).
+P.data = project('p-data', 'Data & reporting', 'data-reporting', 'Tableaux de bord et rapports hebdomadaires (dbt, Metabase).', 'https://github.com/toolso/data-reporting', { myRole: 'VIEWER' });
 const teamProjects = [P.site, P.api, P.mobile, P.data];
 // Budgets mensuels (page Consommation) : l'API Facturation a passé 80 %, l'appli Scouts est loin du sien.
 const PROJECT_MONTH = { 'p-perso': 3.1, 'p-site': 38.4, 'p-api': 104.2, 'p-mobile': 27.5, 'p-data': 12.9 };
@@ -152,6 +153,7 @@ function session(id, p, name, opts = {}) {
     queuedAt: null,
     queuePosition: null,
     review: null,
+    shares: [],
     schedule: null,
     cleanup: { __typename: 'SessionCleanup', retentionDays: null, contextAction: null, contextMaxTokens: null },
     contextTokens: opts.tokens ?? 38_000,
@@ -194,13 +196,16 @@ const S = {
   relances: session('s-relances-impayes', P.api, 'Relances automatiques des impayés', { status: 'INTERRUPTED', age: 60 * 30, updated: 60 * 20, cost: 0.95 }),
   push: session('s-notifs-camps', P.mobile, 'Notifications push des camps', { owner: U.lea, status: 'FAILED', age: 60 * 6, updated: 60 * 2, cost: 0.58, error: 'npm run test : 2 tests en échec (CampReminder.test.ts)' }),
   revue: session('s-max-cotisations', P.mobile, 'Paiement des cotisations en trois fois', { owner: U.max, requestedBy: U.lea, takenOverBy: U.lea, activity: 'BUSY', age: 35, updated: 0, cost: 0.66 }),
-  hebdo: session('s-rapport-hebdo', P.data, 'Rapport hebdo des inscriptions', { model: 'claude-sonnet-5-5', age: 60 * 24 * 6, updated: 60 * 9, cost: 2.1, branch: null }),
+  hebdo: session('s-rapport-hebdo', P.data, 'Rapport hebdo des inscriptions', { owner: U.hugo, model: 'claude-sonnet-5-5', age: 60 * 24 * 6, updated: 60 * 9, cost: 2.1, branch: null }),
   chat1: session('c-idees-blog', P.perso, 'Idées d’articles pour le blog', { kind: 'CHAT', age: 60 * 2, updated: 50, cost: 0.08 }),
   chat2: session('c-compte-rendu', P.perso, 'Résumé du comité de pilotage', { kind: 'CHAT', age: 60 * 26, updated: 60 * 25, cost: 0.05 }),
   chat3: session('c-mail-client', P.perso, 'Réponse à un client mécontent', { kind: 'CHAT', age: 60 * 50, updated: 60 * 49, cost: 0.03 }),
 };
 S.hebdo.schedule = { __typename: 'SessionSchedule', sessionId: S.hebdo.id, name: 'Rapport du lundi', customName: 'Rapport du lundi', session: S.hebdo, project: P.data, cron: '0 8 * * 1', timezone: 'Europe/Paris', prompt: 'Prépare le rapport hebdomadaire des inscriptions et publie-le.', enabled: true, endAfterRun: false, allowedTools: ['Bash(npm run report *)'], nextRunAt: inDays(5), lastRunAt: ago(60 * 9), cleanup: null };
 const chats = sessions.filter((s) => s.kind === 'CHAT');
+// Lien public de lecture de la session « page tarifs » (/share/<DEMO_SHARE_TOKEN>, servi par le mock).
+export const DEMO_SHARE_TOKEN = 'demo-partage-page-tarifs-0123456789abcdefgh';
+S.tarifs.shares = [{ __typename: 'SessionShare', id: 'sh-1', url: `${'http://localhost'}/share/${DEMO_SHARE_TOKEN}`, expiresAt: inDays(6), createdAt: ago(60 * 24), createdBy: U.me }];
 
 // ---- Transcripts --------------------------------------------------------------------------------------------------
 
@@ -240,6 +245,10 @@ const eventsBySession = {
     ...tool(s, 18, 't6', 'Read', { file_path: '/workspace/docs/faq-support.md' }, '## Puis-je changer d’offre ?\nOui, à tout moment…\n## Les agents ont-ils accès à mes données ?\n…'),
     said(s, 12, 'J’ajoute l’interrupteur de période : les prix annuels sont calculés à partir des prix mensuels (-20 %), et la FAQ reprend les six questions du support en accordéon.'),
     ...tool(s, 9, 't7', 'Edit', { file_path: '/workspace/src/pages/tarifs.astro', old_string: '<section class="offers">', new_string: '<BillingToggle />\n<section class="offers">' }, 'The file has been updated.'),
+    ...tool(s, 8, 't8', 'mcp__tasks__create', { title: 'Traduire la page tarifs en anglais', priority: 'low' }, 'Tâche créée'),
+    ev(s, 8, 'task', { action: 'created', taskId: 't-3', projectId: 'p-site', title: 'Traduire la page tarifs en anglais', status: 'todo', priority: 'low' }),
+    ...tool(s, 7, 't9', 'mcp__context__write', { path: 'conventions/tarifs', content: '…' }, 'Mise à jour : conventions/tarifs (version 2)'),
+    ev(s, 7, 'context', { action: 'updated', projectId: 'p-site', instructionId: 'i-tarifs', path: 'conventions/tarifs', description: 'Prix annuels = prix mensuels −20 %, arrondis à l’euro', version: 2, agentId: null, library: null, changeNote: 'Remise annuelle' }),
     said(s, 1, 'Il me reste à relancer le build et à pousser la branche : j’ai besoin de ton accord pour la commande.'),
   ]),
 };
@@ -634,6 +643,14 @@ const projectDashboard = (id) => {
     tasks: tasks.filter((t) => t.project === p),
   };
 };
+
+/** Réponse de GET /api/share/<token> (backend/src/sessionShares/route.ts) pour le lien de démo ; null sinon (404). */
+export function demoSharedSession(token) {
+  if (token !== DEMO_SHARE_TOKEN) return null;
+  const s = S.tarifs;
+  const events = s.events().map(({ __typename, ...e }) => (e.type === 'claude.result' ? { ...e, payload: { ...e.payload, total_cost_usd: undefined } } : e));
+  return { session: { name: s.name, projectName: s.project.name, ownerName: s.owner?.name ?? null, status: 'running', createdAt: s.createdAt }, expiresAt: inDays(6), truncated: false, events };
+}
 
 /** Relevé de consommation cohérent : jours → semaines, parts fixes par projet et par modèle, sessions existantes. */
 const usageReport = (a = {}) => {
