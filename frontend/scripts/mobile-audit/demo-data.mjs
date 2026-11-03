@@ -190,7 +190,7 @@ const S = {
   chat2: session('c-compte-rendu', P.perso, 'Résumé du comité de pilotage', { kind: 'CHAT', age: 60 * 26, updated: 60 * 25, cost: 0.05 }),
   chat3: session('c-mail-client', P.perso, 'Réponse à un client mécontent', { kind: 'CHAT', age: 60 * 50, updated: 60 * 49, cost: 0.03 }),
 };
-S.hebdo.schedule = { __typename: 'SessionSchedule', sessionId: S.hebdo.id, name: 'Rapport du lundi', customName: 'Rapport du lundi', session: S.hebdo, project: P.data, cron: '0 8 * * 1', timezone: 'Europe/Paris', prompt: 'Prépare le rapport hebdomadaire des inscriptions et publie-le.', enabled: true, endAfterRun: false, nextRunAt: inDays(5), lastRunAt: ago(60 * 9), cleanup: null };
+S.hebdo.schedule = { __typename: 'SessionSchedule', sessionId: S.hebdo.id, name: 'Rapport du lundi', customName: 'Rapport du lundi', session: S.hebdo, project: P.data, cron: '0 8 * * 1', timezone: 'Europe/Paris', prompt: 'Prépare le rapport hebdomadaire des inscriptions et publie-le.', enabled: true, endAfterRun: false, allowedTools: ['Bash(npm run report *)'], nextRunAt: inDays(5), lastRunAt: ago(60 * 9), cleanup: null };
 const chats = sessions.filter((s) => s.kind === 'CHAT');
 
 // ---- Transcripts --------------------------------------------------------------------------------------------------
@@ -667,6 +667,10 @@ export const demoRoot = {
   vaultShareCandidates: [U.hugo, U.lea],
   contextInstruction: (a) => byId(contextInstructions, a.id),
   searchContext: (a) => contextInstructions.filter((i) => i.projectId === a.projectId && `${i.name} ${i.content}`.toLowerCase().includes(a.query.toLowerCase())),
+  schedulePermissionSuggestions: (a = {}) => [
+    ...(a.sessionId ? [{ __typename: 'ScheduleToolSuggestion', rule: 'mcp__vault__sql_query(production)', source: 'DENIED', count: 2, lastSeenAt: ago(60 * 9) }, { __typename: 'ScheduleToolSuggestion', rule: 'Bash(git log *)', source: 'ASKED', count: 1, lastSeenAt: ago(60 * 24 * 7) }] : []),
+    ...(/production/i.test(a.prompt ?? '') ? [{ __typename: 'ScheduleToolSuggestion', rule: 'mcp__vault__sql_query(production)', source: 'PROMPT', count: 0, lastSeenAt: null }] : []),
+  ].filter((x, i, all) => all.findIndex((y) => y.rule === x.rule) === i),
   sessionSchedules: (a = {}) => sessions.filter((s) => s.schedule && (!a.projectId || s.project.id === a.projectId)).map((s) => s.schedule),
   providers,
   myAgents: agents,

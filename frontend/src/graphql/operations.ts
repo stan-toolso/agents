@@ -51,6 +51,8 @@ export interface SessionSchedule {
   prompt: string;
   enabled: boolean;
   endAfterRun: boolean;
+  /** Outils pré-autorisés pour les seules exécutions de la planification (règles au format Claude Code). */
+  allowedTools: string[];
   nextRunAt: string | null;
   lastRunAt: string | null;
   lastResult: string | null;
@@ -760,6 +762,7 @@ export const SESSION_FIELDS = gql`
       prompt
       enabled
       endAfterRun
+      allowedTools
       nextRunAt
       lastRunAt
       lastResult
@@ -1196,6 +1199,7 @@ export const SESSION_SCHEDULES = gql`
       prompt
       enabled
       endAfterRun
+      allowedTools
       nextRunAt
       lastRunAt
       lastResult
@@ -1246,6 +1250,27 @@ export const CREATE_SCHEDULED_SESSION = gql`
   mutation CreateScheduledSession($input: CreateScheduledSessionInput!) {
     createScheduledSession(input: $input) {
       ...SessionFields
+    }
+  }
+`;
+
+export type ScheduleToolSuggestionSource = 'DENIED' | 'ASKED' | 'PROMPT';
+
+export interface ScheduleToolSuggestion {
+  rule: string;
+  source: ScheduleToolSuggestionSource;
+  count: number;
+  lastSeenAt: string | null;
+}
+
+/** Outils à pré-autoriser pour une planification (exécutions passées, éléments du coffre cités par l'instruction). */
+export const SCHEDULE_PERMISSION_SUGGESTIONS = gql`
+  query SchedulePermissionSuggestions($projectId: ID!, $sessionId: ID, $prompt: String) {
+    schedulePermissionSuggestions(projectId: $projectId, sessionId: $sessionId, prompt: $prompt) {
+      rule
+      source
+      count
+      lastSeenAt
     }
   }
 `;

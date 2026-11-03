@@ -16,6 +16,8 @@ import { agentGitEnv } from '../../git/agentEnv.js';
 import { createGoogleMcpServer } from '../../google/mcp.js';
 import { googleAccountService, googleReadTools } from '../../google/service.js';
 import { permissionRuleService, suggestedMode, withEditedRules } from '../../permissions/service.js';
+import { activeScheduleRules } from '../../schedules/activeRules.js';
+import { scheduleAllows, scheduleAllowsVault } from '../../schedules/permissions.js';
 import { formatRule, type PermissionRule } from '../../permissions/types.js';
 import type { Project } from '../../projects/types.js';
 import { RequestCancelledError } from '../../requests/service.js';
@@ -345,6 +347,8 @@ class OpencodeRun {
       emit: ctx.emit,
       remembered: async (toolName: string, key: string, projectRules: boolean) => {
         if (this.vaultApprovals.has(`${toolName}|${key.toLowerCase()}`)) return true;
+        const scheduled = await activeScheduleRules(this.ctx.session.id);
+        if (scheduled && scheduleAllowsVault(scheduled, toolName, key)) return true;
         return projectRules && this.ruleUsage.rules.some((r) => r.toolName === toolName && r.ruleContent?.trim().toLowerCase() === key.toLowerCase());
       },
       approve: (approval: VaultApproval) => this.approveVaultUse(approval),
@@ -882,6 +886,9 @@ class OpencodeRun {
     if (this.mode === 'bypassPermissions') return true;
     if (this.mode === 'acceptEdits' && opts.isEdit) return true;
     if (opts.useRules && allowedByRules([...this.allowedTools, ...this.ruleUsage.rules.map(formatRule), ...this.ruleUsage.session, ...SKIPPER_FREE_TOOLS], tool, ctx.cwd)) return true;
+    // Outils pré-autorisés de la planification, pendant ses seules exécutions.
+    const scheduled = await activeScheduleRules(ctx.session.id);
+    if (scheduled && scheduleAllows(scheduled, tool.name, tool.input, ctx.cwd)) return true;
     if (this.mode === 'dontAsk') return "Action non autorisée à l'avance : la session ne pose pas de question (mode « ne jamais demander »).";
 
     const response = (await ctx.ask({ type: 'permission', title: opts.title ?? `Autoriser l'outil ${tool.name}`, message: null, payload: { toolName: tool.name, input: tool.input, suggestions: opts.suggestions, blockedPath: opts.blockedPath } }, signal)) as Partial<PermissionResponse>;

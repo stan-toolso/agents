@@ -27,6 +27,8 @@ import { createGoogleMcpServer } from '../../google/mcp.js';
 import { googleAccountService, googleReadTools } from '../../google/service.js';
 import { permissionRuleService, suggestedMode, withEditedRules } from '../../permissions/service.js';
 import { formatRule, type PermissionRule } from '../../permissions/types.js';
+import { activeScheduleRules } from '../../schedules/activeRules.js';
+import { scheduleAllows, scheduleAllowsVault } from '../../schedules/permissions.js';
 import { createSharedPagesMcpServer, sharedPagesPrompt } from '../../sharedPages/mcp.js';
 import { previewPrompt } from '../../previews/config.js';
 import { createPreviewMcpServer, previewMcpPrompt } from '../../previews/mcp.js';
@@ -308,6 +310,12 @@ export class ClaudeProvider implements SessionProvider {
       emit: ctx.emit,
       remembered: async (toolName: string, key: string, projectRules: boolean) => {
         if (vaultApprovals.has(`${toolName}|${key.toLowerCase()}`)) return true;
+        // Pré-autorisé pour les exécutions de la planification (pendant l'une d'elles seulement).
+        const scheduled = await activeScheduleRules(ctx.session.id);
+        if (scheduled && scheduleAllowsVault(scheduled, toolName, key)) {
+          await this.noteScheduleAllowed(ctx, `${toolName}(${key})`);
+          return true;
+        }
         return projectRules && ruleUsage.rules.some((r) => r.toolName === toolName && r.ruleContent?.trim().toLowerCase() === key.toLowerCase());
       },
       approve: (approval: VaultApproval) => this.approveVaultUse(ctx, ruleUsage, vaultApprovals, approval),
@@ -390,6 +398,22 @@ export class ClaudeProvider implements SessionProvider {
       hooks: review
         ? undefined
         : {
+            // Outils pré-autorisés de la planification : appliqués aux seuls tours qu'elle lance, y compris en mode
+            // « Ne jamais me demander » (le SDK n'y appelle pas canUseTool ; la décision d'un hook passe avant le mode).
+            PreToolUse: [
+              {
+                hooks: [
+                  async (input) => {
+                    const { tool_name: toolName, tool_input: toolInput } = input as { tool_name?: string; tool_input?: Record<string, unknown> };
+                    if (!toolName) return {};
+                    const rules = await activeScheduleRules(ctx.session.id);
+                    if (!rules || !scheduleAllows(rules, toolName, toolInput ?? {}, ctx.cwd)) return {};
+                    await this.noteScheduleAllowed(ctx, toolName);
+                    return { hookSpecificOutput: { hookEventName: 'PreToolUse' as const, permissionDecision: 'allow' as const, permissionDecisionReason: 'Pré-autorisé pour les exécutions de la planification' } };
+                  },
+                ],
+              },
+            ],
             PostToolBatch: [
               {
                 hooks: [
@@ -546,6 +570,14 @@ export class ClaudeProvider implements SessionProvider {
       // Appel soumis à canUseTool : aucune règle mémorisée ne l'a autorisé d'office.
       ruleUsage.asked.add(options.toolUseID);
       try {
+        // Filet du hook PreToolUse : un outil pré-autorisé par la planification ne fait pas de demande pendant ses exécutions.
+        if (toolName !== 'AskUserQuestion') {
+          const scheduled = await activeScheduleRules(ctx.session.id);
+          if (scheduled && scheduleAllows(scheduled, toolName, input, ctx.cwd)) {
+            await this.noteScheduleAllowed(ctx, toolName);
+            return { behavior: 'allow', updatedInput: input, toolUseID: options.toolUseID };
+          }
+        }
         if (toolName === 'AskUserQuestion') {
           const questions = (input.questions as Array<{ question: string }> | undefined) ?? [];
           const response = (await ctx.ask(
@@ -602,6 +634,19 @@ export class ClaudeProvider implements SessionProvider {
         throw err;
       }
     };
+  }
+
+  /** Outils déjà signalés comme pré-autorisés par la planification (une ligne par outil et par session). */
+  private readonly scheduleNoted = new Map<string, Set<string>>();
+
+  /** Signale dans le transcript, une fois par outil, qu'un appel passe grâce aux autorisations de la planification. */
+  private async noteScheduleAllowed(ctx: RunContext, what: string): Promise<void> {
+    const seen = this.scheduleNoted.get(ctx.session.id) ?? new Set<string>();
+    this.scheduleNoted.set(ctx.session.id, seen);
+    if (seen.has(what)) return;
+    seen.add(what);
+    if (this.scheduleNoted.size > 500) this.scheduleNoted.delete(this.scheduleNoted.keys().next().value!);
+    await ctx.emit('system', { message: `Autorisé par la planification : ${what}` }).catch(() => undefined);
   }
 
   /**

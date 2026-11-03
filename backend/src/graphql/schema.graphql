@@ -3070,6 +3070,8 @@ type SessionSchedule {
   enabled: Boolean!
   "Terminer la session à la fin de chaque exécution (défaut) ; sinon elle reste ouverte aux instructions."
   endAfterRun: Boolean!
+  "Outils pré-autorisés pour les seules exécutions de la planification (règles au format Claude Code : Bash(git log *), mcp__vault__sql_query(production)…)."
+  allowedTools: [String!]!
   nextRunAt: DateTime
   lastRunAt: DateTime
   "Compte rendu de la dernière exécution : terminée (durée, coût), ignorée (raison) ou en erreur."
@@ -3127,6 +3129,8 @@ input SessionScheduleInput {
   enabled: Boolean
   "Défaut : true."
   endAfterRun: Boolean
+  "Outils pré-autorisés pour les exécutions (absent : inchangés ; liste vide : aucun)."
+  allowedTools: [String!]
   "Réglage de nettoyage de la session, enregistré en même temps que la planification (absent : inchangé). Proposé par défaut : « fresh »."
   cleanup: SessionCleanupInput
 }
@@ -3145,6 +3149,7 @@ input CreateScheduledSessionInput {
   prompt: String!
   enabled: Boolean
   endAfterRun: Boolean
+  allowedTools: [String!]
   cleanup: SessionCleanupInput
   "Provider de la session (défaut : claude)."
   provider: String
@@ -3156,7 +3161,28 @@ input CreateScheduledSessionInput {
   agentId: ID
 }
 
+enum ScheduleToolSuggestionSource {
+  "Refusé pendant une exécution passée (mode « Ne jamais me demander », refus, demande sans réponse)."
+  DENIED
+  "Demandé pendant une exécution passée, puis accordé par une personne."
+  ASKED
+  "Élément du coffre « avec approbation » cité par l'instruction."
+  PROMPT
+}
+
+"Outil à pré-autoriser pour une planification."
+type ScheduleToolSuggestion {
+  "Règle au format Claude Code, à ajouter aux outils pré-autorisés."
+  rule: String!
+  source: ScheduleToolSuggestionSource!
+  "Nombre d'exécutions passées où l'outil a été refusé ou demandé."
+  count: Int!
+  lastSeenAt: DateTime
+}
+
 extend type Query {
+  "Outils à pré-autoriser pour une planification : refusés ou demandés pendant ses dernières exécutions, et éléments du coffre avec approbation cités par l'instruction (sans session : seulement l'instruction)."
+  schedulePermissionSuggestions(projectId: ID!, sessionId: ID, prompt: String): [ScheduleToolSuggestion!]!
   "Planifications des sessions non archivées, d'un projet ou de tous les projets accessibles."
   sessionSchedules(projectId: ID): [SessionSchedule!]!
   "Prochaines échéances d'une expression cron (aperçu) ; erreur si l'expression ou le fuseau est invalide."
