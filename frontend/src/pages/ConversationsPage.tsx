@@ -1,5 +1,5 @@
 import { useMutation } from '@apollo/client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Badge, Button, Form, Modal } from 'react-bootstrap';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import AgentAvatar from '../components/AgentAvatar';
@@ -86,6 +86,37 @@ function ChannelModal({ projectId, channel, onClose }: { projectId: string; chan
 }
 
 /**
+ * Hauteur du cadre du canal : jusqu'au bas de la fenêtre depuis sa position réelle (l'en-tête du projet change de
+ * hauteur avec la description et la largeur), pour que seul le fil défile et que la zone de saisie reste visible.
+ */
+function useFillHeight<T extends HTMLElement>(ready: boolean) {
+  const ref = useRef<T>(null);
+  const [height, setHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!ready || !el) return;
+    const measure = () => {
+      if (!el.offsetParent) return; // onglet caché : on mesurera à son retour (le ResizeObserver le signale)
+      const box = el.getBoundingClientRect();
+      // La page peut avoir défilé : on mesure depuis le haut du contenu, pas depuis la vue.
+      let top = box.top;
+      for (let p = el.parentElement; p; p = p.parentElement) top += p.scrollTop;
+      setHeight(Math.max(360, Math.floor(window.innerHeight - top - 16)));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(document.body);
+    if (el.parentElement) ro.observe(el.parentElement);
+    window.addEventListener('resize', measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [ready]);
+  return { ref, height };
+}
+
+/**
  * Page Conversations d'un projet : la liste des canaux à gauche (non-lus en évidence), le canal ouvert au centre avec
  * ses fils, et à droite qui est là (membres et agents, à mentionner d'un clic). Route /projects/:id/conversations/:slug?
  * (le général par défaut) ; `#m-<id>` amène à un message.
@@ -97,6 +128,7 @@ export default function ConversationsPage() {
   const [editing, setEditing] = useState<{ channel: Conversation | null } | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const { confirm, showError } = useDialogs();
+  const fill = useFillHeight<HTMLDivElement>(Boolean(data?.project));
   const [setArchived] = useMutation(SET_CONVERSATION_ARCHIVED, { refetchQueries: ['ProjectConversations'], onError: (e) => void showError(e) });
   const project = data?.project ?? null;
   const channels = useMemo(() => project?.conversations ?? [], [project]);
@@ -134,7 +166,7 @@ export default function ConversationsPage() {
       {editing && <ChannelModal projectId={project.id} channel={editing.channel} onClose={(created) => { setEditing(null); if (created && !editing.channel) navigate(`/projects/${id}/conversations/${created.slug}`); }} />}
 
       <div className="ch-wrap">
-      <div className="ch-layout">
+      <div className="ch-layout" ref={fill.ref} style={fill.height ? ({ '--ch-height': `${fill.height}px` } as React.CSSProperties) : undefined}>
         <aside className="ch-channels">
           <div className="ch-side-title">Canaux</div>
           <ul className="ch-channel-list">

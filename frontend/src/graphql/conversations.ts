@@ -256,3 +256,16 @@ export const MARK_CONVERSATION_READ = gql`
 `;
 
 export type { TaskMentionable as Mentionable };
+
+/** Non-lus des canaux par projet (bouton Messages de la barre du haut, sondé partout). */
+export const UNREAD_MESSAGES_BY_PROJECT = gql`
+  query UnreadMessagesByProject {
+    unreadMessagesByProject {
+      count
+      project {
+        id
+        name
+      }
+    }
+  }
+`;

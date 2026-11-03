@@ -752,6 +752,7 @@ export const demoRoot = {
     pullRequests: pullRequests.filter((x) => x.stage === 'TO_MERGE'),
   }),
   inboxCounts,
+  unreadMessagesByProject: () => teamProjects.map((p) => ({ __typename: 'ProjectUnreadMessages', project: p, count: typeof p.unreadMessages === 'function' ? p.unreadMessages() : 0 })),
   pullRequests: (a = {}) => pullRequests.filter((x) => (!a.projectId || x.project.id === a.projectId) && (!a.taskId || x.task?.id === a.taskId) && (!a.stage || a.stage.includes(x.stage)) && (!a.status || a.status.includes(x.status))),
   pullRequest: (a) => byId(pullRequests, a.id),
   worksession: (a) => sessions.map((s) => s.worksession).find((w) => w?.id === a.id) ?? null,
