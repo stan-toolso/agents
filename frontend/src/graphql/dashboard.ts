@@ -6,7 +6,7 @@ import { TRACKED_PULL_REQUEST_FIELDS, type TrackedPullRequest } from './pullRequ
 /** Un membre du projet (personne ou agent) et ce qu'il fait. */
 export interface ProjectTeamMember {
   user: { id: string; name: string; email: string; kind: 'PERSON' | 'AGENT'; lastLoginAt: string | null };
-  agent: { id: string; name: string; kind: 'PRODUCT_MANAGER' | 'DEVELOPER' | 'CUSTOM'; description: string; avatar: { emoji: string | null; color: string | null } } | null;
+  agent: { id: string; name: string; kind: 'PRODUCT_MANAGER' | 'DEVELOPER' | 'CUSTOM'; description: string; avatar: { emoji: string | null; color: string | null }; actions: { key: string; label: string }[] } | null;
   sessions: Pick<Session, 'id' | 'name' | 'status' | 'activity' | 'pendingRequestCount'>[];
   tasks: Pick<Task, 'id' | 'title' | 'status' | 'statusTag'>[];
   lastActivityAt: string | null;
@@ -169,6 +169,10 @@ export const PROJECT_DASHBOARD = gql`
           avatar {
             emoji
             color
+          }
+          actions {
+            key
+            label
           }
         }
         sessions {

@@ -1217,7 +1217,17 @@ sessions qui attendent ou en erreur, tâches en cours sans agent dessus, tâches
 « L'équipe en ce moment » (chaque membre, ses sessions et les tâches qu'elles ont en charge), les tâches à
 surveiller, le **flux des tâches** par étiquette d'état (vocabulaire des agents : à cadrer → prête → en dev → à
 valider → à livrer), le **débit hebdomadaire** (créées / terminées, `lib/taskStats.ts`), les prochaines échéances et
-planifications, l'activité récente (sessions terminées, PR fusionnées, tâches terminées). Les réglages (dossier de
+planifications, l'activité récente (sessions terminées, PR fusionnées, tâches terminées).
+
+**Lancer une release** (en-tête du tableau de bord, membres et administrateurs) : un clic convoque l'agent du projet
+qui sait faire une release — celui dont la fiche porte l'action `release` (« Préparer une release » du modèle Product
+Manager), sinon un agent Product Manager actif avec une consigne équivalente — et ouvre sa session. L'agent rédige les
+notes de version, crée la tâche « Release du … » et demande dans son fil l'accord d'un administrateur avant toute mise
+en production. Le bouton n'apparaît pas sans agent capable (en pause ou archivé, il ne compte pas) ; plusieurs agents
+capables donnent un menu ; une tâche « Release… » encore en cours est signalée (lien « Release en cours ») et demande
+une confirmation avant d'en lancer une autre.
+
+Les réglages (dossier de
 travail, instructions permanentes, membres, autorisations mémorisées, conteneur, disque, clés d'API, suppression)
 sont dans l'onglet **Réglages** (`/projects/:id/settings`, `pages/ProjectSettingsPage.tsx`).
 
