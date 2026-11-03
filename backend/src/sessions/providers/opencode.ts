@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { syncAfterTool, toolSyncUser } from '../../pullRequests/toolTrigger.js';
 import { randomBytes } from 'node:crypto';
 import net from 'node:net';
 import { createInterface } from 'node:readline';
@@ -761,6 +762,7 @@ class OpencodeRun {
     }
     if (state.status !== 'completed' && state.status !== 'error') return;
     call.done = true;
+    if (ctx.project.gitUrl) syncAfterTool(ctx.project.id, toolSyncUser(ctx.session), mapped.name, mapped.input);
     const isError = state.status === 'error';
     const output = isError ? state.error : state.output;
     const data = isError ? {} : toolResultData(part.tool, call.input, state.output, state.metadata ?? {});

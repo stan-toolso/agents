@@ -42,6 +42,7 @@ import { createTasksMcpServer, TASKS_FREE_TOOLS } from '../../tasks/mcp.js';
 import { CONVERSATIONS_FREE_TOOLS, conversationsMcpPrompt, createConversationsMcpServer } from '../../conversations/mcp.js';
 import { conversationService, linkedThreadsPrompt } from '../../conversations/service.js';
 import { trackedPullRequestService } from '../../pullRequests/service.js';
+import { syncAfterTool, toolSyncUser } from '../../pullRequests/toolTrigger.js';
 import { taskService } from '../../tasks/service.js';
 import { createWorksessionsMcpServer } from '../../worksessions/mcp.js';
 import { createEnvMcpServer } from '../../envFiles/mcp.js';
@@ -689,6 +690,8 @@ export class ClaudeProvider implements SessionProvider {
       const use = usage.pending.get(b.tool_use_id);
       usage.pending.delete(b.tool_use_id);
       if (!use) continue;
+      // Push, `gh pr`, outil tasks.pr_*, édition, commit : les PR suivies du projet sont relues sans attendre la synchronisation de fond.
+      if (ctx.project.gitUrl) syncAfterTool(ctx.project.id, toolSyncUser(ctx.session), use.name, use.input);
       if (usage.asked.delete(b.tool_use_id) || !usage.rules.length) continue;
       await permissionRuleService.recordUse(usage.rules, use.name, use.input, ctx.cwd);
     }
