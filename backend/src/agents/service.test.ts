@@ -100,6 +100,23 @@ beforeEach(() => {
   worksessions.findById = vi.fn(async (id: string) => ({ id }));
 });
 
+describe('get', () => {
+  it('renvoie « introuvable » (NotFoundError) pour un identifiant qui n’est pas un UUID, sans erreur interne', async () => {
+    repo.findById = vi.fn(async () => {
+      throw Object.assign(new Error('invalid input syntax for type uuid: "x"'), { code: '22P02' });
+    });
+    await expect(agentService.get('x')).rejects.toMatchObject({ name: 'NotFoundError', code: 'NOT_FOUND' });
+    expect(await agentService.forUser('x')).toBeNull();
+  });
+
+  it('laisse passer les autres erreurs de la base', async () => {
+    repo.findById = vi.fn(async () => {
+      throw new Error('connexion perdue');
+    });
+    await expect(agentService.get('a1')).rejects.toThrow('connexion perdue');
+  });
+});
+
 describe('resolve', () => {
   it('trouve un agent par identifiant ou par nom, sans casse ni accents', async () => {
     expect((await agentService.resolve('p1', 'a2')).name).toBe('Max');
