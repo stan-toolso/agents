@@ -950,8 +950,14 @@ chaque résultat d'un outil Edit, Write ou Bash de la session. Backend : `backen
 et `gitService.changesSince` / `diffSince` / `restoreFromBase` (queries `sessionChanges`,
 `sessionFileDiff` ; mutation `discardSessionFile`).
 
-Thème sombre inspiré de Claude Code (`frontend/src/theme.css`). La page de session
-(`frontend/src/components/Transcript.tsx`) reproduit son affichage : instructions préfixées par `>`,
+Thème sombre inspiré de Claude Code (`frontend/src/theme.css`). Par défaut (détails techniques masqués),
+une session **se lit comme une conversation**, à la manière d'un canal : chaque instruction et chaque tour de
+l'agent sont un message avec avatar, nom et heure, en police de texte (`ChatRow`, prop `participants` de
+`Transcript`). Écrit les instructions la personne qui pilote la session (qui a pris la main, qui l'a demandée
+à l'agent, ou sa propriétaire), sinon la session d'agent qui l'a lancée ; répond l'agent de projet qui joue la
+session, sinon « Claude ». Tout le tour de l'agent tient dans son message (étapes repliées en une ligne discrète,
+messages, questions) et un tour réussi ne laisse pas de ligne « Terminé ». Avec « Afficher les détails
+techniques », la page de session (`frontend/src/components/Transcript.tsx`) reproduit l'affichage du terminal : instructions préfixées par `>`,
 réponses `⏺`, appels d'outils `⏺ Outil(arguments)` (`Bash(commande)`, `Update(fichier)`,
 `Search(pattern: "x")`, `serveur - outil (MCP)(...)`) suivis de leur résultat `⎿` repliable : résumé
 pour les lectures et recherches, diff numéroté pour les modifications, début de la sortie pour les
