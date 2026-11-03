@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ConversationChange } from '../conversations/types.js';
 import type { Task, TaskChange, TaskComment } from '../tasks/types.js';
 import type { Agent } from './types.js';
 
 // Les déclencheurs ne touchent ni la base ni les services voisins : tout est simulé, on vérifie qui est convoqué et pourquoi.
-const { repo, service, sessions, prs, tasks, users } = vi.hoisted(() => ({
+const { repo, service, sessions, prs, tasks, users, conversations } = vi.hoisted(() => ({
+  conversations: {} as Record<string, unknown>,
   repo: {} as Record<string, unknown>,
   service: {} as Record<string, unknown>,
   sessions: {} as Record<string, unknown>,
@@ -17,9 +19,10 @@ vi.mock('../sessions/repository.js', () => ({ sessionRepository: sessions }));
 vi.mock('../pullRequests/service.js', () => ({ trackedPullRequestService: prs }));
 vi.mock('../tasks/service.js', () => ({ taskService: tasks }));
 vi.mock('../users/repository.js', () => ({ userRepository: users }));
+vi.mock('../conversations/service.js', () => ({ conversationService: conversations, channelRef: () => '#general', threadTitle: () => 'Quoi de neuf ?' }));
 vi.mock('../log.js', () => ({ log: { info: () => undefined, warn: () => undefined, error: () => undefined } }));
 
-const { agentFeedTargets, onTaskCreated, onTaskChanged, onPullRequestMerged } = await import('./triggers.js');
+const { agentFeedTargets, onConversationChanged, onTaskCreated, onTaskChanged, onPullRequestMerged } = await import('./triggers.js');
 
 const agent = (over: Partial<Agent> = {}): Agent =>
   ({
@@ -47,6 +50,8 @@ beforeEach(() => {
   tasks.get = vi.fn(async () => task());
   tasks.sessionIds = vi.fn(async () => []);
   users.findById = vi.fn(async () => ({ name: 'Alice' }));
+  service.sessionOnThread = vi.fn(async () => null);
+  conversations.sessionIdsOnThread = vi.fn(async () => []);
 });
 
 describe('onTaskCreated', () => {
@@ -131,6 +136,40 @@ describe('onTaskChanged', () => {
     await onTaskChanged({ ...change, task: task({ statusTag: 'prête', sessionIds: ['s5'] }) });
     expect(service.summon).not.toHaveBeenCalled();
     await onTaskChanged({ ...change, actor: { type: 'agent', sessionId: 's9' } });
+    expect(service.summon).not.toHaveBeenCalled();
+  });
+});
+
+describe('onConversationChanged', () => {
+  const posted = (over: Record<string, unknown> = {}): ConversationChange =>
+    ({
+      kind: 'posted',
+      conversation: { id: 'cv1', projectId: 'p1', slug: 'general' },
+      root: { id: 'm0' },
+      parent: null,
+      message: { id: 'm2', parentId: 'm0', authorType: 'human', authorUserId: 'u1', authorSessionId: null, authorName: 'Alice', body: 'Oui, prépare la release', mentions: [], ...over },
+    }) as unknown as ConversationChange;
+
+  it('un agent mentionné sans session reliée au fil est convoqué sur le fil', async () => {
+    await onConversationChanged(posted({ mentions: [{ kind: 'user', id: 'a1', label: 'Léa', text: '@Léa' }] }));
+    expect(service.summon).toHaveBeenCalledWith('a1', expect.objectContaining({ thread: { conversationId: 'cv1', rootMessageId: 'm0' }, text: expect.stringContaining('[Mention]') }));
+  });
+
+  it('une réponse sans mention rappelle l’agent qui suit le fil quand sa session sur le fil est archivée', async () => {
+    conversations.sessionIdsOnThread = vi.fn(async () => ['s1', 's2']);
+    sessions.findByIds = vi.fn(async () => [
+      { id: 's1', ownerId: 'a1' },
+      { id: 's2', ownerId: 'a2' },
+    ]);
+    repo.findByIds = vi.fn(async () => [agent(), agent({ id: 'a2', name: 'Max', triggers: { ...agent().triggers, threadFollowed: false } })]);
+    await onConversationChanged(posted());
+    expect(service.summon).toHaveBeenCalledTimes(1);
+    expect(service.summon).toHaveBeenCalledWith('a1', expect.objectContaining({ thread: { conversationId: 'cv1', rootMessageId: 'm0' }, requestedById: 'u1', text: expect.stringContaining('[Fil suivi]') }));
+    (service.summon as ReturnType<typeof vi.fn>).mockClear();
+    service.sessionOnThread = vi.fn(async () => ({ id: 's1' }));
+    await onConversationChanged(posted());
+    expect(service.summon).not.toHaveBeenCalled();
+    await onConversationChanged(posted({ authorType: 'agent', authorSessionId: 's9' }));
     expect(service.summon).not.toHaveBeenCalled();
   });
 });

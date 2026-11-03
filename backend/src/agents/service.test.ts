@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent } from './types.js';
 
 // Le service touche la base par le dépôt des agents et les services voisins : tout est simulé.
-const { repo, users, userSvc, sessions, sessionRepo, tasks, launch, schedules, projects, context } = vi.hoisted(() => ({
+const { repo, users, userSvc, sessions, sessionRepo, tasks, launch, schedules, projects, context, conversations, worksessions } = vi.hoisted(() => ({
+  conversations: {} as Record<string, unknown>,
+  worksessions: {} as Record<string, unknown>,
   repo: {} as Record<string, unknown>,
   users: {} as Record<string, unknown>,
   userSvc: {} as Record<string, unknown>,
@@ -24,6 +26,8 @@ vi.mock('../tasks/launch.js', () => launch);
 vi.mock('../schedules/service.js', () => ({ scheduleService: schedules }));
 vi.mock('../projects/service.js', () => ({ projectService: projects }));
 vi.mock('../context/service.js', () => ({ contextService: context }));
+vi.mock('../conversations/service.js', () => ({ conversationService: conversations, channelRef: () => '#general', threadTitle: () => 'Quoi de neuf ?', describeMessages: () => [] }));
+vi.mock('../worksessions/repository.js', () => ({ worksessionRepository: worksessions }));
 vi.mock('../log.js', () => ({ log: { info: () => undefined, warn: () => undefined, error: () => undefined } }));
 
 const { agentService, agentEmail } = await import('./service.js');
@@ -87,6 +91,13 @@ beforeEach(() => {
   schedules.set = vi.fn(async () => ({}));
   schedules.remove = vi.fn(async () => ({}));
   sessions.archive = vi.fn(async () => ({}));
+  sessions.unarchive = vi.fn(async (id: string) => ({ id, archivedAt: null, status: 'stopped' }));
+  conversations.get = vi.fn(async () => ({ id: 'cv1', projectId: 'p1', slug: 'general' }));
+  conversations.agentSessionIdsOnThread = vi.fn(async () => []);
+  conversations.thread = vi.fn(async () => []);
+  conversations.reactions = vi.fn(async () => []);
+  conversations.linkSession = vi.fn(async () => undefined);
+  worksessions.findById = vi.fn(async (id: string) => ({ id }));
 });
 
 describe('resolve', () => {
@@ -167,6 +178,24 @@ describe('summon', () => {
     expect(sessions.create).toHaveBeenCalledWith(expect.objectContaining({ ownerId: 'a1', prompt: 'prompt composé', newWorksession: { label: 'Léa · Export CSV' }, autoStart: false }), { type: 'human' });
     expect(tasks.linkSession).toHaveBeenCalledWith('t1', 'created');
     expect(sessions.start).toHaveBeenCalledWith('created');
+  });
+
+  it('sur un fil de canal : restaure la dernière session archivée de l’agent plutôt que d’en ouvrir une autre', async () => {
+    conversations.agentSessionIdsOnThread = vi.fn(async (_a: string, _r: string, opts: { archived?: boolean } = {}) => (opts.archived ? ['s-old'] : []));
+    sessionRepo.findById = vi.fn(async (id: string) => ({ id, archivedAt: new Date(), worksessionId: 'w1', status: 'stopped' }));
+    const thread = { conversationId: 'cv1', rootMessageId: 'm0' };
+    const s = await agentService.summon('a1', { thread, text: 'Oui, prépare la release', requestedById: 'u1' });
+    expect(sessions.unarchive).toHaveBeenCalledWith('s-old');
+    expect(sessions.sendMessage).toHaveBeenCalledWith('s-old', 'Oui, prépare la release', null);
+    expect(s.id).toBe('s-old');
+    expect(sessions.create).not.toHaveBeenCalled();
+    // Restauration impossible (dossier supprimé ou occupé) : nouvelle session sur le fil.
+    sessions.unarchive = vi.fn(async () => {
+      throw new Error('dossier occupé');
+    });
+    await agentService.summon('a1', { thread, text: 'Et maintenant ?', requestedById: 'u1' });
+    expect(sessions.create).toHaveBeenCalledWith(expect.objectContaining({ ownerId: 'a1', name: 'Léa · #general · conversation' }), { type: 'human' });
+    expect(conversations.linkSession).toHaveBeenCalledWith('m0', 'created');
   });
 
   it('refuse un agent en pause ou retiré, un message vide, une tâche d’un autre projet', async () => {
