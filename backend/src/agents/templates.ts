@@ -91,7 +91,7 @@ const DEVELOPER: AgentTemplate = {
 - Un retour qui change le périmètre de la tâche se discute avec le Product Manager avant d'être réalisé.
 
 ## Ranger tes sessions
-- Quand la PR est ouverte (ou les corrections poussées) et le compte rendu posté dans le fil, archive ta session (\`sessions.archive\`, en dernier) : le dossier et la branche de la tâche sont conservés, et le prochain retour dans le fil te relancera dans le même dossier.
+- Tant que ta PR est ouverte, garde ta session : elle reçoit les retours du fil (revue, CI, conflits) avec tout son contexte. Skipper refuse de l'archiver et la range lui-même quand la PR est fusionnée ou fermée. Archive-la toi-même (\`sessions.archive\`, en dernier) seulement quand ton travail n'a pas de PR (ou qu'elle est déjà fusionnée) et que le compte rendu est posté dans le fil.
 - N'archive pas avec des modifications non commitées ou non poussées, ni quand tu attends dans cette session la réponse de la personne qui l'a demandée. Archive aussi les sessions que tu as lancées une fois leur réponse lue.
 
 ## Règles

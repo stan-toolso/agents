@@ -23,6 +23,8 @@ import { callInstance } from '../instances/client.js';
 import type { Attachment, AttachmentInput, CreateSessionInput, RelaunchInput, Session, SessionFilter, SessionStatus } from './types.js';
 import { log } from '../log.js';
 import { reviewOf } from '../reviews/types.js';
+import { pullRequestRepository } from '../pullRequests/repository.js';
+import type { TrackedPullRequest } from '../pullRequests/types.js';
 import { agentService } from '../agents/service.js';
 import { normalizeContextLimit } from './context.js';
 import { AUTO_ARCHIVE_KEY, archivesWhenIdle, withoutAutoArchive } from './autoArchive.js';
@@ -328,6 +330,23 @@ async function drainOnce(): Promise<void> {
     }
   }
 }
+
+/**
+ * PR encore ouverte du dossier de travail d'une session. Une session d'agent qui porte une PR ouverte ne s'archive pas
+ * (ni par l'outil `sessions.archive`, ni d'office en fin de tour) : elle garde son contexte et son dossier pour les
+ * retours de revue, la CI ou les conflits, et Skipper la range quand la PR est fusionnée ou fermée
+ * (`archiveAgentSessionsOfPullRequest`, projects/cleanup.ts). Les archivages par une personne ne sont pas concernés.
+ */
+async function openPullRequestOf(session: Pick<Session, 'worksessionId'>): Promise<TrackedPullRequest | null> {
+  if (!session.worksessionId) return null;
+  return pullRequestRepository.findOpenByWorksession(session.worksessionId).catch((err) => {
+    log.warn(`[sessions] PR ouverte du dossier ${session.worksessionId} non lue`, err);
+    return null;
+  });
+}
+
+export const openPullRequestRefusal = (pr: Pick<TrackedPullRequest, 'number'>) =>
+  `La PR #${pr.number} de ce dossier est encore ouverte : la session reste active jusqu'à sa fusion ou sa fermeture, pour traiter les retours de revue, la CI ou les conflits avec son contexte. Skipper l'archivera alors d'elle-même ; termine simplement ta réponse.`;
 
 export const sessionService = {
   list: (filter?: SessionFilter) => sessionRepository.list(filter),
@@ -772,19 +791,24 @@ export const sessionService = {
    * Archive la session dès qu'elle a fini : en cours, l'agent termine son tour (`end`), puis l'écouteur
    * `onArchiveWhenDone` l'archive ; sinon elle l'est tout de suite. Sert à une session qui s'archive elle-même
    * (outil `sessions.archive`) : l'archiver immédiatement couperait l'outil qui le demande. Renvoie `true` si
-   * l'archivage est différé à la fin du tour.
+   * l'archivage est différé à la fin du tour. Refusé tant que la PR du dossier est ouverte (`openPullRequestOf`), sauf
+   * `force` (Skipper range la session à la fin de sa PR).
    */
-  async archiveWhenDone(id: string, reason: string | null = null, opts: { auto?: boolean } = {}): Promise<boolean> {
+  async archiveWhenDone(id: string, reason: string | null = null, opts: { auto?: boolean; force?: boolean } = {}): Promise<boolean> {
     const session = await sessionRepository.findById(id);
     if (!session) throw new NotFoundError('Session introuvable');
     if (session.archivedAt) return false;
     if (archiveWhenDone.has(id)) return true; // déjà demandé : la fin du tour l'archivera
     if (!archiveWhenDoneListener) throw new AppError("L'archivage n'est pas disponible");
+    const open = opts.force ? null : await openPullRequestOf(session);
+    if (open) throw new AppError(openPullRequestRefusal(open));
     const deferred = running.has(id);
     const message = opts.auto
       ? "Session archivée d'office à la fin de son tour : lancée sans personne pour la piloter, elle se range seule (le fil de sa tâche ou de son canal rappellera l'agent)"
-      : `${deferred ? 'Session archivée par son agent à la fin de ce tour' : 'Session archivée par un agent'}${reason ? ` : ${reason}` : ''}`;
-    await emitEvent(id, 'system', { message, notice: true, reason: opts.auto ? 'auto_archive' : 'agent_archive' });
+      : opts.force
+        ? `Session archivée par Skipper${deferred ? ' à la fin de ce tour' : ''}${reason ? ` : ${reason}` : ''}`
+        : `${deferred ? 'Session archivée par son agent à la fin de ce tour' : 'Session archivée par un agent'}${reason ? ` : ${reason}` : ''}`;
+    await emitEvent(id, 'system', { message, notice: true, reason: opts.auto ? 'auto_archive' : opts.force ? 'pr_ended_archive' : 'agent_archive' });
     if (deferred) {
       archiveWhenDone.add(id);
       try {
@@ -816,6 +840,11 @@ export const sessionService = {
     ]);
     if (runningChildren.length || queuedChildren.length) {
       log.info(`[sessions] session ${id} non archivée d'office : une session qu'elle a lancée tourne encore`);
+      return false;
+    }
+    const open = await openPullRequestOf(session);
+    if (open) {
+      log.info(`[sessions] session ${id} non archivée d'office : sa PR #${open.number} est encore ouverte`);
       return false;
     }
     await this.archiveWhenDone(id, null, { auto: true });
