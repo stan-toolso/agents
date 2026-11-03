@@ -57,12 +57,11 @@ export default function ProjectDetailPage() {
   if (!project || !d || !stats) return <Alert variant="warning">Projet introuvable.</Alert>;
   const canWrite = project.myRole === 'ADMIN' || project.myRole === 'MEMBER';
   const { counts } = d;
-  const idle = d.runningSessions.filter((s) => s.activity !== 'BUSY' && s.pendingRequestCount === 0);
   const failed = d.recentSessions.filter((s) => s.status === 'FAILED' && isRecent(s.endedAt ?? s.updatedAt, 24));
   const interrupted = d.recentSessions.filter((s) => s.status === 'INTERRUPTED' && s.activity === 'BUSY' && isRecent(s.endedAt ?? s.updatedAt, 24));
   // Une tâche « à valider » dont l'agent s'est arrêté est déjà comptée parmi les tâches à l'agent arrêté.
   const toValidate = d.tasks.filter((t) => isOpen(t) && t.statusTag && fold(t.statusTag) === 'a valider' && !t.stalledSince);
-  const todo = d.pendingRequests.length + idle.length + failed.length + interrupted.length + d.staleTasks.length + d.pullRequests.length + toValidate.length;
+  const todo = d.pendingRequests.length + failed.length + interrupted.length + d.staleTasks.length + d.pullRequests.length + toValidate.length;
   const upcomingTasks = d.tasks.filter((t) => isOpen(t) && t.dueDate).sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? '')).slice(0, 5);
   const activity = recentActivity(d);
 
@@ -89,7 +88,7 @@ export default function ProjectDetailPage() {
         <Link to="/requests" className={`dash-tile${counts.pendingRequests ? ' alert' : ''}`}>
           <div className="dash-tile-label"><i className="bi bi-hand-index-thumb" /> Demandes en attente</div>
           <div className="dash-tile-value">{counts.pendingRequests}</div>
-          <div className="dash-tile-sub">{counts.pendingRequests ? 'Des agents sont bloqués jusqu’à votre réponse' : counts.idleSessions ? `${plural(counts.idleSessions, 'agent attend', 'agents attendent')} vos instructions` : 'Rien ne vous attend'}</div>
+          <div className="dash-tile-sub">{counts.pendingRequests ? 'Des agents sont bloqués jusqu’à votre réponse' : 'Rien ne vous attend'}</div>
         </Link>
         <Link to="/sessions" className="dash-tile">
           <div className="dash-tile-label"><i className="bi bi-cpu" /> Agents au travail</div>
@@ -154,7 +153,6 @@ export default function ProjectDetailPage() {
             </h2>
             <ul className="dash-list">
               {d.pendingRequests.map((r) => <RequestRow key={r.id} request={r} showProject={false} />)}
-              {idle.map((s) => <SessionRow key={s.id} session={s} hint="attend vos instructions" icon="bi-chat-left-dots warn" showProject={false} refetch={REFETCH} />)}
               {failed.map((s) => <SessionRow key={s.id} session={s} hint={s.error ? shorten(s.error, 80) : 'en erreur'} icon="bi-x-octagon bad" showProject={false} refetch={REFETCH} />)}
               {interrupted.map((s) => <SessionRow key={s.id} session={s} hint="interrompue en plein travail par un redémarrage" icon="bi-pause-circle warn" showProject={false} refetch={REFETCH} />)}
               {d.staleTasks.map((t) => <TaskRow key={t.id} task={t} showProject={false} hint={stalledHint(t)} icon="bi-person-x bad" />)}

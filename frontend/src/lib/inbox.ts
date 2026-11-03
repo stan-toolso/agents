@@ -7,7 +7,8 @@ import type { TrackedPullRequest } from '../graphql/pullRequests';
  */
 
 export type InboxKind = 'request' | 'session' | 'task' | 'pullRequest';
-export type SessionReason = 'idle' | 'failed' | 'interrupted';
+/** Une session qui attend simplement des instructions n'est pas « à traiter » : seules l'erreur et l'interruption y mènent. */
+export type SessionReason = 'failed' | 'interrupted';
 
 export type InboxItem =
   | { key: string; kind: 'request'; urgency: number; at: string; projectId: string; projectName: string; request: HumanRequest }
@@ -16,10 +17,10 @@ export type InboxItem =
   | { key: string; kind: 'pullRequest'; urgency: number; at: string; projectId: string; projectName: string; pr: TrackedPullRequest };
 
 /** Plus le chiffre est petit, plus c'est urgent : un agent bloqué d'abord, un brouillon en dernier. */
-export const URGENCY = { request: 0, failed: 1, interrupted: 1, idle: 2, stalled: 2, toMerge: 3, draft: 4 } as const;
+export const URGENCY = { request: 0, failed: 1, interrupted: 1, stalled: 2, toMerge: 3, draft: 4 } as const;
 
 export function sessionReason(s: Pick<Session, 'status'>): SessionReason {
-  return s.status === 'FAILED' ? 'failed' : s.status === 'INTERRUPTED' ? 'interrupted' : 'idle';
+  return s.status === 'FAILED' ? 'failed' : 'interrupted';
 }
 
 export interface InboxData {

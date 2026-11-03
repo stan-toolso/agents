@@ -2729,7 +2729,6 @@ export const PREVIEW_ACCESS_URL = gql`
 
 export interface InboxCounts {
   requests: number;
-  idleSessions: number;
   failedSessions: number;
   interruptedSessions: number;
   stalledTasks: number;
@@ -2752,7 +2751,6 @@ export const INBOX_COUNTS = gql`
   query InboxCounts {
     inboxCounts {
       requests
-      idleSessions
       failedSessions
       interruptedSessions
       stalledTasks
@@ -2772,7 +2770,6 @@ export const INBOX = gql`
       generatedAt
       counts {
         requests
-        idleSessions
         failedSessions
         interruptedSessions
         pullRequests

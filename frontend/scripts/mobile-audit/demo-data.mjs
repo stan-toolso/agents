@@ -538,12 +538,12 @@ const usageDays = Array.from({ length: 30 }, (_, i) => ({ __typename: 'Dashboard
 const stalledTasks = () => tasks.filter((t) => t.stalledSince());
 const inboxCounts = () => {
   const c = {
-    __typename: 'InboxCounts', requests: pending().length, idleSessions: live().filter((s) => s.status === 'RUNNING' && s.activity === 'IDLE' && s.owner === U.me).length,
+    __typename: 'InboxCounts', requests: pending().length,
     failedSessions: live().filter((s) => s.status === 'FAILED').length, interruptedSessions: live().filter((s) => s.status === 'INTERRUPTED').length,
     stalledTasks: stalledTasks().length,
     pullRequests: pullRequests.filter((x) => x.stage === 'TO_MERGE').length,
   };
-  c.total = c.requests + c.idleSessions + c.failedSessions + c.interruptedSessions + c.stalledTasks + c.pullRequests;
+  c.total = c.requests + c.failedSessions + c.interruptedSessions + c.stalledTasks + c.pullRequests;
   return c;
 };
 const dashboard = () => ({
@@ -758,7 +758,7 @@ export const demoRoot = {
   projectDashboard: (a) => projectDashboard(a.id),
   inbox: () => ({
     __typename: 'Inbox', generatedAt: new Date().toISOString(), counts: inboxCounts(), requests: pending(),
-    sessions: live().filter((s) => ['FAILED', 'INTERRUPTED'].includes(s.status) || (s.status === 'RUNNING' && s.activity === 'IDLE' && s.owner === U.me)),
+    sessions: live().filter((s) => ['FAILED', 'INTERRUPTED'].includes(s.status)),
     tasks: stalledTasks(),
     pullRequests: pullRequests.filter((x) => x.stage === 'TO_MERGE'),
   }),

@@ -16,16 +16,15 @@ import './dashboard.css';
 const KIND_LABELS: Record<InboxKind, string> = { request: 'Demandes', session: 'Sessions', task: 'Tâches sans agent', pullRequest: 'Pull requests' };
 
 const REASONS: Record<SessionReason, { icon: string; text: string }> = {
-  idle: { icon: 'bi-chat-left-dots warn', text: 'attend vos instructions' },
   failed: { icon: 'bi-x-octagon bad', text: 'en erreur' },
   interrupted: { icon: 'bi-pause-circle warn', text: 'interrompue en plein travail par un redémarrage' },
 };
 
 /**
  * « À traiter » : tout ce qui attend une action humaine, tous projets confondus — demandes des agents
- * (réponse sur place), sessions qui attendent des instructions, en erreur ou interrompues, tâches en cours dont l'agent
- * s'est arrêté sans les terminer (reprendre, relancer ou remettre à faire), pull requests
- * à fusionner. Triée par urgence puis ancienneté, filtrable par projet et par nature. Le compteur global
+ * (réponse sur place), sessions en erreur ou interrompues, tâches en cours dont l'agent s'est arrêté sans les terminer
+ * (reprendre, relancer ou remettre à faire), pull requests à fusionner. Une session qui attend simplement des
+ * instructions n'y figure pas : elle ne demande rien. Triée par urgence puis ancienneté, filtrable par projet et par nature. Le compteur global
  * vit dans la sidebar (query InboxCounts).
  */
 export default function InboxPage() {
