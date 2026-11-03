@@ -121,14 +121,18 @@ describe.skipIf(!adminUrl)('instances du backend (PostgreSQL)', () => {
     const session = (await blue.pool.query<{ id: string }>(`INSERT INTO sessions (project_id, name, provider) VALUES ($1, 'bus', 'claude') RETURNING id`, [projectId])).rows[0].id;
     const updates = green.pubSub.subscribe('sessionUpdated');
     const events = green.pubSub.subscribe('sessionEvent', session);
+    // Un abonnement de graphql-yoga (Repeater) n'écoute qu'à partir du premier next() : on le lance avant de publier,
+    // sinon une publication relayée et relue par vert avant ce next() est perdue et le test attend jusqu'au délai.
+    const nextUpdate = updates.next();
+    const nextEvent = events.next();
     const updated = await blue.sessionRepository.update(session, { activity: 'busy' });
     blue.pubSub.publish('sessionUpdated', updated!);
     const event = await blue.sessionRepository.addEvent(session, 'assistant', { text: 'x'.repeat(20_000) });
     blue.pubSub.publish('sessionEvent', session, event);
-    const u = await updates.next();
+    const u = await nextUpdate;
     expect(u.value).toMatchObject({ id: session, activity: 'busy' });
     expect(u.value.updatedAt).toBeInstanceOf(Date);
-    const e = await events.next();
+    const e = await nextEvent;
     expect(e.value).toMatchObject({ id: event.id, type: 'assistant' });
     expect(String(e.value.payload.text)).toHaveLength(20_000);
     await updates.return?.(undefined);
