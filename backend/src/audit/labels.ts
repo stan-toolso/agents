@@ -31,6 +31,8 @@ export const ACTION_LABELS: Record<string, string> = {
   'session.stop': 'a arrêté la session',
   'session.end': 'a terminé la session',
   'session.interrupt': 'a interrompu la session',
+  'session.share': 'a partagé la session par lien public',
+  'session.unshare': 'a révoqué un lien public de la session',
   'session.resume': 'a repris la session',
   'session.archive': 'a archivé la session',
   'session.unarchive': 'a restauré la session',

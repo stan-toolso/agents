@@ -104,8 +104,8 @@ export default function SessionPanel({ sessionId }: { sessionId: string }) {
           </span>
         )}
       </div>
-      <ContextBanner session={session} busy={busy} />
-      <div className="cc-actions stacked">{actions.buttons}</div>
+      {!actions.readOnly && <ContextBanner session={session} busy={busy} />}
+      {actions.readOnly ? <div className="cc-actions stacked cc-dim">Lecture seule : votre rôle de lecteur sur ce projet ne permet pas d'agir sur la session.</div> : <div className="cc-actions stacked">{actions.buttons}</div>}
       {session.review && <SessionReviewReport review={session.review} />}
 
       <div className="git-subhead">Détail</div>

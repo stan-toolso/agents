@@ -47,6 +47,7 @@ import { gitServer } from '../gitServer/service.js';
 import type { GitBackup } from '../gitServer/backups.js';
 import { archiveSessionCascade, archiveWorksessionCascade, deleteProjectCascade, deleteSessionCascade, deleteWorksessionCascade, restoreWorksessionCascade } from '../projects/cleanup.js';
 import { importProjectArchive, MAX_IMPORT_BYTES } from '../exports/service.js';
+import { sessionShareService, type SessionShare } from '../sessionShares/service.js';
 import { runner, type RunnerConfig } from '../runners/index.js';
 import { containerMonitor } from '../runners/monitor.js';
 import { runnerLifecycle } from '../runners/lifecycle.js';
@@ -676,6 +677,10 @@ export const resolvers = {
     },
   },
 
+  SessionShare: {
+    url: (share: SessionShare) => `${config.appUrl}/share/${share.token}`,
+    createdBy: (share: SessionShare, _: unknown, ctx: Ctx) => userOrNull(ctx, share.createdById),
+  },
   SharedPage: {
     owner: (p: SharedPage) => userService.get(p.ownerId),
     members: async (p: SharedPage, _: unknown, ctx: Ctx) => {
@@ -810,6 +815,11 @@ export const resolvers = {
     owner: (session: Session, _: unknown, ctx: Ctx) => userOrNull(ctx, session.ownerId),
     requestedBy: (session: Session, _: unknown, ctx: Ctx) => userOrNull(ctx, session.requestedById),
     takenOverBy: (session: Session, _: unknown, ctx: Ctx) => userOrNull(ctx, session.takenOverById),
+    // Les liens publics ne sont montrés qu'à ceux qui peuvent en créer ou en révoquer (pas aux lecteurs).
+    shares: async (session: Session, _: unknown, ctx: Ctx) => {
+      const role = ctx.user ? await roleFor(ctx, session.projectId) : null;
+      return role && role !== 'viewer' ? sessionShareService.listActive(session.id) : [];
+    },
     viewerCanTakeOver: (session: Session, _: unknown, ctx: Ctx) => (ctx.user && session.ownerId ? agentService.canTakeOver(ctx.user.id, session) : false),
     agent: async (session: Session, _: unknown, ctx: Ctx) => (session.ownerId ? ((await loadersOf(ctx).agent(session.ownerId)) ?? null) : null),
     task: (session: Session) => taskService.forSession(session.id),
@@ -1757,6 +1767,16 @@ export const resolvers = {
     resumeSession: async (_: unknown, args: { id: string }, ctx: Ctx) => {
       await guardSession(ctx, args.id, 'member');
       return sessionService.resume(args.id);
+    },
+    createSessionShare: async (_: unknown, args: { sessionId: string; expiresInDays: number }, ctx: Ctx) => {
+      await guardSession(ctx, args.sessionId, 'member');
+      return sessionShareService.create(args.sessionId, requireUser(ctx).id, args.expiresInDays);
+    },
+    revokeSessionShare: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      const share = await sessionShareService.get(args.id);
+      await guardSession(ctx, share.sessionId, 'member');
+      await sessionShareService.revoke(share.id);
+      return true;
     },
     interruptSession: async (_: unknown, args: { id: string }, ctx: Ctx) => {
       await guardSession(ctx, args.id, 'member');

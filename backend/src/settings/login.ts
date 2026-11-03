@@ -10,6 +10,7 @@ import { config } from '../config.js';
 import { AppError, NotFoundError } from '../errors.js';
 import { claudeSettings, cliEnv } from './claude.js';
 import { log } from '../log.js';
+import { redactSecrets } from '../sessionShares/redact.js';
 
 const { Terminal: HeadlessTerminal } = xtermHeadless;
 
@@ -88,9 +89,9 @@ function stripAnsi(s: string): string {
   return s.replace(/\x1b\]8;;[^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\]8;[^;]*;/g, '').replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\x1b[^[\]]/g, '');
 }
 
-/** Écran du CLI pour le journal du serveur : jeton masqué, lignes vides compactées. */
+/** Écran du CLI pour le journal du serveur : secrets masqués (mêmes règles que le lien public d'une session), lignes vides compactées. */
 function redactedTail(l: LiveLogin, chars = 1500): string {
-  return screenText(l.screen).replace(/sk-ant-[A-Za-z0-9_-]{8,}/g, 'sk-ant-[masqué]').replace(/\n\s*\n(\s*\n)+/g, '\n\n').trim().slice(-chars);
+  return redactSecrets(screenText(l.screen)).replace(/\n\s*\n(\s*\n)+/g, '\n\n').trim().slice(-chars);
 }
 
 function publicView(l: LiveLogin): ClaudeLogin {
