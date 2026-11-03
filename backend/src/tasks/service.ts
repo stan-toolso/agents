@@ -29,6 +29,7 @@ import {
   type UpdateTaskInput,
 } from './types.js';
 import { log } from '../log.js';
+import { auditService } from '../audit/service.js';
 
 export const priorityLabels = { urgent: 'urgente', high: 'haute', medium: 'moyenne', low: 'basse' } as const;
 export const statusLabels = { todo: 'à faire', in_progress: 'en cours', done: 'terminée', cancelled: 'annulée' } as const;
@@ -209,6 +210,10 @@ function notifyChanged(change: TaskChange): void {
 
 const fmtDate = (d: Date) => d.toISOString().slice(0, 16).replace('T', ' ');
 
+/** Acteur d'une modification de tâche au journal d'audit (sans acteur : Skipper lui-même, ex. fusion d'une PR). */
+const auditActor = (actor: TaskActor | null | undefined) =>
+  actor ? { userId: actor.type === 'human' ? (actor.userId ?? null) : null, sessionId: actor.type === 'agent' ? (actor.sessionId ?? null) : null, label: actor.name ?? null } : null;
+
 export const taskService = {
   list: (filter?: TaskFilter) => taskRepository.list(filter),
   listForSession: (sessionId: string) => taskRepository.listForSession(sessionId),
@@ -309,6 +314,7 @@ export const taskService = {
       throw err;
     });
     const task = attachments.length ? { ...created, attachmentCount: attachments.length } : created;
+    await auditService.record({ projectId, actor: auditActor(actor), action: 'task.create', targetType: 'task', targetId: task.id, targetLabel: task.title, details: { status: task.status, priority: task.priority, workflowRunId: actor.workflowRunId ?? undefined } });
     if (actor.type === 'agent') {
       void notificationService.notify({
         type: 'task.created',
@@ -343,6 +349,9 @@ export const taskService = {
     const removed = await removeTaskAttachments(id, null, input.removeAttachmentIds);
     const addedAttachments = await storeTaskAttachments(id, null, input.attachments);
     const task = removed.length || addedAttachments.length ? { ...updated, attachmentCount: updated.attachmentCount - removed.length + addedAttachments.length } : updated;
+    if (before.status !== task.status) {
+      await auditService.record({ projectId: task.projectId, actor: auditActor(actor), action: 'task.status', targetType: 'task', targetId: task.id, targetLabel: task.title, details: { from: before.status, to: task.status } });
+    }
     if (actor?.type === 'agent' && before.status !== 'done' && task.status === 'done') {
       const project = await projectService.get(task.projectId);
       void notificationService.notify({

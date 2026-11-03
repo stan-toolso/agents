@@ -154,11 +154,14 @@ export default function SchedulesPage() {
   const { data: projectsData } = useQuery<{ projects: Project[] }>(PROJECTS, { variables: { includePersonal: true } });
   const [searchParams, setSearchParams] = useSearchParams();
   // « ?new=1 » (menu du projet dans la sidebar) : ouvre tout de suite la création, puis s'efface de l'adresse.
+  // « ?edit=<session> » (notification d'une exécution bloquée) : ouvre la planification, où l'on pré-autorise ses outils.
   const [creating, setCreating] = useState(searchParams.has('new'));
+  const [editing, setEditing] = useState<string | null>(searchParams.get('edit'));
   useEffect(() => {
-    if (searchParams.has('new')) setSearchParams({}, { replace: true });
+    const edit = searchParams.get('edit');
+    if (edit) setEditing(edit);
+    if (searchParams.has('new') || edit) setSearchParams({}, { replace: true });
   }, [searchParams, setSearchParams]);
-  const [editing, setEditing] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const project = routeProjectId ? projectsData?.projects.find((p) => p.id === routeProjectId) : null;
@@ -251,7 +254,7 @@ export default function SchedulesPage() {
           ))}
         </div>
       )}
-      {creating && <ScheduleModal projects={writable.map((p) => ({ id: p.id, name: p.isPersonal ? 'Mon espace' : p.name, defaultPermissionMode: p.defaultPermissionMode }))} onClose={() => setCreating(false)} />}
+      {creating && <ScheduleModal projects={writable.map((p) => ({ id: p.id, name: p.isPersonal ? 'Mon espace' : p.name, defaultPermissionMode: p.defaultPermissionMode, defaultModel: p.defaultModel }))} onClose={() => setCreating(false)} />}
       {editingItem && <ScheduleModal session={editingItem.session} onClose={() => setEditing(null)} />}
     </>
   );

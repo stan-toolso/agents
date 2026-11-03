@@ -150,6 +150,30 @@
 .cc-thinking.cc-live { cursor: default; }
 .cc-thinking .cc-thinking-text { margin-left: 18px; }
 .cc-note { margin: 4px 0; color: var(--cc-dimmer); }
+
+/* Conversation (détail technique masqué) : la session se lit comme un canal — avatar, nom, heure, corps — en police
+   de texte. Tout le tour de l'agent tient dans son message : étapes repliées en une ligne discrète, messages, questions.
+   Le détail d'une étape déplié garde la chasse fixe du terminal. */
+.cc-transcript.cc-chat { font-family: var(--bs-font-sans-serif); font-size: 13.5px; padding: 14px 20px; }
+.cc-chat-msg { display: flex; gap: 10px; padding: 8px 10px; margin: 2px -10px; border-radius: 6px; }
+.cc-chat-msg:hover { background: var(--cc-bg-hover); }
+.cc-chat-msg.pending { opacity: 0.75; }
+.cc-chat-main { flex: 1; min-width: 0; }
+.cc-chat-body { margin-top: 2px; }
+.cc-chat-body > * + * { margin-top: 6px; }
+.cc-chat-text { color: var(--cc-fg); }
+div.cc-chat-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Suite du message de l'agent en cours d'écriture, alignée sur le corps du message (avatar 28 px + écart 10 px). */
+.cc-chat-cont { margin: 4px 0 8px 38px; }
+.cc-chat .cc-tool, .cc-chat .cc-thinking { margin: 2px 0; }
+.cc-chat .cc-group .cc-call { font-size: 12px; }
+.cc-chat .cc-group .cc-call { align-items: center; }
+/* Le glyphe ⏺ tourne en emoji sur certains systèmes : un simple point de la couleur de l'issue. */
+.cc-chat .cc-group .cc-dot { font-size: 0; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.cc-chat .cc-group .cc-dot.ok { color: var(--cc-dimmer); }
+.cc-chat .cc-group-body, .cc-chat .cc-tool:not(.cc-group) { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace; font-size: 12px; }
+.cc-chat .cc-thinking { font-size: 12.5px; }
+.cc-chat .cc-note { font-size: 12px; }
 .cc-note.error { color: var(--cc-red); }
 .cc-note.warn { color: var(--cc-yellow); }
 
@@ -334,6 +358,7 @@
   .cc-context-banner-actions .cc-btn { flex: 1 1 auto; text-align: center; }
   .cc-actions .cc-btn { flex: 1 1 auto; text-align: center; padding: 5px 8px; }
   .cc-transcript { padding: 10px 10px; }
+  .cc-transcript.cc-chat { padding: 10px 12px; }
   .cc-toggle { padding: 3px 10px 0; }
   /* Dans le détail repliable de l'en-tête, avec les boutons : alignée à gauche, sans la marge de la ligne autonome. */
   .cc-toggle-mobile { padding: 0; justify-content: flex-start; }

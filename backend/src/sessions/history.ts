@@ -1,5 +1,6 @@
 import { sessionRepository } from './repository.js';
 import type { Session } from './types.js';
+import { authorHeader, parseAuthor } from './instructionAuthor.js';
 
 /** Taille maximale de la conversation reprise dans la consigne d'une relance (caractères). */
 export const MAX_DIGEST_CHARS = 40_000;
@@ -17,7 +18,10 @@ export async function conversationTurns(sessionId: string): Promise<Turn[]> {
     const events = await sessionRepository.listEvents(sessionId, { after, limit: 2000 });
     if (!events.length) break;
     for (const e of events) {
-      if (e.type === 'instruction' && typeof e.payload.text === 'string' && e.payload.text.trim()) turns.push({ role: 'user', text: e.payload.text.trim() });
+      if (e.type === 'instruction' && typeof e.payload.text === 'string' && e.payload.text.trim()) {
+        const text = e.payload.text.trim();
+        turns.push({ role: 'user', text: [authorHeader(parseAuthor(e.payload.author), text), text].filter(Boolean).join('\n') });
+      }
       if (e.type === 'claude.assistant' && !e.payload.parent_tool_use_id) {
         const content = (e.payload.message as { content?: Array<{ type?: string; text?: string }> } | undefined)?.content;
         const text = (Array.isArray(content) ? content : [])

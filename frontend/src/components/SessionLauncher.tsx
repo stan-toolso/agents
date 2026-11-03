@@ -133,7 +133,7 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
   const attachments = usePendingAttachments();
 
   const project = projects.find((p) => p.id === projectId);
-  const { data: infoData } = useQuery<{ project: (Pick<Project, 'id' | 'gitUrl' | 'defaultPermissionMode' | 'defaultContextCleanup'> & { git: { branch: string } | null; approvalConnections: string[] }) | null }>(PROJECT_LAUNCH_INFO, { variables: { id: projectId }, skip: !projectId });
+  const { data: infoData } = useQuery<{ project: (Pick<Project, 'id' | 'gitUrl' | 'defaultPermissionMode' | 'defaultContextCleanup' | 'defaultModel'> & { git: { branch: string } | null; approvalConnections: string[] }) | null }>(PROJECT_LAUNCH_INFO, { variables: { id: projectId }, skip: !projectId });
   const info = infoData?.project?.id === projectId ? infoData.project : null;
   const mainBranch = info?.git?.branch;
   const provider = providers.find((p) => p.type === providerType);
@@ -170,6 +170,14 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
     const mode = saved && (field.options ?? []).some((o) => o.value === saved) ? saved : projectDefaultMode;
     setValues((prev) => ({ ...prev, permissionMode: mode }));
   }, [provider, projectId, projectDefaultMode]);
+
+  // Modèle : celui du projet s'il en fixe un et qu'il fait partie de vos modèles (le serveur l'appliquerait de toute façon).
+  const projectModel = info?.defaultModel ?? null;
+  useEffect(() => {
+    const field = provider?.configFields.find((f) => f.key === 'model');
+    if (!field || !projectModel || !(field.options ?? []).some((o) => o.value === projectModel)) return;
+    setValues((prev) => ({ ...prev, model: projectModel }));
+  }, [provider, projectModel]);
 
   // En tant qu'agent : son type de session, puis son modèle (parmi ses modèles autorisés) et ses autorisations par défaut.
   useEffect(() => {
@@ -209,7 +217,9 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
     if (!project || !canSubmit) return;
     setError(null);
     // Dossier nommé d'après la branche (projet git) ou la consigne ; libellé : première ligne de la consigne.
-    const newWorksession = isGit ? { branch: effectiveBranch, name: null, label: hasText ? derived.label : null, baseRef: baseRef.trim() || null } : { branch: null, name: suggestedName, label: hasText ? derived.label : null, baseRef: null };
+    // Branche non choisie : seul le nom est envoyé, le serveur en dérive une branche libre (suffixée si elle existe déjà).
+    const chosenBranch = isGit && branch.trim() ? effectiveBranch : null;
+    const newWorksession = { branch: chosenBranch, name: chosenBranch ? null : suggestedName, label: hasText ? derived.label : null, baseRef: isGit ? baseRef.trim() || null : null };
     try {
       const chosenMode = values.permissionMode;
       if (chosenMode && provider!.configFields.some((f) => f.key === 'permissionMode')) rememberPermissionMode(project.id, chosenMode);
@@ -220,6 +230,8 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
             projectId: project.id,
             newWorksession,
             name: prompt.trim().split('\n')[0].slice(0, 60) || attachments.items[0]?.name.slice(0, 60) || 'Session',
+            // Nom provisoire : un titre court le remplace après la première réponse (réglage Paramètres → Claude).
+            autoTitle: true,
             provider: provider!.type,
             prompt: prompt || null,
             attachments: attachments.items.length ? await toAttachmentInputs(attachments.items) : null,
@@ -308,7 +320,8 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
                     <div className="ps-3 border-start">
                       <Form.Group className="mb-2">
                         <Form.Label className="mb-1">Branche</Form.Label>
-                        <Form.Control size="sm" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder={`${suggestedName} (extraite si elle existe, créée sinon)`} />
+                        <Form.Control size="sm" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder={suggestedName} />
+                        <Form.Text>Saisie : extraite si elle existe, créée sinon. Vide : dérivée de la consigne, avec un suffixe (-2…) si elle existe déjà.</Form.Text>
                       </Form.Group>
                       <Form.Group className="mb-2">
                         <Form.Label className="mb-1">À partir de</Form.Label>

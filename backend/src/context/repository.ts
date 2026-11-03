@@ -1,3 +1,4 @@
+import { auditService } from '../audit/service.js';
 import { pool, type Queryable } from '../db/pool.js';
 import { toJson } from '../db/json.js';
 import type { Actor, ContextChange, ContextChangeKind, ContextFolder, ContextInstruction, ContextInstructionVersion, Library } from './types.js';
@@ -207,6 +208,18 @@ export const contextRepository = {
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
       [library.projectId, library.agentId, kind, path, toJson(details), actor.type, actor.sessionId ?? null],
     );
+    // Journal d'audit : les modifications des agents (outils context) ; celles des personnes le sont par la mutation GraphQL.
+    if (actor.type === 'agent') {
+      await auditService.record({
+        projectId: library.projectId,
+        actor: { sessionId: actor.sessionId ?? null },
+        action: `context.${kind.replace('.', '_')}`,
+        targetType: 'context',
+        targetId: path,
+        targetLabel: path,
+        details: { ...details, agentId: library.agentId ?? undefined },
+      });
+    }
     return toChange(rows[0]);
   },
   async listChanges(projectId: string, agentId: string | null = null, limit = 100, db: Queryable = pool): Promise<ContextChange[]> {

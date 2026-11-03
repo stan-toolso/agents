@@ -6,6 +6,7 @@ import type { Session } from '../sessions/types.js';
 import { worksessionRepository } from '../worksessions/repository.js';
 import { trackedPullRequestService } from './service.js';
 import type { PullRequestActor, TrackedPullRequest } from './types.js';
+import { sessionAuthor, userAuthor } from '../sessions/instructionAuthor.js';
 
 /**
  * Session d'agent rattachée à une pull request suivie, et demande de résolution des conflits : quand GitHub signale
@@ -51,6 +52,7 @@ export async function requestConflictResolution(id: string, actor: PullRequestAc
   const session = await pullRequestSession(pr);
   if (!session) throw new AppError(`Aucune session d'agent n'est rattachée à la pull request #${pr.number} : lancez une session sur sa branche ${pr.headBranch}`);
   const prompt = conflictResolutionPrompt(pr);
-  const sent = await sessionService.sendMessage(session.id, actor.type === 'human' ? prompt : `${prompt}\n\n(Demande transmise par une autre session d'agent.)`);
+  const author = actor.type === 'human' ? await userAuthor(actor.userId) : await sessionAuthor(actor.sessionId);
+  const sent = await sessionService.sendMessage(session.id, actor.type === 'human' ? prompt : `${prompt}\n\n(Demande transmise par une autre session d'agent.)`, null, { author });
   return sent;
 }

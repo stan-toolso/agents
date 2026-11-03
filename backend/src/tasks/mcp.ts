@@ -1,11 +1,14 @@
+import { auditService } from '../audit/service.js';
 import { agentService } from '../agents/service.js';
 import { gitAccountFor } from '../git/agentEnv.js';
 import { createSdkMcpServer, tool, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { inScope, targetProject, withProjectParam, type ProjectScope } from '../personal/scope.js';
 import type { Project } from '../projects/types.js';
-import { trackedPullRequestService } from '../pullRequests/service.js';
-import { describePullRequest, PR_STAGES, SETTABLE_PR_STATUSES, type PullRequestStage, type TrackedPullRequest, type TrackedPullRequestStatus } from '../pullRequests/types.js';
+import { pullRequestService, type MergeMethod } from '../git/pullRequests.js';
+import type { MergeApproval } from '../pullRequests/mergeApproval.js';
+import { foreignRepoOf, trackedPullRequestService } from '../pullRequests/service.js';
+import { describePullRequest, pullRequestRef, PR_STAGES, SETTABLE_PR_STATUSES, type PullRequestStage, type TrackedPullRequest, type TrackedPullRequestStatus } from '../pullRequests/types.js';
 import { traceSessionEvent } from '../sessions/events.js';
 import { sessionService } from '../sessions/service.js';
 import { describeAttachments, imageBlocks, type McpContent } from './attachments.js';
@@ -18,9 +21,16 @@ const failure = (t: string) => ({ content: [{ type: 'text' as const, text: t }],
 /**
  * Outils du serveur `tasks` autorisés d'office (réversibles, sans coût, sans effet hors de la base). `pr_open`
  * n'y est pas : il pousse la branche et ouvre une pull request sur GitHub avec le compte de la personne, donc
- * passe par la demande d'autorisation.
+ * passe par la demande d'autorisation. `pr_merge` y est parce qu'il pose lui-même sa demande (`approveMerge`) :
+ * la personne qui l'accepte fusionne avec son compte, même en mode « ne jamais demander », et jamais d'office.
  */
-export const TASKS_FREE_TOOLS = ['list', 'get', 'create', 'update', 'claim', 'release', 'comment', 'react', 'people', 'pr_list', 'pr_register', 'pr_update'].map((t) => `mcp__tasks__${t}`);
+export const TASKS_FREE_TOOLS = ['list', 'get', 'create', 'update', 'claim', 'release', 'comment', 'react', 'people', 'pr_list', 'pr_register', 'pr_update', 'pr_merge'].map((t) => `mcp__tasks__${t}`);
+
+/** Ce que le provider de la session fournit au serveur `tasks`. */
+export interface TasksMcpOptions {
+  /** Pose la demande de fusion d'une PR à une personne et renvoie l'identifiant de celle qui l'accepte (lève sinon). */
+  approveMerge?: (approval: MergeApproval) => Promise<string>;
+}
 
 const line = (t: Task, sessionId: string) =>
   `- ${t.id} · [${t.status}${statusTagText(t)}] [${t.priority}] ${t.title}${t.tags.length ? ` · étiquettes ${t.tags.join(', ')}` : ''}${t.sessionIds.includes(sessionId) ? (t.sessionIds.length > 1 ? ' (assignée à cette session et à d’autres)' : ' (assignée à cette session)') : t.sessionIds.length ? ' (prise par une autre session)' : ''}${t.dueDate ? ` · échéance ${t.dueDate}` : ''}${t.assignee ? ` · responsable ${formatPerson(t.assignee)}` : ''}${t.commentCount ? ` · ${t.commentCount} commentaire${t.commentCount > 1 ? 's' : ''}` : ''}${dependencyText(t)}`;
@@ -80,7 +90,7 @@ const autoStartSchema = z.boolean().optional();
  * espace personnel), `list` et `create` acceptent un paramètre `project`, et les autres outils atteignent les
  * tâches de tous les projets de la personne.
  */
-export function createTasksMcpServer(project: Project, sessionId: string, sessionName?: string, scope?: ProjectScope): McpSdkServerConfigWithInstance {
+export function createTasksMcpServer(project: Project, sessionId: string, sessionName?: string, scope?: ProjectScope, options: TasksMcpOptions = {}): McpSdkServerConfigWithInstance {
   const actor: TaskActor = { type: 'agent', sessionId, name: sessionName ?? null };
   const run = async (fn: () => Promise<string>) => {
     try {
@@ -118,7 +128,7 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
   return createSdkMcpServer({
     name: 'tasks',
     version: '1.0.0',
-    instructions: `Tableau de tâches ${scope ? `de tes projets (par défaut : l'espace personnel "${project.name}" ; paramètre project pour un autre projet)` : `du projet "${project.name}"`}. Statuts : todo, in_progress, done, cancelled ; une étiquette d'état (court libellé libre, ex. « en revue », « bloquée ») dit où en est le travail dans le statut. Les tâches peuvent porter des étiquettes libres. Priorités : low, medium, high, urgent. Prends une tâche avec claim avant de t'en occuper (plusieurs sessions peuvent se partager une tâche, et une session en mener plusieurs ; release la rend), passe-la en done quand elle est terminée (travail fini, poussé, PR prête : pas avant), repasse-la en in_progress si tu la reprends ensuite (nouvelle instruction, corrections), commente-la pour rendre compte, et crée des tâches pour le travail à faire plus tard. Une tâche peut dépendre d'autres tâches du projet (depends_on de create et update, pas de cycle) : tant qu'une dépendance n'est pas terminée, elle est bloquée (claim et le lancement d'un agent sont refusés) ; auto_start la confie à une session dès que sa dernière dépendance passe à done. Une tâche créée directement en in_progress ou done t'est rattachée (assign_to_me) ; passer en in_progress ou done une tâche que personne n'a prise te la rattache aussi. Le fil d'une tâche est une conversation : comment poste un message (reply_to pour répondre dans le fil d'un message), react pose ou retire un emoji, une mention (« @Nom » ou « @e-mail » d'un membre, « @session:<id> » d'une session d'agent ; people liste qui l'on peut mentionner) prévient la personne ou transmet le message à la session, qui est alors reliée à la tâche. Les pull requests d'une tâche se suivent avec pr_open (ouvre la PR sur GitHub, ou la merge request sur GitLab, depuis la branche courante, ou depuis un autre dépôt cloné dans un sous-dossier), pr_register (déclare une PR déjà ouverte, dans le dépôt du projet ou un autre), pr_update (statut open/merged/closed, note, tâche) et pr_list (par étape : pending = en préparation, c'est-à-dire une branche avec des modifications sans PR ouverte, draft, to_merge, merged, cancelled).`,
+    instructions: `Tableau de tâches ${scope ? `de tes projets (par défaut : l'espace personnel "${project.name}" ; paramètre project pour un autre projet)` : `du projet "${project.name}"`}. Statuts : todo, in_progress, done, cancelled ; une étiquette d'état (court libellé libre, ex. « en revue », « bloquée ») dit où en est le travail dans le statut. Les tâches peuvent porter des étiquettes libres. Priorités : low, medium, high, urgent. Prends une tâche avec claim avant de t'en occuper (plusieurs sessions peuvent se partager une tâche, et une session en mener plusieurs ; release la rend), passe-la en done quand elle est terminée (travail fini, poussé, PR prête : pas avant), repasse-la en in_progress si tu la reprends ensuite (nouvelle instruction, corrections), commente-la pour rendre compte, et crée des tâches pour le travail à faire plus tard. Une tâche peut dépendre d'autres tâches du projet (depends_on de create et update, pas de cycle) : tant qu'une dépendance n'est pas terminée, elle est bloquée (claim et le lancement d'un agent sont refusés) ; auto_start la confie à une session dès que sa dernière dépendance passe à done. Une tâche créée directement en in_progress ou done t'est rattachée (assign_to_me) ; passer en in_progress ou done une tâche que personne n'a prise te la rattache aussi. Le fil d'une tâche est une conversation : comment poste un message (reply_to pour répondre dans le fil d'un message), react pose ou retire un emoji, une mention (« @Nom » ou « @e-mail » d'un membre, « @session:<id> » d'une session d'agent ; people liste qui l'on peut mentionner) prévient la personne ou transmet le message à la session, qui est alors reliée à la tâche. Les pull requests d'une tâche se suivent avec pr_open (ouvre la PR sur GitHub, ou la merge request sur GitLab, depuis la branche courante, ou depuis un autre dépôt cloné dans un sous-dossier), pr_register (déclare une PR déjà ouverte, dans le dépôt du projet ou un autre), pr_merge (fusionne une PR quand une personne te le demande : elle accepte la demande et la fusion est faite avec son compte), pr_update (statut open/merged/closed, note, tâche) et pr_list (par étape : pending = en préparation, c'est-à-dire une branche avec des modifications sans PR ouverte, draft, to_merge, merged, cancelled).`,
     tools: [
       tool(
         'list',
@@ -349,6 +359,7 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
             const account = accounts ? await gitAccountFor(accounts, path?.trim() ? null : project.gitUrl) : null;
             if (account?.readOnly && !account.pullRequests) throw new Error(`Ton compte ${account.host === 'gitlab' ? 'GitLab' : 'GitHub'} est prêté en lecture seule : tu ne peux ni pousser ni ouvrir de pull request. Si le changement relève du développement, crée une tâche et confie-la à l'agent développeur du projet ; sinon demande dans le fil de la tâche à une personne de prendre la main sur cette session (bouton « Prendre la main ») ou de pousser elle-même.`);
             const pr = await trackedPullRequestService.open({ projectId: project.id, worksessionId: s.worksessionId }, account?.userId ?? s.ownerId, { title, body, base, draft, path }, { taskId: task_id, note }, prActor);
+            await auditService.record({ projectId: project.id, actor: { sessionId }, action: 'pull_request.open', targetType: 'pull_request', targetId: pr.number != null ? String(pr.number) : pr.id, targetLabel: `#${pr.number ?? '?'} ${pr.title}`, details: { taskId: task_id, url: pr.url, draft } });
             return `Pull request ouverte et suivie :\n${describePullRequest(pr, projectRepo)}`;
           }),
       ),
@@ -369,6 +380,27 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
             const s = await sessionContext();
             const pr = await trackedPullRequestService.register(project.id, { url, number }, { taskId: task_id, note, userId: s.ownerId, fallback: { title, headBranch: head_branch } }, prActor);
             return `Pull request suivie :\n${describePullRequest(pr, projectRepo)}`;
+          }),
+      ),
+      tool(
+        'pr_merge',
+        "Fusionne une pull request suivie du projet, seulement quand une personne te l'a demandé. Pose une demande d'autorisation : la personne qui l'accepte fusionne avec son propre compte (GitHub, GitLab ou Forgejo), à son nom ; le compte prêté à cette session ne sert pas. Supprime ensuite la branche distante et passe à « terminée » les tâches de la branche ; le dossier de travail est gardé.",
+        {
+          id: z.string().describe('Identifiant de la PR suivie (donné par pr_list ou get), son numéro dans le dépôt du projet (« 42 », « #42 ») ou son URL'),
+          method: z.enum(['merge', 'squash', 'rebase']).optional().describe('Méthode de fusion ; défaut : merge'),
+        },
+        async ({ id, method }) =>
+          run(async () => {
+            if (!options.approveMerge) throw new Error("Cette session ne peut pas fusionner de pull request : demande à une personne de la fusionner depuis l'onglet Pull requests du projet");
+            const pr = await trackedPullRequestService.resolve(project.id, id);
+            if (pr.number == null) throw new Error("Cette PR est en préparation (pas encore ouverte) : ouvre-la d'abord avec pr_open");
+            if (pr.status !== 'open') throw new Error(`La PR ${pullRequestRef(pr, projectRepo)} n'est pas ouverte (statut : ${pr.status})`);
+            const m = (method ?? 'merge').toUpperCase() as MergeMethod;
+            const ref = pullRequestRef(pr, projectRepo);
+            const userId = await options.approveMerge({ projectId: project.id, ref, title: pr.title, url: pr.url, method: m, input: { id, method: m.toLowerCase(), pr: ref, title: pr.title, url: pr.url } });
+            const result = await pullRequestService.merge(project.id, userId, pr.number, m, { deleteRemoteBranch: true, deleteWorksession: false, completeTasks: true }, foreignRepoOf(pr, projectRepo));
+            const merged = await trackedPullRequestService.markMerged(project.id, result.pullRequest, result.sha, { type: 'human', userId });
+            return [`Pull request fusionnée${result.sha ? ` (${result.sha.slice(0, 7)})` : ''} :`, describePullRequest(merged, projectRepo), ...result.warnings.map((w) => `Attention : ${w}`)].join('\n');
           }),
       ),
       tool(

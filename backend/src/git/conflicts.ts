@@ -5,6 +5,7 @@ import { sessionRepository } from '../sessions/repository.js';
 import { sessionService } from '../sessions/service.js';
 import type { Session } from '../sessions/types.js';
 import { gitService, type GitOperation, type GitStatus } from './service.js';
+import { userAuthor } from '../sessions/instructionAuthor.js';
 
 /**
  * Résolution des conflits git d'un dossier de travail confiée à un agent : quand une fusion (pull, fusion de la base,
@@ -56,7 +57,7 @@ export async function requestGitConflictResolution(ref: WorkspaceRef, ownerId: s
   const prompt = gitConflictPrompt(status);
   // Une session de relecture (lecture seule) ne peut rien résoudre : la session qui travaille dans le dossier.
   const active = (await sessionRepository.list({ projectId: ref.projectId, worksessionId: ref.worksessionId, archived: 'exclude', limit: 20 })).find((s) => !reviewOf(s));
-  if (active) return sessionService.sendMessage(active.id, prompt);
+  if (active) return sessionService.sendMessage(active.id, prompt, null, { author: await userAuthor(ownerId) });
   return sessionService.create({
     projectId: ref.projectId,
     worksessionId: ref.worksessionId,

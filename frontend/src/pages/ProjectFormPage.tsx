@@ -6,8 +6,9 @@ import { Alert, Button, Card, Col, Collapse, Form, Row, Spinner } from 'react-bo
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { bypassConnectionsWarning, permissionModeLabels } from '../lib/humanize';
 import ContextLimitField from '../components/ContextLimitField';
+import { PRIORITY_MODEL_KEYS, cleanTaskModels, modelOptions } from '../lib/models';
 import { NO_CONTEXT_LIMIT, cleanupFromLimit, limitFromCleanup, validLimit, type ContextLimit } from '../lib/contextLimit';
-import { CREATE_PROJECT, GITHUB_REPOSITORIES, GITHUB_STATUS, GITLAB_REPOSITORIES, GITLAB_STATUS, PROJECT, PROJECTS, UPDATE_PROJECT, type GithubAuthStatus, type GithubRepository, type GitlabAuthStatus, type GitlabRepository, type Project } from '../graphql/operations';
+import { CREATE_PROJECT, GITHUB_REPOSITORIES, GITHUB_STATUS, GITLAB_REPOSITORIES, GITLAB_STATUS, PROJECT, PROJECTS, PROVIDERS, UPDATE_PROJECT, type GithubAuthStatus, type GithubRepository, type GitlabAuthStatus, type GitlabRepository, type Project, type Provider, type TaskModels } from '../graphql/operations';
 
 /** Modes proposés comme réglage de projet (même liste que le backend, projects/types.ts). */
 const projectPermissionModes = ['default', 'acceptEdits', 'bypassPermissions', 'plan'];
@@ -120,6 +121,12 @@ export default function ProjectFormPage() {
   const [maxSessions, setMaxSessions] = useState('');
   const [permissionMode, setPermissionMode] = useState('default');
   const [contextLimit, setContextLimit] = useState<ContextLimit>(NO_CONTEXT_LIMIT);
+  const [defaultModel, setDefaultModel] = useState('');
+  const [taskModels, setTaskModels] = useState<TaskModels>({});
+  // Modèles proposables : ceux de vos réglages Claude (bornés par vos modèles autorisés).
+  const { data: providersData } = useQuery<{ providers: Provider[] }>(PROVIDERS);
+  const models = modelOptions(providersData?.providers.find((p) => p.type === 'claude')?.configFields);
+  const modelChoices = (current: string) => [...models, ...(current && !models.some((m) => m.value === current) ? [{ value: current, label: `${current} (hors de vos modèles autorisés)` }] : [])];
   const [showAdvanced, setShowAdvanced] = useState(isEdit);
 
   useEffect(() => {
@@ -140,6 +147,8 @@ export default function ProjectFormPage() {
     setMaxSessions(p.runnerConfig?.maxSessions ? String(p.runnerConfig.maxSessions) : '');
     setPermissionMode(p.defaultPermissionMode ?? 'default');
     setContextLimit(limitFromCleanup(p.defaultContextCleanup));
+    setDefaultModel(p.defaultModel ?? '');
+    setTaskModels(p.taskModels ?? {});
   }, [data]);
 
   const submit = (e: React.FormEvent) => {
@@ -160,6 +169,8 @@ export default function ProjectFormPage() {
       runnerConfig,
       defaultPermissionMode: permissionMode,
       defaultContextCleanup: cleanupFromLimit(contextLimit),
+      defaultModel: defaultModel || null,
+      taskModels: cleanTaskModels(taskModels),
     };
     if (isEdit) updateProject({ variables: { id, input: common } });
     else createProject({ variables: { input: { ...common, slug: slug || null } } });
@@ -254,6 +265,43 @@ export default function ProjectFormPage() {
               onChange={setContextLimit}
               hint="Présélectionné dans le formulaire de nouvelle session (qui retient ensuite votre dernier choix) et appliqué aux sessions lancées depuis une tâche ou par un agent. Les sessions existantes ne changent pas. Recommandé : compacter au-delà de 100 k tokens."
             />
+
+            <Form.Group className="mb-3" controlId="projectDefaultModel">
+              <Form.Label>Modèle des nouvelles sessions</Form.Label>
+              <Form.Select value={defaultModel} onChange={(e) => setDefaultModel(e.target.value)}>
+                <option value="">Modèle par défaut de chacun (Paramètres → Claude)</option>
+                {modelChoices(defaultModel).map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </Form.Select>
+              <Form.Text>
+                Appliqué aux nouvelles sessions qui ne choisissent pas de modèle : planifications, tâches, sessions lancées par un agent sans modèle propre. Ignoré pour une personne dont les réglages Claude n'autorisent pas ce modèle. Les sessions existantes ne changent pas.
+              </Form.Text>
+            </Form.Group>
+
+            <Form.Group className="mb-3">
+              <Form.Label className="mb-1">Modèle des tâches selon leur priorité</Form.Label>
+              <Row className="g-2">
+                {PRIORITY_MODEL_KEYS.map(({ key, label }) => (
+                  <Col xs={6} md={3} key={key}>
+                    <Form.Label htmlFor={`taskModel-${key}`} className="small text-secondary mb-0">
+                      {label}
+                    </Form.Label>
+                    <Form.Select id={`taskModel-${key}`} size="sm" value={taskModels[key] ?? ''} onChange={(e) => setTaskModels((prev) => ({ ...prev, [key]: e.target.value }))}>
+                      <option value="">Modèle du projet</option>
+                      {modelChoices(taskModels[key] ?? '').map((m) => (
+                        <option key={m.value} value={m.value}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </Form.Select>
+                  </Col>
+                ))}
+              </Row>
+              <Form.Text>Prérempli dans « Confier à un agent » (modifiable) et appliqué aux tâches lancées automatiquement ; un agent qui a son propre modèle le garde.</Form.Text>
+            </Form.Group>
 
             <div className="mb-3">
               <Button variant="link" size="sm" className="p-0 text-secondary" onClick={() => setShowAdvanced((v) => !v)} aria-expanded={showAdvanced}>

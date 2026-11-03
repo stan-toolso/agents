@@ -59,7 +59,12 @@ export interface ServerHealth {
   sessions: {
     running: number;
     busy: number;
+    /** En attente d'instructions, processus actif (il occupe sa place et sa mémoire). */
     idle: number;
+    /** Garées : attendent une instruction sans processus (après un drainage bleu/vert). */
+    parked: number;
+    /** Terminées-reprenables depuis 24 h (non archivées, conversation conservée) : un message les relance. */
+    resumable: number;
     queued: number;
     maxConcurrent: number;
   };
@@ -212,9 +217,10 @@ export const healthService = {
   async snapshot(): Promise<ServerHealth> {
     const projectList = await projectRepository.list();
     const projects = new Map(projectList.map((p) => [p.slug, { id: p.id, name: p.name }]));
-    const [memory, active, queued, claudeProcesses, docker, disk] = await Promise.all([
+    const [memory, active, waiting, queued, claudeProcesses, docker, disk] = await Promise.all([
       readMemory(),
       sessionService.activeSummary(),
+      sessionService.resumableSummary(),
       sessionRepository.listQueued(),
       readClaudeProcesses(),
       readDocker(projects),
@@ -227,7 +233,7 @@ export const healthService = {
       cpuCount: os.cpus().length,
       loadAverage: os.loadavg().map((n) => Math.round(n * 100) / 100),
       memory,
-      sessions: { running: active.active, busy: active.busy, idle: active.idle, queued: queued.length, maxConcurrent: serverSettings.current.maxConcurrentSessions },
+      sessions: { running: active.active, busy: active.busy, idle: active.idle, parked: waiting.parked, resumable: waiting.resumable, queued: queued.length, maxConcurrent: serverSettings.current.maxConcurrentSessions },
       terminals: terminalService.liveCount(),
       claudeProcesses,
       docker,

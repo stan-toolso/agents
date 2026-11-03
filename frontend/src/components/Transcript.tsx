@@ -7,6 +7,75 @@ import type { LocalAttachment } from '../lib/pendingInstructions';
 import { clockTime, dayLabel, describeTool, formatCost, formatDuration, permissionModeLabels } from '../lib/humanize';
 import { describeTaskFeed, type TaskFeedSummary } from '../lib/taskFeed';
 import Markdown from './Markdown';
+import AgentAvatar from './AgentAvatar';
+import { Avatar } from './Thread';
+
+/** Auteur journalisé avec une instruction (`author` de l'événement, backend sessions/instructionAuthor.ts). */
+export type InstructionAuthor = { type: 'user'; id?: string; name: string; email?: string | null } | { type: 'session'; id?: string; name: string } | { type: 'system'; name: string };
+
+export function readAuthor(value: unknown): InstructionAuthor | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Record<string, unknown>;
+  const name = typeof v.name === 'string' ? v.name : '';
+  if (!name) return null;
+  const id = typeof v.id === 'string' ? v.id : undefined;
+  if (v.type === 'user') return { type: 'user', id, name, email: typeof v.email === 'string' ? v.email : null };
+  if (v.type === 'session') return { type: 'session', id, name };
+  if (v.type === 'system') return { type: 'system', name };
+  return null;
+}
+
+/** Interlocuteurs d'une session affichée en conversation (sans le détail technique). */
+export interface ChatParticipants {
+  /**
+   * Auteur des instructions qui n'en portent pas (journalisées avant le 03/11/2026) : la personne qui pilote la
+   * session, ou la session d'agent qui l'a lancée. Les autres disent qui les a écrites (`author` de l'événement).
+   */
+  human: { name: string; agent?: boolean };
+  /** La personne connectée : auteur des instructions envoyées depuis la page et pas encore journalisées. */
+  me?: { name: string } | null;
+  /** Qui répond : l'agent de projet qui joue la session, sinon le modèle. */
+  agent: { name: string; projectAgent?: { name: string; avatar: { emoji: string | null; color: string | null } } | null };
+}
+
+/**
+ * Message de conversation, comme dans un canal : avatar, nom, heure, puis le corps. Les réponses de l'agent y
+ * rassemblent tout son tour (étapes repliées, messages, questions).
+ */
+function ChatRow({ who, chat, author, at, pending, children }: { who: 'human' | 'agent'; chat: ChatParticipants; author?: InstructionAuthor | null; at: string | null; pending?: boolean; children: React.ReactNode }) {
+  const human = author ?? (pending && chat.me ? { type: 'user' as const, name: chat.me.name } : { type: chat.human.agent ? ('session' as const) : ('user' as const), name: chat.human.name });
+  const name = who === 'human' ? human.name : chat.agent.name;
+  return (
+    <div className={`cc-chat-msg ${who}${pending ? ' pending' : ''}`} title={pending ? 'Envoi en cours…' : undefined}>
+      {who === 'agent' ? (
+        chat.agent.projectAgent ? <AgentAvatar agent={chat.agent.projectAgent} size={28} className="tt-avatar" /> : <Avatar name={name} agent />
+      ) : human.type === 'system' ? (
+        <span className="tt-avatar tt-avatar-agent" title="Message de Skipper">
+          <i className="bi bi-gear" />
+        </span>
+      ) : (
+        <Avatar name={name} agent={human.type === 'session'} />
+      )}
+      <div className="cc-chat-main">
+        <div className="tt-msg-head">
+          {who === 'human' && human.type === 'session' && 'id' in human && human.id ? (
+            <Link className="tt-author" to={`/sessions/${human.id}`} title="Session d'agent qui a envoyé ce message">
+              {name}
+            </Link>
+          ) : (
+            <span className="tt-author">{name}</span>
+          )}
+          {at && (
+            <time className="tt-time" dateTime={at} title={new Date(at).toLocaleString('fr-FR', { dateStyle: 'full', timeStyle: 'medium' })}>
+              {clockTime(at)}
+            </time>
+          )}
+        </div>
+        <div className="cc-chat-body">{children}</div>
+      </div>
+    </div>
+  );
+}
 
 /** Fichiers joints à une instruction : vignettes pour les images, liens de téléchargement sinon. */
 function InstructionAttachments({ sessionId, attachments }: { sessionId: string; attachments: AttachmentRef[] }) {
@@ -520,6 +589,8 @@ interface WorkItem {
   text?: boolean;
   /** Note discrète d'une tâche reliée (`task_note`). */
   note?: boolean;
+  /** Date de l'événement (en-tête du message de l'agent, en mode conversation). */
+  at: string;
 }
 
 /**
@@ -589,7 +660,9 @@ const STICK_MARGIN = 80;
  * montre chaque étape ; sinon les étapes d'un tour sont repliées en une ligne (`WorkGroup`).
  * `draft` : réponse en cours d'écriture (streaming), affichée en bas avec un curseur jusqu'au message complet.
  */
-export default function Transcript({ events, draft = null, autoScroll = true, technical = false, loading = false }: { events: SessionEvent[]; draft?: SessionLiveDraft | null; autoScroll?: boolean; technical?: boolean; loading?: boolean }) {
+export default function Transcript({ events, draft = null, autoScroll = true, technical = false, loading = false, participants = null }: { events: SessionEvent[]; draft?: SessionLiveDraft | null; autoScroll?: boolean; technical?: boolean; loading?: boolean; participants?: ChatParticipants | null }) {
+  // Sans le détail technique et avec ses interlocuteurs, la session se lit comme une conversation (`ChatRow`).
+  const chat = !technical && participants ? participants : null;
   const containerRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
 
@@ -625,7 +698,7 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
   // mode) : pendant qu'un agent écrit, le brouillon est relevé toutes les 400 ms et seul le bloc « en direct »
   // change. React retrouve les mêmes éléments (même référence) et ne re-rend pas les milliers de nœuds d'une
   // longue session ; l'état local des appels (dépliés) et des groupes est conservé.
-  const nodes = useMemo(() => {
+  const { nodes, tailAgent } = useMemo(() => {
     const rel = (path: string) => (cwd && path.startsWith(`${cwd}/`) ? path.slice(cwd.length + 1) : path);
     const nodes: React.ReactNode[] = [];
     // Sans le détail technique, le travail de l'agent entre deux événements affichés (un tour, le plus souvent)
@@ -661,6 +734,13 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
         } else run.push(item);
       });
       closeRun(true);
+      // En conversation, tout le tour de l'agent forme un seul message, daté de sa première étape.
+      if (chat && out.length && items.length)
+        return [
+          <ChatRow key={`turn-${items[0].key}`} who="agent" chat={chat} at={items[0].at}>
+            {out}
+          </ChatRow>,
+        ];
       return out;
     };
     // Repères de temps, discrets : un séparateur à chaque changement de jour, l'heure sur les instructions,
@@ -695,9 +775,20 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
           const attachments = Array.isArray(p.attachments) ? (p.attachments as AttachmentRef[]) : [];
           // Instruction envoyée depuis la page et pas encore journalisée : affichée aussitôt, fichiers lus en local.
           const local = Array.isArray(p.localAttachments) ? (p.localAttachments as LocalAttachment[]) : [];
+          if (chat) {
+            nodes.push(
+              <ChatRow key={e.id} who="human" chat={chat} author={readAuthor(p.author)} at={p.pending ? null : e.createdAt} pending={Boolean(p.pending)}>
+                <div className="cc-chat-text">{String(p.text ?? '')}</div>
+                {attachments.length > 0 && <InstructionAttachments sessionId={e.sessionId} attachments={attachments} />}
+                {local.length > 0 && <LocalAttachments attachments={local} />}
+              </ChatRow>,
+            );
+            break;
+          }
           nodes.push(
             <div key={e.id} className={`cc-user${p.pending ? ' pending' : ''}`} title={p.pending ? 'Envoi en cours…' : undefined}>
               {stamp(true)}
+              {readAuthor(p.author) && <span className="cc-time">{readAuthor(p.author)!.name}</span>}
               <span className="cc-user-text">{String(p.text ?? '')}</span>
               {p.preamble === true && <span className="cc-note"> (précédée, pour le modèle, du résumé de la conversation précédente)</span>}
               {attachments.length > 0 && <InstructionAttachments sessionId={e.sessionId} attachments={attachments} />}
@@ -712,22 +803,24 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
             const key = `${e.id}-${i}`;
             let item: WorkItem | null = null;
             if (block.type === 'text' && block.text?.trim()) {
-              const node = (
+              const node = chat ? (
+                <Markdown key={key} className="cc-body cc-chat-text" text={block.text} />
+              ) : (
                 <div key={key} className="cc-assistant">
                   <span className="cc-dot">⏺</span>
                   <Markdown className="cc-body" text={block.text} />
                   {stamp()}
                 </div>
               );
-              item = { key, node, pinned: false, text: true };
+              item = { key, node, pinned: false, text: true, at: e.createdAt };
             } else if (block.type === 'tool_use') {
               const name = block.name ?? 'outil';
               const input = block.input ?? {};
               const result = block.id ? results.get(block.id) : undefined;
               const node = <ToolCall key={key} name={name} input={input} result={result} subCalls={block.id ? (subCalls.get(block.id) ?? 0) : 0} rel={rel} />;
-              item = { key, node, pinned: name === 'AskUserQuestion', tool: { ...toolHeader(name, input, rel), severity: toolSeverity(name, result) } };
+              item = { key, node, pinned: name === 'AskUserQuestion', tool: { ...toolHeader(name, input, rel), severity: toolSeverity(name, result) }, at: e.createdAt };
             } else if (block.type === 'thinking' && block.thinking?.trim()) {
-              item = { key, node: <Thinking key={key} text={block.thinking} />, pinned: false };
+              item = { key, node: <Thinking key={key} text={block.thinking} />, pinned: false, at: e.createdAt };
             }
             if (!item) return;
             if (technical) nodes.push(item.node);
@@ -741,7 +834,7 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
           const feed = describeTaskFeed(text) ?? { kind: 'update' as const, taskId: null, title: null, summary: text.split('\n')[0] };
           const node = <TaskFeedLine key={e.id} text={text} feed={feed} quiet stamp={stamp()} />;
           if (technical) nodes.push(node);
-          else work.push({ key: e.id, node, pinned: false, note: true });
+          else work.push({ key: e.id, node, pinned: false, note: true, at: e.createdAt });
           break;
         }
         case 'claude.user': {
@@ -766,6 +859,8 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
           // en erreur avec un diagnostic interne (`[ede_diagnostic] …`). Ce n'est pas une panne : l'agent attend la suite.
           const interrupted = p.terminal_reason === 'aborted_streaming' || p.terminal_reason === 'aborted_tools';
           const failed = Boolean(p.is_error) && !interrupted;
+          // En conversation, un tour qui s'est bien terminé ne laisse pas de ligne : la réponse de l'agent suffit.
+          if (chat && !interrupted && !failed) break;
           nodes.push(
             <div key={e.id} className={`cc-note${failed ? ' error' : ''}`}>
               {stamp(true)}
@@ -905,7 +1000,7 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
           // Cartes des tâches et des instructions touchées par l'agent : gardées en vue hors des étapes repliées.
           const node = e.type === 'task' ? <TaskEventCard key={e.id} payload={p} stamp={stamp()} /> : <ContextEventCard key={e.id} payload={p} stamp={stamp()} />;
           if (technical) nodes.push(node);
-          else work.push({ key: e.id, node, pinned: true });
+          else work.push({ key: e.id, node, pinned: true, at: e.createdAt });
           break;
         }
         case 'connection': {
@@ -988,11 +1083,29 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
         );
       }
     }
-    nodes.push(...flushWork(true));
-    return nodes;
-  }, [events, technical, results, subCalls, cwd]);
+    const tail = flushWork(true);
+    nodes.push(...tail);
+    return { nodes, tailAgent: Boolean(chat && tail.length) };
+  }, [events, technical, chat, results, subCalls, cwd]);
   // Ce que l'agent écrit en ce moment : le texte grandit à chaque relevé, puis le message journalisé le remplace.
-  const live = draft?.text.trim() ? (
+  // En conversation, elle prolonge le message de l'agent du tour en cours, ou en ouvre un.
+  const liveBody = draft?.text.trim() ? (
+    <Markdown className="cc-body cc-chat-text" text={draft.text} />
+  ) : draft?.thinking ? (
+    <div className="cc-thinking">∴ Réflexion…</div>
+  ) : null;
+  const live = chat ? (
+    liveBody &&
+    (tailAgent ? (
+      <div className="cc-chat-cont cc-live">{liveBody}</div>
+    ) : (
+      <div className="cc-live">
+        <ChatRow who="agent" chat={chat} at={null}>
+          {liveBody}
+        </ChatRow>
+      </div>
+    ))
+  ) : draft?.text.trim() ? (
     <div className="cc-assistant cc-live">
       <span className="cc-dot">⏺</span>
       <Markdown className="cc-body" text={draft.text} />
@@ -1005,7 +1118,7 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
 
   return (
     <div
-      className="cc-transcript"
+      className={`cc-transcript${chat ? ' cc-chat' : ''}`}
       ref={containerRef}
       onScroll={(ev) => {
         const el = ev.currentTarget;

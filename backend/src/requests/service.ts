@@ -16,6 +16,9 @@ interface Waiter {
   reject: (err: Error) => void;
 }
 
+/** Clé ajoutée à la réponse remise à l'agent qui attend : identifiant de la personne qui a répondu. */
+export const ANSWERED_BY = 'answeredById';
+
 /** Promesses en attente d'une réponse humaine, indexées par id de demande (mémoire du serveur). */
 const waiters = new Map<string, Waiter>();
 
@@ -23,7 +26,8 @@ function settleWaiter(request: HumanRequest): void {
   const waiter = waiters.get(request.id);
   if (!waiter) return;
   waiters.delete(request.id);
-  if (request.status === 'answered') waiter.resolve(request.response ?? {});
+  // La personne qui a répondu accompagne la réponse (`answeredById`) : un outil peut agir avec son compte (fusion d'une PR).
+  if (request.status === 'answered') waiter.resolve({ ...(request.response ?? {}), ...(request.answeredById ? { [ANSWERED_BY]: request.answeredById } : {}) });
   else waiter.reject(new RequestCancelledError(request));
 }
 

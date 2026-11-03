@@ -23,10 +23,13 @@ import { contextService } from '../../context/service.js';
 import { materializeSkills } from '../../context/skills.js';
 import { AppError } from '../../errors.js';
 import { liveBrowserService } from '../../browser/live.js';
+import { BROWSER_FIELD_READERS, browserPrompt, explainBrowserFailure } from '../../browser/check.js';
 import { createGoogleMcpServer } from '../../google/mcp.js';
 import { googleAccountService, googleReadTools } from '../../google/service.js';
 import { permissionRuleService, suggestedMode, withEditedRules } from '../../permissions/service.js';
 import { formatRule, type PermissionRule } from '../../permissions/types.js';
+import { activeScheduleRules } from '../../schedules/activeRules.js';
+import { scheduleAllows, scheduleAllowsVault } from '../../schedules/permissions.js';
 import { createSharedPagesMcpServer, sharedPagesPrompt } from '../../sharedPages/mcp.js';
 import { previewPrompt } from '../../previews/config.js';
 import { createPreviewMcpServer, previewMcpPrompt } from '../../previews/mcp.js';
@@ -38,6 +41,7 @@ import { RequestCancelledError } from '../../requests/service.js';
 import { runner } from '../../runners/index.js';
 import { agentGitEnv } from '../../git/agentEnv.js';
 import { gitServer } from '../../gitServer/service.js';
+import { askMergeApproval } from '../../pullRequests/mergeApproval.js';
 import { createTasksMcpServer, TASKS_FREE_TOOLS } from '../../tasks/mcp.js';
 import { CONVERSATIONS_FREE_TOOLS, conversationsMcpPrompt, createConversationsMcpServer } from '../../conversations/mcp.js';
 import { conversationService, linkedThreadsPrompt } from '../../conversations/service.js';
@@ -66,6 +70,7 @@ import { agentService } from '../../agents/service.js';
 import { agentIdentityPrompt, agentsPromptSummary, scopedAgentsPromptSummary } from '../../agents/prompt.js';
 import { AGENTS_FREE_TOOLS, agentsMcpPrompt, createAgentsMcpServer } from '../../agents/mcp.js';
 import { userRepository } from '../../users/repository.js';
+import { authorHeader, type InstructionAuthor } from '../instructionAuthor.js';
 
 interface ClaudeConfig {
   model?: string;
@@ -236,7 +241,7 @@ export class ClaudeProvider implements SessionProvider {
     if (chat) await mkdir(chatConfigDir(ctx.project), { recursive: true });
     // Script de relais qui exécute le CLI dans le conteneur du projet (avant le navigateur : rien à nettoyer s'il échoue) ;
     // un chat utilise le CLI du serveur (CLAUDE_BIN, sinon celui du SDK), comme la vérification des identifiants.
-    const claudeExecutable = chat ? config.claudeBin : await runner.claudeExecutable(ctx.project);
+    const claudeExecutable = chat ? config.claudeBin : await runner.claudeExecutable(ctx.project, ctx.cwd);
 
     const abortController = new AbortController();
     // Option « navigateur » du projet : un serveur MCP Playwright (Chromium headless) dans le conteneur du projet.
@@ -275,9 +280,6 @@ export class ClaudeProvider implements SessionProvider {
         chat ? '' : sharedPagesPrompt(),
         ctx.session.worksessionId && !chat ? previewPrompt(previewsEnabled(), ctx.session.worksessionId) : '',
         previewWorksession ? previewMcpPrompt() : '',
-        browserEnabled
-          ? "Un navigateur headless (Chromium) est disponible via les outils `mcp__playwright__*` : navigue, lis la page (`browser_snapshot`), clique et remplis des formulaires pour tester les interfaces web. Le serveur de développement à tester se lance dans l'environnement du projet ; ses URL en localhost y sont accessibles. Pour te connecter à un site web du coffre, clique le champ du formulaire puis appelle `browser_fill` : Skipper y saisit la valeur, que tu ne vois jamais."
-          : '',
       ]
     )
       .filter(Boolean)
@@ -292,11 +294,21 @@ export class ClaudeProvider implements SessionProvider {
     const ruleUsage: RuleUsage = { rules: projectRules, asked: new Set(), pending: new Map() };
     // Le navigateur ne reçoit aucun secret à l'avance : le coffre les saisit à la demande (browser_fill).
     let browserServer: Awaited<ReturnType<typeof runner.browserMcpCommand>> | null = null;
+    // Navigateur qui ne démarre pas : la session part sans lui, avec la raison dans le transcript et dans le prompt
+    // (sinon l'agent passe des tours à tenter d'installer Chromium lui-même).
+    let browserUnavailable: string | null = null;
     if (browserEnabled) {
-      browserServer = await runner.browserMcpCommand(ctx.project, ctx.cwd, { sessionId: ctx.session.id });
-      // Vue en direct du navigateur dans l'interface (le backend s'y attache par CDP quand quelqu'un regarde).
-      liveBrowserService.register(ctx.session.id, ctx.project, browserServer.cdp);
+      try {
+        browserServer = await runner.browserMcpCommand(ctx.project, ctx.cwd, { sessionId: ctx.session.id });
+        // Vue en direct du navigateur dans l'interface (le backend s'y attache par CDP quand quelqu'un regarde).
+        liveBrowserService.register(ctx.session.id, ctx.project, browserServer.cdp);
+      } catch (err) {
+        browserUnavailable = await explainBrowserFailure(ctx.project, (err as Error).message);
+        log.warn(`[browser] session ${ctx.session.id} : ${browserUnavailable}`);
+        await ctx.emit('system', { notice: true, browser: true, message: `Navigateur headless indisponible pour cette session : ${browserUnavailable}` });
+      }
     }
+    const fullSystemPrompt = browserEnabled ? [systemPrompt, browserPrompt({ prefix: 'mcp__playwright__', fill: 'browser_fill', unavailable: browserUnavailable })].join('\n\n') : systemPrompt;
     // Approbations mémorisées « pour la session » sur les éléments du coffre (outil|clé).
     const vaultApprovals = new Set<string>();
     const vaultContext = {
@@ -307,6 +319,12 @@ export class ClaudeProvider implements SessionProvider {
       emit: ctx.emit,
       remembered: async (toolName: string, key: string, projectRules: boolean) => {
         if (vaultApprovals.has(`${toolName}|${key.toLowerCase()}`)) return true;
+        // Pré-autorisé pour les exécutions de la planification (pendant l'une d'elles seulement).
+        const scheduled = await activeScheduleRules(ctx.session.id);
+        if (scheduled && scheduleAllowsVault(scheduled, toolName, key)) {
+          await this.noteScheduleAllowed(ctx, `${toolName}(${key})`);
+          return true;
+        }
         return projectRules && ruleUsage.rules.some((r) => r.toolName === toolName && r.ruleContent?.trim().toLowerCase() === key.toLowerCase());
       },
       approve: (approval: VaultApproval) => this.approveVaultUse(ctx, ruleUsage, vaultApprovals, approval),
@@ -325,10 +343,10 @@ export class ClaudeProvider implements SessionProvider {
 
     const options: Options = {
       cwd: ctx.cwd,
-      systemPrompt: { type: 'preset', preset: 'claude_code', append: systemPrompt },
+      systemPrompt: { type: 'preset', preset: 'claude_code', append: fullSystemPrompt },
       mcpServers: review ? { context: createContextMcpServer(ctx.project, ctx.session.id) } : {
         context: createContextMcpServer(ctx.project, ctx.session.id, { agentLibraries, defaultAgentId: agent?.id ?? null }),
-        tasks: createTasksMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name, scope),
+        tasks: createTasksMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name, scope, { approveMerge: (approval) => askMergeApproval((input) => ctx.ask(input), approval) }),
         ...(scope || channels.length ? { conversations: createConversationsMcpServer(ctx.project, ctx.session.id, agent ? agent.name : ctx.session.name, scope) } : {}),
         ...(projectAgents.length ? { agents: createAgentsMcpServer(ctx.project, ctx.session.id) } : {}),
         ...(scopedAgents.length ? { agents: createAgentsMcpServer(ctx.project, ctx.session.id, scope) } : {}),
@@ -375,7 +393,7 @@ export class ClaudeProvider implements SessionProvider {
       allowedTools: review ? REVIEW_ALLOWED_TOOLS : [...allowedTools, ...projectRules.map(formatRule), 'mcp__context', ...TASKS_FREE_TOOLS, ...CONVERSATIONS_FREE_TOOLS, 'mcp__vault', 'mcp__worksessions__list', 'mcp__worksessions__create', 'mcp__sessions__list', 'mcp__sessions__get', 'mcp__sessions__wait', 'mcp__sessions__end', 'mcp__sessions__archive', 'mcp__pages__list', 'mcp__projects', ...AGENTS_FREE_TOOLS, ...(chat ? [] : ['mcp__env']), ...(previewWorksession ? ['mcp__preview'] : []), ...(browserServer ? browserReadTools : []), ...(googleAccounts.length ? googleReadTools(googleAccounts) : [])],
       ...(review ? { disallowedTools: REVIEW_DISALLOWED_TOOLS } : {}),
       // Le coffre saisit des secrets dans le navigateur : les outils qui pourraient relire la valeur sont retirés à l'agent.
-      ...(browserServer && vaultBrowser ? { disallowedTools: ['mcp__playwright__browser_evaluate', 'mcp__playwright__browser_run_code'] } : {}),
+      ...(browserServer && vaultBrowser ? { disallowedTools: BROWSER_FIELD_READERS.map((t) => `mcp__playwright__${t}`) } : {}),
       // Reprise de la conversation Claude si la session a déjà tourné et que le CLI la retrouve encore.
       resume: (await this.resumableConversation(ctx)) ?? undefined,
       pathToClaudeCodeExecutable: claudeExecutable,
@@ -389,6 +407,22 @@ export class ClaudeProvider implements SessionProvider {
       hooks: review
         ? undefined
         : {
+            // Outils pré-autorisés de la planification : appliqués aux seuls tours qu'elle lance, y compris en mode
+            // « Ne jamais me demander » (le SDK n'y appelle pas canUseTool ; la décision d'un hook passe avant le mode).
+            PreToolUse: [
+              {
+                hooks: [
+                  async (input) => {
+                    const { tool_name: toolName, tool_input: toolInput } = input as { tool_name?: string; tool_input?: Record<string, unknown> };
+                    if (!toolName) return {};
+                    const rules = await activeScheduleRules(ctx.session.id);
+                    if (!rules || !scheduleAllows(rules, toolName, toolInput ?? {}, ctx.cwd)) return {};
+                    await this.noteScheduleAllowed(ctx, toolName);
+                    return { hookSpecificOutput: { hookEventName: 'PreToolUse' as const, permissionDecision: 'allow' as const, permissionDecisionReason: 'Pré-autorisé pour les exécutions de la planification' } };
+                  },
+                ],
+              },
+            ],
             PostToolBatch: [
               {
                 hooks: [
@@ -407,11 +441,11 @@ export class ClaudeProvider implements SessionProvider {
 
     await ctx.emit('system', {
       message: `Lancement via Claude Agent SDK${options.resume ? ` (reprise de ${options.resume})` : ''}`,
-      options: { cwd: options.cwd, project: ctx.project.slug, chat, personalScope: Boolean(scope), systemPromptLength: systemPrompt.length, contextPlugin: pluginDir, browser: browserEnabled, vaultItems: vaultItems.map((i) => i.name), googleAccounts: googleAccounts.map((a) => a.email), model: options.model, fallbackModel: options.fallbackModel, authMode: general.authMode, permissionMode: options.permissionMode, maxTurns: options.maxTurns, maxBudgetUsd: options.maxBudgetUsd, allowedTools: options.allowedTools, owner: ownerId },
+      options: { cwd: options.cwd, project: ctx.project.slug, chat, personalScope: Boolean(scope), systemPromptLength: fullSystemPrompt.length, contextPlugin: pluginDir, browser: browserEnabled, vaultItems: vaultItems.map((i) => i.name), googleAccounts: googleAccounts.map((a) => a.email), model: options.model, fallbackModel: options.fallbackModel, authMode: general.authMode, permissionMode: options.permissionMode, maxTurns: options.maxTurns, maxBudgetUsd: options.maxBudgetUsd, allowedTools: options.allowedTools, owner: ownerId },
     });
 
     const queue = new MessageQueue();
-    queue.push(await this.instruction(ctx, ctx.initialMessage, ctx.initialAttachments, ctx.initialPreamble));
+    queue.push(await this.instruction(ctx, ctx.initialMessage, ctx.initialAttachments, ctx.initialPreamble, null, ctx.initialAuthor));
     // Un tour est en cours entre l'envoi d'une instruction et le message `result` qui le clôt.
     let turnInProgress = true;
     await ctx.setActivity('busy');
@@ -497,9 +531,9 @@ export class ClaudeProvider implements SessionProvider {
         stream.close();
         await done;
       },
-      sendMessage: async (text, attachments = []) => {
+      sendMessage: async (text, attachments = [], author = null) => {
         await (await claudeSettings.forSession(accounts?.claudeUserId ?? null)).assertBudgetAvailable();
-        queue.push(await this.instruction(ctx, text, attachments, null, takeNotes()));
+        queue.push(await this.instruction(ctx, text, attachments, null, takeNotes(), author));
         turnInProgress = true;
         await ctx.setActivity('busy');
       },
@@ -545,6 +579,14 @@ export class ClaudeProvider implements SessionProvider {
       // Appel soumis à canUseTool : aucune règle mémorisée ne l'a autorisé d'office.
       ruleUsage.asked.add(options.toolUseID);
       try {
+        // Filet du hook PreToolUse : un outil pré-autorisé par la planification ne fait pas de demande pendant ses exécutions.
+        if (toolName !== 'AskUserQuestion') {
+          const scheduled = await activeScheduleRules(ctx.session.id);
+          if (scheduled && scheduleAllows(scheduled, toolName, input, ctx.cwd)) {
+            await this.noteScheduleAllowed(ctx, toolName);
+            return { behavior: 'allow', updatedInput: input, toolUseID: options.toolUseID };
+          }
+        }
         if (toolName === 'AskUserQuestion') {
           const questions = (input.questions as Array<{ question: string }> | undefined) ?? [];
           const response = (await ctx.ask(
@@ -601,6 +643,19 @@ export class ClaudeProvider implements SessionProvider {
         throw err;
       }
     };
+  }
+
+  /** Outils déjà signalés comme pré-autorisés par la planification (une ligne par outil et par session). */
+  private readonly scheduleNoted = new Map<string, Set<string>>();
+
+  /** Signale dans le transcript, une fois par outil, qu'un appel passe grâce aux autorisations de la planification. */
+  private async noteScheduleAllowed(ctx: RunContext, what: string): Promise<void> {
+    const seen = this.scheduleNoted.get(ctx.session.id) ?? new Set<string>();
+    this.scheduleNoted.set(ctx.session.id, seen);
+    if (seen.has(what)) return;
+    seen.add(what);
+    if (this.scheduleNoted.size > 500) this.scheduleNoted.delete(this.scheduleNoted.keys().next().value!);
+    await ctx.emit('system', { message: `Autorisé par la planification : ${what}` }).catch(() => undefined);
   }
 
   /**
@@ -667,10 +722,13 @@ export class ClaudeProvider implements SessionProvider {
     return null;
   }
 
-  /** `notes` : notes discrètes en attente, remises au modèle avant l'instruction sans paraître dans le transcript (déjà journalisées). */
-  private async instruction(ctx: RunContext, text: string, attachments: Attachment[], preamble?: string | null, notes?: string | null): Promise<SDKUserMessage['message']['content']> {
-    await ctx.emit('instruction', { text, ...(attachments.length ? { attachments: attachments.map(publicAttachment) } : {}), ...(preamble ? { preamble: true } : {}) });
-    const body = [preamble, notes, text].filter(Boolean).join('\n\n');
+  /**
+   * `notes` : notes discrètes en attente, remises au modèle avant l'instruction sans paraître dans le transcript (déjà journalisées).
+   * `author` : qui écrit, journalisé avec l'instruction et annoncé au modèle juste devant elle (`authorHeader`).
+   */
+  private async instruction(ctx: RunContext, text: string, attachments: Attachment[], preamble?: string | null, notes?: string | null, author?: InstructionAuthor | null): Promise<SDKUserMessage['message']['content']> {
+    await ctx.emit('instruction', { text, ...(attachments.length ? { attachments: attachments.map(publicAttachment) } : {}), ...(preamble ? { preamble: true } : {}), ...(author ? { author } : {}) });
+    const body = [preamble, notes, authorHeader(author, text), text].filter(Boolean).join('\n\n');
     if (!attachments.length) return body;
     const note = attachmentsNote(attachments);
     return [{ type: 'text', text: `${body}\n\n${note}` }, ...(await inlineBlocks(attachments))];
@@ -716,6 +774,14 @@ export class ClaudeProvider implements SessionProvider {
     // Tour refusé pour cause de limite : le message du CLI (« You've reached your … limit ») est peu explicite.
     if (message.type === 'assistant' && message.error === 'rate_limit') {
       await ctx.emit('system', { notice: true, rateLimit: true, message: describeRejection(rateLimitService.current()) });
+    }
+    // Serveur MCP du navigateur qui n'a pas démarré dans le CLI (playwright-mcp absent, plantage) : explication dans le transcript.
+    if (message.type === 'system' && message.subtype === 'init') {
+      const playwright = message.mcp_servers.find((m) => m.name === 'playwright');
+      if (playwright && playwright.status !== 'connected' && playwright.status !== 'pending') {
+        const reason = await explainBrowserFailure(ctx.project, `le serveur MCP playwright est « ${playwright.status} » dans le CLI.`);
+        await ctx.emit('system', { notice: true, browser: true, message: `Navigateur headless indisponible : ${reason}` });
+      }
     }
     // Premier outil du navigateur utilisé par l'agent : la vue en direct est proposée dans la sidebar.
     if (message.type === 'assistant' && message.message.content.some((b) => b.type === 'tool_use' && b.name.startsWith('mcp__playwright__'))) {

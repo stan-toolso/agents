@@ -23,6 +23,13 @@ import { autoArchiveConfig } from '../sessions/autoArchive.js';
 import { agentRepository } from './repository.js';
 import { AGENT_TEMPLATES, templateFor } from './templates.js';
 import { AGENT_KINDS, AGENT_PROVIDERS, type Agent, type AgentAccountKind, type AgentAction, type AgentActionInput, type AgentInput, type AgentManagerRole, type AgentStats, type AgentTemplate, type OwnerAccounts, normalizeAvatar, ownAccounts, normalizeTriggers } from './types.js';
+import { sessionAuthor, userAuthor, type InstructionAuthor } from '../sessions/instructionAuthor.js';
+
+/** Auteur du message d'une convocation : la session d'agent qui convoque, sinon la personne qui l'a demandée. */
+async function summonAuthor(opts: { requestedById?: string | null }, actor: Actor): Promise<InstructionAuthor | null> {
+  if (actor.type === 'agent' && actor.sessionId) return sessionAuthor(actor.sessionId);
+  return userAuthor(opts.requestedById);
+}
 
 const NAME_MAX = 60;
 const DESCRIPTION_MAX = 200;
@@ -437,7 +444,7 @@ export const agentService = {
       if (task.projectId !== agent.projectId) throw new AppError(`La tâche n'appartient pas au projet de ${agent.name}`);
       const existing = await this.sessionOnTask(agent, task.id);
       if (existing && existing.status !== 'queued') {
-        return sessionService.sendMessage(existing.id, text, opts.attachments ?? null);
+        return sessionService.sendMessage(existing.id, text, opts.attachments ?? null, { author: await summonAuthor(opts, actor) });
       }
       if (agent.taskFolder) {
         return startTaskSession(task.id, {
@@ -455,7 +462,7 @@ export const agentService = {
       if (conversation.projectId !== agent.projectId) throw new AppError(`Le canal n'appartient pas au projet de ${agent.name}`);
       const existing = (await this.sessionOnThread(agent, opts.thread.rootMessageId)) ?? (await this.restoreOnThread(agent, opts.thread.rootMessageId));
       if (existing && existing.status !== 'queued') {
-        return sessionService.sendMessage(existing.id, text, opts.attachments ?? null);
+        return sessionService.sendMessage(existing.id, text, opts.attachments ?? null, { author: await summonAuthor(opts, actor) });
       }
       return this.sessionOnChannelThread(agent, conversation, opts.thread.rootMessageId, text, opts, actor);
     }

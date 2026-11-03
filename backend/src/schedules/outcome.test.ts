@@ -28,6 +28,11 @@ describe('summarizeEvents', () => {
     expect(s.denied).toEqual(['vault.sql_query', 'Bash']);
   });
 
+  it("précise l'élément du coffre ou la commande refusés", () => {
+    const s = summarizeEvents([result({ permission_denials: [{ tool_name: 'mcp__vault__sql_query', tool_input: { item: 'production', sql: 'select 1' } }, { tool_name: 'Bash', tool_input: { command: 'git push origin main' } }] })]);
+    expect(s.denied).toEqual(['vault.sql_query (production)', 'Bash (git push)']);
+  });
+
   it("retient l'erreur d'un tour et l'échec de la session", () => {
     expect(summarizeEvents([result({ is_error: true, subtype: 'error_max_turns' })]).error).toBe('error_max_turns');
     expect(summarizeEvents([{ type: 'status', payload: { status: 'failed', error: 'conteneur arrêté' } }]).error).toBe('conteneur arrêté');

@@ -31,6 +31,8 @@ export interface SidebarSession {
   activity: SessionActivity | null;
   pendingRequestCount: number;
   browserActive: boolean;
+  /** Modèle de la session (sa configuration, sinon le défaut de son propriétaire) ; absent ou null : inconnu. */
+  model?: string | null;
   /** Contexte de l'agent : au-delà du seuil serveur, une pastille invite à le nettoyer. */
   context: { tokens: number | null; overThreshold: boolean };
   owner: { id: string; name: string; avatarUrl: string | null; kind?: 'PERSON' | 'AGENT' } | null;

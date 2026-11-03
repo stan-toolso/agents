@@ -5,9 +5,10 @@ import { namesFromText } from '../worksessions/names.js';
 import { worksessionService } from '../worksessions/service.js';
 import { pubSub } from '../pubsub.js';
 import { notificationService } from '../notifications/service.js';
-import { requestService } from '../requests/service.js';
+import { ANSWERED_BY, requestService } from '../requests/service.js';
 import { removeSessionAttachments, storeAttachments } from './attachments.js';
 import { sessionRepository } from './repository.js';
+import { parseAuthor, promptAuthor, SYSTEM_AUTHOR, type InstructionAuthor } from './instructionAuthor.js';
 import { scheduledRuns } from './scheduledRuns.js';
 import { relaunchPrompt } from './history.js';
 import { getProvider } from './providers/registry.js';
@@ -22,10 +23,14 @@ import { instanceRegistry } from '../instances/registry.js';
 import { callInstance } from '../instances/client.js';
 import type { Attachment, AttachmentInput, CreateSessionInput, RelaunchInput, Session, SessionFilter, SessionStatus } from './types.js';
 import { log } from '../log.js';
+import { claudeSettings } from '../settings/claude.js';
 import { reviewOf } from '../reviews/types.js';
+import { pullRequestRepository } from '../pullRequests/repository.js';
+import type { TrackedPullRequest } from '../pullRequests/types.js';
 import { agentService } from '../agents/service.js';
 import { normalizeContextLimit } from './context.js';
 import { AUTO_ARCHIVE_KEY, archivesWhenIdle, withoutAutoArchive } from './autoArchive.js';
+import { autoTitleConfig, autoTitleService, withoutAutoTitle } from './autoTitle.js';
 
 /** Texte d'une instruction sans texte : les fichiers joints sont l'instruction. */
 const ATTACHMENTS_ONLY_TEXT = 'Voir les fichiers joints.';
@@ -41,6 +46,11 @@ const slots = new Map<string, string>();
 const idleSince = new Map<string, number>();
 /** Sessions terminées par le serveur (inactivité, remise à zéro de la conversation à la limite de contexte) : leur fin n'est pas notifiée. */
 const endedForIdle = new Set<string>();
+/**
+ * Sessions à terminer à la fin de leur tour, avec le message du transcript : leur tâche est passée à « terminée »
+ * pendant qu'elles travaillaient (`sessionService.endForTask`). En mémoire, comme le processus.
+ */
+const endAfterTurn = new Map<string, string>();
 /** Traitement de fin de session (mise à jour du statut) en cours, par id de session. */
 const finishing = new Map<string, Promise<void>>();
 /**
@@ -101,9 +111,9 @@ const INTERRUPTION_NOTICES: Record<InterruptionReason, string> = {
 const resumeMessage = (reason: InterruptionReason) =>
   `${INTERRUPTION_CAUSES[reason]} pendant ton tour et l'a interrompu. Reprends là où tu en étais : vérifie l'état des fichiers et des commandes en cours avant de continuer. Les demandes d'autorisation ou questions en attente ont été annulées : refais l'action ou repose la question si elle est encore utile.`;
 
-/** Reprise d'une session qui attendait des instructions : rouvrir la conversation sans lui donner de travail. */
-const idleResumeMessage = (reason: InterruptionReason) =>
-  `${INTERRUPTION_CAUSES[reason]} pendant que tu attendais une instruction ; la conversation reprend. Ne fais rien d'autre que répondre « Prêt » et attends la suite.`;
+
+/** Ce qu'une session interrompue en attente devient à la reprise (transcript). */
+const IDLE_SETTLED_NOTICE = "Session prête à reprendre : elle attendait des instructions, aucun tour n'est relancé. Envoyez un message pour la continuer.";
 
 /**
  * Cause de l'interruption des sessions interrompues par ce serveur (mémoire du serveur) : après un
@@ -137,6 +147,19 @@ async function interruptSession(id: string, reason: InterruptionReason): Promise
   pubSub.publish('sessionUpdated', session);
   await requestService.cancelAllForSession(id, 'expired');
   return session;
+}
+
+/**
+ * « Reprise » d'une session interrompue alors qu'elle attendait des instructions : aucun tour n'est lancé (il réécrirait
+ * tout le contexte, cache expiré, pour un « Prêt » sans travail). Elle passe à « terminée », comme après `idle_timeout` :
+ * sa conversation est conservée et le prochain message la relance. Null si elle n'est plus interrompue.
+ */
+async function settleIdleInterrupted(id: string, message: string, reason: string): Promise<Session | null> {
+  const current = await sessionRepository.findById(id);
+  if (current?.status !== 'interrupted') return null;
+  await emitEvent(id, 'system', { message, notice: true, reason, activity: current.activity });
+  await emitEvent(id, 'status', { status: 'completed' });
+  return publishSession(await sessionRepository.update(id, { status: 'completed', activity: null }));
 }
 
 /** Attend la fin de session de ces sessions (mise à jour finale du statut), sans jamais bloquer plus de `timeoutMs`. */
@@ -277,7 +300,7 @@ const queuedError = () =>
  * Met la session en file d'attente avec son instruction de démarrage (consigne de la session si
  * `initialMessage` est absent). Une session déjà en file garde son rang.
  */
-async function enqueue(session: Session, blocker: string, initialMessage: string | undefined, attachments: Attachment[]): Promise<Session> {
+async function enqueue(session: Session, blocker: string, initialMessage: string | undefined, attachments: Attachment[], author: InstructionAuthor | null): Promise<Session> {
   const queued = await publishSession(
     await sessionRepository.update(session.id, {
       status: 'queued',
@@ -285,7 +308,7 @@ async function enqueue(session: Session, blocker: string, initialMessage: string
       exitCode: null,
       error: null,
       queuedAt: session.queuedAt ?? new Date(),
-      queuedStart: { message: initialMessage ?? null, attachments: initialMessage === undefined ? [] : attachments },
+      queuedStart: { message: initialMessage ?? null, attachments: initialMessage === undefined ? [] : attachments, ...(author ? { author } : {}) },
     }),
   );
   const position = await sessionRepository.queuePosition(session.id);
@@ -316,7 +339,7 @@ async function drainOnce(): Promise<void> {
     const project = await projectService.get(session.projectId).catch(() => null);
     if (!project || slotBlocker(project)) continue;
     try {
-      await sessionService.start(session.id, session.queuedStart?.message ?? undefined, session.queuedStart?.attachments ?? [], { fromQueue: true });
+      await sessionService.start(session.id, session.queuedStart?.message ?? undefined, session.queuedStart?.attachments ?? [], { fromQueue: true, author: parseAuthor(session.queuedStart?.author) });
     } catch (err) {
       const message = (err as Error).message;
       log.error(`[sessions] démarrage de ${session.id} depuis la file d'attente`, err);
@@ -328,6 +351,40 @@ async function drainOnce(): Promise<void> {
     }
   }
 }
+
+/** Modèle fixé par la configuration d'une session (chaîne non vide), sinon null. */
+const configModel = (config: Record<string, unknown> | null | undefined): string | null => (typeof config?.model === 'string' && config.model.trim() ? config.model.trim() : null);
+
+/** Le compte Claude qui servira la session de ce propriétaire (le sien, ou celui prêté à un agent) autorise-t-il ce modèle ? */
+async function modelAllowedForOwner(ownerId: string | null, model: string): Promise<boolean> {
+  if (!ownerId) return false;
+  try {
+    const accounts = await agentService.accountsForOwner(ownerId);
+    const settings = await claudeSettings.forUser(accounts?.claudeUserId ?? ownerId);
+    settings.assertModelAllowed(model);
+    return true;
+  } catch {
+    log.info(`[sessions] modèle du projet ${model} ignoré : non autorisé pour le propriétaire ${ownerId}`);
+    return false;
+  }
+}
+
+/**
+ * PR encore ouverte du dossier de travail d'une session. Une session d'agent qui porte une PR ouverte ne s'archive pas
+ * (ni par l'outil `sessions.archive`, ni d'office en fin de tour) : elle garde son contexte et son dossier pour les
+ * retours de revue, la CI ou les conflits, et Skipper la range quand la PR est fusionnée ou fermée
+ * (`archiveAgentSessionsOfPullRequest`, projects/cleanup.ts). Les archivages par une personne ne sont pas concernés.
+ */
+async function openPullRequestOf(session: Pick<Session, 'worksessionId'>): Promise<TrackedPullRequest | null> {
+  if (!session.worksessionId) return null;
+  return pullRequestRepository.findOpenByWorksession(session.worksessionId).catch((err) => {
+    log.warn(`[sessions] PR ouverte du dossier ${session.worksessionId} non lue`, err);
+    return null;
+  });
+}
+
+export const openPullRequestRefusal = (pr: Pick<TrackedPullRequest, 'number'>) =>
+  `La PR #${pr.number} de ce dossier est encore ouverte : la session reste active jusqu'à sa fusion ou sa fermeture, pour traiter les retours de revue, la CI ou les conflits avec son contexte. Skipper l'archivera alors d'elle-même ; termine simplement ta réponse.`;
 
 export const sessionService = {
   list: (filter?: SessionFilter) => sessionRepository.list(filter),
@@ -361,6 +418,9 @@ export const sessionService = {
       input = { ...input, config: { ...input.config, permissionMode: project.defaultPermissionMode } };
     }
     provider.validateConfig?.(input.config ?? {});
+    // Nom provisoire : drapeau du titre généré après le premier tour ; un nom explicite ne le porte jamais (pas même hérité).
+    const { autoTitle, ...withoutFlag } = input;
+    input = { ...withoutFlag, config: autoTitle ? { ...(input.config ?? {}), ...autoTitleConfig() } : withoutAutoTitle(input.config ?? {}) };
     // Limite de contexte : celle choisie au lancement (objet vide : aucune), sinon le défaut du projet (sessions de
     // tâches, lancées par un agent…). Jamais d'autre limite que celle qu'une personne a choisie.
     input = { ...input, cleanup: (input.cleanup ? normalizeContextLimit(input.cleanup) : project.defaultContextCleanup) ?? {} };
@@ -410,13 +470,23 @@ export const sessionService = {
       parentSessionId = parent.id;
     }
 
+    // Modèle : celui choisi (ou celui de l'agent), sinon celui que le projet propose pour ce lancement (priorité de la
+    // tâche, puis défaut du projet), pourvu que le compte Claude du propriétaire l'autorise ; sinon rien n'est fixé et le
+    // modèle par défaut du propriétaire s'applique au démarrage.
+    if (input.provider === 'claude' && !configModel(input.config)) {
+      const proposed = input.defaultModel?.trim() || project.defaultModel;
+      if (proposed && (await modelAllowedForOwner(ownerId, proposed))) input = { ...input, config: { ...input.config, model: proposed } };
+    }
+
     let worksessionId = input.worksessionId ?? null;
     let createdWorksessionId: string | null = null;
     if (input.newWorksession) {
       // Sans nom ni branche ni libellé, la work session est nommée d'après la consigne (ou le nom de la session).
       const names = namesFromText(input.prompt?.trim() || input.name);
       const nw = input.newWorksession;
-      const worksession = await worksessionService.create(project.id, nw.name?.trim() || nw.branch?.trim() || nw.label?.trim() ? nw : { ...nw, ...names }, ownerId);
+      // Sans branche choisie, la branche est dérivée : suffixée si elle existe déjà plutôt que d'échouer ou de reprendre un autre travail.
+      const uniqueBranch = !nw.branch?.trim();
+      const worksession = await worksessionService.create(project.id, { ...(nw.name?.trim() || nw.branch?.trim() || nw.label?.trim() ? nw : { ...nw, ...names }), uniqueBranch }, ownerId);
       worksessionId = createdWorksessionId = worksession.id;
     }
     let session: Session;
@@ -492,9 +562,10 @@ export const sessionService = {
    * comme première instruction, typiquement pour reprendre une session terminée avec une nouvelle consigne.
    * Si la limite de sessions simultanées (serveur ou projet) est atteinte, la session passe en file d'attente
    * (statut « queued ») avec cette instruction et démarre dès qu'une place se libère. `fromQueue` : démarrage
-   * par la file d'attente elle-même (sans place, la session y reste à son rang).
+   * par la file d'attente elle-même (sans place, la session y reste à son rang). `author` : qui écrit l'instruction
+   * (Skipper par défaut) ; la consigne de la session est attribuée à qui l'a lancée ou demandée (`promptAuthor`).
    */
-  async start(id: string, initialMessage?: string, attachments: Attachment[] = [], opts: { fromQueue?: boolean; fromParked?: boolean } = {}): Promise<Session> {
+  async start(id: string, initialMessage?: string, attachments: Attachment[] = [], opts: { fromQueue?: boolean; fromParked?: boolean; author?: InstructionAuthor | null } = {}): Promise<Session> {
     const session = await sessionRepository.findById(id);
     if (!session) throw new NotFoundError('Session introuvable');
     assertNotArchived(session);
@@ -507,7 +578,7 @@ export const sessionService = {
       // Instance en cours de remplacement : la session démarre sur celle qui la remplace.
       const peer = await instanceRegistry.activePeer();
       if (!peer) throw new AppError('Le serveur redémarre : réessayez dans quelques secondes', 'MAINTENANCE');
-      await callInstance(peer, 'session.start', { id, message: initialMessage ?? null, attachments });
+      await callInstance(peer, 'session.start', { id, message: initialMessage ?? null, attachments, author: opts.author ?? null });
       return publishSession(await sessionRepository.findById(id));
     }
     serverSettings.assertNotInMaintenance();
@@ -521,7 +592,7 @@ export const sessionService = {
     // Pas d'await entre la vérification et la réservation de la place (une place déjà prise : démarrage concurrent).
     if (slots.has(id)) throw new AppError('La session est déjà en cours');
     const blocker = slotBlocker(project);
-    if (blocker) return opts.fromQueue ? session : enqueue(session, blocker, initialMessage, attachments);
+    if (blocker) return opts.fromQueue ? session : enqueue(session, blocker, initialMessage, attachments, opts.author ?? null);
     slots.set(id, project.id);
     idleSince.delete(id);
 
@@ -558,6 +629,7 @@ export const sessionService = {
         initialAttachments: initialMessage === undefined ? session.promptAttachments : attachments,
         // Conversation remise à zéro « en gardant un résumé » : le résumé accompagne la première instruction (une seule fois).
         initialPreamble: session.externalId ? null : session.resumeDigest,
+        initialAuthor: opts.author ?? (initialMessage === undefined ? await promptAuthor(session) : SYSTEM_AUTHOR),
         emit,
         setExternalId: async (externalId) => {
           await publishSession(await sessionRepository.update(id, { externalId }));
@@ -569,6 +641,10 @@ export const sessionService = {
           if (activity === 'idle') idleSince.set(id, Date.now());
           else idleSince.delete(id);
           await publishSession(await sessionRepository.update(id, { activity }));
+          const endNotice = activity === 'idle' ? endAfterTurn.get(id) : undefined;
+          if (endNotice !== undefined) endAfterTurn.delete(id);
+          // Fin du premier tour d'une session au nom provisoire : titre court généré en arrière-plan.
+          if (activity === 'idle') void autoTitleService.afterTurn(id, publishSession);
           if (activity === 'idle' && drainingInstance) void park(id);
           // Fin d'un tour ordinaire : la limite de contexte choisie pour la session s'applique (rien sans limite). Les
           // exécutions planifiées appliquent la leur avant de démarrer (schedules/service.ts).
@@ -578,6 +654,11 @@ export const sessionService = {
               .archiveAfterTurn(id)
               .then(async (archived) => {
                 if (archived) return;
+                // Sa tâche est terminée depuis le début du tour : la session se termine plutôt que d'attendre le délai d'inactivité.
+                if (endNotice !== undefined) {
+                  await sessionService.endForTask(id, endNotice);
+                  return;
+                }
                 const { cleanupService } = await import('./cleanup.js');
                 await cleanupService.afterTurn(id);
               })
@@ -601,7 +682,9 @@ export const sessionService = {
               payload: { requestType: input.type, requestId: request.id },
             });
           });
-          await emit('request.answered', { type: input.type, title: input.title, response });
+          // Qui a répondu reste dans la table des demandes ; le transcript garde la réponse seule.
+          const { [ANSWERED_BY]: _answeredBy, ...shown } = response;
+          await emit('request.answered', { type: input.type, title: input.title, response: shown });
           return response;
         },
         isServerStopping: () => stopping,
@@ -620,6 +703,7 @@ export const sessionService = {
       running.delete(id);
       slots.delete(id);
       idleSince.delete(id);
+      endAfterTurn.delete(id);
       const idleEnd = endedForIdle.delete(id);
       // La place libérée revient à la première session de la file d'attente.
       this.drainQueue();
@@ -682,9 +766,11 @@ export const sessionService = {
 
   /**
    * Envoie une instruction à la session. Si elle est en cours, l'instruction est transmise à
-   * l'agent ; si elle est terminée, la session est relancée avec cette instruction (reprise).
+   * l'agent ; si elle est terminée, la session est relancée avec cette instruction (reprise). `author` : qui écrit
+   * (personne, session d'agent), journalisé et annoncé au modèle ; Skipper à défaut.
    */
-  async sendMessage(id: string, text: string, files?: AttachmentInput[] | null, opts: { attachments?: Attachment[]; byPerson?: boolean } = {}): Promise<Session> {
+  async sendMessage(id: string, text: string, files?: AttachmentInput[] | null, opts: { attachments?: Attachment[]; byPerson?: boolean; author?: InstructionAuthor | null } = {}): Promise<Session> {
+    const author = opts.author ?? SYSTEM_AUTHOR;
     const trimmed = text.trim() || (files?.length || opts.attachments?.length ? ATTACHMENTS_ONLY_TEXT : '');
     if (!trimmed) throw new AppError('Le message est vide');
     const session = await sessionRepository.findById(id);
@@ -705,17 +791,17 @@ export const sessionService = {
       // rien elle-même : l'instruction est transmise.
       const target = (await instanceRegistry.holder(session.instanceId)) ?? (drainingInstance ? await instanceRegistry.activePeer() : null);
       if (target) {
-        await callInstance(target, 'session.message', { id, text: trimmed, attachments: await store() });
+        await callInstance(target, 'session.message', { id, text: trimmed, attachments: await store(), author });
         return publishSession(await sessionRepository.findById(id));
       }
     }
     const attachments = await store();
     // Session garée par une instance en drainage : celle-ci la réserve puis relance son processus avec l'instruction.
     if (!handle && session.status === 'running' && session.parkedAt && (await sessionRepository.claimParked(id, instanceRegistry.id))) {
-      return this.start(id, trimmed, attachments, { fromParked: true });
+      return this.start(id, trimmed, attachments, { fromParked: true, author });
     }
-    if (!handle) return this.start(id, trimmed, attachments);
-    await handle.sendMessage!(trimmed, attachments);
+    if (!handle) return this.start(id, trimmed, attachments, { author });
+    await handle.sendMessage!(trimmed, attachments, author);
     return publishSession(await sessionRepository.findById(id));
   },
 
@@ -765,26 +851,34 @@ export const sessionService = {
     const trimmed = name.trim();
     if (!trimmed) throw new AppError('Le nom est vide');
     if (trimmed.length > 120) throw new AppError('Le nom dépasse 120 caractères');
-    return publishSession(await sessionRepository.update(id, { name: trimmed }));
+    const session = await sessionRepository.findById(id);
+    if (!session) throw new NotFoundError('Session introuvable');
+    // Un nom choisi par une personne n'est jamais remplacé par un titre généré.
+    return publishSession(await sessionRepository.update(id, { name: trimmed, config: withoutAutoTitle(session.config) }));
   },
 
   /**
    * Archive la session dès qu'elle a fini : en cours, l'agent termine son tour (`end`), puis l'écouteur
    * `onArchiveWhenDone` l'archive ; sinon elle l'est tout de suite. Sert à une session qui s'archive elle-même
    * (outil `sessions.archive`) : l'archiver immédiatement couperait l'outil qui le demande. Renvoie `true` si
-   * l'archivage est différé à la fin du tour.
+   * l'archivage est différé à la fin du tour. Refusé tant que la PR du dossier est ouverte (`openPullRequestOf`), sauf
+   * `force` (Skipper range la session à la fin de sa PR).
    */
-  async archiveWhenDone(id: string, reason: string | null = null, opts: { auto?: boolean } = {}): Promise<boolean> {
+  async archiveWhenDone(id: string, reason: string | null = null, opts: { auto?: boolean; force?: boolean } = {}): Promise<boolean> {
     const session = await sessionRepository.findById(id);
     if (!session) throw new NotFoundError('Session introuvable');
     if (session.archivedAt) return false;
     if (archiveWhenDone.has(id)) return true; // déjà demandé : la fin du tour l'archivera
     if (!archiveWhenDoneListener) throw new AppError("L'archivage n'est pas disponible");
+    const open = opts.force ? null : await openPullRequestOf(session);
+    if (open) throw new AppError(openPullRequestRefusal(open));
     const deferred = running.has(id);
     const message = opts.auto
       ? "Session archivée d'office à la fin de son tour : lancée sans personne pour la piloter, elle se range seule (le fil de sa tâche ou de son canal rappellera l'agent)"
-      : `${deferred ? 'Session archivée par son agent à la fin de ce tour' : 'Session archivée par un agent'}${reason ? ` : ${reason}` : ''}`;
-    await emitEvent(id, 'system', { message, notice: true, reason: opts.auto ? 'auto_archive' : 'agent_archive' });
+      : opts.force
+        ? `Session archivée par Skipper${deferred ? ' à la fin de ce tour' : ''}${reason ? ` : ${reason}` : ''}`
+        : `${deferred ? 'Session archivée par son agent à la fin de ce tour' : 'Session archivée par un agent'}${reason ? ` : ${reason}` : ''}`;
+    await emitEvent(id, 'system', { message, notice: true, reason: opts.auto ? 'auto_archive' : opts.force ? 'pr_ended_archive' : 'agent_archive' });
     if (deferred) {
       archiveWhenDone.add(id);
       try {
@@ -816,6 +910,11 @@ export const sessionService = {
     ]);
     if (runningChildren.length || queuedChildren.length) {
       log.info(`[sessions] session ${id} non archivée d'office : une session qu'elle a lancée tourne encore`);
+      return false;
+    }
+    const open = await openPullRequestOf(session);
+    if (open) {
+      log.info(`[sessions] session ${id} non archivée d'office : sa PR #${open.number} est encore ouverte`);
       return false;
     }
     await this.archiveWhenDone(id, null, { auto: true });
@@ -1045,8 +1144,8 @@ export const sessionService = {
 
   /**
    * Reprise manuelle d'une session interrompue par un redémarrage (bouton « Reprendre ») : si l'agent
-   * travaillait, il reprend son tour avec l'instruction de reprise ; sinon la conversation est rouverte
-   * et l'agent attend la suite. Les demandes expirées ne sont pas rejouées.
+   * travaillait, il reprend son tour avec l'instruction de reprise ; sinon aucun tour n'est lancé (rien n'est
+   * facturé) : la session passe à « terminée » et le prochain message la relance. Les demandes expirées ne sont pas rejouées.
    */
   async resume(id: string): Promise<Session> {
     const session = await sessionRepository.findById(id);
@@ -1054,9 +1153,11 @@ export const sessionService = {
     assertNotArchived(session);
     if (session.status !== 'interrupted') throw new AppError("Seule une session interrompue peut être reprise ainsi : envoyez-lui un message");
     const reason = reasonOf(id);
-    const midTurn = session.activity === 'busy';
+    if (session.activity !== 'busy') {
+      return (await settleIdleInterrupted(id, IDLE_SETTLED_NOTICE, 'manual_resume')) ?? publishSession(await sessionRepository.findById(id));
+    }
     await emitEvent(id, 'system', { message: reason.startsWith('runner_') ? "Reprise après la recréation de l'environnement d'exécution" : 'Reprise après le redémarrage du serveur', notice: true, reason: 'manual_resume', activity: session.activity });
-    return this.start(id, midTurn ? resumeMessage(reason) : idleResumeMessage(reason));
+    return this.start(id, resumeMessage(reason));
   },
 
   /**
@@ -1083,8 +1184,8 @@ export const sessionService = {
 
   /**
    * Reprise de toutes les sessions interrompues par `interruptForRunner`, une fois l'environnement
-   * recréé : l'agent qui travaillait reprend son tour, celui qui attendait retrouve sa conversation
-   * ouverte. Une reprise impossible (limite, maintenance…) laisse la session interrompue, avec
+   * recréé : l'agent qui travaillait reprend son tour ; celle qui attendait passe à « terminée » sans tour (le
+   * prochain message la relance). Une reprise impossible (limite, maintenance…) laisse la session interrompue, avec
    * l'explication dans son transcript : le bouton « Reprendre » reste disponible.
    */
   async resumeAfterRunner(sessions: Session[]): Promise<string[]> {
@@ -1097,8 +1198,13 @@ export const sessionService = {
         await awaitFinished([session.id], RESUME_AFTER_RUNNER_TIMEOUT_MS);
         const current = await sessionRepository.findById(session.id);
         if (current?.status !== 'interrupted' || current.archivedAt) continue;
+        // Elle attendait des instructions : pas de tour à relancer, le prochain message la reprendra.
+        if (session.activity !== 'busy') {
+          if (await settleIdleInterrupted(session.id, IDLE_SETTLED_NOTICE, 'auto_resume')) resumed.push(session.id);
+          continue;
+        }
         await emitEvent(session.id, 'system', { message: "Reprise automatique après la recréation de l'environnement d'exécution", notice: true, reason: 'auto_resume' });
-        await this.start(session.id, session.activity === 'busy' ? resumeMessage(reason) : idleResumeMessage(reason));
+        await this.start(session.id, resumeMessage(reason));
         resumed.push(session.id);
       } catch (err) {
         log.error(`[sessions] reprise de ${session.id} après recréation de l'environnement impossible`, err);
@@ -1154,11 +1260,14 @@ export const sessionService = {
     for (const id of running.keys()) if (idleSince.has(id)) void park(id);
   },
 
-  /** Sessions actives sur ce serveur (à consulter avant un redémarrage). */
+  /** Sessions actives sur ce serveur (à consulter avant un redémarrage) : au travail et en attente, avec processus. */
   async activeSummary(): Promise<{ active: number; busy: number; idle: number }> {
     const ids = [...running.keys()];
     return { active: ids.length, ...(await sessionRepository.countByActivity(ids)) };
   },
+
+  /** Sessions sans processus mais reprenables : garées, et terminées-reprenables depuis 24 h (voir `countResumable`). */
+  resumableSummary: (now = Date.now()) => sessionRepository.countResumable(new Date(now - 24 * 60 * 60 * 1000)),
 
   /** Places occupées (sessions en cours ou en train de démarrer), au total et par projet. */
   slotUsage(): { total: number; byProject: Map<string, number> } {
@@ -1218,6 +1327,34 @@ export const sessionService = {
       }
     }
     return ended;
+  },
+
+  /**
+   * La tâche dont la session est en charge est terminée : une session qui attend des instructions (avec processus, ou
+   * garée) se termine tout de suite, sans attendre le délai d'inactivité ; une session au travail se terminera à la fin
+   * de son tour. Fin silencieuse (pas de notification) ; sa conversation est conservée et un message la relance.
+   * Renvoie ce qui a été fait ('none' : la session ne tourne pas, ou se termine déjà).
+   */
+  async endForTask(id: string, notice: string): Promise<'ended' | 'deferred' | 'none'> {
+    const handle = running.get(id);
+    if (!handle) {
+      if (instanceRegistry.hasPeers()) {
+        const holder = await instanceRegistry.holder((await sessionRepository.findById(id))?.instanceId);
+        if (holder) return callInstance<'ended' | 'deferred' | 'none'>(holder, 'session.endForTask', { id, notice });
+      }
+      const session = await sessionRepository.findById(id);
+      if (!session?.parkedAt || session.status !== 'running') return 'none';
+      await emitEvent(id, 'system', { message: notice, notice: true, reason: 'task_done' });
+      return (await endParked(id, 'completed')) ? 'ended' : 'none';
+    }
+    if (endedForIdle.has(id) || archiveWhenDone.has(id) || parking.has(id) || stopping) return 'none';
+    if (!idleSince.has(id)) {
+      endAfterTurn.set(id, notice);
+      return 'deferred';
+    }
+    await emitEvent(id, 'system', { message: notice, notice: true, reason: 'task_done' });
+    await this.end(id, { quiet: true });
+    return 'ended';
   },
 
   /** Lance la minuterie de la file d'attente et de l'arrêt des sessions inactives (au démarrage du serveur). */

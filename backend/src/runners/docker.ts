@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { access, chmod, mkdir, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, readdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -16,6 +16,7 @@ import { containerDrift, countZombies, cpusArgs, SPEC_LABEL, updateCpusValue, sp
 import { AGENT_GIT_ENV_KEYS } from '../git/agentEnv.js';
 import { invalidateContainerStats, parseDockerSize, readContainerStats, SESSION_ENV, type ContainerStats } from './stats.js';
 import { log } from '../log.js';
+import { claudeConfigFile, trustDirectories } from './trust.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -44,6 +45,11 @@ function dockerWithInput(args: string[], input: string): Promise<void> {
     child.on('close', (code) => (code === 0 ? resolve() : reject(new AppError(`docker ${args[0]} a échoué : ${stderr.trim().split('\n').slice(-2).join(' ')}`))));
     child.stdin.end(input);
   });
+}
+
+/** Dossier de configuration de Claude Code dans le conteneur : `~/.claude`, monté depuis le dossier persistant du projet. */
+function claudeConfigDir(home: string): string {
+  return path.join(home, '.claude');
 }
 
 /** Durée pendant laquelle l'identifiant d'une image est gardé en mémoire (la page du projet interroge l'état toutes les 3 s). */
@@ -98,11 +104,27 @@ export class DockerRunner implements Runner {
     return path.join(config.workspacesRoot, '.runners', project.slug, 'claude-home');
   }
 
+  /**
+   * Inscrit les dossiers comme « trusted » pour Claude Code (voir trust.ts) dans le `.claude.json` du conteneur,
+   * rangé dans `~/.claude` (CLAUDE_CONFIG_DIR) et donc écrit depuis l'hôte dans le dossier persistant du projet.
+   */
+  async trustDirectories(project: Project, dirs: string[]): Promise<void> {
+    await trustDirectories(claudeConfigFile(this.claudeHome(project)), dirs);
+  }
+
+  /** Checkout principal et dossiers de travail existants du projet. */
+  private async workingDirectories(project: Project): Promise<string[]> {
+    const root = worksessionsRoot(project);
+    const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+    return [workspacePath(project), ...entries.filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => path.join(root, e.name))];
+  }
+
   private async writeRelay(project: Project): Promise<string> {
     const file = this.relayPath(project);
     await mkdir(path.dirname(file), { recursive: true });
     // La variable de session relie le processus du CLI à sa session (mémoire par session sur la page du projet).
-    const envFlags = [...PASSTHROUGH_ENV, SESSION_ENV].map((v) => `-e ${v}`).join(' ');
+    // CLAUDE_CONFIG_DIR aussi posé ici : un conteneur créé avant qu'il fasse partie de sa configuration l'ignore tant qu'il n'est pas recréé.
+    const envFlags = [`-e CLAUDE_CONFIG_DIR=${claudeConfigDir(os.homedir())}`, ...[...PASSTHROUGH_ENV, SESSION_ENV].map((v) => `-e ${v}`)].join(' ');
     const script = `#!/bin/sh
 # Généré par Skipper : exécute le CLI Claude Code dans le conteneur du projet ${project.slug}.
 exec docker exec -i -w "$PWD" ${envFlags} ${this.containerName(project)} claude "$@"
@@ -189,6 +211,9 @@ exec docker exec -i -w "$PWD" ${envFlags} ${this.containerName(project)} claude 
       cpus: s.cpus,
       user: `${uid}:${gid}`,
       home,
+      // Configuration globale du CLI (`.claude.json` : confiance des dossiers, réglages) dans ~/.claude, persistant,
+      // plutôt qu'à la racine du dossier personnel (tmpfs, perdu à chaque recréation) ; le serveur y inscrit la confiance.
+      env: [`CLAUDE_CONFIG_DIR=${claudeConfigDir(home)}`],
       workdir: workspace,
       restart: 'unless-stopped',
       mounts,
@@ -207,7 +232,7 @@ exec docker exec -i -w "$PWD" ${envFlags} ${this.containerName(project)} claude 
     return [
       'run', '-d', '--name', name, '--restart', spec.restart, '--memory', spec.memory, ...cpusArgs(spec.cpus),
       ...(spec.init ? ['--init'] : []),
-      '--user', spec.user, '-e', `HOME=${spec.home}`, '-w', spec.workdir,
+      '--user', spec.user, '-e', `HOME=${spec.home}`, ...(spec.env ?? []).flatMap((e) => ['-e', e]), '-w', spec.workdir,
       ...spec.hosts.flatMap((h) => ['--add-host', h]),
       ...spec.tmpfs.flatMap((t) => ['--tmpfs', t]),
       ...spec.mounts.flatMap((m) => ['-v', m]),
@@ -274,6 +299,7 @@ exec docker exec -i -w "$PWD" ${envFlags} ${this.containerName(project)} claude 
       await docker(['start', name]);
     }
     await this.writeRelay(project);
+    await this.trustDirectories(project, await this.workingDirectories(project));
     return this.status(project);
   }
 
@@ -315,8 +341,10 @@ exec docker exec -i -w "$PWD" ${envFlags} ${this.containerName(project)} claude 
     await docker(['rm', '-f', this.containerName(project)], { allowFail: true });
   }
 
-  async claudeExecutable(project: Project): Promise<string | undefined> {
+  async claudeExecutable(project: Project, cwd?: string): Promise<string | undefined> {
     await this.ensureReady(project);
+    // Dossier de la session (worktree créé depuis le démarrage du conteneur, sous-dossier) : « trusted » avant le lancement.
+    if (cwd) await this.trustDirectories(project, [cwd]);
     return this.relayPath(project);
   }
 

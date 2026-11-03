@@ -40,6 +40,8 @@ export interface SessionCleanup {
 export interface QueuedStart {
   message: string | null;
   attachments: Attachment[];
+  /** Auteur de l'instruction mise en attente (`InstructionAuthor`, relu par `parseAuthor`). */
+  author?: unknown;
 }
 
 /** Souvenir d'une work session supprimée, gardé par ses sessions archivées. */
@@ -143,6 +145,11 @@ export interface CreateSessionInput {
   /** Session lancée par une exécution de workflow. */
   workflowRunId?: string | null;
   name: string;
+  /**
+   * Nom provisoire (consigne tronquée) : remplacé par un titre court généré après le premier tour (sessions/autoTitle.ts),
+   * sauf si la personne l'a coupé dans ses réglages Claude. Absent : le nom est gardé tel quel (tâche, planification…).
+   */
+  autoTitle?: boolean | null;
   provider: string;
   prompt?: string | null;
   /** Fichiers joints à la première instruction (enregistrés à la création). */
@@ -153,6 +160,11 @@ export interface CreateSessionInput {
    * aucune limite. Absente : le défaut du projet (`Project.defaultContextCleanup`).
    */
   cleanup?: SessionCleanup | null;
+  /**
+   * Modèle proposé pour ce lancement quand la configuration n'en choisit pas (sessions de tâches : modèle du projet pour
+   * la priorité de la tâche), avant le modèle par défaut du projet. Appliqué seulement s'il est autorisé pour le propriétaire.
+   */
+  defaultModel?: string | null;
 }
 
 export interface SessionFilter {

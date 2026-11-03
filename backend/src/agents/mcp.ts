@@ -1,3 +1,4 @@
+import { auditService } from '../audit/service.js';
 import { createSdkMcpServer, tool, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { withProjectParam, type ProjectScope } from '../personal/scope.js';
@@ -112,6 +113,7 @@ export function createAgentsMcpServer(project: Project, sessionId: string, scope
               // Convoqué par une session, pas par une personne : sa session se range seule à la fin de son tour.
               autoArchive: true,
             });
+            await auditService.record({ projectId: target.projectId, actor: { sessionId }, action: 'agent.summon', targetType: 'agent', targetId: target.id, targetLabel: target.name, details: { taskId: task_id, sessionId: created.id } });
             const follow = scope ? 'Utilise sessions.wait avec cet id pour obtenir sa réponse.' : "Il répondra dans le fil de la tâche s'il y en a une ; sinon consulte la session.";
             return `${target.name} convoqué${task_id ? ` sur la tâche ${task_id}` : ''} : session ${created.id} (« ${created.name} »). ${follow}`;
           }),

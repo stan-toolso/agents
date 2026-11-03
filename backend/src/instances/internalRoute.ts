@@ -7,16 +7,18 @@ import type { Attachment } from '../sessions/types.js';
 import { terminalService } from '../terminals/service.js';
 import { INSTANCE_TOKEN_HEADER, INTERNAL_PREFIX } from './client.js';
 import { instanceRegistry } from './registry.js';
+import { parseAuthor } from '../sessions/instructionAuthor.js';
 
 const MAX_BODY = 1_000_000;
 
 /** Actions qu'une autre instance du backend peut demander à celle-ci (sur ce qu'elle tient). */
 const actions: Record<string, (body: Record<string, unknown>) => Promise<unknown>> = {
-  'session.message': (b) => sessionService.sendMessage(String(b.id), String(b.text), null, { attachments: (b.attachments as Attachment[]) ?? [] }),
+  'session.message': (b) => sessionService.sendMessage(String(b.id), String(b.text), null, { attachments: (b.attachments as Attachment[]) ?? [], author: parseAuthor(b.author) }),
   'session.notify': (b) => sessionService.notify(String(b.id), String(b.text)),
-  'session.start': (b) => sessionService.start(String(b.id), typeof b.message === 'string' ? b.message : undefined, (b.attachments as Attachment[]) ?? []),
+  'session.start': (b) => sessionService.start(String(b.id), typeof b.message === 'string' ? b.message : undefined, (b.attachments as Attachment[]) ?? [], { author: parseAuthor(b.author) }),
   'session.interrupt': (b) => sessionService.interrupt(String(b.id)),
   'session.end': (b) => sessionService.end(String(b.id)),
+  'session.endForTask': (b) => sessionService.endForTask(String(b.id), String(b.notice)),
   'session.stop': (b) => sessionService.stop(String(b.id)),
   'session.config': (b) => sessionService.updateConfig(String(b.id), (b.patch as Record<string, unknown>) ?? {}),
   'terminal.close': (b) => terminalService.close(String(b.id)),

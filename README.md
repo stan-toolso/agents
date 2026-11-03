@@ -203,6 +203,8 @@ backend/
       cron.ts                  # expressions cron à cinq champs, fuseaux IANA, prochaine échéance
       service.ts               # planification des sessions : ordonnanceur, exécution, compte rendu et notification
       outcome.ts               # issue d'une exécution (terminée, bloquée, en erreur…) lue dans le transcript
+      permissions.ts           # outils pré-autorisés d'une planification : validation, couverture d'un appel, suggestions
+      activeRules.ts           # règles applicables pendant une exécution planifiée en cours (lues par les providers)
     settings/
       userStore.ts             # réglages par personne (table user_settings)
       claude.ts                # réglages Claude d'une personne : mode, jetons du coffre, modèles, budgets, vérification
@@ -232,7 +234,7 @@ backend/
       service.ts               # tâches : création, mise à jour, personnes, champs, fil de discussion (messages, réponses, mentions, réactions), sessions en charge, résumé pour le prompt
       mentions.ts              # mentions @Nom / @e-mail / @session:<id> : candidats et résolution dans un texte
       sessionFeed.ts           # changements, messages et réactions transmis aux sessions reliées à la tâche (en charge, passées par la tâche, mentionnées)
-      mcp.ts                   # serveur MCP `tasks` (list, get, create, update, claim, release, comment, react, people, pr_list, pr_open, pr_register, pr_update)
+      mcp.ts                   # serveur MCP `tasks` (list, get, create, update, claim, release, comment, react, people, pr_list, pr_open, pr_merge, pr_register, pr_update)
       launch.ts                # confier une tâche à un nouvel agent (refusé tant qu'elle est bloquée)
       dependencyGraph.ts       # dépendances entre tâches : détection des cycles (sans base)
       autoStart.ts             # enchaînement : tâche débloquée lancée automatiquement, notifiée
@@ -273,6 +275,7 @@ backend/
     previews/                  # aperçus des branches : configuration, lancement dans le conteneur, proxy par sous-domaine, instantanés des dépendances, MCP `preview`
     sharedPages/               # pages partagées : publication, versions, membres, route de lecture en bac à sable, MCP `pages`
     search/                    # recherche globale (projets, sessions, tâches, pages, coffre)
+    audit/                     # journal d'audit : table audit_log, enveloppe des mutations GraphQL (mutations.ts), export CSV
     exports/                   # export d'une session en Markdown, archive tar.gz d'un projet et import (routes /api/…/export.*)
     apiKeys/                   # clés d'API des projets
     context/
@@ -686,6 +689,25 @@ L'hébergement ne se désactive pas.
   passent par les demandes d'autorisation, avec « toujours » possible. Les captures vont dans
   `.playwright-mcp/` du dossier de travail. Compter 300 à 500 Mo de mémoire par session.
 
+  Disposition de `/opt/ms-playwright` (le nom du sous-dossier dépend de l'architecture) :
+  `chromium_headless_shell-<révision>/chrome-headless-shell-linux64/chrome-headless-shell` en x86_64,
+  `chromium_headless_shell-<révision>/chrome-headless-shell-linux-arm64/chrome-headless-shell` en arm64
+  (skipper-1), à côté de `chromium-<révision>/` (Chromium complet, inutilisé) et `ffmpeg-<révision>/`.
+  Skipper prend le dernier `chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell` : ne jamais
+  chercher l'ancien chemin `chrome-linux/headless_shell`.
+
+  **Diagnostic** (`backend/src/browser/check.ts`) : si Chromium ne démarre pas, la session part quand même, sans
+  navigateur ; le transcript reçoit un avis « Navigateur headless indisponible : … » avec la cause lue dans le
+  conteneur (playwright-mcp ou Chromium absents : image à reconstruire ; mémoire disponible sous 400 Mo), et le
+  prompt système le dit à l'agent. Même avis si le CLI annonce le serveur MCP `playwright` en échec à son
+  démarrage. Le prompt précise toujours que le navigateur est fourni par le serveur MCP `playwright` et qu'il ne
+  faut pas tenter d'installer Chromium. La carte « Navigateur headless » des réglages du projet a un bouton
+  « Tester » (mutation `testProjectBrowser`) qui refait le chemin d'une session dans le conteneur : relevé
+  (version de Chromium, de playwright-mcp, architecture, mémoire disponible), lancement de Chromium,
+  `playwright-mcp` par `docker exec -i` et client MCP, ouverture d'une page `data:` locale et capture, affichée
+  avec la durée de chaque étape. Quand le coffre saisit des secrets, `browser_evaluate`, `browser_run_code` et
+  `browser_run_code_unsafe` (nouveau nom) sont retirés à l'agent (`BROWSER_FIELD_READERS`).
+
 - **Vue en direct du navigateur** (`backend/src/browser/`) : dès que l'agent a utilisé un outil
   `mcp__playwright__*`, une entrée « Navigateur » apparaît sous la session dans la sidebar
   (`Session.browserActive`) ; elle ouvre `/sessions/<id>/browser`, qui affiche en direct l'onglet
@@ -905,7 +927,12 @@ fusion comptent (un squash laisse les anciens commits « en avance »). Il naît
 session, soumis à son autorisation, avec un paramètre `path` pour ouvrir la PR sur le dépôt d'un autre clone présent
 dans un sous-dossier du dossier de travail ; `tasks.pr_register`, qui déclare une PR ouverte par un autre moyen, par
 l'URL de n'importe quel dépôt GitHub ou par son numéro dans le dépôt du projet ; `tasks.pr_update` tient à jour
-statut, note et tâche, mais une PR en préparation ne change pas de statut ainsi ; `tasks.pr_list` liste par
+statut, note et tâche, mais une PR en préparation ne change pas de statut ainsi ; `tasks.pr_merge` fusionne une PR
+ouverte quand une personne le demande : l'outil pose lui-même une demande d'autorisation, jamais mémorisable et posée
+même en mode « ne jamais demander », et la fusion est faite avec le compte de la personne qui l'accepte (`answered_by`
+de la demande, remis à l'outil par `requestService` sous la clé `answeredById` ; au moins membre du projet), à son nom,
+branche distante supprimée et tâches de la branche terminées, dossier de travail gardé (`pullRequests/mergeApproval.ts`) ;
+`tasks.pr_list` liste par
 étape ; `tasks.get` montre les PR d'une tâche ; les PR d'un autre dépôt sont désignées « owner/name#n »), par
 l'interface (création ou fusion depuis le panneau git, bouton « Suivre une PR » de la page des pull requests ou de
 la fiche d'une tâche), ou par la **synchronisation** (`trackedPullRequestService.sync`, à l'affichage de la page d'un
@@ -950,8 +977,21 @@ chaque résultat d'un outil Edit, Write ou Bash de la session. Backend : `backen
 et `gitService.changesSince` / `diffSince` / `restoreFromBase` (queries `sessionChanges`,
 `sessionFileDiff` ; mutation `discardSessionFile`).
 
-Thème sombre inspiré de Claude Code (`frontend/src/theme.css`). La page de session
-(`frontend/src/components/Transcript.tsx`) reproduit son affichage : instructions préfixées par `>`,
+Thème sombre inspiré de Claude Code (`frontend/src/theme.css`). Par défaut (détails techniques masqués),
+une session **se lit comme une conversation**, à la manière d'un canal : chaque instruction et chaque tour de
+l'agent sont un message avec avatar, nom et heure, en police de texte (`ChatRow`, prop `participants` de
+`Transcript`). **Chaque instruction est signée** : l'événement `instruction` porte son `author`
+(`backend/src/sessions/instructionAuthor.ts` : une personne, une session d'agent ou Skipper lui-même — reprise
+après redémarrage, planification, fil d'une tâche, nettoyage), passé par `sessionService.sendMessage(…, { author })`
+et `start(…, { author })` jusqu'au provider, à travers la file d'attente et les appels entre instances. La consigne
+de départ revient à la session qui l'a lancée, sinon à la personne qui l'a demandée, sinon à sa propriétaire
+(`promptAuthor`). Le modèle le voit aussi : une ligne `[Message de Nom <e-mail>]` (ou `[Message de la session
+d'agent « Nom » (@session:<id>)]`) précède l'instruction qu'il reçoit, sans figurer dans le texte journalisé (rien
+pour Skipper ni devant une commande `/…`) ; l'export Markdown et le résumé de conversation la reprennent. Les
+instructions d'avant le 03/11/2026, sans auteur, sont attribuées à la personne qui pilote la session. Répond
+l'agent de projet qui joue la session, sinon « Claude ». Tout le tour de l'agent tient dans son message (étapes repliées en une ligne discrète,
+messages, questions) et un tour réussi ne laisse pas de ligne « Terminé ». Avec « Afficher les détails
+techniques », la page de session (`frontend/src/components/Transcript.tsx`) reproduit l'affichage du terminal : instructions préfixées par `>`,
 réponses `⏺`, appels d'outils `⏺ Outil(arguments)` (`Bash(commande)`, `Update(fichier)`,
 `Search(pattern: "x")`, `serveur - outil (MCP)(...)`) suivis de leur résultat `⎿` repliable : résumé
 pour les lectures et recherches, diff numéroté pour les modifications, début de la sortie pour les
@@ -1367,7 +1407,8 @@ création et ne suivent pas les évolutions des modèles ; Skipper ajoute donc a
 soient ses instructions : un **Product Manager** ne modifie pas le code, ne commite, ne pousse ni n'ouvre de PR
 (`tasks.pr_open` le lui refuse) ; un changement de code nécessaire, y compris un bug qui bloque une release, devient une
 tâche « prête » confiée aussitôt à l'agent développeur, la tâche bloquée en dépendant. Un **Developer** ne met rien en
-production et ne fusionne pas. Ces règles sont levées quand une personne a pris la main.
+production et ne fusionne pas de sa propre initiative : quand une personne le lui demande, il passe par `tasks.pr_merge`,
+que cette personne accepte et qui fusionne avec son compte. Ces règles sont levées quand une personne a pris la main.
 
 **Type de session et modèles.** Le profil (carte « Sessions ») règle le **type de session par défaut**
 (`defaults.provider` : Claude Code ou OpenCode ; `agentService.providerOf`), le **modèle par défaut**
@@ -1484,8 +1525,14 @@ sous condition), donc une seule instance l'exécute. Le suivi d'une exécution v
 si ce processus disparaît (déploiement, arrêt), la reprise (`scheduleService.reconcile`, à chaque passage de
 l'ordonnanceur) clôt les exécutions « en cours » depuis plus de cinq minutes dont la session est au repos, avec ce
 que dit le transcript ; la clôture est atomique (`finishRun ... WHERE status = 'running'`), une seule notification.
-L'analyseur cron (`backend/src/schedules/cron.ts`) n'a pas de dépendance et gère les fuseaux IANA, changements
-d'heure compris (une heure locale inexistante est sautée).
+L'analyseur cron (`backend/src/schedules/cron.ts`, testé par `cron.test.ts`) n'a pas de dépendance et gère les
+fuseaux IANA. Aux changements d'heure, il suit le cron classique :
+- **heure répétée** (retour à l'heure d'hiver, 2 h → 3 h deux fois) : une planification à heure fixe (`30 2 * * *`)
+  ne tourne qu'une fois, à la première occurrence ; une planification dont le champ des heures commence par `*`
+  (`*/15 * * * *`, `0 * * * *`, `0 */2 * * *`) tourne aux échéances des deux occurrences ;
+- **heure absente** (passage à l'heure d'été, 2 h → 3 h) : une planification à heure fixe est décalée à la première
+  minute qui existe (`30 2 * * *` tourne à 3 h ce jour-là, une seule fois même si plusieurs échéances tombent dans
+  le trou) ; une planification dont le champ des heures commence par `*` saute les minutes absentes.
 
 Modèle : `SessionSchedule` (`session_schedules`, une ligne par session au plus : `name`, `cron`, `timezone`,
 `prompt`, `enabled`, `endAfterRun`, `nextRunAt`, `lastRunAt`, `lastResult`), exposée par `Session.schedule`
@@ -1710,7 +1757,17 @@ La relance travaille dans le dossier et sur la branche de la session d'origine (
 la session d'origine est archivée, arrêtée si elle tournait : une seule session par dossier), ou dans un
 nouveau dossier si le sien a été supprimé. Archiver une session archive son dossier (terminaux fermés,
 dossier et branche conservés) ; la restaurer le restaure ; un dossier disparu est recréé à la prochaine
-utilisation. Une session se renomme depuis la sidebar ou ses réglages.
+utilisation. Une session se renomme depuis la sidebar (menu « ⋮ »), ses réglages, ou d'un double-clic (ou clic droit)
+sur son onglet.
+
+**Titre généré** (`backend/src/sessions/autoTitle.ts`) : une session lancée sans nom explicite (lanceur, chat,
+`sessions.create` sans `name`) reçoit un nom provisoire (début de la consigne) et le drapeau `config.autoTitle`. À
+la fin de son premier tour, Haiku 4.5 (`claude-haiku-4-5-20251001`, par le SDK Agent avec les identifiants Claude
+de la session, clé API ou abonnement) propose un titre de 4 à 8 mots d'après la consigne et la première réponse ; il
+remplace le nom provisoire et le drapeau tombe (un échec garde le nom provisoire, sans réessayer). Un renommage
+manuel retire le drapeau et l'emporte toujours. Les sessions de tâches et planifiées gardent leur nom (pas de
+drapeau). Le coût est inscrit dans `usage_ledger`. Réglage par personne : Paramètres → Claude → Modèles,
+« Titrer les sessions automatiquement » (`ClaudeSettings.autoTitle`, activé par défaut).
 
 **Une session peut s'archiver elle-même** (outil MCP `sessions.archive`, libre) : sans `id`, la session
 courante, archivée **à la fin de son tour** (`sessionService.archiveWhenDone` : fin propre par `end`, puis
@@ -1722,6 +1779,30 @@ avec la personne qui l'a demandée) ; une **sous-session** laisse sa parente l'a
 personne** ne s'archive que si elle le demande ; toutes archivent les sessions qu'elles ont lancées une fois leur
 réponse lue. Les mutations `archiveWorksession`,
 `restoreWorksession`, `renameWorksession` et `deleteWorksession` restent dans l'API (sans interface).
+
+## Journal d'audit
+
+Le **journal** d'un projet (onglet « Journal », `/projects/:id/audit`, `pages/AuditPage.tsx`) dit qui a fait quoi,
+personnes comme agents : sessions lancées, arrêtées, interrompues, archivées ; réponses aux demandes (décision,
+portée, règles autorisées) ; tâches créées, changées de statut, supprimées ; contexte ; membres, autorisations
+mémorisées, clés d'API ; coffre du projet (jamais les valeurs) ; commit, push, pull, checkout du panneau git ; pull
+requests ; agents, workflows, planifications, fichiers d'environnement. Filtres par acteur (personne ou agent, type
+d'acteur), type, action et période ; export CSV avec les mêmes filtres (`GET /api/projects/:id/audit.csv`, 10 000
+lignes au plus). Ouvert aux **lecteurs** du projet (`auditLog`, `auditFacets`).
+
+- Table `audit_log` (`backend/src/audit`) : projet (NULL pour une action de l'application : utilisateurs, réglages du
+  serveur), acteur (`actor_user_id` ; `session_id` pour une session d'agent, la personne ou l'agent qui la porte étant
+  complété ; les deux NULL : Skipper, ex. une tâche terminée à la fusion de sa PR), action `<type>.<verbe>`, cible et
+  son libellé au moment de l'action, détails JSON bornés. Une écriture ratée est journalisée sans faire échouer l'action.
+- **Mutations GraphQL** : `withAudit` enveloppe `Mutation` (`audit/mutations.ts`) ; la table `AUDITED` dit pour
+  chacune l'action, où lire le projet et la cible (lue *avant* la mutation : une suppression ne laisse rien à lire) et
+  les détails. Le test `audit/mutations.test.ts` exige que **chaque mutation du schéma** soit classée : `AUDITED`,
+  `AUDITED_BY_SERVICE` (tâches) ou `NOT_AUDITED` (réglages personnels, fils de discussion, lectures, préparation git…).
+  Une nouvelle mutation fait donc échouer les tests tant qu'elle n'est pas classée ; une action nouvelle prend son
+  libellé dans `audit/labels.ts`.
+- **Agents** : tâches par `taskService` (création, changement de statut, aussi pour les personnes et les clés d'API),
+  contexte par `contextRepository.addChange` (auteur agent), et les outils `sessions.create/end/archive`,
+  `agents.summon`, `tasks.pr_open`.
 
 ## Export et import
 
@@ -1844,6 +1925,16 @@ l'application sont repris au démarrage dans le coffre et les réglages du premi
 - **Modèles** : modèles proposés à la création d'une session (`allowedModels`, vide = tous), modèle
   par défaut et modèle de repli. Le champ « Modèle » du formulaire de session devient une liste
   déroulante ; un modèle hors liste est refusé côté serveur.
+- **Modèle par projet, par planification et par tâche** : un projet peut fixer le modèle de ses nouvelles
+  sessions (`projects.default_model`) et celui des sessions de tâches selon la priorité (`projects.task_models`,
+  ex. `{"low": "sonnet"}`), dans son formulaire. À la création d'une session Claude sans modèle choisi
+  (`sessionService.create`), on prend celui de la priorité de la tâche (`startTaskSession`), sinon celui du
+  projet, **seulement s'il est autorisé** par le compte Claude du propriétaire (sinon son modèle par défaut) ;
+  il est alors écrit dans `config.model`. Le modèle d'un agent l'emporte. Une planification choisit le modèle
+  de sa session (modale de planification) : elle peut tourner sur Sonnet pendant que les sessions manuelles
+  restent sur Opus. « Confier à un agent » préremplit le modèle proposé pour la priorité. `Session.model`
+  (configuration, sinon défaut du propriétaire) s'affiche dans la sidebar quand ce n'est pas Opus. Rien ne
+  change tant que ces réglages sont vides.
 - **Facturation** : plafond mensuel (USD, toutes les sessions de la personne), budget par défaut par
   session (`maxBudgetUsd` du SDK) et nombre d'étapes par défaut. À chaque fin de tour, le delta de
   `total_cost_usd` est enregistré dans `usage_ledger` (par session, projet et personne, ventilé par

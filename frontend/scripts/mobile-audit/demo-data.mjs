@@ -41,6 +41,8 @@ const project = (id, name, slug, description, gitUrl, extra = {}) => ({
   taskInstructions: '',
   runnerConfig: {},
   defaultPermissionMode: 'default',
+  defaultModel: null,
+  taskModels: null,
   approvalConnections: [],
   isMember: true,
   isPersonal: false,
@@ -75,7 +77,7 @@ const key = (id) => id.slice(2);
 const member = (u, role) => ({ __typename: 'ProjectMember', user: u, role, invitedBy: null, createdAt: ago(60 * 24 * 60), pending: false });
 
 P.perso = project('p-perso', 'Espace de Camille', 'perso-camille', 'Mon espace personnel : chats et brouillons.', null, { isPersonal: true });
-P.site = project('p-site', 'Site vitrine Toolso', 'site-vitrine', 'Le site public toolso.io : pages produit, tarifs, blog et formulaire de contact (Astro).', 'https://github.com/toolso/site-vitrine');
+P.site = project('p-site', 'Site vitrine Toolso', 'site-vitrine', 'Le site public toolso.io : pages produit, tarifs, blog et formulaire de contact (Astro).', 'https://github.com/toolso/site-vitrine', { taskModels: { low: 'claude-sonnet-5-5' } });
 P.api = project('p-api', 'API Facturation', 'api-facturation', 'Service de facturation : abonnements Stripe, factures PDF, relances et exports comptables.', 'https://github.com/toolso/api-facturation');
 P.mobile = project('p-mobile', 'Appli Scouts', 'appli-scouts', 'Application mobile des groupes scouts : inscriptions aux camps, cotisations et messagerie des parents.', 'https://github.com/toolso/appli-scouts');
 P.data = project('p-data', 'Data & reporting', 'data-reporting', 'Tableaux de bord et rapports hebdomadaires (dbt, Metabase).', 'https://github.com/toolso/data-reporting');
@@ -129,7 +131,8 @@ function session(id, p, name, opts = {}) {
     workflowRun: null,
     prompt: opts.prompt ?? name,
     promptAttachments: [],
-    config: { model: 'default', permissionMode: opts.permissionMode ?? 'default' },
+    config: { model: opts.model ?? 'default', permissionMode: opts.permissionMode ?? 'default' },
+    model: opts.model ?? 'claude-opus-5-5',
     externalId: null,
     exitCode: opts.status === 'FAILED' ? 1 : null,
     error: opts.error ?? null,
@@ -177,20 +180,20 @@ const sessionsOf = (projectId, args = {}) =>
 
 const S = {
   tarifs: session('s-page-tarifs', P.site, 'Refonte de la page tarifs', { activity: 'BUSY', age: 70, updated: 0, cost: 1.86, tokens: 64_000, prompt: 'Refonds la page /tarifs : trois offres en cartes, un comparatif détaillé dessous et une FAQ. Garde le style du site.' }),
-  contact: session('s-formulaire-contact', P.site, 'Formulaire de contact sur mobile', { age: 60 * 5, updated: 25, cost: 0.74 }),
+  contact: session('s-formulaire-contact', P.site, 'Formulaire de contact sur mobile', { model: 'claude-sonnet-5-5', age: 60 * 5, updated: 25, cost: 0.74 }),
   blog: session('s-chris-tri-blog', P.site, 'Tri des demandes du blog', { owner: U.chris, requestedBy: U.me, age: 60 * 3, updated: 40, cost: 0.31, branch: null }),
   pdf: session('s-export-pdf', P.api, 'Export des factures en PDF', { owner: U.hugo, activity: 'BUSY', age: 50, updated: 1, cost: 1.12 }),
-  revuePdf: session('s-nora-revue-118', P.api, 'Revue de la PR #118', { owner: U.nora, requestedBy: U.hugo, age: 25, updated: 4, cost: 0.22, branch: null }),
+  revuePdf: session('s-nora-revue-118', P.api, 'Revue de la PR #118', { model: 'claude-haiku-5-5', owner: U.nora, requestedBy: U.hugo, age: 25, updated: 4, cost: 0.22, branch: null }),
   stripe: session('s-stripe-2026-10', P.api, 'Migration vers l’API Stripe 2026-10', { status: 'COMPLETED', age: 60 * 28, updated: 60 * 22, cost: 3.4 }),
   relances: session('s-relances-impayes', P.api, 'Relances automatiques des impayés', { status: 'INTERRUPTED', age: 60 * 30, updated: 60 * 20, cost: 0.95 }),
   push: session('s-notifs-camps', P.mobile, 'Notifications push des camps', { owner: U.lea, status: 'FAILED', age: 60 * 6, updated: 60 * 2, cost: 0.58, error: 'npm run test : 2 tests en échec (CampReminder.test.ts)' }),
   revue: session('s-max-cotisations', P.mobile, 'Paiement des cotisations en trois fois', { owner: U.max, requestedBy: U.lea, takenOverBy: U.lea, activity: 'BUSY', age: 35, updated: 0, cost: 0.66 }),
-  hebdo: session('s-rapport-hebdo', P.data, 'Rapport hebdo des inscriptions', { age: 60 * 24 * 6, updated: 60 * 9, cost: 2.1, branch: null }),
+  hebdo: session('s-rapport-hebdo', P.data, 'Rapport hebdo des inscriptions', { model: 'claude-sonnet-5-5', age: 60 * 24 * 6, updated: 60 * 9, cost: 2.1, branch: null }),
   chat1: session('c-idees-blog', P.perso, 'Idées d’articles pour le blog', { kind: 'CHAT', age: 60 * 2, updated: 50, cost: 0.08 }),
   chat2: session('c-compte-rendu', P.perso, 'Résumé du comité de pilotage', { kind: 'CHAT', age: 60 * 26, updated: 60 * 25, cost: 0.05 }),
   chat3: session('c-mail-client', P.perso, 'Réponse à un client mécontent', { kind: 'CHAT', age: 60 * 50, updated: 60 * 49, cost: 0.03 }),
 };
-S.hebdo.schedule = { __typename: 'SessionSchedule', sessionId: S.hebdo.id, name: 'Rapport du lundi', customName: 'Rapport du lundi', session: S.hebdo, project: P.data, cron: '0 8 * * 1', timezone: 'Europe/Paris', prompt: 'Prépare le rapport hebdomadaire des inscriptions et publie-le.', enabled: true, endAfterRun: false, nextRunAt: inDays(5), lastRunAt: ago(60 * 9), cleanup: null };
+S.hebdo.schedule = { __typename: 'SessionSchedule', sessionId: S.hebdo.id, name: 'Rapport du lundi', customName: 'Rapport du lundi', session: S.hebdo, project: P.data, cron: '0 8 * * 1', timezone: 'Europe/Paris', prompt: 'Prépare le rapport hebdomadaire des inscriptions et publie-le.', enabled: true, endAfterRun: false, allowedTools: ['Bash(npm run report *)'], nextRunAt: inDays(5), lastRunAt: ago(60 * 9), cleanup: null };
 const chats = sessions.filter((s) => s.kind === 'CHAT');
 
 // ---- Transcripts --------------------------------------------------------------------------------------------------
@@ -227,7 +230,7 @@ const eventsBySession = {
     said(s, 58, 'Les trois offres (Découverte, Équipe, Entreprise) sont en place, l’offre Équipe est mise en avant. Je vérifie le build avant de passer au comparatif.'),
     ...tool(s, 57, 't5', 'Bash', { command: 'npm run build', description: 'Build du site' }, '> astro build\n\n 14 page(s) built in 6.21s\n Complete!'),
     done(s, 56, 9, 0.92),
-    ev(s, 20, 'instruction', { text: 'Super. Ajoute la FAQ avec les questions du support, et un interrupteur mensuel / annuel (-20 %).' }),
+    ev(s, 20, 'instruction', { text: 'Super. Ajoute la FAQ avec les questions du support, et un interrupteur mensuel / annuel (-20 %).', author: { type: 'user', id: U.hugo.id, name: U.hugo.name, email: U.hugo.email } }),
     ...tool(s, 18, 't6', 'Read', { file_path: '/workspace/docs/faq-support.md' }, '## Puis-je changer d’offre ?\nOui, à tout moment…\n## Les agents ont-ils accès à mes données ?\n…'),
     said(s, 12, 'J’ajoute l’interrupteur de période : les prix annuels sont calculés à partir des prix mensuels (-20 %), et la FAQ reprend les six questions du support en accordéon.'),
     ...tool(s, 9, 't7', 'Edit', { file_path: '/workspace/src/pages/tarifs.astro', old_string: '<section class="offers">', new_string: '<BillingToggle />\n<section class="offers">' }, 'The file has been updated.'),
@@ -630,7 +633,37 @@ const projectDashboard = (id) => {
   };
 };
 
+// ---- Journal d'audit (page Journal d'un projet) -----------------------------------------------------------------
+
+const audit = (n, minutes, actorKind, actor, actorLabel, action, actionLabel, targetType, targetTypeLabel, targetId, targetLabel, details = {}, sessionId = null) => ({
+  __typename: 'AuditEntry', id: String(1000 - n), createdAt: ago(minutes), action, actionLabel, targetType, targetTypeLabel, targetId, targetLabel, details, actorKind, actor, sessionId, actorLabel,
+});
+const auditEntries = [
+  audit(1, 3, 'HUMAN', U.me, 'Camille Laurent', 'request.answer', 'a répondu à la demande', 'request', 'Demande', 'r-1', 'Autoriser Bash : npm run build ?', { type: 'permission', decision: 'allow', always: true, scope: 'project', rules: ['Bash(npm run build *)'] }),
+  audit(2, 12, 'AGENT', U.max, 'Refonte de la page tarifs', 'task.status', 'a changé le statut de la tâche', 'task', 'Tâche', 't-1', 'Refondre la page tarifs', { from: 'todo', to: 'in_progress' }, 's-page-tarifs'),
+  audit(3, 25, 'HUMAN', U.hugo, 'Hugo Bernard', 'git.commit', 'a commité', 'git', 'Git', 'w-1', 'page-tarifs (task/page-tarifs)', { message: 'Corrige le comparatif des offres', stageAll: true }),
+  audit(4, 26, 'HUMAN', U.hugo, 'Hugo Bernard', 'git.push', 'a poussé', 'git', 'Git', 'w-1', 'page-tarifs (task/page-tarifs)'),
+  audit(5, 40, 'HUMAN', U.me, 'Camille Laurent', 'session.stop', 'a arrêté la session', 'session', 'Session', 's-page-tarifs', 'Refonte de la page tarifs'),
+  audit(6, 95, 'AGENT', U.chris, 'Cadrage du formulaire de contact', 'task.create', 'a créé la tâche', 'task', 'Tâche', 't-2', 'Formulaire de contact : anti-spam', { status: 'todo', priority: 'medium' }, 's-page-tarifs'),
+  audit(7, 60 * 3, 'HUMAN', U.me, 'Camille Laurent', 'member.role', 'a changé le rôle de', 'member', 'Membre', 'u-thomas', 'thomas.petit@toolso.io', { role: 'VIEWER' }),
+  audit(8, 60 * 5, 'HUMAN', U.lea, 'Léa Fontaine', 'vault.update', 'a modifié l’élément du coffre', 'vault', 'Coffre', 'v-1', 'base-staging', { fields: ['host', 'password'] }),
+  audit(9, 60 * 26, 'SYSTEM', null, null, 'task.status', 'a changé le statut de la tâche', 'task', 'Tâche', 't-3', 'Mettre à jour Astro', { from: 'in_progress', to: 'done' }),
+  audit(10, 60 * 30, 'HUMAN', U.me, 'Camille Laurent', 'session.create', 'a lancé la session', 'session', 'Session', 's-page-tarifs', 'Refonte de la page tarifs', { provider: 'claude' }),
+];
+const auditFacets = {
+  __typename: 'AuditFacets',
+  actors: [U.me, U.hugo, U.lea, U.max, U.chris],
+  targetTypes: [['git', 'Git'], ['member', 'Membre'], ['request', 'Demande'], ['session', 'Session'], ['task', 'Tâche'], ['vault', 'Coffre']].map(([value, label]) => ({ __typename: 'AuditOption', value, label })),
+  actions: [['git.commit', 'a commité'], ['git.push', 'a poussé'], ['member.role', 'a changé le rôle de'], ['request.answer', 'a répondu à la demande'], ['session.create', 'a lancé la session'], ['session.stop', 'a arrêté la session'], ['task.create', 'a créé la tâche'], ['task.status', 'a changé le statut de la tâche'], ['vault.update', 'a modifié l’élément du coffre']].map(([value, label]) => ({ __typename: 'AuditOption', value, label })),
+};
+const auditLog = (a = {}) => {
+  const f = a.filter ?? {};
+  return auditEntries.filter((e) => (!f.actorKind || e.actorKind === f.actorKind) && (!f.actorUserId || e.actor?.id === f.actorUserId) && (!f.targetType || e.targetType === f.targetType) && (!f.action || e.action === f.action) && (!f.from || e.createdAt >= f.from) && (!f.to || e.createdAt < f.to) && (!a.before || Number(e.id) < Number(a.before)));
+};
+
 export const demoRoot = {
+  auditLog,
+  auditFacets: () => auditFacets,
   me: U.me,
   users: Object.values(U),
   sidebarProjects: allProjects,
@@ -671,6 +704,10 @@ export const demoRoot = {
   vaultShareCandidates: [U.hugo, U.lea],
   contextInstruction: (a) => byId(contextInstructions, a.id),
   searchContext: (a) => contextInstructions.filter((i) => i.projectId === a.projectId && `${i.name} ${i.content}`.toLowerCase().includes(a.query.toLowerCase())),
+  schedulePermissionSuggestions: (a = {}) => [
+    ...(a.sessionId ? [{ __typename: 'ScheduleToolSuggestion', rule: 'mcp__vault__sql_query(production)', source: 'DENIED', count: 2, lastSeenAt: ago(60 * 9) }, { __typename: 'ScheduleToolSuggestion', rule: 'Bash(git log *)', source: 'ASKED', count: 1, lastSeenAt: ago(60 * 24 * 7) }] : []),
+    ...(/production/i.test(a.prompt ?? '') ? [{ __typename: 'ScheduleToolSuggestion', rule: 'mcp__vault__sql_query(production)', source: 'PROMPT', count: 0, lastSeenAt: null }] : []),
+  ].filter((x, i, all) => all.findIndex((y) => y.rule === x.rule) === i),
   sessionSchedules: (a = {}) => sessions.filter((s) => s.schedule && (!a.projectId || s.project.id === a.projectId)).map((s) => s.schedule),
   providers,
   myAgents: agents,
@@ -692,6 +729,28 @@ export const demoRoot = {
   },
   sessionChanges: (a) => ({ __typename: 'SessionChanges', mode: 'COMMIT', baseCommit: commits[2].hash, truncated: false, files: a.sessionId === S.tarifs.id ? branchFiles : [] }),
   terminal: null,
+  // « Tester » de la carte « Navigateur headless » (réglages du projet) : un contrôle réussi sur skipper-runner arm64.
+  testProjectBrowser: (a) => {
+    const step = (label, detail, durationMs) => ({ __typename: 'BrowserCheckStep', label, ok: true, detail, durationMs });
+    const page = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400"><rect width="100%" height="100%" fill="white"/><text x="40" y="80" font-family="sans-serif" font-size="32" font-weight="bold">Navigateur opérationnel</text><text x="40" y="130" font-family="sans-serif" font-size="20">Page de test de Skipper.</text></svg>';
+    return {
+      __typename: 'BrowserCheck', ok: true, enabled: Boolean(byId(allProjects, a.id)?.runnerConfig?.browser), image: 'skipper-runner:latest', problems: [], durationMs: 2840,
+      screenshot: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(page)}`,
+      probe: {
+        __typename: 'BrowserProbe', arch: 'aarch64', chromiumVersion: 'Google Chrome for Testing 156.0.7000.0', mcpPath: '/usr/local/bin/playwright-mcp', mcpVersion: 'Version 0.0.84',
+        chromiumPath: '/opt/ms-playwright/chromium_headless_shell-1247/chrome-headless-shell-linux-arm64/chrome-headless-shell', browsers: ['chromium-1247', 'chromium_headless_shell-1247', 'ffmpeg-1013'],
+        memoryLimitMb: 1536, memoryUsedMb: 612, memoryAvailableMb: 924,
+      },
+      steps: [
+        step('Conteneur du projet', 'image skipper-runner:latest', 40),
+        step('Navigateur dans l’image', 'Google Chrome for Testing 156.0.7000.0 · playwright-mcp Version 0.0.84 · aarch64', 910),
+        step('Lancement de Chromium', 'port CDP 41233', 520),
+        step('Démarrage de playwright-mcp', 'Playwright 1.65.0 · 25 outils', 1010),
+        step('Ouverture d’une page locale', 'data:text/html (page de test, sans réseau)', 230),
+        step('Capture de la page', '7 Ko', 130),
+      ],
+    };
+  },
 };
 
 // ---- Valeurs générées pour les champs absents ---------------------------------------------------------------------

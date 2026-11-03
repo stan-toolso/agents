@@ -201,7 +201,10 @@ export function sessionToMarkdown(session: MarkdownSession, events: MarkdownEven
       case 'instruction': {
         const text = String(p.text ?? '').trim();
         if (!text) break;
-        push(`## 👤 Instruction · ${date(e.createdAt)}`, quote(text));
+        // Auteur (`InstructionAuthor`) journalisé depuis le 03/11/2026 : les instructions plus anciennes restent « Instruction ».
+        const author = (p.author ?? null) as { type?: string; name?: string } | null;
+        const who = typeof author?.name === 'string' && author.name ? author.name : 'Instruction';
+        push(`## ${author?.type === 'session' ? '🤖' : author?.type === 'system' ? '⚙️' : '👤'} ${who} · ${date(e.createdAt)}`, quote(text));
         const files = Array.isArray(p.attachments) ? (p.attachments as Array<{ name?: string }>) : [];
         if (files.length) push(`📎 Fichiers joints : ${files.map((f) => f.name ?? 'fichier').join(', ')}`);
         speaker = 'human';

@@ -3,6 +3,7 @@ import type { CreateRequestInput } from '../../requests/types.js';
 import type { UserClaudeSettings } from '../../settings/claude.js';
 import type { UserOpencodeSettings } from '../../settings/opencode.js';
 import type { Attachment, Session, SessionActivity } from '../types.js';
+import type { InstructionAuthor } from '../instructionAuthor.js';
 
 /** Réglages de la personne pour qui le formulaire est décrit (modèles autorisés, modèle par défaut) ; absents : description générique. */
 export interface DescribeContext {
@@ -54,6 +55,8 @@ export interface RunContext {
   initialPreamble?: string | null;
   /** Fichiers joints à la première instruction (chemins sur disque ; images et PDF peuvent aussi être transmis au modèle). */
   initialAttachments: Attachment[];
+  /** Auteur de la première instruction : journalisé avec elle et annoncé au modèle (`authorHeader`). */
+  initialAuthor?: InstructionAuthor | null;
   /** Signale si l'agent travaille ou attend des instructions. */
   setActivity(activity: SessionActivity): Promise<void>;
   /** Journalise un événement (persisté et diffusé en temps réel). */
@@ -95,7 +98,7 @@ export interface RunningHandle {
   /** Arrêt immédiat (abandon du travail en cours). */
   stop(): Promise<void>;
   /** Envoie une instruction à l'agent en cours d'exécution (providers interactifs). */
-  sendMessage?(text: string, attachments?: Attachment[]): Promise<void>;
+  sendMessage?(text: string, attachments?: Attachment[], author?: InstructionAuthor | null): Promise<void>;
   /**
    * Note discrète : un texte à porter à la connaissance de l'agent sans lui ouvrir de tour (remis avec le résultat de
    * ses prochains outils, ou avec sa prochaine instruction s'il attend).

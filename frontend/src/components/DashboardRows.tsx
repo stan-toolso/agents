@@ -92,7 +92,7 @@ export function SessionRow({ session, hint, icon, showStatus, showProject = true
       </div>
       <div className="side">
         {session.status === 'INTERRUPTED' && (
-          <Button size="sm" variant="outline-primary" disabled={resuming} title="L'agent reprend le travail coupé par l'interruption" onClick={() => void resumeSession({ variables: { id: session.id } })}>
+          <Button size="sm" variant="outline-primary" disabled={resuming} title={session.activity === 'BUSY' ? "L'agent reprend le travail coupé par l'interruption" : "Rend la session reprenable sans lancer de tour (rien n'est facturé) : votre prochain message la relance"} onClick={() => void resumeSession({ variables: { id: session.id } })}>
             <i className="bi bi-play-fill" /> {resuming ? 'Reprise…' : 'Reprendre'}
           </Button>
         )}

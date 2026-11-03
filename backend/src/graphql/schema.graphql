@@ -112,6 +112,10 @@ type Project {
   defaultPermissionMode: String!
   "Limite de contexte des nouvelles sessions qui n'en choisissent pas (tâches, sessions lancées par un agent), présélectionnée au lancement : contextAction « compact » ou « reset » au-delà de contextMaxTokens. Null : aucune limite (l'interface propose au-delà du seuil de signalement)."
   defaultContextCleanup: SessionCleanup
+  "Modèle Claude des nouvelles sessions qui n'en choisissent pas (planifications, tâches, sessions lancées par un agent sans modèle). Null : le modèle par défaut du propriétaire. Ignoré pour un propriétaire qui n'autorise pas ce modèle."
+  defaultModel: String
+  "Modèle des sessions de tâches selon la priorité de la tâche ({ low: 'sonnet' }), prioritaire sur defaultModel et prérempli dans « Confier à un agent ». Null : aucun."
+  taskModels: JSON
   "Noms des éléments du coffre dont les usages par les agents sont soumis à l'approbation d'un humain (même en mode bypassPermissions)."
   approvalConnections: [String!]!
   "Faux quand l'utilisateur atteint le projet en tant que super administrateur sans en être membre."
@@ -1181,6 +1185,50 @@ type RunnerStatus {
   zombies: Int
 }
 
+"Ce que le conteneur d'un projet dit de son navigateur headless."
+type BrowserProbe {
+  arch: String
+  "Binaire « headless shell » trouvé dans /opt/ms-playwright ; null : absent de l'image."
+  chromiumPath: String
+  chromiumVersion: String
+  "Entrées de /opt/ms-playwright."
+  browsers: [String!]!
+  mcpPath: String
+  mcpVersion: String
+  memoryLimitMb: Int
+  memoryUsedMb: Int
+  "Mémoire encore disponible pour le navigateur (limite du conteneur moins utilisée, bornée par l'hôte)."
+  memoryAvailableMb: Int
+}
+
+"Problème repéré sur le navigateur : level « error » (il ne peut pas marcher) ou « warning »."
+type BrowserProblem {
+  level: String!
+  code: String!
+  message: String!
+}
+
+type BrowserCheckStep {
+  label: String!
+  ok: Boolean!
+  detail: String
+  durationMs: Int!
+}
+
+"Résultat du contrôle du navigateur headless d'un projet (testProjectBrowser)."
+type BrowserCheck {
+  ok: Boolean!
+  "L'option « navigateur headless » est activée sur le projet."
+  enabled: Boolean!
+  image: String
+  probe: BrowserProbe
+  problems: [BrowserProblem!]!
+  steps: [BrowserCheckStep!]!
+  "Capture de la page de test (data URL PNG)."
+  screenshot: String
+  durationMs: Int!
+}
+
 "Mesure du conteneur d'un projet (cgroup v2, lu dans le conteneur)."
 type ContainerStats {
   sampledAt: DateTime!
@@ -1580,6 +1628,8 @@ type Session {
   "Fichiers joints à la première instruction."
   promptAttachments: [Attachment!]!
   config: JSON!
+  "Modèle de la session (sessions Claude) : celui de sa configuration, sinon le modèle par défaut de son propriétaire ; null : celui du CLI (ou autre type de session)."
+  model: String
   externalId: String
   exitCode: Int
   error: String
@@ -1738,6 +1788,8 @@ type ClaudeSettings {
   defaultMaxTurns: Int
   "Seuil (tokens) au-delà duquel ses pages signalent le contexte d'une session : jauge en couleur, pastille, bandeau « Compacter / Repartir d'une conversation neuve ». null : ne jamais signaler. Défaut : 150 000."
   contextWarnTokens: Int
+  "Titre court généré par un modèle léger (Haiku) après le premier tour des sessions lancées sans nom explicite. Défaut : true."
+  autoTitle: Boolean!
 }
 
 type UsageByModel {
@@ -2115,9 +2167,16 @@ type MemoryHealth {
 }
 
 type SessionsHealth {
+  "Sessions dont le processus tourne sur cette instance."
   running: Int!
+  "Parmi elles, au travail (tour en cours)."
   busy: Int!
+  "Parmi elles, en attente d'instructions (processus actif, qui occupe sa place et sa mémoire)."
   idle: Int!
+  "Garées : en attente d'instructions sans processus (après un drainage bleu/vert), sur tout le serveur."
+  parked: Int!
+  "Terminées-reprenables depuis 24 h (non archivées, conversation conservée) : un message les relance, rien ne tourne d'ici là."
+  resumable: Int!
   queued: Int!
   "0 : illimité."
   maxConcurrent: Int!
@@ -2203,6 +2262,8 @@ input ClaudeSettingsInput {
   defaultMaxTurns: Int
   "Seuil de signalement du contexte (tokens) ; null explicite : ne jamais signaler."
   contextWarnTokens: Int
+  "Génération du titre des sessions après leur premier tour."
+  autoTitle: Boolean
 }
 
 "Éléments ouverts dans les onglets du workbench, par type (identifiants non UUID ignorés)."
@@ -2692,6 +2753,10 @@ input CreateProjectInput {
   defaultPermissionMode: String
   "Limite de contexte des nouvelles sessions (contextAction « compact » ou « reset », contextMaxTokens) ; null ou objet vide : aucune."
   defaultContextCleanup: SessionCleanupInput
+  "Modèle des nouvelles sessions (alias du CLI ou identifiant) ; null ou vide : aucun."
+  defaultModel: String
+  "Modèle des sessions de tâches par priorité ({ low, medium, high, urgent }) ; null ou objet vide : aucun."
+  taskModels: JSON
   taskInstructions: String
 }
 
@@ -2707,6 +2772,10 @@ input UpdateProjectInput {
   defaultPermissionMode: String
   "Limite de contexte des nouvelles sessions (contextAction « compact » ou « reset », contextMaxTokens) ; null ou objet vide : aucune."
   defaultContextCleanup: SessionCleanupInput
+  "Modèle des nouvelles sessions (alias du CLI ou identifiant) ; null ou vide : aucun."
+  defaultModel: String
+  "Modèle des sessions de tâches par priorité ({ low, medium, high, urgent }) ; null ou objet vide : aucun."
+  taskModels: JSON
   taskInstructions: String
 }
 
@@ -2735,6 +2804,8 @@ input CreateSessionInput {
   "Crée d'abord cette work session et y lance la session (exclusif avec worksessionId)."
   newWorksession: NewWorksessionInput
   name: String!
+  "Nom provisoire (tiré de la consigne) : remplacé par un titre court généré après le premier tour, sauf si la personne l'a coupé (Paramètres → Claude)."
+  autoTitle: Boolean
   provider: String!
   "Première instruction. Facultative : sans consigne ni fichier joint, la session est créée sans démarrer et attend sa première instruction."
   prompt: String
@@ -2844,6 +2915,8 @@ type Mutation {
   stopProjectRunner(id: ID!): Project!
   "Supprime le conteneur (pour repartir d'une image à jour) ; les fichiers sont conservés."
   resetProjectRunner(id: ID!): Project!
+  "Contrôle du navigateur headless dans le conteneur du projet (démarré au besoin) : Chromium, playwright-mcp, ouverture d'une page locale et capture, comme pour une session."
+  testProjectBrowser(id: ID!): BrowserCheck!
   "Supprime le projet et tout ce qui en dépend : sessions, terminaux, work sessions, conteneur, dossier de travail. Irréversible. Dépôt hébergé (Forgejo) : supprimé avec deleteHostedRepo, sinon conservé dans Forgejo, archivé (lecture seule) et renommé."
   deleteProject(id: ID!, deleteHostedRepo: Boolean = false): Boolean!
   "Importe une archive d'export de projet (tar.gz encodé en base64, produite par GET /api/projects/<id>/export.tar.gz) : contexte avec ses versions, tâches avec leur fil, réglages. Administrateurs du projet."
@@ -3064,6 +3137,8 @@ type SessionSchedule {
   enabled: Boolean!
   "Terminer la session à la fin de chaque exécution (défaut) ; sinon elle reste ouverte aux instructions."
   endAfterRun: Boolean!
+  "Outils pré-autorisés pour les seules exécutions de la planification (règles au format Claude Code : Bash(git log *), mcp__vault__sql_query(production)…)."
+  allowedTools: [String!]!
   nextRunAt: DateTime
   lastRunAt: DateTime
   "Compte rendu de la dernière exécution : terminée (durée, coût), ignorée (raison) ou en erreur."
@@ -3121,6 +3196,8 @@ input SessionScheduleInput {
   enabled: Boolean
   "Défaut : true."
   endAfterRun: Boolean
+  "Outils pré-autorisés pour les exécutions (absent : inchangés ; liste vide : aucun)."
+  allowedTools: [String!]
   "Réglage de nettoyage de la session, enregistré en même temps que la planification (absent : inchangé). Proposé par défaut : « fresh »."
   cleanup: SessionCleanupInput
 }
@@ -3139,6 +3216,7 @@ input CreateScheduledSessionInput {
   prompt: String!
   enabled: Boolean
   endAfterRun: Boolean
+  allowedTools: [String!]
   cleanup: SessionCleanupInput
   "Provider de la session (défaut : claude)."
   provider: String
@@ -3150,7 +3228,28 @@ input CreateScheduledSessionInput {
   agentId: ID
 }
 
+enum ScheduleToolSuggestionSource {
+  "Refusé pendant une exécution passée (mode « Ne jamais me demander », refus, demande sans réponse)."
+  DENIED
+  "Demandé pendant une exécution passée, puis accordé par une personne."
+  ASKED
+  "Élément du coffre « avec approbation » cité par l'instruction."
+  PROMPT
+}
+
+"Outil à pré-autoriser pour une planification."
+type ScheduleToolSuggestion {
+  "Règle au format Claude Code, à ajouter aux outils pré-autorisés."
+  rule: String!
+  source: ScheduleToolSuggestionSource!
+  "Nombre d'exécutions passées où l'outil a été refusé ou demandé."
+  count: Int!
+  lastSeenAt: DateTime
+}
+
 extend type Query {
+  "Outils à pré-autoriser pour une planification : refusés ou demandés pendant ses dernières exécutions, et éléments du coffre avec approbation cités par l'instruction (sans session : seulement l'instruction)."
+  schedulePermissionSuggestions(projectId: ID!, sessionId: ID, prompt: String): [ScheduleToolSuggestion!]!
   "Planifications des sessions non archivées, d'un projet ou de tous les projets accessibles."
   sessionSchedules(projectId: ID): [SessionSchedule!]!
   "Prochaines échéances d'une expression cron (aperçu) ; erreur si l'expression ou le fuseau est invalide."
@@ -3784,4 +3883,67 @@ type ProjectDashboard {
 
 extend type Query {
   projectDashboard(id: ID!): ProjectDashboard!
+}
+
+# ---- Journal d'audit -----------------------------------------------------------------------
+
+"Qui a fait l'action : une personne, une session d'agent, ou Skipper lui-même (automatismes, clé d'API)."
+enum AuditActorKind {
+  HUMAN
+  AGENT
+  SYSTEM
+}
+
+"Une action inscrite au journal d'audit d'un projet."
+type AuditEntry {
+  id: ID!
+  createdAt: DateTime!
+  "Identifiant technique de l'action, ex. session.stop, request.answer."
+  action: String!
+  "Libellé de l'action (« a arrêté la session »)."
+  actionLabel: String!
+  targetType: String!
+  targetTypeLabel: String!
+  targetId: String
+  "Nom de la cible au moment de l'action (titre de tâche, nom de session, chemin…)."
+  targetLabel: String
+  "Ce qui précise l'action (statut avant et après, décision d'une demande, message de commit…) ; jamais un secret."
+  details: JSON!
+  actorKind: AuditActorKind!
+  "Personne, ou agent de projet, qui a agi (directement ou par sa session)."
+  actor: User
+  "Session d'agent qui a agi."
+  sessionId: ID
+  "Nom de l'acteur au moment de l'action (personne, session, clé d'API)."
+  actorLabel: String
+}
+
+input AuditFilterInput {
+  "Une personne ou un agent de projet : ses actions et celles de ses sessions."
+  actorUserId: ID
+  actorKind: AuditActorKind
+  targetType: String
+  action: String
+  "Début de période (inclus)."
+  from: DateTime
+  "Fin de période (exclue)."
+  to: DateTime
+}
+
+type AuditOption {
+  value: String!
+  label: String!
+}
+
+"Valeurs présentes dans le journal d'un projet, pour ses filtres."
+type AuditFacets {
+  actors: [User!]!
+  targetTypes: [AuditOption!]!
+  actions: [AuditOption!]!
+}
+
+extend type Query {
+  "Journal d'audit du projet, du plus récent au plus ancien (lecteurs du projet). before : curseur (id de la dernière entrée reçue)."
+  auditLog(projectId: ID!, filter: AuditFilterInput, limit: Int = 100, before: ID): [AuditEntry!]!
+  auditFacets(projectId: ID!): AuditFacets!
 }

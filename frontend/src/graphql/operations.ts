@@ -51,6 +51,8 @@ export interface SessionSchedule {
   prompt: string;
   enabled: boolean;
   endAfterRun: boolean;
+  /** Outils pré-autorisés pour les seules exécutions de la planification (règles au format Claude Code). */
+  allowedTools: string[];
   nextRunAt: string | null;
   lastRunAt: string | null;
   lastResult: string | null;
@@ -160,6 +162,10 @@ export interface Project {
   defaultPermissionMode: string;
   /** Limite de contexte des nouvelles sessions (compact / reset au-delà d'un seuil) ; null : aucune. */
   defaultContextCleanup: Pick<SessionCleanup, 'contextAction' | 'contextMaxTokens'> | null;
+  /** Modèle Claude des nouvelles sessions qui n'en choisissent pas ; null : celui du propriétaire. */
+  defaultModel: string | null;
+  /** Modèle des sessions de tâches par priorité ({ low: 'sonnet' }) ; null : aucun. */
+  taskModels: TaskModels | null;
   /** Éléments du coffre soumis à approbation (requête PROJECT seulement). */
   approvalConnections?: string[];
   /** Faux quand le projet est atteint en tant que super administrateur sans en être membre. */
@@ -184,6 +190,8 @@ export interface Session {
   prompt: string | null;
   promptAttachments: AttachmentRef[];
   config: Record<string, unknown>;
+  /** Modèle de la session (sa configuration, sinon le défaut de son propriétaire) ; requête SIDEBAR seulement. */
+  model?: string | null;
   externalId: string | null;
   exitCode: number | null;
   error: string | null;
@@ -305,6 +313,8 @@ export interface Terminal {
 
 export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'DONE' | 'CANCELLED';
 export type TaskPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+/** Modèle des sessions de tâches d'un projet, par priorité (clés en minuscules, comme côté serveur). */
+export type TaskModels = Partial<Record<'low' | 'medium' | 'high' | 'urgent', string>>;
 
 export interface TaskField {
   key: string;
@@ -538,6 +548,8 @@ export const PROJECT_FIELDS = gql`
       contextAction
       contextMaxTokens
     }
+    defaultModel
+    taskModels
     runnerStatus {
       kind
       ready
@@ -760,6 +772,7 @@ export const SESSION_FIELDS = gql`
       prompt
       enabled
       endAfterRun
+      allowedTools
       nextRunAt
       lastRunAt
       lastResult
@@ -1196,6 +1209,7 @@ export const SESSION_SCHEDULES = gql`
       prompt
       enabled
       endAfterRun
+      allowedTools
       nextRunAt
       lastRunAt
       lastResult
@@ -1246,6 +1260,27 @@ export const CREATE_SCHEDULED_SESSION = gql`
   mutation CreateScheduledSession($input: CreateScheduledSessionInput!) {
     createScheduledSession(input: $input) {
       ...SessionFields
+    }
+  }
+`;
+
+export type ScheduleToolSuggestionSource = 'DENIED' | 'ASKED' | 'PROMPT';
+
+export interface ScheduleToolSuggestion {
+  rule: string;
+  source: ScheduleToolSuggestionSource;
+  count: number;
+  lastSeenAt: string | null;
+}
+
+/** Outils à pré-autoriser pour une planification (exécutions passées, éléments du coffre cités par l'instruction). */
+export const SCHEDULE_PERMISSION_SUGGESTIONS = gql`
+  query SchedulePermissionSuggestions($projectId: ID!, $sessionId: ID, $prompt: String) {
+    schedulePermissionSuggestions(projectId: $projectId, sessionId: $sessionId, prompt: $prompt) {
+      rule
+      source
+      count
+      lastSeenAt
     }
   }
 `;
@@ -1482,6 +1517,7 @@ export const SIDEBAR = gql`
     activity
     pendingRequestCount
     browserActive
+    model
     context {
       tokens
       overThreshold
@@ -1553,6 +1589,7 @@ export const PROJECT_LAUNCH_INFO = gql`
         contextAction
         contextMaxTokens
       }
+      defaultModel
       approvalConnections
       git {
         branch
@@ -2691,6 +2728,62 @@ export const INBOX = gql`
       pullRequests {
         ...TrackedPullRequestFields
       }
+    }
+  }
+`;
+
+/** Contrôle du navigateur headless d'un projet (carte « Navigateur headless » des réglages). */
+export interface BrowserCheck {
+  ok: boolean;
+  enabled: boolean;
+  image: string | null;
+  probe: {
+    arch: string | null;
+    chromiumPath: string | null;
+    chromiumVersion: string | null;
+    browsers: string[];
+    mcpPath: string | null;
+    mcpVersion: string | null;
+    memoryLimitMb: number | null;
+    memoryUsedMb: number | null;
+    memoryAvailableMb: number | null;
+  } | null;
+  problems: { level: 'error' | 'warning'; code: string; message: string }[];
+  steps: { label: string; ok: boolean; detail: string | null; durationMs: number }[];
+  screenshot: string | null;
+  durationMs: number;
+}
+
+export const TEST_PROJECT_BROWSER = gql`
+  mutation TestProjectBrowser($id: ID!) {
+    testProjectBrowser(id: $id) {
+      ok
+      enabled
+      image
+      probe {
+        arch
+        chromiumPath
+        chromiumVersion
+        browsers
+        mcpPath
+        mcpVersion
+        memoryLimitMb
+        memoryUsedMb
+        memoryAvailableMb
+      }
+      problems {
+        level
+        code
+        message
+      }
+      steps {
+        label
+        ok
+        detail
+        durationMs
+      }
+      screenshot
+      durationMs
     }
   }
 `;

@@ -6,10 +6,12 @@ const m = vi.hoisted(() => ({
   status: null as unknown as GitStatus,
   sessions: [] as Array<{ id: string; projectId: string; worksessionId: string | null; archivedAt: Date | null }>,
   sent: [] as Array<[string, string]>,
+  authors: [] as unknown[],
   created: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('./service.js', () => ({ gitService: { status: async () => m.status } }));
+vi.mock('../users/repository.js', () => ({ userRepository: { findById: async (id: string) => ({ id, name: 'Alice', email: 'alice@toolso.io', kind: 'person' }) } }));
 vi.mock('../sessions/repository.js', () => ({
   sessionRepository: {
     list: async (f: { projectId?: string; worksessionId?: string; limit?: number }) =>
@@ -18,8 +20,9 @@ vi.mock('../sessions/repository.js', () => ({
 }));
 vi.mock('../sessions/service.js', () => ({
   sessionService: {
-    sendMessage: async (id: string, text: string) => {
+    sendMessage: async (id: string, text: string, _files: unknown, opts?: { author?: unknown }) => {
       m.sent.push([id, text]);
+      m.authors.push(opts?.author ?? null);
       return { id };
     },
     create: async (input: Record<string, unknown>) => {
@@ -39,6 +42,7 @@ beforeEach(() => {
   m.status = status();
   m.sessions = [];
   m.sent = [];
+  m.authors = [];
   m.created = [];
 });
 
@@ -66,6 +70,8 @@ describe('requestGitConflictResolution', () => {
     const session = await requestGitConflictResolution(ref, 'u1');
     expect(session.id).toBe('s1');
     expect(m.sent).toHaveLength(1);
+    // La consigne est signée par la personne qui l'a demandée.
+    expect(m.authors[0]).toEqual({ type: 'user', id: 'u1', name: 'Alice', email: 'alice@toolso.io' });
     expect(m.created).toHaveLength(0);
   });
 

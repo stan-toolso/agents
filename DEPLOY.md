@@ -299,7 +299,12 @@ sessions OpenCode, Playwright/Chromium pour l'option « navigateur headless », 
 comptes AWS et Scaleway du coffre) : `docker build -t skipper-runner deploy/runner` sur le serveur
 (≈ 1 Go, l'ARM64 télécharge son propre Chromium), puis « Recréer » le conteneur sur la page de
 chaque projet concerné. Une session avec navigateur prend 300 à 500 Mo de plus : prévoir au moins
-1,5 Go pour le conteneur du projet. Les comptes AWS du coffre (outil `aws_run`) exigent une image
+1,5 Go pour le conteneur du projet. Chromium est installé par Playwright dans `/opt/ms-playwright` :
+en arm64, `chromium_headless_shell-<rév>/chrome-headless-shell-linux-arm64/chrome-headless-shell` (en x86_64,
+`…/chrome-headless-shell-linux64/…`), avec `chromium-<rév>/` et `ffmpeg-<rév>/` à côté ; `playwright-mcp` est dans le
+PATH (`npm install -g @playwright/mcp`). Après reconstruction et « Recréer », vérifier avec « Tester » sur la carte
+« Navigateur headless » des réglages du projet (version de Chromium, mémoire disponible, capture d'une page de test).
+Les comptes AWS du coffre (outil `aws_run`) exigent une image
 reconstruite avec le CLI AWS v2 (≈ 250 Mo de plus) : sans lui, l'outil répond « “aws” est absent de l'image » ;
 chaque commande tourne dans un conteneur jetable `skipper-run-*` (512 Mo au plus, supprimé à la fin), hors du
 conteneur du projet, qui n'a donc pas besoin d'être recréé. Même chose pour les comptes Scaleway (outil `scw_run`) :
