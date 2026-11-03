@@ -33,6 +33,7 @@ export type TabKind =
   | 'settings'
   | 'users'
   | 'billing'
+  | 'usage'
   | 'files'
   | 'file'
   | 'workspace'
@@ -107,6 +108,7 @@ export function describeRoute(pathname: string): { title: string; kind: TabKind 
   if (/^\/projects\/[^/]+\/pull-requests$/.test(pathname)) return { title: 'Pull requests', kind: 'pull-requests' };
   if (/^\/projects\/[^/]+\/repo$/.test(pathname)) return { title: 'Dépôt', kind: 'repo' };
   if (/^\/projects\/[^/]+\/vault$/.test(pathname)) return { title: 'Coffre', kind: 'vault' };
+  if (/^\/projects\/[^/]+\/usage$/.test(pathname)) return { title: 'Consommation', kind: 'usage' };
   if (/^\/projects\/[^/]+\/history$/.test(pathname)) return { title: 'Historique', kind: 'history' };
   if (/^\/projects\/[^/]+\/audit$/.test(pathname)) return { title: 'Journal', kind: 'audit' };
   if (/^\/projects\/[^/]+\/env$/.test(pathname)) return { title: 'Environnement', kind: 'env' };

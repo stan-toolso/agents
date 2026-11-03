@@ -55,6 +55,7 @@ import { archivePromptSummary, createSessionsMcpServer, sessionsPromptSummary } 
 import { archivesWhenIdle } from '../autoArchive.js';
 import { claudeSettings, cliEnv } from '../../settings/claude.js';
 import { usageService } from '../../settings/usage.js';
+import { projectBudget } from '../../projects/budget.js';
 import { describeRejection, rateLimitService } from '../../settings/rateLimits.js';
 import type { PermissionResponse, QuestionResponse } from '../../requests/types.js';
 import { attachmentsNote, inlineBlocks, publicAttachment } from '../attachments.js';
@@ -203,6 +204,7 @@ export class ClaudeProvider implements SessionProvider {
     const owner = await claudeSettings.forSession(accounts?.claudeUserId ?? null);
     owner.assertCredentials();
     await owner.assertBudgetAvailable();
+    await projectBudget.assertAvailable(ctx.project.id);
     const general = owner.settings;
     // Modèle courant : modifiable en cours de session (updateConfig), d'où la variable.
     let model = cfg.model ? String(cfg.model) : general.defaultModel ?? undefined;
@@ -533,6 +535,7 @@ export class ClaudeProvider implements SessionProvider {
       },
       sendMessage: async (text, attachments = [], author = null) => {
         await (await claudeSettings.forSession(accounts?.claudeUserId ?? null)).assertBudgetAvailable();
+        await projectBudget.assertAvailable(ctx.project.id);
         queue.push(await this.instruction(ctx, text, attachments, null, takeNotes(), author));
         turnInProgress = true;
         await ctx.setActivity('busy');
@@ -693,7 +696,10 @@ export class ClaudeProvider implements SessionProvider {
     for (const [name, usage] of Object.entries(result.modelUsage ?? {})) modelTotals[name] = usage.costUSD;
     try {
       const delta = await usageService.recordTotal(ctx.session.id, ctx.project.id, ctx.session.ownerId, result.total_cost_usd ?? 0, modelTotals, previous, fallbackModel);
-      if (delta > 0) await ctx.emit('usage', { deltaUsd: Number(delta.toFixed(6)), totalUsd: result.total_cost_usd });
+      if (delta > 0) {
+        await ctx.emit('usage', { deltaUsd: Number(delta.toFixed(6)), totalUsd: result.total_cost_usd });
+        void projectBudget.checkAlert(ctx.project.id);
+      }
     } catch (err) {
       log.error('[usage] relevé impossible', err);
     }

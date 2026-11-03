@@ -30,6 +30,7 @@ export const PUSH_CATEGORIES: readonly PushCategory[] = [
   { key: 'workflows', label: 'Workflows', description: 'Fin d’une exécution de workflow, réussie ou en erreur.', types: ['workflow.run', 'workflow.failed'], adminsOnly: false },
   { key: 'context', label: 'Contexte', description: 'Instruction ajoutée à la bibliothèque de contexte par un agent.', types: ['context.created'], adminsOnly: false },
   { key: 'pages', label: 'Pages partagées', description: 'Une page a été partagée avec vous.', types: ['page.shared'], adminsOnly: false },
+  { key: 'budget', label: 'Budget des projets', description: 'Un projet a consommé 80 % de son budget mensuel, ou l’a atteint (il ne lance plus de session).', types: ['project.budget_warning', 'project.budget_exceeded'], adminsOnly: false },
   { key: 'containers', label: 'Ressources des projets', description: 'Conteneur d’un projet proche de sa limite mémoire ou saturé en CPU.', types: ['container.memory_high', 'container.cpu_saturated'], adminsOnly: false },
   { key: 'server', label: 'Alertes du serveur et de l’abonnement', description: 'Mémoire du serveur basse, limites de l’abonnement Claude approchées ou atteintes.', types: ['claude.rate_limit', 'server.memory_low'], adminsOnly: true },
 ];

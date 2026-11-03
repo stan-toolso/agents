@@ -36,6 +36,8 @@ export interface Project {
   taskInstructions: string;
   /** Espace personnel : la personne à qui il appartient (jamais partagé) ; null pour un projet ordinaire. */
   personalOwnerId: string | null;
+  /** Budget mensuel du projet en USD (au-delà : plus de session ni de tour, voir projects/budget.ts) ; null : aucun. */
+  monthlyBudgetUsd: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -79,4 +81,6 @@ export interface UpdateProjectInput {
   /** Null ou objet vide : aucun. */
   taskModels?: TaskModels | null;
   taskInstructions?: string | null;
+  /** Budget mensuel en USD ; null ou 0 : aucun. Modifié par la mutation setProjectBudget (pas par updateProject). */
+  monthlyBudgetUsd?: number | null;
 }

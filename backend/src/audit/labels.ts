@@ -61,6 +61,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'task.resume_session': 'a repris la tâche',
   'project.create': 'a créé le projet',
   'project.update': 'a modifié le projet',
+  'project.budget': 'a changé le budget mensuel du projet',
   'project.delete': 'a supprimé le projet',
   'project.import': 'a importé une archive dans le projet',
   'project.runner_start': 'a démarré le conteneur',

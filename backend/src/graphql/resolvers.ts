@@ -30,6 +30,8 @@ import { billingService } from '../billing/service.js';
 import type { BillingSettings, CtoTimeEntryInput } from '../billing/types.js';
 import { applyCostConversion, costDisplay, costRate, toStoredUsd } from '../billing/display.js';
 import { dashboardService } from '../dashboard/service.js';
+import { projectBudget } from '../projects/budget.js';
+import { usageReport } from '../usage/report.js';
 import { inboxService } from '../inbox/service.js';
 import { AppError, NotFoundError } from '../errors.js';
 import { fileService, type WorkspaceRef } from '../files/service.js';
@@ -749,6 +751,7 @@ export const resolvers = {
 
   Project: {
     workspacePath: (project: Project) => workspacePath(project),
+    monthUsd: (project: Project) => projectBudget.monthSpent(project.id),
     permissionRules: (project: Project) => permissionRuleService.list(project.id),
     runnerStatus: (project: Project) => runner.status(project),
     containerStats: async (project: Project) => {
@@ -1255,6 +1258,11 @@ export const resolvers = {
       return { ...(stored ?? (await billingService.settings())), configured: stored !== null };
     },
     dashboard: async (_: unknown, __: unknown, ctx: Ctx) => dashboardService.build(requireUser(ctx).id, await accessibleProjectIds(ctx), new Date(), requireUser(ctx).isAdmin),
+    usageReport: async (_: unknown, args: { projectId?: string | null; days?: number | null }, ctx: Ctx) => {
+      if (args.projectId) await requireProject(ctx, args.projectId);
+      else requireAdmin(ctx);
+      return usageReport(args.projectId ? [args.projectId] : null, args.days ?? 30);
+    },
     projectDashboard: async (_: unknown, args: { id: string }, ctx: Ctx) => {
       await requireProject(ctx, args.id);
       return dashboardService.buildForProject(requireUser(ctx).id, await projectService.get(args.id), new Date(), requireUser(ctx).isAdmin);
@@ -1660,6 +1668,16 @@ export const resolvers = {
       const project = await projectService.create(input, user.id);
       await userService.addCreator(project.id, user);
       syncHostedMembers(project.id);
+      return project;
+    },
+    setProjectBudget: async (_: unknown, args: { projectId: string; monthlyBudgetUsd?: number | null }, ctx: Ctx) => {
+      // Administrateur de l'application (page Consommation des Paramètres) ou du projet.
+      if (!requireUser(ctx).isAdmin) await requireProject(ctx, args.projectId, 'admin');
+      const budget = toStoredUsd(args.monthlyBudgetUsd ?? null, await costRate(ctx)) ?? null;
+      if (budget !== null && (!Number.isFinite(budget) || budget < 0)) throw new AppError('Budget invalide');
+      const project = await projectService.update(args.projectId, { monthlyBudgetUsd: budget });
+      // Un budget abaissé sous la consommation du mois prévient tout de suite ; relevé, il libère le projet.
+      void projectBudget.checkAlert(project.id);
       return project;
     },
     updateProject: async (_: unknown, { id, input }: { id: string; input: UpdateProjectInput }, ctx: Ctx) => {

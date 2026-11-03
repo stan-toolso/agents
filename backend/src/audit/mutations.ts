@@ -108,6 +108,8 @@ export const AUDITED: Record<string, MutationAudit> = {
   resumeTaskSession: { action: 'task.resume_session', lookup: ['task', 'id'], details: (_a, r) => ({ sessionId: r?.id }) },
   // Projet.
   createProject: { action: 'project.create', projectFromResult: true, label: (_a, r) => r?.name },
+  // Montant tel que saisi, dans l'unité d'affichage (crédits dans une cellule facturée : jamais d'USD).
+  setProjectBudget: { action: 'project.budget', lookup: ['project', 'projectId'], details: (a) => ({ monthlyBudget: a.monthlyBudgetUsd ?? null }) },
   updateProject: { action: 'project.update', lookup: ['project', 'id'], details: (a) => ({ fields: keysOf(a.input) }) },
   deleteProject: { action: 'project.delete', lookup: ['project', 'id'], detachProject: true, details: (a) => ({ deleteHostedRepo: a.deleteHostedRepo }) },
   importProjectArchive: { action: 'project.import', lookup: ['project', 'projectId'], details: (a) => ({ context: a.context, tasks: a.tasks, settings: a.settings }) },
@@ -230,6 +232,8 @@ export const AUDITED_BY_SERVICE = new Set(['createTask', 'updateTask']);
 export const NOT_AUDITED = new Set([
   // Fichiers : l'édition elle-même (le dépôt garde l'historique) ; renommage et suppression sont tracés.
   'writeWorkspaceFile', 'createWorkspaceEntry',
+  // Contrôle sans effet : lance le navigateur headless du conteneur et rend son état.
+  'testProjectBrowser',
   // Réglages et comptes personnels.
   'updateClaudeSettings', 'setClaudeApiKeyItem', 'setClaudeOauthItem', 'clearClaudeOauthToken', 'startClaudeLogin', 'completeClaudeLogin', 'cancelClaudeLogin', 'verifyClaudeAuth',
   'updateOpencodeSettings', 'setOpencodeKeyItem', 'refreshOpencodeModels',

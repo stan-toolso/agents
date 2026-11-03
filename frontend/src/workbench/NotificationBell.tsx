@@ -29,6 +29,8 @@ const icons: Record<string, string> = {
   'claude.rate_limit': 'bi-speedometer2',
   'server.memory_low': 'bi-memory',
   'container.memory_high': 'bi-memory',
+  'project.budget_warning': 'bi-piggy-bank',
+  'project.budget_exceeded': 'bi-piggy-bank-fill',
   'container.cpu_saturated': 'bi-speedometer2',
   'context.created': 'bi-journal-plus',
   'schedule.run': 'bi-alarm',

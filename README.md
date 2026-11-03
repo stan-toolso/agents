@@ -1855,7 +1855,7 @@ met à jour le badge de l'icône et ouvre la page concernée au clic. « Tester 
 dans la cloche) : les notifications sont regroupées en familles (`backend/src/notifications/preferences.ts`,
 `PUSH_CATEGORIES` : demandes d'un agent, sessions terminées ou en erreur, sessions lancées par un agent,
 tâches, mentions et réponses dans le fil d'une tâche, pull requests, planifications, workflows, contexte, pages
-partagées, ressources des projets et,
+partagées, budget des projets, ressources des projets et,
 pour les administrateurs, alertes du serveur et de l'abonnement), chacune activable ou non. Le choix suit
 la personne sur tous ses appareils (`user_settings`, clé `notifications.push`, qui ne garde que les
 familles coupées : une famille ajoutée plus tard est reçue par défaut). Il filtre l'envoi push
@@ -1907,6 +1907,30 @@ portent des crédits ; `Query.costDisplay` donne l'unité, que le front lit à l
 le budget USD par session du formulaire de lancement n'est plus proposé. Le coût en USD n'apparaît plus que dans la
 vue Toolso de la page Consommation. Sans facturation configurée (instance interne), tout reste en USD : **configurer
 la facturation à la création d'une cellule client**.
+
+## Consommation des projets et budget par projet
+
+Relevé de `usage_ledger` (un enregistrement par tour facturé d'une session) sur les 7, 30 ou 90 derniers jours,
+calculé par `backend/src/usage/report.ts` (query `usageReport(projectId, days)`) : total, nombre de tours et de
+sessions, coût par projet, par modèle (colonne `models`), par jour et par semaine (lundi), et les 15 sessions les plus
+coûteuses. Les totaux par projet, jour, semaine et session se recoupent (même source) ; jours dans le fuseau du
+serveur Node. Deux entrées, même composant (`components/UsageReportView.tsx`) :
+
+- **Paramètres › Consommation** (administrateurs de l'application) : tous les projets, avec le budget de chacun
+  (modifiable sur place) ;
+- onglet **Consommation** d'un projet (`/projects/:id/usage`, tous ses membres) : ce projet seul, et son budget
+  (modifiable par ses administrateurs).
+
+**Budget mensuel par projet** (`projects.monthly_budget_usd`, `backend/src/projects/budget.ts`), en plus du plafond
+mensuel de chaque personne : la consommation du mois calendaire de toutes les sessions du projet s'y compare. Atteint,
+le projet ne démarre plus de session et refuse les nouvelles instructions (`BUDGET_EXCEEDED`, vérifié aux mêmes
+endroits que le plafond par personne : providers Claude et OpenCode, exécutions planifiées). Après chaque tour, les
+membres sont prévenus à **80 %** (`project.budget_warning`) puis à **100 %** (`project.budget_exceeded`), une fois par
+palier et par mois (`budget_alert_month`, `budget_alert_level`, réservés par un UPDATE conditionnel ; remis à zéro
+quand le budget change). Mutation `setProjectBudget(projectId, monthlyBudgetUsd)` (administrateurs du projet ou de
+l'application ; saisi dans l'unité d'affichage des coûts). Le coût de chaque session apparaît dans la liste des
+sessions, l'infobulle de sa ligne dans la sidebar et son panneau ; celui de chaque tâche sur sa page, dans la liste et
+sur sa carte du kanban.
 
 ## Paramètres par personne (Claude, OpenCode, GitHub, GitLab)
 

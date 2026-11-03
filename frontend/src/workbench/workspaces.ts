@@ -31,6 +31,8 @@ export interface SidebarSession {
   activity: SessionActivity | null;
   pendingRequestCount: number;
   browserActive: boolean;
+  /** Coût cumulé de la session (unité d'affichage), montré dans l'infobulle de sa ligne. */
+  costUsd?: number;
   /** Modèle de la session (sa configuration, sinon le défaut de son propriétaire) ; absent ou null : inconnu. */
   model?: string | null;
   /** Contexte de l'agent : au-delà du seuil serveur, une pastille invite à le nettoyer. */

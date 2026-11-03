@@ -28,6 +28,7 @@ import { sessionTag, type BrowserMcpServer } from '../../runners/types.js';
 import { claudeSettings } from '../../settings/claude.js';
 import { opencodeSettings, splitModel } from '../../settings/opencode.js';
 import { usageService } from '../../settings/usage.js';
+import { projectBudget } from '../../projects/budget.js';
 import { createSharedPagesMcpServer, sharedPagesPrompt } from '../../sharedPages/mcp.js';
 import { previewPrompt } from '../../previews/config.js';
 import { previewsEnabled } from '../../previews/hosts.js';
@@ -297,6 +298,7 @@ class OpencodeRun {
     // Réglages du propriétaire : clés (coffre), modèle, budget par session, plafond mensuel.
     const owner = await opencodeSettings.forSession(this.ownerId);
     await (await claudeSettings.forSession(this.ownerId)).assertBudgetAvailable();
+    await projectBudget.assertAvailable(ctx.project.id);
     this.model = owner.resolveModel(this.cfg.model);
     this.maxBudgetUsd = this.cfg.maxBudgetUsd ? Number(this.cfg.maxBudgetUsd) : (owner.settings.sessionBudgetUsd ?? null);
     const actor = { sessionId: ctx.session.id, projectId: ctx.project.id };
@@ -567,6 +569,7 @@ class OpencodeRun {
       sendMessage: async (text, attachments = [], author = null) => {
         if (this.finished || this.endRequested) throw new AppError("La session n'accepte plus d'instructions");
         await (await claudeSettings.forSession(this.ownerId)).assertBudgetAvailable();
+        await projectBudget.assertAvailable(this.ctx.project.id);
         await this.prompt(text, attachments, null, author);
       },
       end: async () => {
@@ -831,7 +834,10 @@ class OpencodeRun {
     const modelTotals = this.modelTotals();
     try {
       const delta = await usageService.recordTotal(ctx.session.id, ctx.project.id, this.ownerId, total, modelTotals, this.previousModelTotals, this.model);
-      if (delta > 0) await ctx.emit('usage', { deltaUsd: Number(delta.toFixed(6)), totalUsd: total });
+      if (delta > 0) {
+        await ctx.emit('usage', { deltaUsd: Number(delta.toFixed(6)), totalUsd: total });
+        void projectBudget.checkAlert(ctx.project.id);
+      }
     } catch (err) {
       log.error('[usage] relevé impossible', err);
     }

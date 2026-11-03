@@ -1,4 +1,5 @@
 import { useMutation } from '@apollo/client';
+import UsageReportView, { PeriodPicker, useUsagePeriod } from '../components/UsageReportView';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { useEffect, useState } from 'react';
 import { Alert, Badge, Button, Card, Col, Form, InputGroup, Nav, ProgressBar, Row, Spinner, Table } from 'react-bootstrap';
@@ -673,7 +674,7 @@ function ServerSection({ server }: { server: ServerState }) {
   );
 }
 
-type SettingsSection = 'claude' | 'opencode' | 'github' | 'gitlab' | 'server' | 'notifications' | 'appearance';
+type SettingsSection = 'claude' | 'opencode' | 'github' | 'gitlab' | 'server' | 'usage' | 'notifications' | 'appearance';
 
 /** Thème clair / sombre / système, mémorisé dans ce navigateur seulement. */
 function AppearanceSection() {
@@ -757,13 +758,29 @@ export function AgentAccountSettings({ agentName }: { agentName: string }) {
   );
 }
 
+/** Paramètres › Consommation (administrateurs) : relevé de tous les projets et budget mensuel de chacun. */
+function UsageSection() {
+  const [days, setDays] = useUsagePeriod();
+  return (
+    <>
+      <div className="d-flex align-items-center flex-wrap gap-2 mb-3">
+        <span className="text-secondary small" style={{ flex: '1 1 320px' }}>
+          Tous les projets, d’après le relevé de chaque tour de session. Le budget mensuel d’un projet s’ajoute au plafond de chaque personne (onglet Claude) : atteint, le projet ne lance plus de session ; ses membres sont prévenus à 80 %.
+        </span>
+        <PeriodPicker days={days} onChange={setDays} />
+      </div>
+      <UsageReportView projectId={null} days={days} canEditBudget />
+    </>
+  );
+}
+
 export default function SettingsPage() {
   useTabTitle('Paramètres');
   const { user } = useAuth();
   const isAdmin = Boolean(user?.isAdmin);
   const [searchParams, setSearchParams] = useSearchParams();
   const requested = searchParams.get('section') as SettingsSection | null;
-  const section: SettingsSection = requested && (requested !== 'server' || isAdmin) ? requested : 'claude';
+  const section: SettingsSection = requested && ((requested !== 'server' && requested !== 'usage') || isAdmin) ? requested : 'claude';
   const { data, loading, error } = usePollingQuery<{ settings: AppSettings }>(SETTINGS, { pollInterval: 15_000 });
   if (loading && !data) return <PageLoading />;
   if (error) return <Alert variant="danger">Erreur : {error.message}</Alert>;
@@ -806,6 +823,13 @@ export default function SettingsPage() {
             </Nav.Link>
           </Nav.Item>
         )}
+        {isAdmin && (
+          <Nav.Item>
+            <Nav.Link eventKey="usage">
+              <i className="bi bi-bar-chart-line me-1" /> Consommation
+            </Nav.Link>
+          </Nav.Item>
+        )}
         <Nav.Item>
           <Nav.Link eventKey="notifications">
             <i className="bi bi-bell me-1" /> Notifications
@@ -830,6 +854,7 @@ export default function SettingsPage() {
         {section === 'github' && <GithubSection />}
         {section === 'gitlab' && <GitlabSection />}
         {section === 'server' && s.server && <ServerSection server={s.server} />}
+        {section === 'usage' && isAdmin && <UsageSection />}
         {section === 'notifications' && <NotificationsSection />}
         {section === 'appearance' && <AppearanceSection />}
       </div>

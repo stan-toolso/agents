@@ -8,7 +8,7 @@ import { Spinner } from 'react-bootstrap';
 import { useAuth } from '../auth/AuthContext';
 import { CLOSE_TERMINAL, INBOX_COUNTS, REQUESTS, SIDEBAR, SIDEBAR_PULL_REQUESTS, STOP_SESSION, type HumanRequest } from '../graphql/operations';
 import { usePollingQuery } from '../lib/usePollingQuery';
-import { sessionStateHint, taskChipOf } from '../lib/humanize';
+import { formatCost, sessionStateHint, taskChipOf } from '../lib/humanize';
 import Logo from '../components/Logo';
 import { useInstallApp } from '../components/InstallButton';
 import { useDialogs } from '../components/Dialogs';
@@ -255,7 +255,7 @@ function SessionRow({ s, indent, depth = 0, byAgent = false, parentName = null, 
   const left = indent + depth * CHILD_INDENT;
   return (
     <>
-      <RowWithMenu to={`/sessions/${s.id}`} active={location.pathname === `/sessions/${s.id}`} indent={left} title={`${statusTitle(s)}${s.model ? ` · modèle ${s.model}` : ''}${byAgentTitle({ byAgent, parentName })}${elsewhere ? ` · dans le dossier ${elsewhere}` : ''}`} items={items}>
+      <RowWithMenu to={`/sessions/${s.id}`} active={location.pathname === `/sessions/${s.id}`} indent={left} title={`${statusTitle(s)}${s.model ? ` · modèle ${s.model}` : ''}${byAgentTitle({ byAgent, parentName })}${elsewhere ? ` · dans le dossier ${elsewhere}` : ''}${s.costUsd ? ` · coût ${formatCost(s.costUsd)}` : ''}`} items={items}>
         {depth > 0 && <span className="wb-tree">└</span>}
         <span className={`wb-dot ${sessionDotClass(s)}`} />
         {byAgent && depth === 0 && <RobotIcon />}

@@ -31,7 +31,7 @@ const { createSessionsMcpServer } = await import('../sessions/mcp.js');
 const { createTasksMcpServer } = await import('../tasks/mcp.js');
 const { createWorksessionsMcpServer } = await import('../worksessions/mcp.js');
 
-const project = (over: Partial<Project>): Project => ({ id: 'p1', name: 'Curso', slug: 'curso', description: null, systemPrompt: '', gitUrl: 'https://github.com/x/curso.git', gitBranch: 'main', gitHosted: false, runnerConfig: {}, defaultPermissionMode: 'default', defaultContextCleanup: null, defaultModel: null, taskModels: null, taskInstructions: '', personalOwnerId: null, createdAt: new Date(), updatedAt: new Date(), ...over });
+const project = (over: Partial<Project>): Project => ({ id: 'p1', name: 'Curso', slug: 'curso', description: null, systemPrompt: '', gitUrl: 'https://github.com/x/curso.git', gitBranch: 'main', gitHosted: false, runnerConfig: {}, defaultPermissionMode: 'default', defaultContextCleanup: null, defaultModel: null, taskModels: null, taskInstructions: '', personalOwnerId: null, monthlyBudgetUsd: null, createdAt: new Date(), updatedAt: new Date(), ...over });
 const home = project({ id: 'home', name: 'Espace personnel', slug: 'moi-alice', gitUrl: null, gitBranch: null, personalOwnerId: 'u1' });
 const curso = project({});
 const viewerOnly = project({ id: 'p2', name: 'Lecture seule', slug: 'lecture-seule' });

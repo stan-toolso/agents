@@ -21,6 +21,7 @@ interface ProjectRow {
   task_models: TaskModels | null;
   task_instructions: string | null;
   personal_owner_id: string | null;
+  monthly_budget_usd: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -43,6 +44,7 @@ function toProject(row: ProjectRow): Project {
     taskModels: row.task_models ?? null,
     taskInstructions: row.task_instructions ?? '',
     personalOwnerId: row.personal_owner_id ?? null,
+    monthlyBudgetUsd: row.monthly_budget_usd == null ? null : Number(row.monthly_budget_usd),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -61,6 +63,7 @@ const updateColumns: Record<keyof UpdateProjectInput, string> = {
   defaultModel: 'default_model',
   taskModels: 'task_models',
   taskInstructions: 'task_instructions',
+  monthlyBudgetUsd: 'monthly_budget_usd',
 };
 
 export const projectRepository = {
@@ -135,6 +138,13 @@ export const projectRepository = {
       if (key === 'defaultContextCleanup' || key === 'taskModels') {
         params.push(value ? toJson(value) : null);
         sets.push(`${column} = $${params.length}::jsonb`);
+        continue;
+      }
+      if (key === 'monthlyBudgetUsd') {
+        params.push(typeof value === 'number' && value > 0 ? value : null);
+        sets.push(`${column} = $${params.length}`);
+        // Nouveau budget : les paliers d'alerte (80 %, 100 %) repartent de zéro.
+        sets.push('budget_alert_month = NULL', 'budget_alert_level = NULL');
         continue;
       }
       if (key === 'gitHosted') {

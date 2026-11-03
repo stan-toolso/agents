@@ -1,0 +1,19 @@
+/* Page Consommation (Paramètres › Consommation, onglet Consommation d'un projet) : réutilise les tuiles, sections et
+   graphiques de dashboard.css. Couleurs par variables --cc-* uniquement. */
+.usage-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 16px; }
+@media (max-width: 900px) { .usage-grid { grid-template-columns: minmax(0, 1fr); } }
+.usage-chart { height: 120px; }
+.usage-table td, .usage-table th { vertical-align: middle; }
+.usage-table .text-end { font-variant-numeric: tabular-nums; }
+.usage-budget .dash-meter { margin: 2px 0; }
+.usage-bars { display: grid; grid-template-columns: minmax(90px, 220px) minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; font-size: 13px; }
+.usage-bars-row { display: contents; }
+.usage-bars-label { min-width: 0; color: var(--cc-fg); font-family: var(--bs-font-monospace); font-size: 12px; }
+.usage-bars-track { display: block; height: 10px; background: var(--cc-bg-hover); border-radius: 4px; overflow: hidden; }
+.usage-bars-fill { display: block; height: 100%; background: var(--cc-accent); border-radius: 4px; }
+.usage-bars-value { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.usage-data summary { cursor: pointer; }
+.usage-data table { font-size: 12px; }
+@media (max-width: 576px) {
+  .usage-bars { grid-template-columns: minmax(70px, 120px) minmax(0, 1fr) auto; }
+}

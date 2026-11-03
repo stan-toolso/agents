@@ -6,7 +6,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { PROJECT, PROJECTS, TASKS, TASK_LAUNCH_TARGETS, type Project, type Task, type TaskPerson, type TaskPriority, type TaskStatus } from '../graphql/operations';
 import { TASK_PEOPLE, TASK_TAGS } from '../graphql/tasks';
-import { taskPriorityLabels } from '../lib/humanize';
+import { formatCost, taskPriorityLabels } from '../lib/humanize';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { useTabTitle } from '../workbench/TabsContext';
 import ProjectHeader from '../components/ProjectHeader';
@@ -89,6 +89,12 @@ function TaskCard({ task, showProject, onEdit, target, onTag }: { task: Task; sh
               <i className="bi bi-chat-left-text me-1" />
               {task.commentCount}
             </Link>
+          )}
+          {task.costUsd > 0 && (
+            <span title="Coût attribué à la tâche : chaque tour d'une session est réparti à parts égales entre les tâches auxquelles elle était reliée">
+              <i className="bi bi-coin me-1" />
+              {formatCost(task.costUsd)}
+            </span>
           )}
           {task.dueDate && <span className={overdue ? 'text-danger' : ''}>{overdue ? 'En retard : ' : 'Pour le '}{new Date(task.dueDate).toLocaleDateString()}</span>}
           <span title={task.createdBySession ? `Créée par la session ${task.createdBySession.name}` : "Créée depuis l'interface"}>
