@@ -116,6 +116,13 @@ http
         return res.end(JSON.stringify({ errors: [{ message: String(e) }] }));
       }
     }
+    // Lien public d'une session (page /share/<token>) : le transcript de démo pour le jeton de démo, 404 sinon.
+    const share = url.pathname.match(/^\/api\/share\/([^/]+)$/);
+    if (share) {
+      const view = DEMO?.demoSharedSession?.(decodeURIComponent(share[1])) ?? null;
+      res.writeHead(view ? 200 : 404, { ...cors, 'content-type': 'application/json' });
+      return res.end(JSON.stringify(view ?? { error: "Ce lien de partage n'existe pas, a expiré ou a été révoqué." }));
+    }
     if (url.pathname.startsWith('/auth/') || url.pathname.startsWith('/api/')) {
       res.writeHead(200, { ...cors, 'content-type': 'text/html; charset=utf-8' });
       return res.end('<!doctype html><html><body style="font-family:sans-serif;padding:16px"><h1>Aperçu</h1><p>Contenu de la page servie par le backend.</p></body></html>');

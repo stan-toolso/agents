@@ -78,6 +78,9 @@ export const AUDITED: Record<string, MutationAudit> = {
   relaunchSession: session('session.relaunch', (a, r) => ({ newSessionId: r?.id, input: a.input })),
   updateSessionConfig: session('session.config', (a) => ({ config: a.config })),
   updateSession: session('session.update', (a) => ({ input: a.input })),
+  // Liens publics de lecture : la cible est la session (jamais le jeton du lien dans les détails).
+  createSessionShare: { action: 'session.share', lookup: ['session', 'sessionId'], details: (a, r) => ({ shareId: r?.id, expiresInDays: a.expiresInDays }) },
+  revokeSessionShare: { action: 'session.unshare', target: 'session', lookup: ['session_share', 'id'], details: (a) => ({ shareId: a.id }) },
   applySessionCleanup: session('session.cleanup'),
   compactSessionContext: session('session.compact'),
   resetSessionContext: session('session.context_reset', (a) => ({ keepSummary: a.keepSummary })),
@@ -233,6 +236,8 @@ export const NOT_AUDITED = new Set([
   'startGithubDeviceLogin', 'pollGithubDeviceLogin', 'connectGithubFromVault', 'setDefaultGithubAccount', 'disconnectGithub',
   'startGitlabDeviceLogin', 'pollGitlabDeviceLogin', 'connectGitlabFromVault', 'setDefaultGitlabAccount', 'disconnectGitlab',
   'startAwsLogin', 'pollAwsLogin', 'testVaultItem',
+  // Contrôle du navigateur headless d'un projet : lecture d'état, rien n'est modifié.
+  'testProjectBrowser',
   'subscribePush', 'unsubscribePush', 'sendTestPush', 'setPushPreference', 'markNotificationRead', 'markAllNotificationsRead',
   // Espace personnel et instructions aux sessions (le transcript les garde).
   'createChat', 'sendSessionMessage',

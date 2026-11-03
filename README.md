@@ -277,6 +277,7 @@ backend/
     search/                    # recherche globale (projets, sessions, tâches, pages, coffre)
     audit/                     # journal d'audit : table audit_log, enveloppe des mutations GraphQL (mutations.ts), export CSV
     exports/                   # export d'une session en Markdown, archive tar.gz d'un projet et import (routes /api/…/export.*)
+    sessionShares/             # liens publics de lecture d'une session (/share/<token>), filtrage et masquage des secrets
     apiKeys/                   # clés d'API des projets
     context/
       service.ts               # bibliothèque de contexte : dossiers, instructions, versions, journal
@@ -1811,6 +1812,13 @@ lignes au plus). Ouvert aux **lecteurs** du projet (`auditLog`, `auditFacets`).
   (entrée et résultat, coupés à 4 000 caractères), demandes faites aux humains et leurs réponses, fins de tour. La
   réflexion, le détail interne des sous-agents, le coût et les événements techniques n'y sont pas. Le fichier se lit
   sans l'application (GitHub, éditeur, texte brut). Calcul pur : `backend/src/exports/sessionMarkdown.ts`.
+- **Session partagée par lien public** : actions de la session › « Partager » (rôle membre) crée un lien
+  `/share/<token>` valable 1 heure à 30 jours (table `session_shares`), révocable depuis la même modale. La page se lit
+  **sans connexion**, en lecture seule (seul `GET /api/share/<token>` est servi ; un lien expiré, révoqué ou inconnu
+  renvoie 404). Le transcript y passe par une liste blanche (`sessionShares/publicEvents.ts` : ni réflexion, ni coût,
+  ni fichiers joints, ni stderr, ni audit des connexions ; demandes et réponses incluses) et les secrets sont masqués
+  (`sessionShares/redact.ts`, règles partagées avec le journal du CLI de connexion Claude). Un **lecteur** du projet
+  voit la page de session sans saisie, réponses aux demandes ni actions.
 - **Projet en archive** : page de modification du projet (administrateurs) › « Exporter le projet »
   (`GET /api/projects/<id>/export.tar.gz`). L'archive contient `manifest.json`, `project.json` (réglages, règles
   d'autorisation, fichiers d'environnement réduits à leurs clés et références au coffre), `context/library.json`
