@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installe (ou réinstalle) Skipper dans une cellule préparée par bootstrap.sh. À lancer en tant que skipper :
-#   ./install-skipper.sh --domain skipper2.toolso.io --google-client-id ... --google-client-secret ... [--github-client-id ...] [--branch main]
+#   ./install-skipper.sh --domain skipper.example.com --google-client-id ... --google-client-secret ... [--github-client-id ...] [--branch main]
 # Clone le dépôt dans ~/skipper, écrit ~/.env s'il n'existe pas, installe les dépendances, construit, publie le front,
 # construit l'image du runner, puis démarre le service (instance skipper@blue/green via deploy.sh si la cellule est en bleu/vert). Idempotent : relançable ; un .env existant n'est jamais écrasé.
 set -euo pipefail

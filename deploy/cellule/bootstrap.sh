@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Prépare une machine neuve (Ubuntu 24.04, Elastic Metal Scaleway) pour une cellule Skipper. À lancer en root, une fois :
-#   sudo ./bootstrap.sh --domain skipper2.toolso.io [--hostname skipper-1] [--skip-certbot]
+#   sudo ./bootstrap.sh --domain skipper.example.com [--hostname skipper-1] [--skip-certbot]
 # Idempotent : relançable sans dégât. Installe Node 22, Docker, PostgreSQL 17 + pgBackRest, nginx + certbot, pare-feu,
 # fail2ban, mises à jour automatiques, l'utilisateur `skipper`, le service systemd et le site nginx.
 # Ne touche pas aux données : la base est créée par postgres.sh, Skipper par install-skipper.sh (en tant que skipper).
@@ -20,7 +20,7 @@ while [ $# -gt 0 ]; do
     *) echo "argument inconnu : $1" >&2; exit 2 ;;
   esac
 done
-[ -n "$DOMAIN" ] || { echo "--domain est obligatoire (ex. skipper2.toolso.io)" >&2; exit 2; }
+[ -n "$DOMAIN" ] || { echo "--domain est obligatoire (ex. skipper.example.com)" >&2; exit 2; }
 [ "$(id -u)" = 0 ] || { echo "à lancer en root (sudo)" >&2; exit 2; }
 HERE="$(cd "$(dirname "$0")" && pwd)"
 T="$HERE/templates"

@@ -91,7 +91,7 @@ Trois notions :
 
 ## Démarrage rapide
 
-Mise en production (serveur, nginx, base RDS, pm2) : voir `DEPLOY.md`.
+Mise en production (cellule skipper-1, nginx, PostgreSQL local, déploiement bleu/vert) : voir `DEPLOY.md` et `deploy/cellule/README.md`.
 
 Paramètres (menu en bas de la sidebar), **propres à chaque personne** : **Claude** (abonnement
 connecté depuis la page ou clé API du coffre, modèles, budgets et consommation), **OpenCode** (modèle
