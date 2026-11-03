@@ -515,6 +515,69 @@ function TaskFeedLine({ text, feed, quiet, stamp }: { text: string; feed: TaskFe
   );
 }
 
+const TASK_STATUS_LABELS: Record<string, string> = { todo: 'À faire', in_progress: 'En cours', done: 'Terminée', cancelled: 'Annulée' };
+const TASK_PRIORITY_LABELS: Record<string, string> = { urgent: 'Urgente', high: 'Haute', medium: 'Moyenne', low: 'Basse' };
+const TASK_STATUS_ICONS: Record<string, string> = { todo: 'bi-circle', in_progress: 'bi-circle-half', done: 'bi-check-circle-fill', cancelled: 'bi-x-circle' };
+
+/**
+ * Carte d'une tâche créée, prise en charge ou changée de statut par l'agent (événement `task`, émis par le serveur
+ * MCP tasks) : titre, statut, priorité ; elle ouvre la tâche dans le tableau du projet.
+ */
+export function TaskEventCard({ payload, stamp }: { payload: Record<string, unknown>; stamp?: React.ReactNode }) {
+  const status = String(payload.status ?? '');
+  const previous = payload.previousStatus ? String(payload.previousStatus) : null;
+  const statusLabel = TASK_STATUS_LABELS[status] ?? status;
+  const action =
+    payload.action === 'created'
+      ? 'Tâche créée'
+      : payload.action === 'claimed'
+        ? 'Tâche prise en charge'
+        : previous
+          ? `Tâche passée de « ${TASK_STATUS_LABELS[previous] ?? previous} » à « ${statusLabel} »`
+          : 'Statut de la tâche modifié';
+  const to = payload.projectId ? `/projects/${String(payload.projectId)}/tasks?task=${String(payload.taskId)}` : `/tasks/${String(payload.taskId)}`;
+  return (
+    <div className="cc-event-card-row">
+      {stamp}
+      <Link to={to} className="cc-event-card" title="Ouvrir la tâche dans le tableau">
+        <span className="cc-event-card-kind">
+          <i className="bi bi-kanban" /> {action}
+        </span>
+        <span className="cc-event-card-title">{String(payload.title ?? '')}</span>
+        <span className="cc-event-card-meta">
+          <span className={`cc-event-card-status ${status}`}>
+            <i className={`bi ${TASK_STATUS_ICONS[status] ?? 'bi-circle'}`} /> {statusLabel}
+            {payload.statusTag ? ` · ${String(payload.statusTag)}` : ''}
+          </span>
+          {payload.priority ? <span className={`cc-event-card-priority ${String(payload.priority)}`}>Priorité {(TASK_PRIORITY_LABELS[String(payload.priority)] ?? String(payload.priority)).toLowerCase()}</span> : null}
+        </span>
+      </Link>
+    </div>
+  );
+}
+
+/** Carte d'une instruction du contexte écrite par l'agent (événement `context`) : elle ouvre l'instruction dans la page Contexte. */
+export function ContextEventCard({ payload, stamp }: { payload: Record<string, unknown>; stamp?: React.ReactNode }) {
+  const query = new URLSearchParams({ ...(payload.agentId ? { library: String(payload.agentId) } : {}), instruction: String(payload.instructionId ?? '') });
+  const library = payload.library ? `bibliothèque de ${String(payload.library)}` : payload.agentId ? "bibliothèque d'un agent" : 'contexte du projet';
+  return (
+    <div className="cc-event-card-row">
+      {stamp}
+      <Link to={`/projects/${String(payload.projectId)}/context?${query.toString()}`} className="cc-event-card" title="Ouvrir l'instruction">
+        <span className="cc-event-card-kind">
+          <i className="bi bi-journal-text" /> {payload.action === 'created' ? 'Instruction créée' : 'Instruction mise à jour'} · {library}
+        </span>
+        <span className="cc-event-card-title">{String(payload.path ?? '')}</span>
+        {payload.description ? <span className="cc-event-card-desc">{String(payload.description)}</span> : null}
+        <span className="cc-event-card-meta">
+          <span>v{String(payload.version ?? '')}</span>
+          {payload.changeNote ? <span className="cc-event-card-desc">{String(payload.changeNote)}</span> : null}
+        </span>
+      </Link>
+    </div>
+  );
+}
+
 /** Un élément du travail de l'agent dans un tour : un message, un appel d'outil ou une réflexion. */
 interface WorkItem {
   key: string;
@@ -932,6 +995,14 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
             );
           }
           break;
+        case 'task':
+        case 'context': {
+          // Cartes des tâches et des instructions touchées par l'agent : gardées en vue hors des étapes repliées.
+          const node = e.type === 'task' ? <TaskEventCard key={e.id} payload={p} stamp={stamp()} /> : <ContextEventCard key={e.id} payload={p} stamp={stamp()} />;
+          if (technical) nodes.push(node);
+          else work.push({ key: e.id, node, pinned: true, at: e.createdAt });
+          break;
+        }
         case 'connection': {
           // Audit d'un accès à un système externe (outils MCP `connections` et `google`) : l'appel d'outil est
           // déjà affiché, la ligne d'audit relève du détail technique.

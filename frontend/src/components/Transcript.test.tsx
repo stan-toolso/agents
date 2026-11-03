@@ -34,6 +34,27 @@ const html = (events: SessionEvent[], technical = false, participants: ChatParti
   );
 
 describe('Transcript', () => {
+  it('affiche les tâches et instructions touchées par l’agent en cartes cliquables, hors des étapes repliées', () => {
+    const out = html([
+      ev('instruction', { text: 'Go' }),
+      tool('t1', 'mcp__tasks__create', { title: 'Corriger le menu' }),
+      result('t1', 'Tâche créée'),
+      ev('task', { action: 'created', taskId: 'tk1', projectId: 'p1', title: 'Corriger le menu', status: 'todo', priority: 'high' }),
+      tool('t2', 'mcp__tasks__update', { id: 'tk2', status: 'done' }),
+      result('t2', 'ok'),
+      ev('task', { action: 'status', taskId: 'tk2', projectId: 'p1', title: 'Export PDF', status: 'done', previousStatus: 'in_progress', priority: 'low' }),
+      ev('context', { action: 'updated', projectId: 'p1', instructionId: 'i1', path: 'dev/tests', version: 3, agentId: 'a1', library: 'Ben' }),
+      text('Fini.'),
+    ]);
+    expect(out).toContain('href="/projects/p1/tasks?task=tk1"');
+    expect(out).toContain('Corriger le menu');
+    expect(out).toContain('Priorité haute');
+    expect(out).toContain('Tâche passée de « En cours » à « Terminée »');
+    expect(out).toContain('href="/projects/p1/context?library=a1&amp;instruction=i1"');
+    expect(out).toContain('Instruction mise à jour · bibliothèque de Ben');
+    expect(out).toContain('cc-group');
+  });
+
   it('replie les étapes d’un tour et garde son dernier message en vue', () => {
     const out = html(turn);
     expect(out).toContain('Le bug est corrigé.');

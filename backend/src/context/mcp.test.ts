@@ -5,8 +5,9 @@ import type { Project } from '../projects/types.js';
 
 // Le CLI liste les outils au démarrage : un schéma zod refusé ferait disparaître tout le serveur. Le service est simulé :
 // on vérifie la déclaration des outils et la résolution du paramètre `library` (projet, agent par nom ou identifiant, défaut).
-const { service } = vi.hoisted(() => ({ service: {} as Record<string, unknown> }));
+const { service, trace } = vi.hoisted(() => ({ service: {} as Record<string, unknown>, trace: { fn: null as unknown as ReturnType<typeof import('vitest').vi.fn> } }));
 vi.mock('./service.js', () => ({ contextService: service }));
+vi.mock('../sessions/events.js', () => ({ traceSessionEvent: (...args: unknown[]) => trace.fn(...args) }));
 
 const { createContextMcpServer } = await import('./mcp.js');
 
@@ -29,7 +30,8 @@ const textOf = (res: Awaited<ReturnType<Client['callTool']>>) => (res.content as
 
 beforeEach(() => {
   service.tree = vi.fn(async (_p: string, agentId: string | null) => ({ folders: [], instructions: agentId ? [{ id: 'i', folderId: null, path: `memo-${agentId}`, description: '', version: 1 }] : [] }));
-  service.writeInstructionAtPath = vi.fn(async (_p: string, path: string) => ({ instruction: { path, version: 1 }, created: true }));
+  service.writeInstructionAtPath = vi.fn(async (_p: string, path: string) => ({ instruction: { id: `i-${path}`, path, description: '', version: 1 }, created: true }));
+  trace.fn = vi.fn(async () => undefined);
 });
 
 describe('serveur MCP context (bibliothèques)', () => {
@@ -62,5 +64,13 @@ describe('serveur MCP context (bibliothèques)', () => {
     const res = await client.callTool({ name: 'tree', arguments: { library: 'Zoé' } });
     expect(res.isError).toBe(true);
     expect(textOf(res)).toContain('Bibliothèque « Zoé » inconnue');
+  });
+
+  it('write trace l’instruction dans le transcript (événement context), avec sa bibliothèque', async () => {
+    const client = await connect({ agentLibraries: libraries, defaultAgentId: 'a1' });
+    await client.callTool({ name: 'write', arguments: { path: 'notes/jour', content: 'x', change_note: 'premier jet' } });
+    expect(trace.fn).toHaveBeenLastCalledWith('s1', 'context', expect.objectContaining({ action: 'created', projectId: 'p1', instructionId: 'i-notes/jour', path: 'notes/jour', version: 1, agentId: 'a1', library: 'Léa', changeNote: 'premier jet' }));
+    await client.callTool({ name: 'write', arguments: { library: 'projet', path: 'conventions', content: 'y' } });
+    expect(trace.fn).toHaveBeenLastCalledWith('s1', 'context', expect.objectContaining({ agentId: null, library: null }));
   });
 });

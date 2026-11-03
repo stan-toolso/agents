@@ -486,3 +486,17 @@ div.cc-chat-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .cc-task-feed-link { flex: 0 0 auto; color: inherit; }
 .cc-task-feed-link:hover { color: var(--cc-accent); }
 .cc-task-feed-text { margin: 4px 0 0 20px; white-space: pre-wrap; color: var(--cc-dim); border-left: 2px solid var(--cc-border); padding-left: 8px; }
+
+/* Cartes des tâches et des instructions touchées par l'agent (événements `task` et `context`). */
+.cc-event-card-row { margin: 6px 0 6px 18px; display: flex; align-items: flex-start; gap: 8px; }
+.cc-event-card-row .cc-time { float: none; order: 2; flex: 0 0 auto; }
+.cc-event-card { flex: 0 1 auto; min-width: 0; max-width: 560px; display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border: 1px solid var(--cc-border); border-radius: 6px; color: var(--cc-fg); text-decoration: none; }
+.cc-event-card:hover { background: var(--cc-bg-hover); border-color: var(--cc-accent); color: var(--cc-fg); }
+.cc-event-card-kind { font-size: 12px; color: var(--cc-dim); }
+.cc-event-card-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-event-card-desc { color: var(--cc-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-event-card-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--cc-dim); min-width: 0; }
+.cc-event-card-status.in_progress { color: var(--cc-yellow); }
+.cc-event-card-status.done { color: var(--cc-green); }
+.cc-event-card-status.cancelled { color: var(--cc-dimmer); }
+.cc-event-card-priority.urgent, .cc-event-card-priority.high { color: var(--cc-red); }
