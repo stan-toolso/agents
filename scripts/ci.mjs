@@ -57,7 +57,9 @@ async function startEmbeddedPostgres() {
   const data = mkdtempSync(path.join(base, 'data-'));
   const port = await freePort();
   execFileSync(path.join(pkg, 'bin', 'initdb'), ['-D', data, '-U', 'skipper', '--auth=trust', '-E', 'UTF8', '--no-locale'], { env, stdio: 'ignore' });
-  execFileSync(path.join(pkg, 'bin', 'pg_ctl'), ['-D', data, '-l', path.join(data, 'pg.log'), '-o', `-p ${port} -k ${data} -c listen_addresses=127.0.0.1 -c shared_buffers=16MB -c max_connections=20`, '-w', 'start'], { env, stdio: 'ignore' });
+  // max_connections : comme le service PostgreSQL de la CI GitHub (100 par défaut). Les fichiers *.db.test.ts tournent en
+  // parallèle, chacun avec son pool (jusqu'à 10 connexions) : à 20, l'ajout d'un fichier suffisait à saturer la base.
+  execFileSync(path.join(pkg, 'bin', 'pg_ctl'), ['-D', data, '-l', path.join(data, 'pg.log'), '-o', `-p ${port} -k ${data} -c listen_addresses=127.0.0.1 -c shared_buffers=16MB -c max_connections=100`, '-w', 'start'], { env, stdio: 'ignore' });
   return {
     url: `postgres://skipper:skipper@127.0.0.1:${port}/postgres`,
     stop() {
