@@ -22,7 +22,15 @@ const m = vi.hoisted(() => ({
 }));
 vi.mock('./service.js', () => ({ taskService: m.tasks, describeThread: () => ['Fil de discussion :'], summarizeReactions: () => '', formatPerson: () => '', statusTagText: () => '', dependencyText: () => '', assertUnblocked: m.assertUnblocked }));
 vi.mock('./attachments.js', () => ({ describeAttachments: () => [], imageBlocks: async () => [] }));
-vi.mock('../pullRequests/service.js', () => ({ trackedPullRequestService: m.prs }));
+vi.mock('../pullRequests/service.js', () => ({ trackedPullRequestService: m.prs, foreignRepoOf: (p: { repo: string }, projectRepo: string) => (p.repo && p.repo !== projectRepo ? { owner: p.repo.split('/')[0], name: p.repo.split('/')[1] } : null) }));
+vi.mock('../git/pullRequests.js', () => ({
+  pullRequestService: {
+    merge: async (...args: unknown[]) => {
+      m.calls.push(['merge', args]);
+      return { pullRequest: { number: args[2], state: 'MERGED' }, sha: 'abcdef1234567', deletedWorksessionIds: [], completedTaskIds: [], warnings: [] };
+    },
+  },
+}));
 // Comptes du propriétaire (délégation d'un agent de projet) : une personne utilise les siens ; un agent en lecture seule ne pousse pas.
 const accounts = { claudeUserId: 'u1', githubUserId: 'u1', githubReadOnly: false, githubPullRequests: true, gitlabUserId: 'u1', gitlabReadOnly: false, gitlabPullRequests: true, forgeUserId: 'u1' };
 vi.mock('../agents/service.js', () => ({
@@ -74,8 +82,8 @@ const pr = (over: Partial<TrackedPullRequest> = {}): TrackedPullRequest => ({
   ...over,
 });
 
-async function connect() {
-  const server = createTasksMcpServer(project, 's1', 'Session');
+async function connect(options: Parameters<typeof createTasksMcpServer>[4] = {}) {
+  const server = createTasksMcpServer(project, 's1', 'Session', undefined, options);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.instance.connect(serverTransport);
   const client = new Client({ name: 'test', version: '1.0.0' });
@@ -144,6 +152,10 @@ beforeEach(() => {
       record('open')(...args);
       return pr({ number: 44, title: 'Ouverte' });
     },
+    markMerged: async (...args: unknown[]) => {
+      record('markMerged')(...args);
+      return pr({ status: 'merged', mergedAt: new Date() });
+    },
   });
 });
 
@@ -151,7 +163,7 @@ describe('serveur MCP tasks', () => {
   it('déclare tous ses outils (schémas acceptés par le SDK), dont ceux des pull requests', async () => {
     const client = await connect();
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
-    expect(names).toEqual(['claim', 'comment', 'create', 'get', 'list', 'people', 'pr_list', 'pr_open', 'pr_register', 'pr_update', 'react', 'release', 'update']);
+    expect(names).toEqual(['claim', 'comment', 'create', 'get', 'list', 'people', 'pr_list', 'pr_merge', 'pr_open', 'pr_register', 'pr_update', 'react', 'release', 'update']);
     // Tout outil libre existe ; pr_open (pousse et ouvre sur GitHub) n'est pas libre.
     for (const free of TASKS_FREE_TOOLS) expect(names).toContain(free.replace('mcp__tasks__', ''));
     expect(TASKS_FREE_TOOLS).not.toContain('mcp__tasks__pr_open');
@@ -326,5 +338,35 @@ describe('serveur MCP tasks', () => {
     accounts.githubReadOnly = false;
     accounts.githubPullRequests = true;
     m.session = { ...m.session, ownerId: 'u1', takenOverById: null };
+  });
+
+  it("pr_merge pose la demande et fusionne avec le compte de la personne qui l'accepte", async () => {
+    const approvals: unknown[] = [];
+    const client = await connect({ approveMerge: async (a) => (approvals.push(a), 'stan') });
+    const r = await client.callTool({ name: 'pr_merge', arguments: { id: '#42', method: 'squash' } });
+    expect(r.isError).toBeFalsy();
+    expect(textOf(r)).toContain('Pull request fusionnée (abcdef1)');
+    expect(approvals).toEqual([expect.objectContaining({ projectId: 'p', ref: '#42', title: 'Ma PR', method: 'SQUASH' })]);
+    const merge = m.calls.find(([n]) => n === 'merge')?.[1];
+    // Compte de Stan, pas celui de la session ; le dossier de travail est gardé (la session y tourne).
+    expect(merge?.slice(0, 4)).toEqual(['p', 'stan', 42, 'SQUASH']);
+    expect(merge?.[4]).toEqual({ deleteRemoteBranch: true, deleteWorksession: false, completeTasks: true });
+    expect(merge?.[5]).toBeNull();
+    expect(m.calls.find(([n]) => n === 'markMerged')?.[1][3]).toEqual({ type: 'human', userId: 'stan' });
+  });
+
+  it('pr_merge ne fusionne pas si la demande est refusée, ni sans demande possible, ni une PR qui n’est pas ouverte', async () => {
+    const denied = await (await connect({ approveMerge: async () => { throw new Error('Fusion refusée par la personne sollicitée'); } })).callTool({ name: 'pr_merge', arguments: { id: 'pr1' } });
+    expect(denied.isError).toBe(true);
+    expect(textOf(denied)).toContain('Fusion refusée');
+    const none = await (await connect()).callTool({ name: 'pr_merge', arguments: { id: 'pr1' } });
+    expect(none.isError).toBe(true);
+    expect(textOf(none)).toContain('ne peut pas fusionner');
+    m.prs.resolve = async () => pr({ status: 'merged' });
+    let asked = false;
+    const closed = await (await connect({ approveMerge: async () => ((asked = true), 'stan') })).callTool({ name: 'pr_merge', arguments: { id: 'pr1' } });
+    expect(closed.isError).toBe(true);
+    expect(asked).toBe(false);
+    expect(m.calls.filter(([n]) => n === 'merge')).toHaveLength(0);
   });
 });

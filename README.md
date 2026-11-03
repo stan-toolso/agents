@@ -232,7 +232,7 @@ backend/
       service.ts               # tâches : création, mise à jour, personnes, champs, fil de discussion (messages, réponses, mentions, réactions), sessions en charge, résumé pour le prompt
       mentions.ts              # mentions @Nom / @e-mail / @session:<id> : candidats et résolution dans un texte
       sessionFeed.ts           # changements, messages et réactions transmis aux sessions reliées à la tâche (en charge, passées par la tâche, mentionnées)
-      mcp.ts                   # serveur MCP `tasks` (list, get, create, update, claim, release, comment, react, people, pr_list, pr_open, pr_register, pr_update)
+      mcp.ts                   # serveur MCP `tasks` (list, get, create, update, claim, release, comment, react, people, pr_list, pr_open, pr_merge, pr_register, pr_update)
       launch.ts                # confier une tâche à un nouvel agent (refusé tant qu'elle est bloquée)
       dependencyGraph.ts       # dépendances entre tâches : détection des cycles (sans base)
       autoStart.ts             # enchaînement : tâche débloquée lancée automatiquement, notifiée
@@ -905,7 +905,12 @@ fusion comptent (un squash laisse les anciens commits « en avance »). Il naît
 session, soumis à son autorisation, avec un paramètre `path` pour ouvrir la PR sur le dépôt d'un autre clone présent
 dans un sous-dossier du dossier de travail ; `tasks.pr_register`, qui déclare une PR ouverte par un autre moyen, par
 l'URL de n'importe quel dépôt GitHub ou par son numéro dans le dépôt du projet ; `tasks.pr_update` tient à jour
-statut, note et tâche, mais une PR en préparation ne change pas de statut ainsi ; `tasks.pr_list` liste par
+statut, note et tâche, mais une PR en préparation ne change pas de statut ainsi ; `tasks.pr_merge` fusionne une PR
+ouverte quand une personne le demande : l'outil pose lui-même une demande d'autorisation, jamais mémorisable et posée
+même en mode « ne jamais demander », et la fusion est faite avec le compte de la personne qui l'accepte (`answered_by`
+de la demande, remis à l'outil par `requestService` sous la clé `answeredById` ; au moins membre du projet), à son nom,
+branche distante supprimée et tâches de la branche terminées, dossier de travail gardé (`pullRequests/mergeApproval.ts`) ;
+`tasks.pr_list` liste par
 étape ; `tasks.get` montre les PR d'une tâche ; les PR d'un autre dépôt sont désignées « owner/name#n »), par
 l'interface (création ou fusion depuis le panneau git, bouton « Suivre une PR » de la page des pull requests ou de
 la fiche d'une tâche), ou par la **synchronisation** (`trackedPullRequestService.sync`, à l'affichage de la page d'un
@@ -1367,7 +1372,8 @@ création et ne suivent pas les évolutions des modèles ; Skipper ajoute donc a
 soient ses instructions : un **Product Manager** ne modifie pas le code, ne commite, ne pousse ni n'ouvre de PR
 (`tasks.pr_open` le lui refuse) ; un changement de code nécessaire, y compris un bug qui bloque une release, devient une
 tâche « prête » confiée aussitôt à l'agent développeur, la tâche bloquée en dépendant. Un **Developer** ne met rien en
-production et ne fusionne pas. Ces règles sont levées quand une personne a pris la main.
+production et ne fusionne pas de sa propre initiative : quand une personne le lui demande, il passe par `tasks.pr_merge`,
+que cette personne accepte et qui fusionne avec son compte. Ces règles sont levées quand une personne a pris la main.
 
 **Type de session et modèles.** Le profil (carte « Sessions ») règle le **type de session par défaut**
 (`defaults.provider` : Claude Code ou OpenCode ; `agentService.providerOf`), le **modèle par défaut**

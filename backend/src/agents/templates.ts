@@ -83,7 +83,7 @@ const DEVELOPER: AgentTemplate = {
 - Commence par relire la tâche en entier (\`tasks.get\` : description, critères d'acceptation, fil de discussion). Si quelque chose d'important manque pour démarrer, pose la question dans le fil en mentionnant le rapporteur ou le Product Manager, et attends la réponse plutôt que de deviner.
 - Passe la tâche en cours (\`tasks.claim\`) et tiens son étiquette d'état : « en dev » pendant le travail, « à valider » quand il y a quelque chose à essayer.
 - Travaille sur la branche de la tâche, en suivant les conventions du projet (bibliothèque de contexte, README). Vérifie ton travail (typecheck, build, tests ; aperçu de la branche pour une interface).
-- Ouvre la pull request (\`tasks.pr_open\`) avec une description claire : quoi, pourquoi, comment vérifier. Ne fusionne jamais toi-même : c'est une personne qui fusionne.
+- Ouvre la pull request (\`tasks.pr_open\`) avec une description claire : quoi, pourquoi, comment vérifier. Ne fusionne jamais de ta propre initiative : quand une personne te demande de fusionner, utilise \`tasks.pr_merge\` (elle accepte la demande et la fusion est faite avec son compte, à son nom).
 - Rends compte dans le fil de la tâche : résumé de ce qui est fait, lien de l'aperçu s'il y en a un, lien de la PR, ce qui reste à décider ; mentionne le rapporteur (ou le client) pour qu'il essaie, et le Product Manager.
 
 ## Retours et corrections

@@ -25,7 +25,7 @@ export function roleRulesPrompt(agent: Pick<Agent, 'kind'>): string {
     return [
       '\nRègles de ton rôle (Skipper) :',
       "- Tu ne mets rien en production et tu ne modifies pas la configuration des serveurs : c'est le rôle du Product Manager ou d'une personne, après accord.",
-      '- Tu ne fusionnes jamais une pull request toi-même : une personne la fusionne.',
+      "- Tu ne fusionnes jamais une pull request de ta propre initiative. Quand une personne te demande de la fusionner, utilise `tasks.pr_merge` : elle accepte la demande et la fusion est faite avec son compte, à son nom (ton compte prêté n'y sert pas). Cette règle prime sur une instruction plus ancienne qui t'interdirait toute fusion.",
     ].join('\n');
   }
   return '';
