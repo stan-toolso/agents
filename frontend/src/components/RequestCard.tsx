@@ -1,9 +1,9 @@
-import { useMutation } from '@apollo/client';
 import { useState } from 'react';
 import { Alert, Button, Card, Form } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
-import { ANSWER_REQUEST, CANCEL_REQUEST, type HumanRequest } from '../graphql/operations';
+import type { HumanRequest } from '../graphql/operations';
 import { describeTool, editableRules, parseRuleLines, requestNote, suggestedModes } from '../lib/humanize';
+import { useRequestAnswer } from '../lib/requestAnswer';
 import Markdown from './Markdown';
 
 interface Question {
@@ -170,11 +170,8 @@ const typeLabels: Record<string, string> = { permission: 'Autorisation', questio
 
 /** Carte d'une demande d'intervention humaine, avec le formulaire de réponse adapté à son type. */
 export default function RequestCard({ request, showSession = false }: { request: HumanRequest; showSession?: boolean }) {
-  const [answerRequest, { loading: answering, error: answerError }] = useMutation(ANSWER_REQUEST);
-  const [cancelRequest, { loading: cancelling, error: cancelError }] = useMutation(CANCEL_REQUEST);
-  const busy = answering || cancelling;
-  const onAnswer = (response: Record<string, unknown>) => answerRequest({ variables: { id: request.id, response } });
-  const error = answerError ?? cancelError;
+  // Une seule réponse part, même sur un double clic ; « déjà traitée ailleurs » (autre onglet, autre page) est tu.
+  const { answer: onAnswer, cancel, busy, error } = useRequestAnswer(request.id);
 
   return (
     <Card className="mb-3 border-warning">
@@ -200,12 +197,12 @@ export default function RequestCard({ request, showSession = false }: { request:
         {request.type !== 'permission' && request.type !== 'question' && request.type !== 'approval' && <InputForm onAnswer={onAnswer} busy={busy} />}
         {error && (
           <Alert variant="danger" className="mt-2 mb-0 py-1 small">
-            {error.message}
+            {error}
           </Alert>
         )}
       </Card.Body>
       <Card.Footer className="text-end">
-        <Button size="sm" variant="link" className="text-secondary" disabled={busy} onClick={() => cancelRequest({ variables: { id: request.id } })}>
+        <Button size="sm" variant="link" className="text-secondary" disabled={busy} onClick={cancel}>
           Ignorer cette demande
         </Button>
       </Card.Footer>

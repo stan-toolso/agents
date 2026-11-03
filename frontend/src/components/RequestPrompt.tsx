@@ -1,8 +1,8 @@
-import { useMutation } from '@apollo/client';
-import { useEffect, useState } from 'react';
-import { ANSWER_REQUEST, CANCEL_REQUEST, type HumanRequest } from '../graphql/operations';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import type { HumanRequest } from '../graphql/operations';
 import { describeTool, editableRules, parseRuleLines, requestNote, suggestedModes } from '../lib/humanize';
 import { canAutoFocus } from '../lib/device';
+import { promptTakesKey, useRequestAnswer } from '../lib/requestAnswer';
 import Markdown from './Markdown';
 
 interface Option {
@@ -18,17 +18,32 @@ interface Question {
   options: { label: string; description?: string }[];
 }
 
+/** Le prompt a-t-il la main sur le clavier (premier prompt affiché de la page) ? */
+const KeyboardTurn = createContext(true);
+
 function OptionList({ options, onPick, disabled }: { options: Option[]; onPick: (o: Option) => void; disabled: boolean }) {
   const [cursor, setCursor] = useState(0);
+  const first = useContext(KeyboardTurn);
+  const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     // Raccourcis clavier façon Claude Code : chiffres, flèches, Entrée. Ils valent aussi quand le focus est dans la
-    // zone de saisie principale (textarea) tant qu'elle est vide : sinon un « 1 » suivi d'Entrée partirait comme
-    // instruction à l'agent. Les champs texte du prompt lui-même (input) gardent leurs touches.
+    // zone de saisie principale (textarea) tant qu'elle est vide. Une seule réponse part (useRequestAnswer) ; la
+    // touche est en plus ignorée si elle est maintenue, si le prompt est masqué (page du workbench en arrière-plan)
+    // ou s'il n'est pas le premier de la page (lib/requestAnswer.ts, promptTakesKey).
     const handler = (ev: KeyboardEvent) => {
-      if (disabled || ev.altKey || ev.ctrlKey || ev.metaKey) return;
-      const target = ev.target as HTMLElement | null;
-      if (target?.tagName === 'INPUT') return;
-      if (target?.tagName === 'TEXTAREA' && (target as HTMLTextAreaElement).value !== '') return;
+      const target = ev.target instanceof HTMLElement ? ev.target : null;
+      const box = ref.current?.closest('.cc-prompt') ?? ref.current;
+      const take = promptTakesKey({
+        locked: disabled,
+        repeat: ev.repeat,
+        modifier: ev.altKey || ev.ctrlKey || ev.metaKey,
+        targetTag: target?.tagName ?? null,
+        targetValue: target instanceof HTMLTextAreaElement ? target.value : '',
+        targetInPrompt: Boolean(target && box?.contains(target)),
+        visible: document.visibilityState !== 'hidden' && Boolean(ref.current && ref.current.getClientRects().length > 0),
+        first,
+      });
+      if (!take) return;
       const n = Number(ev.key);
       if (n >= 1 && n <= options.length) onPick(options[n - 1]);
       else if (ev.key === 'ArrowDown') setCursor((c) => Math.min(c + 1, options.length - 1));
@@ -39,10 +54,10 @@ function OptionList({ options, onPick, disabled }: { options: Option[]; onPick: 
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [options, cursor, onPick, disabled]);
+  }, [options, cursor, onPick, disabled, first]);
 
   return (
-    <>
+    <div ref={ref} className="cc-options">
       {options.map((o, i) => (
         <button key={o.label} type="button" className={`cc-option${i === cursor ? ' selected' : ''}`} disabled={disabled} onMouseEnter={() => setCursor(i)} onClick={() => onPick(o)}>
           <span className="cc-cursor">{i === cursor ? '❯' : ''}</span>
@@ -50,7 +65,7 @@ function OptionList({ options, onPick, disabled }: { options: Option[]; onPick: 
           {o.description && <span className="cc-desc"> — {o.description}</span>}
         </button>
       ))}
-    </>
+    </div>
   );
 }
 
@@ -224,14 +239,12 @@ function InputPrompt({ request, answer, busy }: { request: HumanRequest; answer:
 }
 
 /** Demande en attente affichée dans le terminal de session, à la manière des prompts de Claude Code. */
-export default function RequestPrompt({ request }: { request: HumanRequest }) {
-  const [answerRequest, { loading: answering, error }] = useMutation(ANSWER_REQUEST);
-  const [cancelRequest, { loading: cancelling }] = useMutation(CANCEL_REQUEST);
-  const busy = answering || cancelling;
-  const answer = (response: Record<string, unknown>) => void answerRequest({ variables: { id: request.id, response } });
+export default function RequestPrompt({ request, keyboard = true }: { request: HumanRequest; keyboard?: boolean }) {
+  // Une seule réponse part, même sur un double clic ou un Entrée répété ; « déjà traitée ailleurs » est tu.
+  const { answer, cancel, busy, error } = useRequestAnswer(request.id);
 
   return (
-    <div>
+    <KeyboardTurn.Provider value={keyboard}>
       {request.type === 'permission' ? (
         <PermissionPrompt request={request} answer={answer} busy={busy} />
       ) : request.type === 'question' ? (
@@ -242,11 +255,11 @@ export default function RequestPrompt({ request }: { request: HumanRequest }) {
         <InputPrompt request={request} answer={answer} busy={busy} />
       )}
       <div className="cc-hint">
-        {error ? <span className="cc-red">{error.message}</span> : <span className="cc-hint-text">Cliquez sur une réponse, ou tapez son numéro</span>}
-        <button type="button" className="cc-btn" disabled={busy} onClick={() => cancelRequest({ variables: { id: request.id } })}>
+        {error ? <span className="cc-red">{error}</span> : <span className="cc-hint-text">Cliquez sur une réponse, ou tapez son numéro</span>}
+        <button type="button" className="cc-btn" disabled={busy} onClick={cancel}>
           Ignorer cette demande
         </button>
       </div>
-    </div>
+    </KeyboardTurn.Provider>
   );
 }

@@ -150,7 +150,9 @@ export const approvalService = {
     const projectId = await projectOfSession(current.sessionId);
     if (!(await isAdmin(user.id, projectId))) throw new AppError("Seul un administrateur du projet peut répondre à une demande d'accord", 'FORBIDDEN');
     const message = typeof response.message === 'string' ? response.message.trim() : '';
-    const request = await requestService.answer(id, { decision, ...(message ? { message } : {}) }, user.id);
+    const { request, settled } = await requestService.answerOnce(id, { decision, ...(message ? { message } : {}) }, user.id);
+    // Réponse en double (double clic, deux onglets) : la décision est déjà postée dans le fil.
+    if (!settled) return request;
     await postDecision(request, payload, user, decision === 'approve' ? 'approved' : 'denied', message);
     return request;
   },
@@ -162,8 +164,8 @@ export const approvalService = {
     if (!payload) throw new AppError("Ce n'est pas une demande d'accord");
     const projectId = await projectOfSession(current.sessionId);
     if (!(await isAdmin(user.id, projectId))) throw new AppError("Seul un administrateur du projet peut écarter une demande d'accord", 'FORBIDDEN');
-    const request = await requestService.cancel(id, user.id);
-    if (request.status === 'cancelled' && request.answeredById === user.id) await postDecision(request, payload, user, 'dismissed', '');
+    const { request, settled } = await requestService.cancelOnce(id, user.id);
+    if (settled) await postDecision(request, payload, user, 'dismissed', '');
     return request;
   },
 

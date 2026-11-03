@@ -1,6 +1,7 @@
 import { AppError, NotFoundError } from '../errors.js';
 import { pubSub } from '../pubsub.js';
 import { notificationService } from '../notifications/service.js';
+import { userRepository } from '../users/repository.js';
 import { requestRepository } from './repository.js';
 import type { CreateRequestInput, HumanRequest, RequestStatus } from './types.js';
 
@@ -18,6 +19,31 @@ interface Waiter {
 
 /** Clé ajoutée à la réponse remise à l'agent qui attend : identifiant de la personne qui a répondu. */
 export const ANSWERED_BY = 'answeredById';
+
+/** Code de l'erreur renvoyée quand on répond à une demande déjà réglée autrement : l'interface la tait et rafraîchit. */
+export const REQUEST_SETTLED = 'REQUEST_SETTLED';
+
+/** Sérialisation stable (clés triées) pour comparer deux réponses. */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (value && typeof value === 'object')
+    return `{${Object.keys(value)
+      .filter((k) => (value as Record<string, unknown>)[k] !== undefined)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonical((value as Record<string, unknown>)[k])}`)
+      .join(',')}}`;
+  return JSON.stringify(value) ?? 'null';
+}
+
+export const sameResponse = (a: Record<string, unknown> | null, b: Record<string, unknown> | null): boolean => canonical(a ?? {}) === canonical(b ?? {});
+
+const settledLabels: Record<string, string> = { answered: 'traitée', cancelled: 'ignorée', expired: 'expirée' };
+
+async function settledError(request: HumanRequest): Promise<AppError> {
+  const by = request.answeredById ? await userRepository.findById(request.answeredById).catch(() => null) : null;
+  const who = by ? ` par ${by.name || by.email}` : '';
+  return new AppError(`Cette demande a déjà été ${settledLabels[request.status] ?? request.status}${who}`, REQUEST_SETTLED);
+}
 
 /** Promesses en attente d'une réponse humaine, indexées par id de demande (mémoire du serveur). */
 const waiters = new Map<string, Waiter>();
@@ -56,25 +82,41 @@ export const requestService = {
     });
   },
 
+  /**
+   * Répond à une demande. Idempotent : une demande déjà réglée avec la même réponse (double clic, Entrée répété,
+   * même demande affichée dans deux onglets) est renvoyée telle quelle ; une réponse différente, ou une demande
+   * ignorée ou expirée, donne une erreur explicite (code REQUEST_SETTLED).
+   */
   async answer(id: string, response: Record<string, unknown>, answeredBy: string | null = null): Promise<HumanRequest> {
+    return (await this.answerOnce(id, response, answeredBy)).request;
+  },
+
+  /** Comme `answer`, en disant si c'est cet appel qui a réglé la demande (`settled`) ou s'il en était le doublon. */
+  async answerOnce(id: string, response: Record<string, unknown>, answeredBy: string | null = null): Promise<{ request: HumanRequest; settled: boolean }> {
     const request = await requestRepository.settle(id, 'answered', response, answeredBy);
     if (!request) {
       const existing = await this.get(id);
-      throw new AppError(`La demande n'est plus en attente (statut : ${existing.status})`);
+      if (existing.status === 'answered' && sameResponse(existing.response, response)) return { request: existing, settled: false };
+      throw await settledError(existing);
     }
     pubSub.publish('requestUpdated', request);
     settleWaiter(request);
     void notificationService.markReadForRequests([request.id]);
-    return request;
+    return { request, settled: true };
   },
 
   async cancel(id: string, cancelledBy: string | null = null): Promise<HumanRequest> {
+    return (await this.cancelOnce(id, cancelledBy)).request;
+  },
+
+  /** Comme `cancel`, en disant si c'est cet appel qui a réglé la demande (`settled`). Une demande déjà réglée est renvoyée telle quelle. */
+  async cancelOnce(id: string, cancelledBy: string | null = null): Promise<{ request: HumanRequest; settled: boolean }> {
     const request = await requestRepository.settle(id, 'cancelled', null, cancelledBy);
-    if (!request) return this.get(id);
+    if (!request) return { request: await this.get(id), settled: false };
     pubSub.publish('requestUpdated', request);
     settleWaiter(request);
     void notificationService.markReadForRequests([request.id]);
-    return request;
+    return { request, settled: true };
   },
 
   /** Annule toutes les demandes en attente d'une session (arrêt, fin de processus). */

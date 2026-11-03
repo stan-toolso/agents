@@ -471,8 +471,8 @@ export default function SessionDetailPage() {
 
       {pending.length > 0 && !readOnly && (
         <div className="cc-prompts">
-          {pending.map((r) => (
-            <RequestPrompt key={r.id} request={r} />
+          {pending.map((r, i) => (
+            <RequestPrompt key={r.id} request={r} keyboard={i === 0} />
           ))}
         </div>
       )}
