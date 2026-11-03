@@ -13,6 +13,7 @@ const m = vi.hoisted(() => ({
   session: { id: 's1', worksessionId: 'w1' as string | null, ownerId: 'u1', takenOverById: null as string | null },
   ownerKind: null as string | null,
   calls: [] as Array<[string, unknown[]]>,
+  events: [] as unknown[][],
   taskStatus: 'in_progress' as string,
   taskSessionIds: [] as string[],
   blockedBy: [] as string[],
@@ -32,6 +33,7 @@ vi.mock('../agents/service.js', () => ({
   },
 }));
 vi.mock('../git/agentEnv.js', () => ({ gitAccountFor: async (a: typeof accounts) => ({ host: 'github', userId: a.githubUserId, readOnly: a.githubReadOnly, pullRequests: a.githubPullRequests }) }));
+vi.mock('../sessions/events.js', () => ({ traceSessionEvent: async (...args: unknown[]) => void m.events.push(args) }));
 vi.mock('../sessions/service.js', () => ({ sessionService: { get: async () => m.session } }));
 vi.mock('../personal/scope.js', () => ({
   inScope: async (_p: Project, _s: unknown, projectId: string) => projectId === 'p',
@@ -87,6 +89,7 @@ const record = (name: string) => (...args: unknown[]) => void m.calls.push([name
 
 beforeEach(() => {
   m.calls = [];
+  m.events = [];
   m.session = { id: 's1', worksessionId: 'w1', ownerId: 'u1', takenOverById: null };
   m.taskStatus = 'in_progress';
   m.taskSessionIds = [];
@@ -201,6 +204,20 @@ describe('serveur MCP tasks', () => {
     expect((m.calls[0][1] as unknown[])[1]).not.toHaveProperty('sessionId');
     const got = await client.callTool({ name: 'get', arguments: { id: 't1' } });
     expect(textOf(got)).toMatch(/Bloquée par[\s\S]*t0 · \[todo\] Tâche t0/);
+  });
+
+  it('trace dans le transcript la création, la prise en charge et les changements de statut (événement task)', async () => {
+    const client = await connect();
+    const events = () => m.events.splice(0);
+    await client.callTool({ name: 'create', arguments: { title: 'Nouvelle' } });
+    expect(events()).toEqual([['s1', 'task', expect.objectContaining({ action: 'created', taskId: 't2', projectId: 'p', title: 'Nouvelle', status: 'todo', priority: 'medium' })]]);
+    await client.callTool({ name: 'update', arguments: { id: 't1', priority: 'high' } });
+    expect(events()).toEqual([]);
+    await client.callTool({ name: 'update', arguments: { id: 't1', status: 'done' } });
+    expect(events()).toEqual([['s1', 'task', expect.objectContaining({ action: 'status', taskId: 't1', status: 'done', previousStatus: 'in_progress' })]]);
+    m.taskStatus = 'todo';
+    await client.callTool({ name: 'claim', arguments: { id: 't1' } });
+    expect(events()).toEqual([['s1', 'task', expect.objectContaining({ action: 'claimed', taskId: 't1', status: 'in_progress', previousStatus: 'todo' })]]);
   });
 
   it('release rend une tâche dont la session est en charge', async () => {

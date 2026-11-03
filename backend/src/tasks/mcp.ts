@@ -6,6 +6,7 @@ import { inScope, targetProject, withProjectParam, type ProjectScope } from '../
 import type { Project } from '../projects/types.js';
 import { trackedPullRequestService } from '../pullRequests/service.js';
 import { describePullRequest, PR_STAGES, SETTABLE_PR_STATUSES, type PullRequestStage, type TrackedPullRequest, type TrackedPullRequestStatus } from '../pullRequests/types.js';
+import { traceSessionEvent } from '../sessions/events.js';
 import { sessionService } from '../sessions/service.js';
 import { describeAttachments, imageBlocks, type McpContent } from './attachments.js';
 import { assertUnblocked, dependencyText, describeThread, formatPerson, statusTagText, summarizeReactions, taskService } from './service.js';
@@ -94,6 +95,12 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
     if (!t || !(await inScope(project, scope, t.projectId, opts))) throw new Error(scope ? 'Tâche introuvable dans tes projets' : 'Tâche introuvable dans ce projet');
     return t;
   };
+  /**
+   * Carte de la tâche dans le transcript de la session (événement `task`) : création, prise en charge ou changement
+   * de statut par l'agent. Les autres modifications (étiquette d'état, description…) n'en laissent pas.
+   */
+  const trace = (action: 'created' | 'claimed' | 'status', t: Task, previousStatus?: Task['status']) =>
+    traceSessionEvent(sessionId, 'task', { action, taskId: t.id, projectId: t.projectId, title: t.title, status: t.status, priority: t.priority, statusTag: t.statusTag ?? null, ...(previousStatus ? { previousStatus } : {}) });
   const where = scope ? ' (par défaut ton espace personnel ; project : un de tes projets)' : '';
   /** Qui agit sur une PR suivie : cette session. */
   const prActor = { type: 'agent' as const, sessionId };
@@ -190,6 +197,7 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
               },
               actor,
             );
+            await trace('created', t);
             return `Tâche créée : ${line(t, sessionId)}`;
           }),
       ),
@@ -238,13 +246,16 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
               },
               actor,
             );
+            if (t.status !== current.status) await trace('status', t, current.status);
             return `Tâche mise à jour : ${line(t, sessionId)}`;
           }),
       ),
       tool('claim', "Prend une tâche en charge : l'assigne à cette session (en plus des sessions déjà en charge, s'il y en a) et la passe en in_progress. Refusé tant que la tâche est bloquée par des dépendances non terminées.", { id: z.string() }, async ({ id }) =>
         run(async () => {
-          await assertUnblocked(await own(id));
+          const current = await own(id);
+          await assertUnblocked(current);
           const t = await taskService.update(id, { status: 'in_progress', sessionId }, actor);
+          await trace('claimed', t, current.status !== t.status ? current.status : undefined);
           return `Tâche prise en charge : ${line(t, sessionId)}`;
         }),
       ),

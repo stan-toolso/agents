@@ -231,6 +231,10 @@ const eventsBySession = {
     ...tool(s, 18, 't6', 'Read', { file_path: '/workspace/docs/faq-support.md' }, '## Puis-je changer d’offre ?\nOui, à tout moment…\n## Les agents ont-ils accès à mes données ?\n…'),
     said(s, 12, 'J’ajoute l’interrupteur de période : les prix annuels sont calculés à partir des prix mensuels (-20 %), et la FAQ reprend les six questions du support en accordéon.'),
     ...tool(s, 9, 't7', 'Edit', { file_path: '/workspace/src/pages/tarifs.astro', old_string: '<section class="offers">', new_string: '<BillingToggle />\n<section class="offers">' }, 'The file has been updated.'),
+    ...tool(s, 8, 't8', 'mcp__tasks__create', { title: 'Traduire la page tarifs en anglais', priority: 'low' }, 'Tâche créée'),
+    ev(s, 8, 'task', { action: 'created', taskId: 't-3', projectId: 'p-site', title: 'Traduire la page tarifs en anglais', status: 'todo', priority: 'low' }),
+    ...tool(s, 7, 't9', 'mcp__context__write', { path: 'conventions/tarifs', content: '…' }, 'Mise à jour : conventions/tarifs (version 2)'),
+    ev(s, 7, 'context', { action: 'updated', projectId: 'p-site', instructionId: 'i-tarifs', path: 'conventions/tarifs', description: 'Prix annuels = prix mensuels −20 %, arrondis à l’euro', version: 2, agentId: null, library: null, changeNote: 'Remise annuelle' }),
     said(s, 1, 'Il me reste à relancer le build et à pousser la branche : j’ai besoin de ton accord pour la commande.'),
   ]),
 };
