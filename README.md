@@ -275,6 +275,7 @@ backend/
     previews/                  # aperçus des branches : configuration, lancement dans le conteneur, proxy par sous-domaine, instantanés des dépendances, MCP `preview`
     sharedPages/               # pages partagées : publication, versions, membres, route de lecture en bac à sable, MCP `pages`
     search/                    # recherche globale (projets, sessions, tâches, pages, coffre)
+    audit/                     # journal d'audit : table audit_log, enveloppe des mutations GraphQL (mutations.ts), export CSV
     exports/                   # export d'une session en Markdown, archive tar.gz d'un projet et import (routes /api/…/export.*)
     apiKeys/                   # clés d'API des projets
     context/
@@ -1778,6 +1779,30 @@ avec la personne qui l'a demandée) ; une **sous-session** laisse sa parente l'a
 personne** ne s'archive que si elle le demande ; toutes archivent les sessions qu'elles ont lancées une fois leur
 réponse lue. Les mutations `archiveWorksession`,
 `restoreWorksession`, `renameWorksession` et `deleteWorksession` restent dans l'API (sans interface).
+
+## Journal d'audit
+
+Le **journal** d'un projet (onglet « Journal », `/projects/:id/audit`, `pages/AuditPage.tsx`) dit qui a fait quoi,
+personnes comme agents : sessions lancées, arrêtées, interrompues, archivées ; réponses aux demandes (décision,
+portée, règles autorisées) ; tâches créées, changées de statut, supprimées ; contexte ; membres, autorisations
+mémorisées, clés d'API ; coffre du projet (jamais les valeurs) ; commit, push, pull, checkout du panneau git ; pull
+requests ; agents, workflows, planifications, fichiers d'environnement. Filtres par acteur (personne ou agent, type
+d'acteur), type, action et période ; export CSV avec les mêmes filtres (`GET /api/projects/:id/audit.csv`, 10 000
+lignes au plus). Ouvert aux **lecteurs** du projet (`auditLog`, `auditFacets`).
+
+- Table `audit_log` (`backend/src/audit`) : projet (NULL pour une action de l'application : utilisateurs, réglages du
+  serveur), acteur (`actor_user_id` ; `session_id` pour une session d'agent, la personne ou l'agent qui la porte étant
+  complété ; les deux NULL : Skipper, ex. une tâche terminée à la fusion de sa PR), action `<type>.<verbe>`, cible et
+  son libellé au moment de l'action, détails JSON bornés. Une écriture ratée est journalisée sans faire échouer l'action.
+- **Mutations GraphQL** : `withAudit` enveloppe `Mutation` (`audit/mutations.ts`) ; la table `AUDITED` dit pour
+  chacune l'action, où lire le projet et la cible (lue *avant* la mutation : une suppression ne laisse rien à lire) et
+  les détails. Le test `audit/mutations.test.ts` exige que **chaque mutation du schéma** soit classée : `AUDITED`,
+  `AUDITED_BY_SERVICE` (tâches) ou `NOT_AUDITED` (réglages personnels, fils de discussion, lectures, préparation git…).
+  Une nouvelle mutation fait donc échouer les tests tant qu'elle n'est pas classée ; une action nouvelle prend son
+  libellé dans `audit/labels.ts`.
+- **Agents** : tâches par `taskService` (création, changement de statut, aussi pour les personnes et les clés d'API),
+  contexte par `contextRepository.addChange` (auteur agent), et les outils `sessions.create/end/archive`,
+  `agents.summon`, `tasks.pr_open`.
 
 ## Export et import
 

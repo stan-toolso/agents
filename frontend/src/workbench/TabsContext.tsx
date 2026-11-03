@@ -28,6 +28,7 @@ export type TabKind =
   | 'pull-requests'
   | 'repo'
   | 'history'
+  | 'audit'
   | 'env'
   | 'settings'
   | 'users'
@@ -107,6 +108,7 @@ export function describeRoute(pathname: string): { title: string; kind: TabKind 
   if (/^\/projects\/[^/]+\/repo$/.test(pathname)) return { title: 'Dépôt', kind: 'repo' };
   if (/^\/projects\/[^/]+\/vault$/.test(pathname)) return { title: 'Coffre', kind: 'vault' };
   if (/^\/projects\/[^/]+\/history$/.test(pathname)) return { title: 'Historique', kind: 'history' };
+  if (/^\/projects\/[^/]+\/audit$/.test(pathname)) return { title: 'Journal', kind: 'audit' };
   if (/^\/projects\/[^/]+\/env$/.test(pathname)) return { title: 'Environnement', kind: 'env' };
   if (pathname === '/tasks') return { title: 'Tâches', kind: 'tasks' };
   if (/^\/tasks\/[^/]+$/.test(pathname)) return { title: 'Tâche', kind: 'task' };

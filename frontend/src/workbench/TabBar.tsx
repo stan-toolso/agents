@@ -41,6 +41,7 @@ const icons: Record<TabKind, string> = {
   'pull-requests': 'bi-git',
   repo: 'bi-code-square',
   history: 'bi-clock-history',
+  audit: 'bi-list-check',
   settings: 'bi-gear',
   users: 'bi-people',
   billing: 'bi-receipt',
