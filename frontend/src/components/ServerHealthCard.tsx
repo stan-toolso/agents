@@ -92,9 +92,14 @@ export default function ServerHealthCard({ memoryAlertThresholdMb }: { memoryAle
                       </>
                     }
                     label="sessions en cours"
-                    hint={`${h.sessions.busy} au travail, ${h.sessions.idle} en attente d'instructions`}
+                    hint={`${h.sessions.busy} au travail, ${h.sessions.idle} en attente d'instructions (processus actif)`}
                   />
                   <Stat value={h.sessions.queued} label="en file d'attente" />
+                  <Stat
+                    value={h.sessions.resumable + h.sessions.parked}
+                    label="reprenables, sans processus"
+                    hint={`${h.sessions.resumable} terminées depuis 24 h${h.sessions.parked ? `, ${h.sessions.parked} garées` : ''} : un message les relance, rien ne tourne d'ici là`}
+                  />
                   <Stat value={h.terminals} label="terminaux ouverts" />
                   <Stat
                     value={h.claudeProcesses.length}

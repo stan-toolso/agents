@@ -168,7 +168,7 @@ export interface ServerHealth {
   cpuCount: number;
   loadAverage: number[];
   memory: { totalMb: number; availableMb: number; swapTotalMb: number; swapFreeMb: number };
-  sessions: { running: number; busy: number; idle: number; queued: number; maxConcurrent: number };
+  sessions: { running: number; busy: number; idle: number; parked: number; resumable: number; queued: number; maxConcurrent: number };
   terminals: number;
   claudeProcesses: { pid: number; rssMb: number; elapsedSeconds: number }[];
   docker: {
@@ -204,6 +204,8 @@ export const SERVER_HEALTH = gql`
         running
         busy
         idle
+        parked
+        resumable
         queued
         maxConcurrent
       }

@@ -17,6 +17,7 @@ const actions: Record<string, (body: Record<string, unknown>) => Promise<unknown
   'session.start': (b) => sessionService.start(String(b.id), typeof b.message === 'string' ? b.message : undefined, (b.attachments as Attachment[]) ?? []),
   'session.interrupt': (b) => sessionService.interrupt(String(b.id)),
   'session.end': (b) => sessionService.end(String(b.id)),
+  'session.endForTask': (b) => sessionService.endForTask(String(b.id), String(b.notice)),
   'session.stop': (b) => sessionService.stop(String(b.id)),
   'session.config': (b) => sessionService.updateConfig(String(b.id), (b.patch as Record<string, unknown>) ?? {}),
   'terminal.close': (b) => terminalService.close(String(b.id)),
