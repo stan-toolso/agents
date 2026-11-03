@@ -427,6 +427,22 @@ describe('sync', () => {
   });
 });
 
+describe('watch (onglet actif)', () => {
+  it('resynchronise après 10 s (au lieu de 20) et ne renvoie que les PR en cours ou terminées depuis moins de 10 min', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-02T10:05:00Z'));
+    const old = await trackedPullRequestService.recordGithub('pw', gh(1, 'OPEN'), human);
+    const live = await trackedPullRequestService.recordGithub('pw', gh(2, 'OPEN'), human);
+    Object.assign(m.rows.find((r) => r.id === old.id)!, { status: 'merged', mergedAt: new Date('2026-09-01T10:00:00Z') });
+    await trackedPullRequestService.sync('pw', 'u1', { force: true });
+    m.github.push(gh(2, 'MERGED')); // fusionnée le 02/10 à 10:00
+    vi.setSystemTime(new Date('2026-10-02T10:05:05Z'));
+    expect((await trackedPullRequestService.watch('pw', 'u1')).map((r) => [r.id, r.status])).toEqual([[live.id, 'open']]);
+    vi.setSystemTime(new Date('2026-10-02T10:05:11Z'));
+    expect((await trackedPullRequestService.watch('pw', 'u1')).map((r) => [r.id, r.status])).toEqual([[live.id, 'merged']]);
+  });
+});
+
 describe('syncAll (synchronisation de fond)', () => {
   it('relit GitHub pour chaque projet à suivre, sans que personne ait ouvert la page des PR', async () => {
     vi.useFakeTimers();

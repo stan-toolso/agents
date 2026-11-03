@@ -1369,6 +1369,10 @@ export const resolvers = {
       await requireProject(ctx, args.projectId);
       return trackedPullRequestService.sync(args.projectId, requireUser(ctx).id, { force: true });
     },
+    watchPullRequests: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId);
+      return trackedPullRequestService.watch(args.projectId, requireUser(ctx).id);
+    },
     resolvePullRequestConflicts: async (_: unknown, args: { id: string }, ctx: Ctx) => {
       const pr = await trackedPullRequestService.get(args.id);
       await requireProject(ctx, pr.projectId, 'member');

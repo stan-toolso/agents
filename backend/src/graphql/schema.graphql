@@ -2938,6 +2938,8 @@ type Mutation {
   deletePullRequest(id: ID!): Boolean!
   "Rafraîchit tout de suite les pull requests suivies d'un projet depuis GitHub."
   syncPullRequests(projectId: ID!): [TrackedPullRequest!]!
+  "L'onglet actif regarde ce projet : synchronise ses pull requests avec GitHub si la dernière synchronisation date de plus de 10 s, et renvoie les PR en cours (en préparation, brouillon, à fusionner) et celles fusionnées ou fermées depuis moins de 10 minutes."
+  watchPullRequests(projectId: ID!): [TrackedPullRequest!]!
   "Demande à la session rattachée à la PR (TrackedPullRequest.session) de résoudre ses conflits avec la base : l'instruction lui est envoyée (la session est relancée si elle était terminée). Renvoie la session."
   resolvePullRequestConflicts(id: ID!): Session!
   "Fait relire une branche (dossier de travail) ou une PR suivie par un agent : session Claude en lecture seule dans le dossier de la branche, avec le diff par rapport à la base ; son rapport est publié dans le fil de la tâche et, pour une PR ouverte, en commentaire GitHub. Renvoie la session de relecture."
