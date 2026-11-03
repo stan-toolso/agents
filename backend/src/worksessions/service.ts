@@ -6,7 +6,7 @@ import { projectService } from '../projects/service.js';
 import { slugify } from '../projects/slug.js';
 import type { Project } from '../projects/types.js';
 import { ensureWorkspace, git, gitAuthFor, isGitRepository, workspacePath } from '../projects/workspace.js';
-import { LABEL_MAX, uniqueName } from './names.js';
+import { LABEL_MAX, uniqueName, uniqueNameAndBranch } from './names.js';
 import { worksessionRepository } from './repository.js';
 import { worksessionLabel, type Worksession } from './types.js';
 import { log } from '../log.js';
@@ -96,6 +96,12 @@ export interface CreateWorksessionInput {
   label?: string | null;
   /** Tâche à laquelle la work session est consacrée. */
   taskId?: string | null;
+  /**
+   * Noms dérivés (de la consigne, du titre d'une tâche), pas choisis : dossier et branche reçoivent ensemble
+   * un suffixe (`-2`, `-3`…) tant que la branche existe déjà, localement, sur origin ou dans un autre dossier
+   * de travail. Sans cette option, une branche existante est extraite telle quelle.
+   */
+  uniqueBranch?: boolean;
 }
 
 /**
@@ -124,6 +130,30 @@ async function runRetireHooks(project: Project, worksession: Worksession): Promi
 
 /** Restaurations de dossier en cours, par work session : des appels concurrents partagent la même. */
 const restoring = new Map<string, Promise<string>>();
+
+/** Dossier de chaque branche extraite dans un worktree du dépôt (checkout principal compris). */
+async function worktreeBranches(main: string): Promise<Map<string, string>> {
+  const out = await git(['worktree', 'list', '--porcelain'], main).catch(() => '');
+  const map = new Map<string, string>();
+  let dir = '';
+  for (const line of out.split('\n')) {
+    if (line.startsWith('worktree ')) dir = line.slice('worktree '.length);
+    else if (line.startsWith('branch refs/heads/')) map.set(line.slice('branch refs/heads/'.length), dir);
+  }
+  return map;
+}
+
+/** Branches qui existent déjà : locales, sur origin (dernier fetch) et extraites dans un worktree. */
+async function takenBranches(main: string): Promise<Set<string>> {
+  const refs = await git(['for-each-ref', '--format=%(refname)', 'refs/heads', 'refs/remotes/origin'], main).catch(() => '');
+  const taken = new Set<string>();
+  for (const ref of refs.split('\n').map((r) => r.trim())) {
+    if (ref.startsWith('refs/heads/')) taken.add(ref.slice('refs/heads/'.length));
+    else if (ref.startsWith('refs/remotes/origin/') && ref !== 'refs/remotes/origin/HEAD') taken.add(ref.slice('refs/remotes/origin/'.length));
+  }
+  for (const branch of (await worktreeBranches(main)).keys()) taken.add(branch);
+  return taken;
+}
 
 export const worksessionService = {
   listByProject: (projectId: string, opts?: { includeArchived?: boolean; archived?: 'exclude' | 'only' | 'all' }) => worksessionRepository.listByProject(projectId, opts),
@@ -161,13 +191,14 @@ export const worksessionService = {
    * branche d'un projet git est celle donnée, sinon le nom du dossier ; un projet sans dépôt n'a pas de
    * branche (le nom du dossier en tient lieu).
    */
-  async validate(project: Project, input: CreateWorksessionInput): Promise<{ branch: string; name: string; label: string | null }> {
+  async validate(project: Project, input: CreateWorksessionInput): Promise<{ branch: string; name: string; label: string | null; base: string; takenNames: string[] }> {
     const label = normalizeLabel(input.label);
     const base = slugify(input.name?.trim() || input.branch?.trim() || label || '');
     if (!base) throw new AppError('Donnez à la work session un nom, une branche ou un libellé');
-    const name = uniqueName(await worksessionRepository.listByProject(project.id, { includeArchived: true }), base);
+    const existing = await worksessionRepository.listByProject(project.id, { includeArchived: true });
+    const name = uniqueName(existing, base);
     const branch = project.gitUrl ? validateBranch(input.branch?.trim() || name) : name;
-    return { branch, name, label };
+    return { branch, name, label, base, takenNames: existing.map((w) => w.name) };
   },
 
   /**
@@ -177,11 +208,11 @@ export const worksessionService = {
    */
   async create(projectId: string, input: CreateWorksessionInput, actorId?: string | null): Promise<Worksession> {
     const project = await projectService.get(projectId);
-    const { branch, name, label } = await this.validate(project, input);
-    const dir = worksessionPath(project, { name });
-    if (await exists(dir)) throw new AppError(`Le dossier ${dir} existe déjà`);
-    await mkdir(worksessionsRoot(project), { recursive: true });
+    const validated = await this.validate(project, input);
+    const { label } = validated;
+    let { branch, name } = validated;
     let main: string | null = null;
+    let auth: string[] = [];
     if (project.gitUrl) {
       main = await ensureWorkspace(project, actorId);
       if (!(await isGitRepository(main))) {
@@ -189,8 +220,20 @@ export const worksessionService = {
           `Le dossier principal du projet (${main}) n'est pas un dépôt git. S'il est vide, « Créer le dossier » depuis la page du projet le clonera ; sinon videz-le ou clonez-y le dépôt à la main.`,
         );
       }
+      auth = await gitAuthFor(project, actorId);
+      if (input.uniqueBranch) {
+        // Branches à jour d'origin avant de choisir : le checkout qui suit n'a plus besoin de refaire le fetch.
+        await git(['fetch', '--prune', 'origin'], main, auth).catch(() => undefined);
+        const branchBase = validateBranch(input.branch?.trim() || validated.base);
+        ({ name, branch } = uniqueNameAndBranch(validated.base, branchBase, validated.takenNames, await takenBranches(main)));
+      }
+    }
+    const dir = worksessionPath(project, { name });
+    if (await exists(dir)) throw new AppError(`Le dossier ${dir} existe déjà`);
+    await mkdir(worksessionsRoot(project), { recursive: true });
+    if (main) {
       const base = input.baseRef?.trim() ? validateBaseRef(input.baseRef.trim()) : null;
-      await this.checkout(main, dir, branch, { base, defaultBranch: project.gitBranch, auth: await gitAuthFor(project, actorId) });
+      await this.checkout(main, dir, branch, { base, defaultBranch: project.gitBranch, auth, fetched: Boolean(input.uniqueBranch) });
       // Dépendances déjà installées une fois pour ce lockfile (instantané des aperçus) : liées tout de suite, sans installation.
       await seedWorksessionDeps(worksessionsRoot(project), dir);
     } else {
@@ -221,13 +264,19 @@ export const worksessionService = {
     main: string,
     dir: string,
     branch: string,
-    opts: { base?: string | null; defaultBranch?: string | null; auth?: string[] } = {},
+    opts: { base?: string | null; defaultBranch?: string | null; auth?: string[]; fetched?: boolean } = {},
   ): Promise<{ how: 'local' | 'remote' | 'new'; from: string }> {
-    await git(['fetch', '--prune', 'origin'], main, opts.auth ?? []).catch(() => undefined);
+    if (!opts.fetched) await git(['fetch', '--prune', 'origin'], main, opts.auth ?? []).catch(() => undefined);
     await fastForwardMain(main);
     const localBranches = (await git(['branch', '--list', branch], main)).trim();
     const remoteBranches = (await git(['branch', '-r', '--list', `origin/${branch}`], main)).trim();
     if (localBranches) {
+      const usedBy = (await worktreeBranches(main)).get(branch);
+      if (usedBy) {
+        throw new AppError(
+          `La branche « ${branch} » est déjà extraite dans le dossier de travail ${path.basename(usedBy)} : ouvrez la session de ce dossier, ou choisissez une autre branche.`,
+        );
+      }
       await git(['worktree', 'add', dir, branch], main);
       return { how: 'local', from: branch };
     }

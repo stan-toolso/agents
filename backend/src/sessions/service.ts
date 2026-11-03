@@ -435,7 +435,9 @@ export const sessionService = {
       // Sans nom ni branche ni libellé, la work session est nommée d'après la consigne (ou le nom de la session).
       const names = namesFromText(input.prompt?.trim() || input.name);
       const nw = input.newWorksession;
-      const worksession = await worksessionService.create(project.id, nw.name?.trim() || nw.branch?.trim() || nw.label?.trim() ? nw : { ...nw, ...names }, ownerId);
+      // Sans branche choisie, la branche est dérivée : suffixée si elle existe déjà plutôt que d'échouer ou de reprendre un autre travail.
+      const uniqueBranch = !nw.branch?.trim();
+      const worksession = await worksessionService.create(project.id, { ...(nw.name?.trim() || nw.branch?.trim() || nw.label?.trim() ? nw : { ...nw, ...names }), uniqueBranch }, ownerId);
       worksessionId = createdWorksessionId = worksession.id;
     }
     let session: Session;
