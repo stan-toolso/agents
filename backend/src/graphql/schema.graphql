@@ -2063,8 +2063,6 @@ type ProjectUnreadMessages {
 type InboxCounts {
   "Demandes (autorisation, question, saisie) en attente de réponse."
   requests: Int!
-  "Sessions dont l'agent attend des instructions, sans demande en attente."
-  idleSessions: Int!
   "Sessions en erreur depuis 24 h."
   failedSessions: Int!
   "Sessions coupées en plein tour depuis 24 h."
@@ -2080,7 +2078,7 @@ type Inbox {
   counts: InboxCounts!
   "Demandes en attente, les plus anciennes d'abord."
   requests: [Request!]!
-  "Sessions à reprendre : en attente d'instructions, en erreur ou interrompues (les plus anciennes d'abord)."
+  "Sessions à reprendre : en erreur ou interrompues (les plus anciennes d'abord). Une session qui attend simplement des instructions n'est pas « à traiter »."
   sessions: [Session!]!
   pullRequests: [TrackedPullRequest!]!
 }
