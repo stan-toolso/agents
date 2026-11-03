@@ -33,6 +33,7 @@ import {
 } from '../graphql/operations';
 import { GIT_BRANCH_CHANGES, GIT_BRANCH_FILE_DIFF, type GitBranchChanges } from '../graphql/sessions';
 import { usePollingQuery } from '../lib/usePollingQuery';
+import { useWatchPullRequests } from '../lib/useWatchPullRequests';
 import SessionChanges, { useSessionChanges } from '../components/SessionChanges';
 import { useGitPanel } from './GitTargetContext';
 import PreviewPanel from './PreviewPanel';
@@ -447,6 +448,8 @@ export default function GitPanel({ resizer }: { resizer?: PanelResizer }) {
   const projectQ = useQuery<{ project: { id: string; gitUrl: string | null } | null }>(GIT_PANEL_PROJECT, { variables: { id: target?.projectId ?? '' }, skip: !target });
   // Projet sans dépôt git : pas de comparaison à une base ni de pull requests (requêtes inutiles, erreurs côté serveur).
   const hasRepo = Boolean(projectQ.data?.project?.gitUrl);
+  // Statut des PR du projet affiché rafraîchi toutes les 10 s (au lieu d'une à deux minutes) tant que la page est visible.
+  useWatchPullRequests(hasRepo ? target?.projectId : null);
 
   const statusQ = usePollingQuery<{ gitStatus: GitStatus }>(GIT_STATUS, { variables: vars ?? undefined, skip: !gitVisible, pollInterval: 5000 });
   const branchesQ = usePollingQuery<{ gitBranches: GitBranch[] }>(GIT_BRANCHES, { variables: vars ?? undefined, skip: !gitVisible, pollInterval: 15000 });

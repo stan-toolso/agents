@@ -44,6 +44,15 @@ const MAX_TITLE = 500;
  * (une fusion faite hors de Skipper apparaît au relevé suivant).
  */
 const SYNC_INTERVAL_MS = 20_000;
+/**
+ * Projet regardé par l'onglet actif d'une personne (mutation `watchPullRequests`, appelée par le panneau de droite
+ * toutes les 10 s tant que la page est visible) : synchronisé au plus toutes les 10 s, pour qu'une fusion ou un
+ * changement de checks faits sur GitHub se voient en une dizaine de secondes là où l'on regarde. Coût : une requête
+ * GraphQL GitHub toutes les 10 s par projet regardé (360 par heure, sous la limite de 5 000 par heure et par compte).
+ */
+export const WATCH_SYNC_INTERVAL_MS = 10_000;
+/** PR terminées renvoyées à l'onglet qui regarde : celles fusionnées ou fermées depuis moins de ce délai. */
+const WATCH_RECENT_MS = 10 * 60_000;
 /** PR suivies absentes des 100 dernières du dépôt (ou d'un autre dépôt) : interrogées une à une, au plus ce nombre par synchronisation. */
 const MAX_INDIVIDUAL_FETCHES = 10;
 
@@ -347,10 +356,10 @@ export const trackedPullRequestService = {
    * session sont adoptées. Au plus une fois toutes les 20 s par projet, sauf `force`. Sans GitHub (dépôt ailleurs,
    * compte absent, panne), la partie GitHub est passée et la liste est rendue telle quelle.
    */
-  async sync(projectId: string, userId: string | null | undefined, opts: { force?: boolean } = {}): Promise<TrackedPullRequest[]> {
+  async sync(projectId: string, userId: string | null | undefined, opts: { force?: boolean; minIntervalMs?: number } = {}): Promise<TrackedPullRequest[]> {
     const current = () => pullRequestRepository.list({ projectId, limit: 1000 });
     const last = lastSync.get(projectId) ?? 0;
-    if (!opts.force && Date.now() - last < SYNC_INTERVAL_MS) return current();
+    if (!opts.force && Date.now() - last < (opts.minIntervalMs ?? SYNC_INTERVAL_MS)) return current();
     const project = await projectService.get(projectId).catch(() => null);
     if (!project?.gitUrl) return current();
     lastSync.set(projectId, Date.now());
@@ -360,6 +369,19 @@ export const trackedPullRequestService = {
     if (projectRepo) await this.syncGithub(projectId, userId, projectRepo).catch((err) => log.error('[pull-requests] synchronisation GitHub', err));
     await this.refreshPending(project).catch((err) => log.error('[pull-requests] travail local des branches', err));
     return current();
+  },
+
+  /**
+   * L'onglet actif regarde ce projet : synchronisation au plus toutes les 10 s (`WATCH_SYNC_INTERVAL_MS`), puis les PR
+   * en cours (en préparation, brouillon, à fusionner) et celles fusionnées ou fermées depuis moins de 10 minutes. La
+   * réponse reste petite (pas tout l'historique des PR fusionnées) et suffit au cache du client, qui met à jour par
+   * identifiant toutes les vues qui affichent ces PR (sidebar, fiche de tâche, grille).
+   */
+  async watch(projectId: string, userId: string | null | undefined): Promise<TrackedPullRequest[]> {
+    const all = await this.sync(projectId, userId, { minIntervalMs: WATCH_SYNC_INTERVAL_MS });
+    const since = Date.now() - WATCH_RECENT_MS;
+    const endedAt = (pr: TrackedPullRequest) => (pr.status === 'merged' ? pr.mergedAt : pr.status === 'closed' ? pr.closedAt : null);
+    return all.filter((pr) => pr.status === 'pending' || pr.status === 'open' || (endedAt(pr)?.getTime() ?? 0) >= since);
   },
 
   /**

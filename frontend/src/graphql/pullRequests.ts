@@ -255,3 +255,18 @@ export const STAGE_LABELS: Record<PullRequestStage, { label: string; plural: str
   MERGED: { label: 'fusionnée', plural: 'Fusionnées', icon: 'bi-check2-circle', cls: 'pr-stage-merged', hint: 'Fusionnée dans la base' },
   CANCELLED: { label: 'annulée', plural: 'Annulées', icon: 'bi-x-circle', cls: 'pr-stage-cancelled', hint: 'Fermée sans fusion' },
 };
+
+/**
+ * L'onglet actif regarde un projet (useWatchPullRequests) : le serveur synchronise ses PR avec GitHub au plus toutes
+ * les 10 s et renvoie les PR en cours et celles terminées récemment. Le cache Apollo, normalisé par identifiant, met
+ * à jour toutes les vues qui affichent ces PR (sidebar, fiche et grille des tâches, page des PR).
+ */
+export const WATCH_PULL_REQUESTS = gql`
+  ${TASK_PULL_REQUEST_FIELDS}
+  mutation WatchPullRequests($projectId: ID!) {
+    watchPullRequests(projectId: $projectId) {
+      ...TaskPullRequestFields
+      syncedAt
+    }
+  }
+`;
