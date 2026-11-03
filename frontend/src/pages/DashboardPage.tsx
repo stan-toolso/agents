@@ -49,7 +49,8 @@ export default function DashboardPage() {
     );
 
   const { counts, usage } = d;
-  const waiting = counts.pendingRequests + counts.idleSessions;
+  // Une session qui attend simplement des instructions n'est pas « à traiter » (elle reste comptée dans « Agents au travail »).
+  const waiting = counts.pendingRequests;
   // Sessions coupées en plein tour par un redémarrage du serveur (pas une erreur, mais un travail à reprendre).
   // Projets où l'on peut créer une tâche (pas lecteur), proposés dans la modale de création.
   const writableProjects = d.projects.filter((p) => p.project.myRole !== 'VIEWER').map((p) => p.project);
@@ -83,7 +84,7 @@ export default function DashboardPage() {
           <div className="dash-tile-label"><i className="bi bi-hand-index-thumb" /> Demandes en attente</div>
           <div className="dash-tile-value">{counts.pendingRequests}</div>
           <div className="dash-tile-sub">
-            {counts.pendingRequests ? 'Des agents sont bloqués jusqu’à votre réponse' : counts.idleSessions ? `${plural(counts.idleSessions, 'agent attend', 'agents attendent')} vos instructions` : 'Rien ne vous attend'}
+            {counts.pendingRequests ? 'Des agents sont bloqués jusqu’à votre réponse' : 'Rien ne vous attend'}
           </div>
         </Link>
         <Link to="/sessions" className="dash-tile">
@@ -120,7 +121,6 @@ export default function DashboardPage() {
             </h2>
             <ul className="dash-list">
               {d.pendingRequests.map((r) => <RequestRow key={r.id} request={r} />)}
-              {d.runningSessions.filter((s) => s.activity !== 'BUSY' && s.pendingRequestCount === 0).map((s) => <SessionRow key={s.id} session={s} hint="attend vos instructions" icon="bi-chat-left-dots warn" />)}
               {d.recentSessions.filter((s) => s.status === 'FAILED' && isRecent(s.endedAt ?? s.updatedAt, 24)).map((s) => <SessionRow key={s.id} session={s} hint={s.error ? shorten(s.error, 80) : 'en erreur'} icon="bi-x-octagon bad" />)}
               {interruptedMidTurn.map((s) => <SessionRow key={s.id} session={s} hint="interrompue en plein travail par un redémarrage" icon="bi-pause-circle warn" />)}
               {waiting === 0 && counts.failedSessions24h === 0 && interruptedMidTurn.length === 0 && <li className="empty">Rien à traiter : les agents n’ont besoin de rien pour l’instant.</li>}
