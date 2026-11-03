@@ -14,6 +14,11 @@ export interface SessionSchedule {
   enabled: boolean;
   /** Terminer la session à la fin de chaque exécution (sinon elle reste ouverte aux instructions). */
   endAfterRun: boolean;
+  /**
+   * Outils pré-autorisés pour les seules exécutions de la planification (règles au format Claude Code :
+   * `Bash(git status *)`, `mcp__vault__sql_query(production)`…). Hors exécution planifiée, ils ne valent rien.
+   */
+  allowedTools: string[];
   nextRunAt: Date | null;
   lastRunAt: Date | null;
   /** Compte rendu texte de la dernière exécution (gardé pour compatibilité ; l'historique est dans `ScheduleRun`). */
@@ -30,6 +35,8 @@ export interface SessionScheduleInput {
   prompt: string;
   enabled?: boolean | null;
   endAfterRun?: boolean | null;
+  /** Outils pré-autorisés pour les exécutions (absent ou null : inchangés). */
+  allowedTools?: string[] | null;
   /** Réglage de nettoyage de la session, enregistré en même temps (null ou absent : inchangé). */
   cleanup?: SessionCleanup | null;
 }

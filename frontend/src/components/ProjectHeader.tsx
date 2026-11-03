@@ -5,7 +5,7 @@ import { PROJECT_UNREAD_MESSAGES } from '../graphql/conversations';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { useSessionLauncher } from './SessionLauncher';
 
-export type ProjectTab = 'overview' | 'conversations' | 'chats' | 'repo' | 'tasks' | 'agents' | 'pullRequests' | 'context' | 'vault' | 'env' | 'schedules' | 'workflows' | 'history' | 'usage' | 'settings';
+export type ProjectTab = 'overview' | 'conversations' | 'chats' | 'repo' | 'tasks' | 'agents' | 'pullRequests' | 'context' | 'vault' | 'env' | 'schedules' | 'workflows' | 'history' | 'audit' | 'usage' | 'settings';
 
 const TABS: { key: ProjectTab; label: string; path: string; icon: string; title?: string; absolute?: boolean }[] = [
   { key: 'overview', label: 'Tableau de bord', path: '', icon: 'bi-speedometer2', title: 'Ce qui attend une réponse, l’équipe au travail, le flux des tâches et la consommation du projet' },
@@ -21,6 +21,7 @@ const TABS: { key: ProjectTab; label: string; path: string; icon: string; title?
   { key: 'workflows', label: 'Workflows', path: '/workflows', icon: 'bi-diagram-3', title: 'Workflows : enchaînements d’appels de modèle, de sessions et de tâches' },
   { key: 'history', label: 'Historique', path: '/history', icon: 'bi-clock-history', title: 'Sessions et work sessions archivées' },
   { key: 'usage', label: 'Consommation', path: '/usage', icon: 'bi-bar-chart-line', title: 'Coût du projet par jour, semaine, modèle et session ; budget mensuel' },
+  { key: 'audit', label: 'Journal', path: '/audit', icon: 'bi-list-check', title: 'Journal d’audit : qui a fait quoi, personnes et agents (sessions, demandes, tâches, membres, coffre, git…), avec filtres et export CSV' },
   { key: 'settings', label: 'Réglages', path: '/settings', icon: 'bi-gear', title: 'Dossier de travail, instructions permanentes, membres, autorisations mémorisées, conteneur, clés d’API' },
 ];
 

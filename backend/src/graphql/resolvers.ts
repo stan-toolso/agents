@@ -1,3 +1,7 @@
+import { withAudit } from '../audit/mutations.js';
+import { auditService } from '../audit/service.js';
+import { actionLabel, targetTypeLabel } from '../audit/labels.js';
+import { parseAuditFilter, type AuditEntry, type RawAuditFilter } from '../audit/types.js';
 import { DateTimeResolver, JSONResolver } from 'graphql-scalars';
 import { accessibleProjectIds, canAccessProject, filterAsync, memberRoleFor, requireAdmin, requireProject, requireSuperAdmin, requireUser, roleFor, settingsUser, type AuthContext } from '../auth/access.js';
 import { agentService } from '../agents/service.js';
@@ -48,6 +52,7 @@ import { importProjectArchive, MAX_IMPORT_BYTES } from '../exports/service.js';
 import { runner, type RunnerConfig } from '../runners/index.js';
 import { containerMonitor } from '../runners/monitor.js';
 import { runnerLifecycle } from '../runners/lifecycle.js';
+import { checkBrowser } from '../browser/check.js';
 import type { ContextChange, ContextInstruction, ContextInstructionVersion } from '../context/types.js';
 import { projectService } from '../projects/service.js';
 import { isPersonalProject } from '../projects/types.js';
@@ -104,6 +109,7 @@ import { userService } from '../users/service.js';
 import type { ProjectMember, ProjectRole } from '../users/types.js';
 import { log } from '../log.js';
 import { previewService } from '../previews/service.js';
+import { personAuthor } from '../sessions/instructionAuthor.js';
 
 type Ctx = AuthContext;
 /** Message d'un canal enrichi par le résolveur de la liste : ses réactions et ses réponses, lues en une fois. */
@@ -581,6 +587,13 @@ export const resolvers = {
     linkedBy: (l: VaultLink, _: unknown, ctx: Ctx) => userOrNull(ctx, l.linkedById),
   },
 
+  AuditEntry: {
+    actionLabel: (e: AuditEntry) => actionLabel(e.action),
+    targetTypeLabel: (e: AuditEntry) => targetTypeLabel(e.targetType),
+    actorKind: (e: AuditEntry) => e.actorKind.toUpperCase(),
+    actor: (e: AuditEntry, _: unknown, ctx: Ctx) => userOrNull(ctx, e.actorUserId),
+  },
+
   VaultAuditEvent: {
     actor: (e: VaultAuditEvent, _: unknown, ctx: Ctx) => userOrNull(ctx, e.actorUserId),
     project: (e: VaultAuditEvent, _: unknown, ctx: Ctx) => projectIfAccessible(ctx, e.projectId),
@@ -853,6 +866,20 @@ export const resolvers = {
   },
 
   Query: {
+    auditLog: async (_: unknown, args: { projectId: string; filter?: RawAuditFilter | null; limit?: number | null; before?: string | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'viewer');
+      return auditService.list({ ...parseAuditFilter(args.projectId, args.filter), limit: args.limit ?? 100, before: args.before ?? null });
+    },
+    auditFacets: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'viewer');
+      const facets = await auditService.facets(args.projectId);
+      const actors = (await Promise.all(facets.actorUserIds.map((id) => userOrNull(ctx, id)))).filter((u) => u !== null);
+      return {
+        actors,
+        targetTypes: facets.targetTypes.map((value) => ({ value, label: targetTypeLabel(value) })),
+        actions: facets.actions.map((value) => ({ value, label: actionLabel(value) })),
+      };
+    },
     agent: async (_: unknown, args: { id: string }, ctx: Ctx) => {
       const agent = await agentService.get(args.id);
       await requireProject(ctx, agent.projectId, 'viewer');
@@ -1140,6 +1167,19 @@ export const resolvers = {
       }
       return scheduleService.listForProjects(await accessibleProjectIds(ctx));
     },
+    schedulePermissionSuggestions: async (_: unknown, args: { projectId: string; sessionId?: string | null; prompt?: string | null }, ctx: Ctx) => {
+      const user = requireUser(ctx);
+      await requireProject(ctx, args.projectId, 'member');
+      let ownerId: string | null = user.id;
+      if (args.sessionId) {
+        await guardSession(ctx, args.sessionId, 'member');
+        const session = await sessionService.get(args.sessionId);
+        if (!session || session.projectId !== args.projectId) throw new AppError("La session n'appartient pas à ce projet");
+        ownerId = session.ownerId;
+      }
+      const list = await scheduleService.permissionSuggestions({ sessionId: args.sessionId ?? null, projectId: args.projectId, ownerId, prompt: args.prompt });
+      return list.map((s) => ({ ...s, source: s.source.toUpperCase() }));
+    },
     scheduleNextRuns: (_: unknown, args: { cron: string; timezone?: string | null; count?: number | null }, ctx: Ctx) => {
       requireUser(ctx);
       return scheduleService.preview(args.cron, args.timezone, args.count ?? 5);
@@ -1228,7 +1268,7 @@ export const resolvers = {
     },
   },
 
-  Mutation: {
+  Mutation: withAudit({
     createAgent: async (_: unknown, args: { projectId: string; input: GqlAgentInput }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId, 'member');
       return agentService.create(args.projectId, fromGqlAgentInput(args.input), requireUser(ctx));
@@ -1647,6 +1687,10 @@ export const resolvers = {
       await runnerLifecycle.reset(project);
       return project;
     },
+    testProjectBrowser: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.id, 'member');
+      return checkBrowser(await projectService.get(args.id));
+    },
     deleteProject: async (_: unknown, args: { id: string; deleteHostedRepo?: boolean | null }, ctx: Ctx) => {
       await requireProject(ctx, args.id, 'admin');
       await personalService.assertNotPersonal(args.id, 'Supprimer');
@@ -1698,7 +1742,7 @@ export const resolvers = {
     },
     sendSessionMessage: async (_: unknown, args: { id: string; text: string; attachments?: AttachmentInput[] | null }, ctx: Ctx) => {
       await guardSession(ctx, args.id, 'member');
-      return sessionService.sendMessage(args.id, args.text, args.attachments, { byPerson: true });
+      return sessionService.sendMessage(args.id, args.text, args.attachments, { byPerson: true, author: personAuthor(requireUser(ctx)) });
     },
     endSession: async (_: unknown, args: { id: string }, ctx: Ctx) => {
       await guardSession(ctx, args.id, 'member');
@@ -1859,7 +1903,7 @@ export const resolvers = {
     },
     resumeTaskSession: async (_: unknown, args: { id: string; text: string }, ctx: Ctx) => {
       await guardTask(ctx, args.id, 'member');
-      return resumeTaskSession(args.id, args.text);
+      return resumeTaskSession(args.id, args.text, personAuthor(requireUser(ctx)));
     },
     createProjectApiKey: async (_: unknown, args: { projectId: string; name: string }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId, 'admin');
@@ -2028,7 +2072,7 @@ export const resolvers = {
       await guardInstruction(ctx, args.id, 'member');
       return contextService.restoreVersion(args.id, args.version, HUMAN);
     },
-  },
+  }),
 
   Subscription: {
     sessionEvents: {

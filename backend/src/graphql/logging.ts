@@ -1,7 +1,7 @@
 import type { DocumentNode, ExecutionResult } from 'graphql';
 import { createGraphQLError, isAsyncIterable, maskError, type Plugin, type YogaLogger } from 'graphql-yoga';
 import type { AuthContext } from '../auth/access.js';
-import { AppError } from '../errors.js';
+import { AppError, isInvalidUuidError, NotFoundError } from '../errors.js';
 import { createLogger } from '../log.js';
 
 /**
@@ -28,11 +28,19 @@ interface GraphQLErrorLike extends Error {
 
 const asGraphQLError = (error: unknown): GraphQLErrorLike | null => (error instanceof Error && error.name === 'GraphQLError' ? (error as GraphQLErrorLike) : null);
 
+/** Erreur métier portée par une erreur (elle-même ou l'erreur d'origine du résolveur) ; un identifiant mal formé vaut « introuvable ». */
 export const appErrorOf = (error: unknown): AppError | null => {
-  if (error instanceof AppError) return error;
-  const original = asGraphQLError(error)?.originalError;
-  return original instanceof AppError ? original : null;
+  const original = error instanceof AppError || isInvalidUuidError(error) ? error : asGraphQLError(error)?.originalError;
+  if (original instanceof AppError) return original;
+  return isInvalidUuidError(original) ? new NotFoundError() : null;
 };
+
+/**
+ * Niveau d'une erreur métier dans le journal : `warn`, sauf « Connexion requise » (`UNAUTHENTICATED`), attendue quand
+ * une session a expiré et que l'interface, affichée avec l'utilisateur de la dernière visite, interroge le serveur
+ * avant d'apprendre qu'il faut se reconnecter. Elle reste visible en `debug`.
+ */
+const levelOf = (app: AppError): 'warn' | 'debug' => (app.code === 'UNAUTHENTICATED' ? 'debug' : 'warn');
 
 const pathOf = (error: unknown): string | null => {
   const path = asGraphQLError(error)?.path;
@@ -57,7 +65,7 @@ export const yogaLogger: YogaLogger = {
     const where = pathOf(first);
     if (app) {
       // Normalement déjà journalisée par le plugin (opération et utilisateur connus) ; sinon, une ligne quand même.
-      if (!(typeof first === 'object' && first !== null && reported.has(first))) log.warn(`${where ? `${where} : ` : ''}${app.message}`);
+      if (!(typeof first === 'object' && first !== null && reported.has(first))) log[levelOf(app)](`${where ? `${where} : ` : ''}${app.message}`);
       return;
     }
     // Erreur inattendue : la trace de l'erreur d'origine (celle du résolveur), précédée du chemin GraphQL.
@@ -73,13 +81,13 @@ function operationNameOf(document: DocumentNode, explicit: string | null | undef
   return '(anonyme)';
 }
 
-/** Journalise les erreurs métier d'un résultat d'exécution : une ligne `warn` par erreur. */
+/** Journalise les erreurs métier d'un résultat d'exécution : une ligne `warn` par erreur (`debug` pour « Connexion requise »). */
 export function reportAppErrors(result: ExecutionResult, operation: string, user: string | null): void {
   for (const error of result.errors ?? []) {
     const app = appErrorOf(error);
     if (!app) continue;
     reported.add(error);
-    log.warn(`${operation} · ${pathOf(error) ?? operation} · ${user ?? 'anonyme'} : ${app.message}`);
+    log[levelOf(app)](`${operation} · ${pathOf(error) ?? operation} · ${user ?? 'anonyme'} : ${app.message}`);
   }
 }
 

@@ -255,6 +255,8 @@ function AuthCard({ settings }: { settings: AppSettings }) {
   );
 }
 
+const TITLE_MODEL_LABEL = 'Haiku 4.5';
+
 function ModelsCard({ settings }: { settings: AppSettings }) {
   const { claude, models } = settings;
   const [allowed, setAllowed] = useState<string[]>(claude.allowedModels);
@@ -355,6 +357,22 @@ function ModelsCard({ settings }: { settings: AppSettings }) {
             <ErrorLine error={error} />
           </Col>
         </Row>
+        <hr />
+        <Form.Check
+          type="switch"
+          id="claude-auto-title"
+          checked={claude.autoTitle}
+          disabled={loading}
+          onChange={(e) => void update({ variables: { input: { autoTitle: e.target.checked } } }).catch(() => undefined)}
+          label={
+            <>
+              Titrer les sessions automatiquement
+              <div className="small text-secondary">
+                Après la première réponse, un modèle léger ({TITLE_MODEL_LABEL}) remplace le début de la consigne par un titre court. Les sessions de tâches et planifiées gardent leur nom ; un nom choisi à la main n'est jamais remplacé. Coût négligeable, compté dans votre consommation.
+              </div>
+            </>
+          }
+        />
       </Card.Body>
     </Card>
   );

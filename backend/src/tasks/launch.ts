@@ -11,6 +11,7 @@ import type { Worksession } from '../worksessions/types.js';
 import { assertUnblocked, taskService } from './service.js';
 import { asInstructionAttachments, describeAttachment, fitInInstruction } from './attachments.js';
 import type { Task, TaskAttachment, TaskComment } from './types.js';
+import type { InstructionAuthor } from '../sessions/instructionAuthor.js';
 
 export interface StartTaskOptions {
   provider?: string | null;
@@ -69,7 +70,7 @@ export async function taskWorksession(task: Task, actorId?: string | null): Prom
   const existing = await worksessionService.forTask(task.id);
   if (existing) return existing;
   const { label, name, branch } = taskWorksessionNames(task, await worksessionRepository.listByProject(task.projectId, { includeArchived: true }));
-  return worksessionService.create(task.projectId, { name, branch, label, taskId: task.id }, actorId);
+  return worksessionService.create(task.projectId, { name, branch, label, taskId: task.id, uniqueBranch: true }, actorId);
 }
 
 /**
@@ -147,7 +148,7 @@ export async function resumableTaskSession(task: Task): Promise<Session | null> 
  * archivées (une seule à la fois), la tâche repasse en cours et le message est envoyé à la session — transmis à
  * l'agent s'il tourne, sinon la session repart avec ce message, conversation comprise.
  */
-export async function resumeTaskSession(taskId: string, text: string): Promise<Session> {
+export async function resumeTaskSession(taskId: string, text: string, author: InstructionAuthor | null = null): Promise<Session> {
   if (!text.trim()) throw new AppError('Le message est vide');
   const task = await taskService.get(taskId);
   if (!task) throw new NotFoundError('Tâche introuvable');
@@ -163,5 +164,5 @@ export async function resumeTaskSession(taskId: string, text: string): Promise<S
   }
   if (session.archivedAt) await sessionService.unarchive(session.id);
   await taskService.update(task.id, { status: 'in_progress', sessionId: session.id, releaseSessionIds: archived.filter((id) => task.sessionIds.includes(id)) });
-  return sessionService.sendMessage(session.id, text);
+  return sessionService.sendMessage(session.id, text, null, { author });
 }

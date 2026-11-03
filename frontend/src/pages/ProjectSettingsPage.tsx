@@ -7,6 +7,7 @@ import { useTabTitle } from '../workbench/TabsContext';
 import { useGitTarget } from '../workbench/GitTargetContext';
 import ProjectHeader from '../components/ProjectHeader';
 import WorksessionDiskCard from '../components/WorksessionDiskCard';
+import BrowserCheckCard from '../components/BrowserCheckCard';
 
 import { CREATE_PROJECT_API_KEY, DELETE_PROJECT_API_KEY, PROJECT_API_KEYS, type ProjectApiKey } from '../graphql/tasks';
 import { apiBaseUrl } from '../apollo';
@@ -768,6 +769,7 @@ export default function ProjectSettingsPage() {
       {!personal && <MembersCard projectId={project.id} canManage={isAdmin} />}
       <PermissionRulesCard projectId={project.id} canManage={canWrite} />
       <RunnerCard project={project} />
+      {!personal && <BrowserCheckCard projectId={project.id} enabled={Boolean(project.runnerConfig?.browser)} canEdit={isAdmin} />}
       <WorksessionDiskCard projectId={project.id} canWrite={canWrite} isAdmin={isAdmin} />
       {isAdmin && !personal && <ApiKeysCard projectId={project.id} />}
 
