@@ -172,6 +172,28 @@ describe('Transcript', () => {
     expect(tech).toContain('Terminé');
   });
 
+  it('en conversation, cache les commandes et montre seulement que l’agent réfléchit', () => {
+    const people: ChatParticipants = { human: { name: 'Alice Martin' }, agent: { name: 'Ben' } };
+    const events = [
+      ev('instruction', { text: 'Lance la CI' }),
+      tool('t1', 'Bash', { command: 'npm run ci -- --serial', run_in_background: true }),
+      result('t1', 'lancé'),
+      ev('claude.system', { subtype: 'task_notification', summary: 'npm run ci -- --serial' }),
+      tool('t2', 'Bash', { command: 'uptime; tail -8 log' }),
+    ];
+    const live = renderToStaticMarkup(
+      <MemoryRouter>
+        <Transcript events={events} autoScroll={false} participants={people} busy />
+      </MemoryRouter>,
+    );
+    expect(live).not.toContain('npm run ci');
+    expect(live).not.toContain('uptime');
+    expect(live).toContain('Ben réfléchit…');
+    expect(html(events, false, people)).not.toContain('réfléchit');
+    // Le détail technique garde la commande et la notification de fin.
+    expect(html(events, true, people)).toContain('⏺ npm run ci -- --serial');
+  });
+
   it('signe chaque instruction de son auteur journalisé, à défaut de la personne qui pilote la session', () => {
     const people: ChatParticipants = { human: { name: 'Alice Martin' }, agent: { name: 'Claude' } };
     const events = [

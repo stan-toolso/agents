@@ -162,7 +162,8 @@
 .cc-chat-body { margin-top: 2px; }
 .cc-chat-body > * + * { margin-top: 6px; }
 .cc-chat-text { color: var(--cc-fg); }
-div.cc-chat-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Texte brut des instructions seulement : sur une réponse Markdown, pre-wrap rendrait les retours à la ligne entre balises (lignes vides). */
+div.cc-chat-text:not(.cc-md) { white-space: pre-wrap; overflow-wrap: anywhere; }
 /* Suite du message de l'agent en cours d'écriture, alignée sur le corps du message (avatar 28 px + écart 10 px). */
 .cc-chat-cont { margin: 4px 0 8px 38px; }
 .cc-chat .cc-tool, .cc-chat .cc-thinking { margin: 2px 0; }
@@ -173,6 +174,8 @@ div.cc-chat-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .cc-chat .cc-group .cc-dot.ok { color: var(--cc-dimmer); }
 .cc-chat .cc-group-body, .cc-chat .cc-tool:not(.cc-group) { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace; font-size: 12px; }
 .cc-chat .cc-thinking { font-size: 12.5px; }
+/* « L'agent réfléchit… » : l'agent travaille sans écrire (pas de cursor pointer, rien à déplier). */
+.cc-chat .cc-chat-thinking { cursor: default; animation: cc-blink 1.6s ease-in-out infinite; }
 .cc-chat .cc-note { font-size: 12px; }
 .cc-note.error { color: var(--cc-red); }
 .cc-note.warn { color: var(--cc-yellow); }
