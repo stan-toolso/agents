@@ -953,9 +953,16 @@ et `gitService.changesSince` / `diffSince` / `restoreFromBase` (queries `session
 Thème sombre inspiré de Claude Code (`frontend/src/theme.css`). Par défaut (détails techniques masqués),
 une session **se lit comme une conversation**, à la manière d'un canal : chaque instruction et chaque tour de
 l'agent sont un message avec avatar, nom et heure, en police de texte (`ChatRow`, prop `participants` de
-`Transcript`). Écrit les instructions la personne qui pilote la session (qui a pris la main, qui l'a demandée
-à l'agent, ou sa propriétaire), sinon la session d'agent qui l'a lancée ; répond l'agent de projet qui joue la
-session, sinon « Claude ». Tout le tour de l'agent tient dans son message (étapes repliées en une ligne discrète,
+`Transcript`). **Chaque instruction est signée** : l'événement `instruction` porte son `author`
+(`backend/src/sessions/instructionAuthor.ts` : une personne, une session d'agent ou Skipper lui-même — reprise
+après redémarrage, planification, fil d'une tâche, nettoyage), passé par `sessionService.sendMessage(…, { author })`
+et `start(…, { author })` jusqu'au provider, à travers la file d'attente et les appels entre instances. La consigne
+de départ revient à la session qui l'a lancée, sinon à la personne qui l'a demandée, sinon à sa propriétaire
+(`promptAuthor`). Le modèle le voit aussi : une ligne `[Message de Nom <e-mail>]` (ou `[Message de la session
+d'agent « Nom » (@session:<id>)]`) précède l'instruction qu'il reçoit, sans figurer dans le texte journalisé (rien
+pour Skipper ni devant une commande `/…`) ; l'export Markdown et le résumé de conversation la reprennent. Les
+instructions d'avant le 03/11/2026, sans auteur, sont attribuées à la personne qui pilote la session. Répond
+l'agent de projet qui joue la session, sinon « Claude ». Tout le tour de l'agent tient dans son message (étapes repliées en une ligne discrète,
 messages, questions) et un tour réussi ne laisse pas de ligne « Terminé ». Avec « Afficher les détails
 techniques », la page de session (`frontend/src/components/Transcript.tsx`) reproduit l'affichage du terminal : instructions préfixées par `>`,
 réponses `⏺`, appels d'outils `⏺ Outil(arguments)` (`Bash(commande)`, `Update(fichier)`,

@@ -150,4 +150,22 @@ describe('Transcript', () => {
     expect(tech).not.toContain('cc-chat');
     expect(tech).toContain('Terminé');
   });
+
+  it('signe chaque instruction de son auteur journalisé, à défaut de la personne qui pilote la session', () => {
+    const people: ChatParticipants = { human: { name: 'Alice Martin' }, agent: { name: 'Claude' } };
+    const events = [
+      ev('instruction', { text: 'Ancienne consigne' }),
+      ev('instruction', { text: 'Regarde aussi le mobile', author: { type: 'user', id: 'u2', name: 'Bruno Petit', email: 'bruno@toolso.io' } }),
+      ev('instruction', { text: 'Fais le point', author: { type: 'session', id: 'parent-1', name: 'Release de novembre' } }),
+      ev('instruction', { text: 'Exécution planifiée', author: { type: 'system', name: 'Planification « Revue »' } }),
+    ];
+    const out = html(events, false, people);
+    expect(out).toContain('Alice Martin');
+    expect(out).toContain('Bruno Petit');
+    expect(out).toContain('href="/sessions/parent-1"');
+    expect(out).toContain('Planification « Revue »');
+    expect(out).toContain('bi-gear');
+    // En mode technique, le nom reste lisible à côté de l'heure.
+    expect(html(events, true, people)).toContain('Bruno Petit');
+  });
 });

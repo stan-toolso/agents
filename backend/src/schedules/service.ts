@@ -15,6 +15,7 @@ import { RUN_STATUS_LABELS, runOutcome, summarizeEvents } from './outcome.js';
 import { scheduleRepository } from './repository.js';
 import type { ScheduleRun, ScheduleRunStatus, SessionSchedule, SessionScheduleInput } from './types.js';
 import { log } from '../log.js';
+import { systemAuthor } from '../sessions/instructionAuthor.js';
 
 /** Fréquence de vérification des échéances. */
 const TICK_MS = 30_000;
@@ -280,7 +281,7 @@ export const scheduleService = {
     scheduledRuns.add(id);
     localRuns.set(id, run.id);
     try {
-      await sessionService.sendMessage(id, schedule.prompt);
+      await sessionService.sendMessage(id, schedule.prompt, null, { author: systemAuthor(`Planification « ${schedule.name} »`) });
     } catch (err) {
       scheduledRuns.delete(id);
       localRuns.delete(id);

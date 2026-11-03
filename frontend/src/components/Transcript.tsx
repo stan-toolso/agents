@@ -10,10 +10,30 @@ import Markdown from './Markdown';
 import AgentAvatar from './AgentAvatar';
 import { Avatar } from './Thread';
 
+/** Auteur journalisé avec une instruction (`author` de l'événement, backend sessions/instructionAuthor.ts). */
+export type InstructionAuthor = { type: 'user'; id?: string; name: string; email?: string | null } | { type: 'session'; id?: string; name: string } | { type: 'system'; name: string };
+
+export function readAuthor(value: unknown): InstructionAuthor | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Record<string, unknown>;
+  const name = typeof v.name === 'string' ? v.name : '';
+  if (!name) return null;
+  const id = typeof v.id === 'string' ? v.id : undefined;
+  if (v.type === 'user') return { type: 'user', id, name, email: typeof v.email === 'string' ? v.email : null };
+  if (v.type === 'session') return { type: 'session', id, name };
+  if (v.type === 'system') return { type: 'system', name };
+  return null;
+}
+
 /** Interlocuteurs d'une session affichée en conversation (sans le détail technique). */
 export interface ChatParticipants {
-  /** Qui écrit les instructions : la personne qui pilote la session, ou la session d'agent qui l'a lancée. */
+  /**
+   * Auteur des instructions qui n'en portent pas (journalisées avant le 03/11/2026) : la personne qui pilote la
+   * session, ou la session d'agent qui l'a lancée. Les autres disent qui les a écrites (`author` de l'événement).
+   */
   human: { name: string; agent?: boolean };
+  /** La personne connectée : auteur des instructions envoyées depuis la page et pas encore journalisées. */
+  me?: { name: string } | null;
   /** Qui répond : l'agent de projet qui joue la session, sinon le modèle. */
   agent: { name: string; projectAgent?: { name: string; avatar: { emoji: string | null; color: string | null } } | null };
 }
@@ -22,14 +42,29 @@ export interface ChatParticipants {
  * Message de conversation, comme dans un canal : avatar, nom, heure, puis le corps. Les réponses de l'agent y
  * rassemblent tout son tour (étapes repliées, messages, questions).
  */
-function ChatRow({ who, chat, at, pending, children }: { who: 'human' | 'agent'; chat: ChatParticipants; at: string | null; pending?: boolean; children: React.ReactNode }) {
-  const name = who === 'human' ? chat.human.name : chat.agent.name;
+function ChatRow({ who, chat, author, at, pending, children }: { who: 'human' | 'agent'; chat: ChatParticipants; author?: InstructionAuthor | null; at: string | null; pending?: boolean; children: React.ReactNode }) {
+  const human = author ?? (pending && chat.me ? { type: 'user' as const, name: chat.me.name } : { type: chat.human.agent ? ('session' as const) : ('user' as const), name: chat.human.name });
+  const name = who === 'human' ? human.name : chat.agent.name;
   return (
     <div className={`cc-chat-msg ${who}${pending ? ' pending' : ''}`} title={pending ? 'Envoi en cours…' : undefined}>
-      {who === 'human' ? <Avatar name={name} agent={Boolean(chat.human.agent)} /> : chat.agent.projectAgent ? <AgentAvatar agent={chat.agent.projectAgent} size={28} className="tt-avatar" /> : <Avatar name={name} agent />}
+      {who === 'agent' ? (
+        chat.agent.projectAgent ? <AgentAvatar agent={chat.agent.projectAgent} size={28} className="tt-avatar" /> : <Avatar name={name} agent />
+      ) : human.type === 'system' ? (
+        <span className="tt-avatar tt-avatar-agent" title="Message de Skipper">
+          <i className="bi bi-gear" />
+        </span>
+      ) : (
+        <Avatar name={name} agent={human.type === 'session'} />
+      )}
       <div className="cc-chat-main">
         <div className="tt-msg-head">
-          <span className="tt-author">{name}</span>
+          {who === 'human' && human.type === 'session' && 'id' in human && human.id ? (
+            <Link className="tt-author" to={`/sessions/${human.id}`} title="Session d'agent qui a envoyé ce message">
+              {name}
+            </Link>
+          ) : (
+            <span className="tt-author">{name}</span>
+          )}
           {at && (
             <time className="tt-time" dateTime={at} title={new Date(at).toLocaleString('fr-FR', { dateStyle: 'full', timeStyle: 'medium' })}>
               {clockTime(at)}
@@ -679,7 +714,7 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
           const local = Array.isArray(p.localAttachments) ? (p.localAttachments as LocalAttachment[]) : [];
           if (chat) {
             nodes.push(
-              <ChatRow key={e.id} who="human" chat={chat} at={p.pending ? null : e.createdAt} pending={Boolean(p.pending)}>
+              <ChatRow key={e.id} who="human" chat={chat} author={readAuthor(p.author)} at={p.pending ? null : e.createdAt} pending={Boolean(p.pending)}>
                 <div className="cc-chat-text">{String(p.text ?? '')}</div>
                 {attachments.length > 0 && <InstructionAttachments sessionId={e.sessionId} attachments={attachments} />}
                 {local.length > 0 && <LocalAttachments attachments={local} />}
@@ -690,6 +725,7 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
           nodes.push(
             <div key={e.id} className={`cc-user${p.pending ? ' pending' : ''}`} title={p.pending ? 'Envoi en cours…' : undefined}>
               {stamp(true)}
+              {readAuthor(p.author) && <span className="cc-time">{readAuthor(p.author)!.name}</span>}
               <span className="cc-user-text">{String(p.text ?? '')}</span>
               {p.preamble === true && <span className="cc-note"> (précédée, pour le modèle, du résumé de la conversation précédente)</span>}
               {attachments.length > 0 && <InstructionAttachments sessionId={e.sessionId} attachments={attachments} />}

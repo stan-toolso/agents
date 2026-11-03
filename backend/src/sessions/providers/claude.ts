@@ -66,6 +66,7 @@ import { agentService } from '../../agents/service.js';
 import { agentIdentityPrompt, agentsPromptSummary, scopedAgentsPromptSummary } from '../../agents/prompt.js';
 import { AGENTS_FREE_TOOLS, agentsMcpPrompt, createAgentsMcpServer } from '../../agents/mcp.js';
 import { userRepository } from '../../users/repository.js';
+import { authorHeader, type InstructionAuthor } from '../instructionAuthor.js';
 
 interface ClaudeConfig {
   model?: string;
@@ -411,7 +412,7 @@ export class ClaudeProvider implements SessionProvider {
     });
 
     const queue = new MessageQueue();
-    queue.push(await this.instruction(ctx, ctx.initialMessage, ctx.initialAttachments, ctx.initialPreamble));
+    queue.push(await this.instruction(ctx, ctx.initialMessage, ctx.initialAttachments, ctx.initialPreamble, null, ctx.initialAuthor));
     // Un tour est en cours entre l'envoi d'une instruction et le message `result` qui le clôt.
     let turnInProgress = true;
     await ctx.setActivity('busy');
@@ -497,9 +498,9 @@ export class ClaudeProvider implements SessionProvider {
         stream.close();
         await done;
       },
-      sendMessage: async (text, attachments = []) => {
+      sendMessage: async (text, attachments = [], author = null) => {
         await (await claudeSettings.forSession(accounts?.claudeUserId ?? null)).assertBudgetAvailable();
-        queue.push(await this.instruction(ctx, text, attachments, null, takeNotes()));
+        queue.push(await this.instruction(ctx, text, attachments, null, takeNotes(), author));
         turnInProgress = true;
         await ctx.setActivity('busy');
       },
@@ -667,10 +668,13 @@ export class ClaudeProvider implements SessionProvider {
     return null;
   }
 
-  /** `notes` : notes discrètes en attente, remises au modèle avant l'instruction sans paraître dans le transcript (déjà journalisées). */
-  private async instruction(ctx: RunContext, text: string, attachments: Attachment[], preamble?: string | null, notes?: string | null): Promise<SDKUserMessage['message']['content']> {
-    await ctx.emit('instruction', { text, ...(attachments.length ? { attachments: attachments.map(publicAttachment) } : {}), ...(preamble ? { preamble: true } : {}) });
-    const body = [preamble, notes, text].filter(Boolean).join('\n\n');
+  /**
+   * `notes` : notes discrètes en attente, remises au modèle avant l'instruction sans paraître dans le transcript (déjà journalisées).
+   * `author` : qui écrit, journalisé avec l'instruction et annoncé au modèle juste devant elle (`authorHeader`).
+   */
+  private async instruction(ctx: RunContext, text: string, attachments: Attachment[], preamble?: string | null, notes?: string | null, author?: InstructionAuthor | null): Promise<SDKUserMessage['message']['content']> {
+    await ctx.emit('instruction', { text, ...(attachments.length ? { attachments: attachments.map(publicAttachment) } : {}), ...(preamble ? { preamble: true } : {}), ...(author ? { author } : {}) });
+    const body = [preamble, notes, authorHeader(author, text), text].filter(Boolean).join('\n\n');
     if (!attachments.length) return body;
     const note = attachmentsNote(attachments);
     return [{ type: 'text', text: `${body}\n\n${note}` }, ...(await inlineBlocks(attachments))];

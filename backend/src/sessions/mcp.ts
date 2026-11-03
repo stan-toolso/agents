@@ -7,6 +7,7 @@ import { worksessionService } from '../worksessions/service.js';
 import { sessionRepository } from './repository.js';
 import { sessionService } from './service.js';
 import type { Session } from './types.js';
+import { sessionAuthor } from './instructionAuthor.js';
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
 const failure = (t: string) => ({ content: [{ type: 'text' as const, text: t }], isError: true });
@@ -190,7 +191,7 @@ export function createSessionsMcpServer(project: Project, sessionId: string, sco
         async ({ id, text: message }) =>
           run(async () => {
             const child = await getChild(id);
-            const s = await sessionService.sendMessage(child.id, message);
+            const s = await sessionService.sendMessage(child.id, message, null, { author: await sessionAuthor(sessionId) });
             return `Instruction envoyée :\n${await describe(s)}`;
           }),
       ),

@@ -167,7 +167,7 @@ export default function SessionDetailPage() {
     const person = session.takenOverBy ?? session.requestedBy ?? (session.owner && session.owner.kind !== 'AGENT' ? session.owner : null);
     const human = person ? { name: person.id === user?.id ? (user?.name ?? person.name) : person.name } : session.parentSession ? { name: session.parentSession.name, agent: true } : { name: user?.name ?? 'Vous' };
     const agent = session.agent ? { name: session.agent.name, projectAgent: session.agent } : { name: session.provider === 'claude' ? 'Claude' : 'Agent' };
-    return { human, agent };
+    return { human, agent, me: user ? { name: user.name } : null };
   }, [session?.takenOverBy, session?.requestedBy, session?.owner, session?.parentSession, session?.agent, session?.provider, user?.id, user?.name]);
   const running = session?.status === 'RUNNING';
   const busy = running && session?.activity === 'BUSY';

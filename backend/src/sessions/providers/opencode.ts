@@ -48,6 +48,7 @@ import { allowedByRules, claudeQuestions, claudeTool, mcpToolOf, OPENCODE_EDIT_T
 import { opencodeStateRepository } from './opencodeState.js';
 import type { DescribeContext, ProviderDescription, RunContext, RunningHandle, RunResult, SessionProvider } from './provider.js';
 import { log } from '../../log.js';
+import { authorHeader, type InstructionAuthor } from '../instructionAuthor.js';
 
 /** Modes d'autorisation d'une session OpenCode (les mêmes que ceux de Claude : l'exécuteur les applique aux demandes d'OpenCode). */
 const permissionModes = ['default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions'] as const;
@@ -282,7 +283,7 @@ class OpencodeRun {
       return this.finish({ exitCode: 1, error: `Le serveur OpenCode s'est arrêté (${signal ? `signal ${signal}` : `code ${code}`}) ; conteneur à court de mémoire ?` });
     });
     await Promise.race([this.connected, new Promise((resolve) => setTimeout(resolve, 10_000))]);
-    await this.prompt(ctx.initialMessage, ctx.initialAttachments, ctx.initialPreamble);
+    await this.prompt(ctx.initialMessage, ctx.initialAttachments, ctx.initialPreamble, ctx.initialAuthor);
     return this.handle();
   }
 
@@ -515,10 +516,10 @@ class OpencodeRun {
   // ---- Instructions ------------------------------------------------------------------------------
 
   /** Journalise l'instruction et l'envoie : texte, note des pièces jointes, images et PDF en parties fichier. */
-  private async prompt(text: string, attachments: Attachment[], preamble?: string | null): Promise<void> {
+  private async prompt(text: string, attachments: Attachment[], preamble?: string | null, author?: InstructionAuthor | null): Promise<void> {
     const { ctx } = this;
     this.beginTurn();
-    await ctx.emit('instruction', { text, ...(attachments.length ? { attachments: attachments.map(publicAttachment) } : {}), ...(preamble ? { preamble: true } : {}) });
+    await ctx.emit('instruction', { text, ...(attachments.length ? { attachments: attachments.map(publicAttachment) } : {}), ...(preamble ? { preamble: true } : {}), ...(author ? { author } : {}) });
     await ctx.setActivity('busy');
     // Le nettoyage du contexte demande une compaction : OpenCode résume la conversation.
     if (text.trim() === '/compact' && !attachments.length) {
@@ -526,7 +527,7 @@ class OpencodeRun {
       if (res.error) throw new AppError(`Compaction OpenCode impossible : ${describeError(res.error)}`);
       return;
     }
-    const body = preamble ? `${preamble}\n\n${text}` : text;
+    const body = [preamble, authorHeader(author, text), text].filter(Boolean).join('\n\n');
     const parts: Array<{ type: 'text'; text: string } | { type: 'file'; mime: string; filename: string; url: string }> = [{ type: 'text', text: attachments.length ? `${body}\n\n${attachmentsNote(attachments)}` : body }];
     for (const a of attachments) {
       if (a.mediaType.startsWith('image/') || a.mediaType === 'application/pdf') parts.push({ type: 'file', mime: a.mediaType, filename: a.name, url: `file://${a.path}` });
@@ -553,10 +554,10 @@ class OpencodeRun {
         if (this.busy) await this.client.session.abort({ sessionID: this.sessionId }).catch(() => undefined);
         await this.finish({ exitCode: null, closedByServer: true });
       },
-      sendMessage: async (text, attachments = []) => {
+      sendMessage: async (text, attachments = [], author = null) => {
         if (this.finished || this.endRequested) throw new AppError("La session n'accepte plus d'instructions");
         await (await claudeSettings.forSession(this.ownerId)).assertBudgetAvailable();
-        await this.prompt(text, attachments);
+        await this.prompt(text, attachments, null, author);
       },
       end: async () => {
         this.endRequested = true;

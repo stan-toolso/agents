@@ -6,10 +6,12 @@ const m = vi.hoisted(() => ({
   worksessions: [] as Array<{ id: string; projectId: string; branch: string }>,
   sessions: [] as Array<{ id: string; projectId: string; worksessionId: string | null; archivedAt: Date | null; createdAt: Date; status: string }>,
   sent: [] as Array<[string, string]>,
+  authors: [] as unknown[],
   prs: [] as TrackedPullRequest[],
 }));
 
 vi.mock('../worksessions/repository.js', () => ({ worksessionRepository: { findByBranch: async (projectId: string, branch: string) => m.worksessions.find((w) => w.projectId === projectId && w.branch === branch) ?? null } }));
+vi.mock('../users/repository.js', () => ({ userRepository: { findById: async (id: string) => ({ id, name: 'Alice', email: 'alice@toolso.io', kind: 'person' }) } }));
 vi.mock('../sessions/repository.js', () => ({
   sessionRepository: {
     list: async (f: { projectId?: string; worksessionId?: string; limit?: number }) =>
@@ -22,8 +24,9 @@ vi.mock('../sessions/repository.js', () => ({
 }));
 vi.mock('../sessions/service.js', () => ({
   sessionService: {
-    sendMessage: async (id: string, text: string) => {
+    sendMessage: async (id: string, text: string, _files: unknown, opts?: { author?: unknown }) => {
       m.sent.push([id, text]);
+      m.authors.push(opts?.author ?? null);
       return m.sessions.find((s) => s.id === id);
     },
   },
@@ -75,6 +78,7 @@ beforeEach(() => {
   m.worksessions = [];
   m.sessions = [];
   m.sent = [];
+  m.authors = [];
   m.prs = [];
 });
 
@@ -116,6 +120,7 @@ describe('demande de résolution des conflits', () => {
     expect(m.sent).toHaveLength(1);
     const [id, text] = m.sent[0];
     expect(id).toBe('s1');
+    expect(m.authors[0]).toEqual({ type: 'user', id: 'u1', name: 'Alice', email: 'alice@toolso.io' });
     expect(text).toContain('#70 « Fluidité »');
     expect(text).toContain('git merge origin/main');
     expect(text).toContain('`fluidite`');

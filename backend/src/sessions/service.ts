@@ -8,6 +8,7 @@ import { notificationService } from '../notifications/service.js';
 import { requestService } from '../requests/service.js';
 import { removeSessionAttachments, storeAttachments } from './attachments.js';
 import { sessionRepository } from './repository.js';
+import { parseAuthor, promptAuthor, SYSTEM_AUTHOR, type InstructionAuthor } from './instructionAuthor.js';
 import { scheduledRuns } from './scheduledRuns.js';
 import { relaunchPrompt } from './history.js';
 import { getProvider } from './providers/registry.js';
@@ -277,7 +278,7 @@ const queuedError = () =>
  * Met la session en file d'attente avec son instruction de démarrage (consigne de la session si
  * `initialMessage` est absent). Une session déjà en file garde son rang.
  */
-async function enqueue(session: Session, blocker: string, initialMessage: string | undefined, attachments: Attachment[]): Promise<Session> {
+async function enqueue(session: Session, blocker: string, initialMessage: string | undefined, attachments: Attachment[], author: InstructionAuthor | null): Promise<Session> {
   const queued = await publishSession(
     await sessionRepository.update(session.id, {
       status: 'queued',
@@ -285,7 +286,7 @@ async function enqueue(session: Session, blocker: string, initialMessage: string
       exitCode: null,
       error: null,
       queuedAt: session.queuedAt ?? new Date(),
-      queuedStart: { message: initialMessage ?? null, attachments: initialMessage === undefined ? [] : attachments },
+      queuedStart: { message: initialMessage ?? null, attachments: initialMessage === undefined ? [] : attachments, ...(author ? { author } : {}) },
     }),
   );
   const position = await sessionRepository.queuePosition(session.id);
@@ -316,7 +317,7 @@ async function drainOnce(): Promise<void> {
     const project = await projectService.get(session.projectId).catch(() => null);
     if (!project || slotBlocker(project)) continue;
     try {
-      await sessionService.start(session.id, session.queuedStart?.message ?? undefined, session.queuedStart?.attachments ?? [], { fromQueue: true });
+      await sessionService.start(session.id, session.queuedStart?.message ?? undefined, session.queuedStart?.attachments ?? [], { fromQueue: true, author: parseAuthor(session.queuedStart?.author) });
     } catch (err) {
       const message = (err as Error).message;
       log.error(`[sessions] démarrage de ${session.id} depuis la file d'attente`, err);
@@ -492,9 +493,10 @@ export const sessionService = {
    * comme première instruction, typiquement pour reprendre une session terminée avec une nouvelle consigne.
    * Si la limite de sessions simultanées (serveur ou projet) est atteinte, la session passe en file d'attente
    * (statut « queued ») avec cette instruction et démarre dès qu'une place se libère. `fromQueue` : démarrage
-   * par la file d'attente elle-même (sans place, la session y reste à son rang).
+   * par la file d'attente elle-même (sans place, la session y reste à son rang). `author` : qui écrit l'instruction
+   * (Skipper par défaut) ; la consigne de la session est attribuée à qui l'a lancée ou demandée (`promptAuthor`).
    */
-  async start(id: string, initialMessage?: string, attachments: Attachment[] = [], opts: { fromQueue?: boolean; fromParked?: boolean } = {}): Promise<Session> {
+  async start(id: string, initialMessage?: string, attachments: Attachment[] = [], opts: { fromQueue?: boolean; fromParked?: boolean; author?: InstructionAuthor | null } = {}): Promise<Session> {
     const session = await sessionRepository.findById(id);
     if (!session) throw new NotFoundError('Session introuvable');
     assertNotArchived(session);
@@ -507,7 +509,7 @@ export const sessionService = {
       // Instance en cours de remplacement : la session démarre sur celle qui la remplace.
       const peer = await instanceRegistry.activePeer();
       if (!peer) throw new AppError('Le serveur redémarre : réessayez dans quelques secondes', 'MAINTENANCE');
-      await callInstance(peer, 'session.start', { id, message: initialMessage ?? null, attachments });
+      await callInstance(peer, 'session.start', { id, message: initialMessage ?? null, attachments, author: opts.author ?? null });
       return publishSession(await sessionRepository.findById(id));
     }
     serverSettings.assertNotInMaintenance();
@@ -521,7 +523,7 @@ export const sessionService = {
     // Pas d'await entre la vérification et la réservation de la place (une place déjà prise : démarrage concurrent).
     if (slots.has(id)) throw new AppError('La session est déjà en cours');
     const blocker = slotBlocker(project);
-    if (blocker) return opts.fromQueue ? session : enqueue(session, blocker, initialMessage, attachments);
+    if (blocker) return opts.fromQueue ? session : enqueue(session, blocker, initialMessage, attachments, opts.author ?? null);
     slots.set(id, project.id);
     idleSince.delete(id);
 
@@ -558,6 +560,7 @@ export const sessionService = {
         initialAttachments: initialMessage === undefined ? session.promptAttachments : attachments,
         // Conversation remise à zéro « en gardant un résumé » : le résumé accompagne la première instruction (une seule fois).
         initialPreamble: session.externalId ? null : session.resumeDigest,
+        initialAuthor: opts.author ?? (initialMessage === undefined ? await promptAuthor(session) : SYSTEM_AUTHOR),
         emit,
         setExternalId: async (externalId) => {
           await publishSession(await sessionRepository.update(id, { externalId }));
@@ -682,9 +685,11 @@ export const sessionService = {
 
   /**
    * Envoie une instruction à la session. Si elle est en cours, l'instruction est transmise à
-   * l'agent ; si elle est terminée, la session est relancée avec cette instruction (reprise).
+   * l'agent ; si elle est terminée, la session est relancée avec cette instruction (reprise). `author` : qui écrit
+   * (personne, session d'agent), journalisé et annoncé au modèle ; Skipper à défaut.
    */
-  async sendMessage(id: string, text: string, files?: AttachmentInput[] | null, opts: { attachments?: Attachment[]; byPerson?: boolean } = {}): Promise<Session> {
+  async sendMessage(id: string, text: string, files?: AttachmentInput[] | null, opts: { attachments?: Attachment[]; byPerson?: boolean; author?: InstructionAuthor | null } = {}): Promise<Session> {
+    const author = opts.author ?? SYSTEM_AUTHOR;
     const trimmed = text.trim() || (files?.length || opts.attachments?.length ? ATTACHMENTS_ONLY_TEXT : '');
     if (!trimmed) throw new AppError('Le message est vide');
     const session = await sessionRepository.findById(id);
@@ -705,17 +710,17 @@ export const sessionService = {
       // rien elle-même : l'instruction est transmise.
       const target = (await instanceRegistry.holder(session.instanceId)) ?? (drainingInstance ? await instanceRegistry.activePeer() : null);
       if (target) {
-        await callInstance(target, 'session.message', { id, text: trimmed, attachments: await store() });
+        await callInstance(target, 'session.message', { id, text: trimmed, attachments: await store(), author });
         return publishSession(await sessionRepository.findById(id));
       }
     }
     const attachments = await store();
     // Session garée par une instance en drainage : celle-ci la réserve puis relance son processus avec l'instruction.
     if (!handle && session.status === 'running' && session.parkedAt && (await sessionRepository.claimParked(id, instanceRegistry.id))) {
-      return this.start(id, trimmed, attachments, { fromParked: true });
+      return this.start(id, trimmed, attachments, { fromParked: true, author });
     }
-    if (!handle) return this.start(id, trimmed, attachments);
-    await handle.sendMessage!(trimmed, attachments);
+    if (!handle) return this.start(id, trimmed, attachments, { author });
+    await handle.sendMessage!(trimmed, attachments, author);
     return publishSession(await sessionRepository.findById(id));
   },
 

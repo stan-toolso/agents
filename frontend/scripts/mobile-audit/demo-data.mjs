@@ -227,7 +227,7 @@ const eventsBySession = {
     said(s, 58, 'Les trois offres (Découverte, Équipe, Entreprise) sont en place, l’offre Équipe est mise en avant. Je vérifie le build avant de passer au comparatif.'),
     ...tool(s, 57, 't5', 'Bash', { command: 'npm run build', description: 'Build du site' }, '> astro build\n\n 14 page(s) built in 6.21s\n Complete!'),
     done(s, 56, 9, 0.92),
-    ev(s, 20, 'instruction', { text: 'Super. Ajoute la FAQ avec les questions du support, et un interrupteur mensuel / annuel (-20 %).' }),
+    ev(s, 20, 'instruction', { text: 'Super. Ajoute la FAQ avec les questions du support, et un interrupteur mensuel / annuel (-20 %).', author: { type: 'user', id: U.hugo.id, name: U.hugo.name, email: U.hugo.email } }),
     ...tool(s, 18, 't6', 'Read', { file_path: '/workspace/docs/faq-support.md' }, '## Puis-je changer d’offre ?\nOui, à tout moment…\n## Les agents ont-ils accès à mes données ?\n…'),
     said(s, 12, 'J’ajoute l’interrupteur de période : les prix annuels sont calculés à partir des prix mensuels (-20 %), et la FAQ reprend les six questions du support en accordéon.'),
     ...tool(s, 9, 't7', 'Edit', { file_path: '/workspace/src/pages/tarifs.astro', old_string: '<section class="offers">', new_string: '<BillingToggle />\n<section class="offers">' }, 'The file has been updated.'),

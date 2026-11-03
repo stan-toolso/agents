@@ -164,7 +164,7 @@ describe('summon', () => {
     repo.sessionIdsOnTask = vi.fn(async () => ['s1']);
     sessionRepo.findById = vi.fn(async () => ({ id: 's1', archivedAt: null, worksessionId: 'w1', status: 'completed' }));
     const s = await agentService.summon('a1', { taskId: 't1', text: 'Du nouveau', requestedById: 'u1' });
-    expect(sessions.sendMessage).toHaveBeenCalledWith('s1', 'Du nouveau', null);
+    expect(sessions.sendMessage).toHaveBeenCalledWith('s1', 'Du nouveau', null, { author: expect.objectContaining({ type: 'user', id: 'u1' }) });
     expect(s.id).toBe('s1');
     expect(sessions.create).not.toHaveBeenCalled();
   });
@@ -186,7 +186,7 @@ describe('summon', () => {
     const thread = { conversationId: 'cv1', rootMessageId: 'm0' };
     const s = await agentService.summon('a1', { thread, text: 'Oui, prépare la release', requestedById: 'u1' });
     expect(sessions.unarchive).toHaveBeenCalledWith('s-old');
-    expect(sessions.sendMessage).toHaveBeenCalledWith('s-old', 'Oui, prépare la release', null);
+    expect(sessions.sendMessage).toHaveBeenCalledWith('s-old', 'Oui, prépare la release', null, { author: expect.objectContaining({ type: 'user', id: 'u1' }) });
     expect(s.id).toBe('s-old');
     expect(sessions.create).not.toHaveBeenCalled();
     // Restauration impossible (dossier supprimé ou occupé) : nouvelle session sur le fil.
