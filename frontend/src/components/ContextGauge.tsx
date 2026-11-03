@@ -2,6 +2,7 @@ import { useMutation } from '@apollo/client';
 import { useEffect, useState } from 'react';
 import { COMPACT_SESSION_CONTEXT, RESET_SESSION_CONTEXT, type Session } from '../graphql/operations';
 import { limitFromCleanup } from '../lib/contextLimit';
+import { shortModel } from '../lib/models';
 import { formatCost, formatTokens } from '../lib/humanize';
 import { useDialogs } from './Dialogs';
 
@@ -23,15 +24,6 @@ export function gaugeLevel(ctx: Session['context']): '' | 'warn' | 'danger' {
   return ctx.overThreshold ? 'warn' : '';
 }
 
-/** Libellé court du modèle (ex. « opus 4.1 » pour claude-opus-4-1-20250805). */
-const shortModel = (model: string | null) =>
-  model
-    ? model
-        .replace(/^claude-/, '')
-        .replace(/-\d{8}$/, '')
-        .replace(/-(\d)-(\d)$/, ' $1.$2')
-        .replace(/-(\d)$/, ' $1')
-    : null;
 
 /**
  * Jauge de contexte de l'en-tête d'une session : tokens du dernier tour, part de la fenêtre du modèle, coût

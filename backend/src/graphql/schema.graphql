@@ -112,6 +112,10 @@ type Project {
   defaultPermissionMode: String!
   "Limite de contexte des nouvelles sessions qui n'en choisissent pas (tâches, sessions lancées par un agent), présélectionnée au lancement : contextAction « compact » ou « reset » au-delà de contextMaxTokens. Null : aucune limite (l'interface propose au-delà du seuil de signalement)."
   defaultContextCleanup: SessionCleanup
+  "Modèle Claude des nouvelles sessions qui n'en choisissent pas (planifications, tâches, sessions lancées par un agent sans modèle). Null : le modèle par défaut du propriétaire. Ignoré pour un propriétaire qui n'autorise pas ce modèle."
+  defaultModel: String
+  "Modèle des sessions de tâches selon la priorité de la tâche ({ low: 'sonnet' }), prioritaire sur defaultModel et prérempli dans « Confier à un agent ». Null : aucun."
+  taskModels: JSON
   "Noms des éléments du coffre dont les usages par les agents sont soumis à l'approbation d'un humain (même en mode bypassPermissions)."
   approvalConnections: [String!]!
   "Faux quand l'utilisateur atteint le projet en tant que super administrateur sans en être membre."
@@ -1580,6 +1584,8 @@ type Session {
   "Fichiers joints à la première instruction."
   promptAttachments: [Attachment!]!
   config: JSON!
+  "Modèle de la session (sessions Claude) : celui de sa configuration, sinon le modèle par défaut de son propriétaire ; null : celui du CLI (ou autre type de session)."
+  model: String
   externalId: String
   exitCode: Int
   error: String
@@ -2692,6 +2698,10 @@ input CreateProjectInput {
   defaultPermissionMode: String
   "Limite de contexte des nouvelles sessions (contextAction « compact » ou « reset », contextMaxTokens) ; null ou objet vide : aucune."
   defaultContextCleanup: SessionCleanupInput
+  "Modèle des nouvelles sessions (alias du CLI ou identifiant) ; null ou vide : aucun."
+  defaultModel: String
+  "Modèle des sessions de tâches par priorité ({ low, medium, high, urgent }) ; null ou objet vide : aucun."
+  taskModels: JSON
   taskInstructions: String
 }
 
@@ -2707,6 +2717,10 @@ input UpdateProjectInput {
   defaultPermissionMode: String
   "Limite de contexte des nouvelles sessions (contextAction « compact » ou « reset », contextMaxTokens) ; null ou objet vide : aucune."
   defaultContextCleanup: SessionCleanupInput
+  "Modèle des nouvelles sessions (alias du CLI ou identifiant) ; null ou vide : aucun."
+  defaultModel: String
+  "Modèle des sessions de tâches par priorité ({ low, medium, high, urgent }) ; null ou objet vide : aucun."
+  taskModels: JSON
   taskInstructions: String
 }
 

@@ -6,6 +6,7 @@ import { projectPermissionModes, type CreateProjectInput, type Project, type Upd
 import { slugify } from './slug.js';
 import { ensureWorkspace } from './workspace.js';
 import { normalizeContextLimit } from '../sessions/context.js';
+import { normalizeModel, normalizeTaskModels } from './models.js';
 
 /** Dérive un identifiant de dossier sûr à partir du nom du projet. */
 export { slugify };
@@ -60,7 +61,7 @@ export const projectService = {
     if (await projectRepository.slugExists(slug)) throw new AppError(`Le slug "${slug}" est déjà utilisé`);
     validatePermissionMode(input.defaultPermissionMode);
     validateRunnerConfig(input.runnerConfig);
-    input = { ...input, defaultContextCleanup: normalizeContextLimit(input.defaultContextCleanup) };
+    input = { ...input, defaultContextCleanup: normalizeContextLimit(input.defaultContextCleanup), defaultModel: normalizeModel(input.defaultModel), taskModels: normalizeTaskModels(input.taskModels) };
     const hosted = Boolean(input.gitHosted);
     if (hosted && input.gitUrl?.trim()) throw new AppError("Un dépôt hébergé par Skipper n'a pas d'adresse distante : choisissez l'un ou l'autre");
     if (hosted && !gitServer.available()) throw new AppError("L'hébergement de dépôts n'est pas configuré sur ce serveur (Forgejo)");
@@ -85,6 +86,8 @@ export const projectService = {
     const before = await this.get(id);
     const patch: UpdateProjectInput = { ...input, name: input.name?.trim() };
     if (input.defaultContextCleanup !== undefined) patch.defaultContextCleanup = normalizeContextLimit(input.defaultContextCleanup);
+    if (input.defaultModel !== undefined) patch.defaultModel = normalizeModel(input.defaultModel);
+    if (input.taskModels !== undefined) patch.taskModels = normalizeTaskModels(input.taskModels);
     if (before.gitHosted) {
       // L'hébergement ne se désactive pas (les dossiers de travail sont des clones du dépôt hébergé) et n'a pas d'adresse.
       if (input.gitHosted === false) throw new AppError("L'hébergement du dépôt par Skipper ne se désactive pas : supprimez le projet, ou créez-en un autre");

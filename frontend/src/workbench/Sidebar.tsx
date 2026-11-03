@@ -1,4 +1,5 @@
 import AgentAvatar from '../components/AgentAvatar';
+import { isOpus, shortModel } from '../lib/models';
 import { useMutation, useQuery } from '@apollo/client';
 import PopMenu, { type MenuItem } from '../components/PopMenu';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -254,12 +255,17 @@ function SessionRow({ s, indent, depth = 0, byAgent = false, parentName = null, 
   const left = indent + depth * CHILD_INDENT;
   return (
     <>
-      <RowWithMenu to={`/sessions/${s.id}`} active={location.pathname === `/sessions/${s.id}`} indent={left} title={`${statusTitle(s)}${byAgentTitle({ byAgent, parentName })}${elsewhere ? ` · dans le dossier ${elsewhere}` : ''}`} items={items}>
+      <RowWithMenu to={`/sessions/${s.id}`} active={location.pathname === `/sessions/${s.id}`} indent={left} title={`${statusTitle(s)}${s.model ? ` · modèle ${s.model}` : ''}${byAgentTitle({ byAgent, parentName })}${elsewhere ? ` · dans le dossier ${elsewhere}` : ''}`} items={items}>
         {depth > 0 && <span className="wb-tree">└</span>}
         <span className={`wb-dot ${sessionDotClass(s)}`} />
         {byAgent && depth === 0 && <RobotIcon />}
         {s.schedule && <ScheduleIcon schedule={s.schedule} />}
         <span className="wb-row-label">{s.name}</span>
+        {s.model && !isOpus(s.model) && (
+          <span className="wb-tag wb-model-tag" title={`Modèle : ${s.model}`}>
+            {shortModel(s.model)}
+          </span>
+        )}
         {elsewhere && !s.name.toLowerCase().startsWith(elsewhere.toLowerCase()) && (
           <span className="wb-tag" title={`Travaille dans le dossier ${elsewhere}`}>
             <i className="bi bi-layers" /> {elsewhere}
@@ -388,7 +394,7 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
             to: `/sessions/${s.id}`,
             active: isCurrent(`/sessions/${s.id}`),
             label: s.name,
-            title: `${s.name} · ${statusTitle(s)}${byAgentTitle(n)}${s.owner ? ` · ${s.owner.name}` : ''}`,
+            title: `${s.name} · ${statusTitle(s)}${byAgentTitle(n)}${s.owner ? ` · ${s.owner.name}` : ''}${s.model ? ` · modèle ${s.model}` : ''}`,
             node: (
               <>
                 <span className={`wb-dot ${sessionDotClass(s)}`} />
@@ -429,7 +435,9 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
   const headTo = session ? `/sessions/${session.id}` : tabUrl ?? ws.key;
   const title = ws.primary
     ? `Dossier principal · ${ws.name} · sessions d'avant les work sessions`
-    : `${session ? `${statusTitle(session)}${session.owner ? ` · ${session.owner.name}` : ''} · ` : ''}${ws.task ? `Tâche : ${ws.task.title} · ${ws.task.status.toLowerCase()}${ws.task.statusTag ? ` · ${ws.task.statusTag}` : ''} · ` : ''}${icon.title}`;
+    : `${session ? `${statusTitle(session)}${session.owner ? ` · ${session.owner.name}` : ''}${session.model ? ` · modèle ${session.model}` : ''} · ` : ''}${ws.task ? `Tâche : ${ws.task.title} · ${ws.task.status.toLowerCase()}${ws.task.statusTag ? ` · ${ws.task.statusTag}` : ''} · ` : ''}${icon.title}`;
+  // Modèle de la session du dossier : signalé sur la carte quand ce n'est pas Opus (planification ou tâche sur Sonnet…).
+  const cheapModel = !ws.primary && session?.model && !isOpus(session.model) ? session.model : null;
   const hasRows = ws.primary ? visibleSessions.length > 0 || ws.terminals.length > 0 || hiddenOthers > 0 || elsewhereSubs.length > 0 : children.length > 0 || ws.terminals.length > 0 || Boolean(session?.browserActive);
   return (
     <div className={`wb-ws${activeKey === ws.key ? ' active' : ''}${session && isCurrent(`/sessions/${session.id}`) ? ' current' : ''}`}>
@@ -475,7 +483,7 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
           {menu && <AddMenu projectId={ws.projectId} session={session ? { id: session.id, name: session.name, status: session.status, worksessionId: ws.worksessionId, branch: ws.worksessionId ? ws.branch : null } : null} onClose={() => setMenu(false)} />}
         </span>
       </div>
-      {(chips.length > 0 || ws.task || (pr && PR_PILL[prState(pr)]) || ws.primary || hasRows || children.length > 0) && (
+      {(chips.length > 0 || ws.task || (pr && PR_PILL[prState(pr)]) || ws.primary || hasRows || children.length > 0 || cheapModel) && (
         <div className="wb-ws-items">
           {ws.task && taskChip && (
             <Link to={`/tasks/${ws.task.id}`} className={`wb-ws-task task-status task-status-${taskChip.cls}`} title={`Tâche : ${ws.task.title}${taskChip.note ? ` · ${taskChip.note}` : ''}`}>
@@ -488,6 +496,11 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
               <i className="bi bi-git" /> {pr.number == null ? null : prLabel(pr)}
               <span className="task-status-tag">{PR_PILL[prState(pr)]}</span>
             </button>
+          )}
+          {cheapModel && (
+            <span className="wb-tag wb-model-tag" title={`Modèle : ${cheapModel}`}>
+              <i className="bi bi-cpu" /> {shortModel(cheapModel)}
+            </span>
           )}
           {prOpen && prWindow && <PullRequestWindow projectId={ws.projectId} window={prWindow} onClose={() => setPrOpen(false)} />}
           {!ws.primary && children.length > 0 && !expanded && (

@@ -1,3 +1,4 @@
+import { projectModelFor } from '../projects/models.js';
 import { AppError, NotFoundError } from '../errors.js';
 import { reviewOf } from '../reviews/types.js';
 import { projectService } from '../projects/service.js';
@@ -111,6 +112,8 @@ export async function startTaskSession(taskId: string, options: StartTaskOptions
     prompt,
     attachments: files?.kept.length ? await asInstructionAttachments(files.kept) : null,
     config: options.config ?? {},
+    // Sans modèle choisi : celui du projet pour la priorité de la tâche (s'il est réglé), puis le défaut du projet.
+    defaultModel: projectModelFor(project, task.priority),
     ownerId: options.ownerId ?? null,
     requestedById: options.requestedById ?? null,
     workflowRunId: options.workflowRunId ?? null,

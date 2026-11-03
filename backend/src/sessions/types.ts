@@ -153,6 +153,11 @@ export interface CreateSessionInput {
    * aucune limite. Absente : le défaut du projet (`Project.defaultContextCleanup`).
    */
   cleanup?: SessionCleanup | null;
+  /**
+   * Modèle proposé pour ce lancement quand la configuration n'en choisit pas (sessions de tâches : modèle du projet pour
+   * la priorité de la tâche), avant le modèle par défaut du projet. Appliqué seulement s'il est autorisé pour le propriétaire.
+   */
+  defaultModel?: string | null;
 }
 
 export interface SessionFilter {

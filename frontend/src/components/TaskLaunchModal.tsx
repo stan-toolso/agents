@@ -2,12 +2,13 @@ import { useMutation, useQuery } from '@apollo/client';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Alert, Button, Collapse, Form, Modal } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
-import { PROVIDERS, RESUME_TASK_SESSION, START_TASK_SESSION, type ConfigField, type Provider, type SessionStatus, type Task } from '../graphql/operations';
+import { PROVIDERS, RESUME_TASK_SESSION, START_TASK_SESSION, type ConfigField, type Provider, type SessionStatus, type Task, type TaskModels, type TaskPriority } from '../graphql/operations';
 import { TASK_LAUNCH_INFO, TASK_PROMPT } from '../graphql/tasks';
 import { PROJECT_AGENT_REFS, agentKindLabels, type AgentRef } from '../graphql/agents';
 import AgentAvatar from './AgentAvatar';
 import { bypassConnectionsWarning } from '../lib/humanize';
 import { agentConfigFields, agentConfigValues, agentProvider } from '../lib/agentSessions';
+import { projectModelForTask } from '../lib/models';
 import { buildConfig, FieldGroup, lastPermissionMode, rememberPermissionMode } from './SessionLauncher';
 
 export interface LaunchTarget {
@@ -59,6 +60,8 @@ interface LaunchInfo {
   task: {
     id: string;
     branch: string | null;
+    priority: TaskPriority;
+    project: { id: string; defaultModel: string | null; taskModels: TaskModels | null };
     session: { id: string; name: string; archivedAt: string | null } | null;
     resumableSession: ResumableSession | null;
     worksession: { id: string; name: string; branch: string; label: string; archivedAt: string | null } | null;
@@ -174,6 +177,7 @@ function TaskNewSessionModal({ task, target, info: infoData, onClose }: { task: 
   const branch = own?.branch ?? infoData?.task?.branch ?? null;
   // Session active déjà en charge de la tâche : elle sera archivée au profit de la nouvelle.
   const previous = infoData?.task?.session && !infoData.task.session.archivedAt ? infoData.task.session : null;
+  const proposedModel = projectModelForTask(infoData?.task?.project, infoData?.task?.priority);
   const [values, setValues] = useState<Record<string, string>>({});
   const [advanced, setAdvanced] = useState(false);
   const original = promptData?.taskPrompt ?? '';
@@ -190,7 +194,11 @@ function TaskNewSessionModal({ task, target, info: infoData, onClose }: { task: 
       const valid = (v: string | null) => v && modeField.options?.some((o) => o.value === v);
       defaults.permissionMode = (valid(remembered) ? remembered : valid(target?.defaultPermissionMode ?? null) ? target!.defaultPermissionMode : defaults.permissionMode) ?? '';
     }
-    setValues(agent ? { ...defaults, ...agentConfigValues(agent, provider.configFields) } : defaults);
+    // Modèle proposé par le projet pour la priorité de la tâche (s'il fait partie des modèles proposés) ; celui de l'agent l'emporte.
+    if (proposedModel && provider.configFields.find((f) => f.key === 'model')?.options?.some((o) => o.value === proposedModel)) defaults.model = proposedModel;
+    const fromAgent = agent ? agentConfigValues(agent, provider.configFields) : {};
+    if (fromAgent.model === '') delete fromAgent.model;
+    setValues({ ...defaults, ...fromAgent });
   }, [provider?.type, agent?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [start, { loading, error }] = useMutation<{ startTaskSession: { id: string } }>(START_TASK_SESSION, {
@@ -200,7 +208,14 @@ function TaskNewSessionModal({ task, target, info: infoData, onClose }: { task: 
       onClose();
     },
   });
-  const fields = useMemo(() => agentConfigFields(agent, provider?.configFields ?? []), [provider, agent]);
+  // Le modèle, quand le projet en propose un pour les tâches, est montré d'emblée (pas dans les options avancées).
+  const fields = useMemo(
+    () =>
+      agentConfigFields(agent, provider?.configFields ?? []).map((f) =>
+        f.key === 'model' && proposedModel ? { ...f, advanced: false, description: `Proposé par le projet pour cette tâche : ${proposedModel}. ${f.description ?? ''}`.trim() } : f,
+      ),
+    [provider, agent, proposedModel],
+  );
   const basic = fields.filter((f) => !f.advanced);
   const extra = fields.filter((f) => f.advanced);
   const warning = values.permissionMode === 'bypassPermissions' ? bypassConnectionsWarning(target?.approvalConnections ?? []) : null;

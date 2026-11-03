@@ -8,12 +8,15 @@ import {
   SCHEDULE_NEXT_RUNS,
   SESSION_SCHEDULE_RUNS,
   SET_SESSION_SCHEDULE,
+  PROVIDERS,
   UPDATE_SESSION_CONFIG,
+  type Provider,
   type ScheduleRun,
   type Session,
 } from '../graphql/operations';
 import { browserTimeZone, buildCron, cronPresetLabels as presetLabels, describeCron, detectCronPreset as detectPreset, weekdayLabels, type CronPreset as Preset } from '../lib/cron';
 import { formatTokens, permissionModeShortLabels } from '../lib/humanize';
+import { modelOptions } from '../lib/models';
 import { useDialogs } from './Dialogs';
 import { RunHistory } from './ScheduleRuns';
 
@@ -36,6 +39,8 @@ export interface ScheduleModalProject {
   id: string;
   name: string;
   defaultPermissionMode?: string;
+  /** Modèle des nouvelles sessions du projet (appliqué à une nouvelle planification sans modèle choisi). */
+  defaultModel?: string | null;
 }
 
 /**
@@ -63,6 +68,12 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
   useEffect(() => {
     if (!session) setPermissionMode(project?.defaultPermissionMode ?? 'default');
   }, [session, project?.defaultPermissionMode]);
+  // Modèle des exécutions : celui de la session (vide : modèle par défaut, celui du projet à la création).
+  const { data: providersData } = useQuery<{ providers: Provider[] }>(PROVIDERS);
+  const provider = session?.provider ?? 'claude';
+  const models = modelOptions(providersData?.providers.find((p) => p.type === provider)?.configFields);
+  const currentModel = typeof session?.config.model === 'string' ? session.config.model : '';
+  const [model, setModel] = useState(currentModel);
   const cleanupNow = session?.cleanup ?? { retentionDays: null, contextAction: null, contextMaxTokens: null };
   // Nouvelle planification : nettoyage actif d'office (conversation neuve à chaque exécution). Planification existante : son réglage actuel.
   const [contextMode, setContextMode] = useState<ContextMode>(existing ? ((cleanupNow.contextAction as ContextMode) ?? '') : 'fresh');
@@ -105,15 +116,16 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
     };
     const input = { name: name.trim() || null, cron, timezone, prompt: prompt.trim(), enabled, endAfterRun, cleanup };
     if (creating) {
-      const res = await create({ variables: { input: { ...input, name: name.trim(), projectId, config: { permissionMode } } } }).catch(() => null);
+      const res = await create({ variables: { input: { ...input, name: name.trim(), projectId, config: { permissionMode, ...(model ? { model } : {}) } } } }).catch(() => null);
       if (res?.data) {
         onCreated?.(res.data.createScheduledSession);
         onClose();
       }
       return;
     }
-    if (permissionMode !== currentMode) {
-      const ok = await updateConfig({ variables: { id: session.id, config: { permissionMode } } }).catch((err: Error) => (showError(err), null));
+    if (permissionMode !== currentMode || model !== currentModel) {
+      const config = { ...(permissionMode !== currentMode ? { permissionMode } : {}), ...(model !== currentModel ? { model } : {}) };
+      const ok = await updateConfig({ variables: { id: session.id, config } }).catch((err: Error) => (showError(err), null));
       if (!ok) return;
     }
     const res = await save({ variables: { id: session.id, input }, refetchQueries: ['SessionSchedules'] }).catch(() => null);
@@ -248,6 +260,20 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
               )}
             </div>
           </div>
+          {provider === 'claude' && models.length > 0 && (
+            <Form.Group className="mb-3">
+              <Form.Label className="mb-1">Modèle des exécutions</Form.Label>
+              <Form.Select value={model} onChange={(e) => setModel(e.target.value)}>
+                <option value="">{creating ? (project?.defaultModel ? `Modèle du projet (${project.defaultModel})` : 'Mon modèle par défaut') : 'Modèle par défaut du propriétaire'}</option>
+                {[...models, ...(model && !models.some((m) => m.value === model) ? [{ value: model, label: model }] : [])].map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </Form.Select>
+              <Form.Text>Une revue récurrente en lecture tourne très bien sur un modèle plus économique (Sonnet) ; les modèles proposés se règlent dans Paramètres → Claude.</Form.Text>
+            </Form.Group>
+          )}
           <Form.Group className="mb-3">
             <Form.Label className="mb-1">Autorisations pendant les exécutions</Form.Label>
             <Form.Select value={permissionMode} onChange={(e) => setPermissionMode(e.target.value)}>
