@@ -1,7 +1,9 @@
 import AgentAvatar from '../components/AgentAvatar';
+import GoneNotice from '../components/GoneNotice';
+import { isGoneError } from '../lib/gone';
 import { useMutation, useQuery } from '@apollo/client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Spinner } from 'react-bootstrap';
+import { Alert, Button, Spinner } from 'react-bootstrap';
 import { Link, useParams } from 'react-router-dom';
 import { useTabTitle } from '../workbench/TabsContext';
 import { canAutoFocus } from '../lib/device';
@@ -237,8 +239,22 @@ export default function SessionDetailPage() {
         </div>
       </div>
     );
+  if (isGoneError(error) || (!error && !session))
+    return (
+      <GoneNotice what="Cette session">
+        {text.trim() && (
+          <div className="mt-3">
+            <div className="small text-secondary mb-1">Votre texte, non envoyé :</div>
+            <textarea className="form-control font-monospace small" rows={Math.min(10, text.split('\n').length + 1)} readOnly value={text} onFocus={(e) => e.currentTarget.select()} />
+            <Button size="sm" variant="outline-secondary" className="mt-2" onClick={() => void navigator.clipboard?.writeText(text)}>
+              <i className="bi bi-clipboard me-1" /> Copier
+            </Button>
+          </div>
+        )}
+      </GoneNotice>
+    );
   if (error) return <Alert variant="danger">Erreur : {error.message}</Alert>;
-  if (!session) return <Alert variant="warning">Session introuvable.</Alert>;
+  if (!session) return null;
 
   const actionError = sendError ?? configError;
   const schedule = session.schedule;

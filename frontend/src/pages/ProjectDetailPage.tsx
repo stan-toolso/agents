@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react';
+import GoneNotice from '../components/GoneNotice';
+import { isGoneError } from '../lib/gone';
 import { Alert, Badge, Button, Col, Row, Spinner } from 'react-bootstrap';
 import { Link, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
@@ -48,6 +50,7 @@ export default function ProjectDetailPage() {
   const stats = useMemo(() => (d ? computeStats(d.tasks) : null), [d]);
 
   if (loading && !data) return <ProjectPageLoading id={id} />;
+  if (isGoneError(error) || (!error && !project)) return <GoneNotice what="Ce projet" />;
   if (error && !data) return <Alert variant="danger">Erreur : {error.message}</Alert>;
   if (!project || !d || !stats) return <Alert variant="warning">Projet introuvable.</Alert>;
   const canWrite = project.myRole === 'ADMIN' || project.myRole === 'MEMBER';
