@@ -203,6 +203,8 @@ backend/
       cron.ts                  # expressions cron à cinq champs, fuseaux IANA, prochaine échéance
       service.ts               # planification des sessions : ordonnanceur, exécution, compte rendu et notification
       outcome.ts               # issue d'une exécution (terminée, bloquée, en erreur…) lue dans le transcript
+      permissions.ts           # outils pré-autorisés d'une planification : validation, couverture d'un appel, suggestions
+      activeRules.ts           # règles applicables pendant une exécution planifiée en cours (lues par les providers)
     settings/
       userStore.ts             # réglages par personne (table user_settings)
       claude.ts                # réglages Claude d'une personne : mode, jetons du coffre, modèles, budgets, vérification
