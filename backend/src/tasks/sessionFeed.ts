@@ -33,7 +33,7 @@ const QUIET_HINT = "Pour information : poursuis sans en parler, sauf si cela cha
  * Pertinence d'un changement pour une session, qui décide entre message (un tour de l'agent, visible dans la session)
  * et note discrète : un message du fil n'est adressé qu'aux sessions en charge et à celles qu'il mentionne ; une
  * modification ne l'est qu'aux sessions en charge, et seulement quand une personne l'a faite (un statut changé par une
- * autre session d'agent n'appelle rien). Le reste (sessions seulement reliées, réactions) passe en note.
+ * autre session d'agent n'appelle rien) et pas quand elle ferme la tâche (ses sessions se terminent). Le reste (sessions seulement reliées, réactions) passe en note.
  *
  * Messages à transmettre aux sessions reliées à la tâche (toutes celles en charge, celles passées par la tâche ou
  * mentionnées dans son fil : `linked`) pour un changement fait par quelqu'un d'autre. Un message du fil relance les
@@ -89,12 +89,15 @@ export function feedsFor(change: TaskChange, linked: string[] = [], alsoAddresse
   if (!change.actor) return [];
   const lines = describeTaskChanges(change.before, change.task, change.addedAttachments);
   if (!lines.length) return [];
+  // Tâche fermée (terminée ou annulée) : ses sessions se terminent (tasks/endSessions.ts) ; un tour juste pour en
+  // prendre acte serait facturé sans travail. Elles en reçoivent une note.
+  const closing = change.before.status !== change.task.status && (change.task.status === 'done' || change.task.status === 'cancelled');
   const by = change.actor.type === 'agent' ? `la session d'agent « ${change.actor.name ?? 'inconnue'} » (${change.actor.sessionId ?? '?'})` : change.actor.name || 'une personne';
   return [...recipients]
     // Passation : la session qui vient de prendre la charge a reçu la tâche entière ; l'auteur du changement n'a rien à apprendre.
     .filter((sessionId) => sessionId !== change.actor?.sessionId && !(inCharge(change.task, sessionId) && !inCharge(change.before, sessionId)))
     .map((sessionId) => {
-      const quiet = !(inCharge(change.task, sessionId) && change.actor?.type !== 'agent');
+      const quiet = closing || !(inCharge(change.task, sessionId) && change.actor?.type !== 'agent');
       return {
         sessionId,
         restart: false,

@@ -162,6 +162,10 @@ export interface Project {
   defaultPermissionMode: string;
   /** Limite de contexte des nouvelles sessions (compact / reset au-delà d'un seuil) ; null : aucune. */
   defaultContextCleanup: Pick<SessionCleanup, 'contextAction' | 'contextMaxTokens'> | null;
+  /** Modèle Claude des nouvelles sessions qui n'en choisissent pas ; null : celui du propriétaire. */
+  defaultModel: string | null;
+  /** Modèle des sessions de tâches par priorité ({ low: 'sonnet' }) ; null : aucun. */
+  taskModels: TaskModels | null;
   /** Éléments du coffre soumis à approbation (requête PROJECT seulement). */
   approvalConnections?: string[];
   /** Faux quand le projet est atteint en tant que super administrateur sans en être membre. */
@@ -186,6 +190,8 @@ export interface Session {
   prompt: string | null;
   promptAttachments: AttachmentRef[];
   config: Record<string, unknown>;
+  /** Modèle de la session (sa configuration, sinon le défaut de son propriétaire) ; requête SIDEBAR seulement. */
+  model?: string | null;
   externalId: string | null;
   exitCode: number | null;
   error: string | null;
@@ -307,6 +313,8 @@ export interface Terminal {
 
 export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'DONE' | 'CANCELLED';
 export type TaskPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+/** Modèle des sessions de tâches d'un projet, par priorité (clés en minuscules, comme côté serveur). */
+export type TaskModels = Partial<Record<'low' | 'medium' | 'high' | 'urgent', string>>;
 
 export interface TaskField {
   key: string;
@@ -540,6 +548,8 @@ export const PROJECT_FIELDS = gql`
       contextAction
       contextMaxTokens
     }
+    defaultModel
+    taskModels
     runnerStatus {
       kind
       ready
@@ -1508,6 +1518,7 @@ export const SIDEBAR = gql`
     activity
     pendingRequestCount
     browserActive
+    model
     context {
       tokens
       overThreshold
@@ -1579,6 +1590,7 @@ export const PROJECT_LAUNCH_INFO = gql`
         contextAction
         contextMaxTokens
       }
+      defaultModel
       approvalConnections
       git {
         branch

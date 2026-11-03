@@ -262,6 +262,12 @@ export const TASK_LAUNCH_INFO = gql`
     task(id: $id) {
       id
       branch
+      priority
+      project {
+        id
+        defaultModel
+        taskModels
+      }
       session {
         id
         name

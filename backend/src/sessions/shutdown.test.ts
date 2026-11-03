@@ -191,7 +191,7 @@ describe('reprise automatique au démarrage', () => {
 });
 
 describe('reprise manuelle (bouton « Reprendre »)', () => {
-  it("reprend le tour coupé si l'agent travaillait, rouvre la conversation sinon, refuse une session non interrompue", async () => {
+  it("reprend le tour coupé si l'agent travaillait, la rend reprenable sans tour sinon, refuse une session non interrompue", async () => {
     const { sessionService } = await load();
     const starts: (string | null)[] = [];
     providers.current = { ...fakeProvider().provider, start: async (ctx) => (starts.push(ctx.initialMessage), { wait: () => new Promise(() => undefined), stop: async () => undefined }) };
@@ -203,10 +203,11 @@ describe('reprise manuelle (bouton « Reprendre »)', () => {
     await sessionService.resume('b');
     await sessionService.resume('i');
     expect(session('b').status).toBe('running');
-    expect(session('i').status).toBe('running');
+    // Elle attendait des instructions : aucun tour (rien de facturé), elle est « terminée » et un message la relancera.
+    expect(session('i')).toMatchObject({ status: 'completed', activity: null });
+    expect(starts).toHaveLength(1);
     expect(starts[0]).toMatch(/pendant ton tour/);
-    expect(starts[1]).toMatch(/attendais une instruction/);
-    expect(starts).not.toContain('consigne initiale');
+    expect(eventsOf('i').some((e) => e.type === 'system' && e.payload.reason === 'manual_resume')).toBe(true);
     expect(eventsOf('b').some((e) => e.type === 'system' && e.payload.reason === 'manual_resume')).toBe(true);
     await expect(sessionService.resume('c')).rejects.toThrow(/interrompue/);
   });
@@ -245,15 +246,14 @@ describe("recréation de l'environnement d'exécution (conteneur)", () => {
     expect(notifications.notify).not.toHaveBeenCalled();
     expect(sessionService.runningCountByProject('p')).toBe(0);
 
-    // Conteneur recréé : toutes les sessions reprennent, chacune avec l'instruction qui correspond à son activité.
+    // Conteneur recréé : la session qui travaillait reprend son tour ; celle qui attendait est rendue reprenable, sans tour.
     const resumed = await sessionService.resumeAfterRunner(interrupted);
     expect(resumed.sort()).toEqual([busy.id, idle.id].sort());
     expect(session(busy.id).status).toBe('running');
-    expect(session(idle.id).status).toBe('running');
-    expect(starts).toHaveLength(2);
+    expect(session(idle.id).status).toBe('completed');
+    expect(starts).toHaveLength(1);
     expect(starts[0]).toMatch(/environnement d'exécution .* a été recréé pendant ton tour/);
     expect(starts[0]).toMatch(/demandes .* annulées/);
-    expect(starts[1]).toMatch(/a été recréé pendant que tu attendais une instruction/);
     expect(eventsOf(busy.id).some((e) => e.type === 'system' && e.payload.reason === 'auto_resume')).toBe(true);
   });
 

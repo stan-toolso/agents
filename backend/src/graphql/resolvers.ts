@@ -155,6 +155,24 @@ const warnTokensOf = (ctx: Ctx): Promise<number | null> => {
   }
   return pending;
 };
+/**
+ * Modèle par défaut du propriétaire d'une session (réglages Claude du compte qui la sert : celui de la personne, ou le
+ * compte prêté à un agent), lu une fois par propriétaire et par requête : la sidebar en affiche une liste.
+ */
+const ownerModelByCtx = new WeakMap<Ctx, Map<string, Promise<string | null>>>();
+const ownerDefaultModelOf = (ctx: Ctx, ownerId: string): Promise<string | null> => {
+  let byOwner = ownerModelByCtx.get(ctx);
+  if (!byOwner) ownerModelByCtx.set(ctx, (byOwner = new Map()));
+  let pending = byOwner.get(ownerId);
+  if (!pending) {
+    pending = agentService
+      .accountsForOwner(ownerId)
+      .then((acc) => (acc?.claudeUserId ? claudeSettings.forUser(acc.claudeUserId).then((s) => s.settings.defaultModel ?? null) : null))
+      .catch(() => null);
+    byOwner.set(ownerId, pending);
+  }
+  return pending;
+};
 const guardRequest = async (ctx: Ctx, id: string, min: ProjectRole) => requireProject(ctx, await projectOfRequest(id), min);
 const guardTask = async (ctx: Ctx, id: string, min: ProjectRole) => requireProject(ctx, (await taskService.get(id)).projectId, min);
 /** Dépôt « owner/name » passé par le client pour une PR d'un autre dépôt que celui du projet ; null = dépôt du projet. */
@@ -811,6 +829,12 @@ export const resolvers = {
     liveDraft: (session: Session) => liveDraftService.get(session.id),
     queuePosition: (session: Session) => (session.status === 'queued' ? sessionService.queuePosition(session.id) : null),
     promptAttachments: (session: Session) => session.promptAttachments.map(publicAttachment),
+    model: async (session: Session, _: unknown, ctx: Ctx) => {
+      if (session.provider !== 'claude') return null;
+      const own = typeof session.config.model === 'string' ? session.config.model.trim() : '';
+      if (own) return own;
+      return session.ownerId ? ownerDefaultModelOf(ctx, session.ownerId) : null;
+    },
     schedule: async (session: Session, _: unknown, ctx: Ctx) => (await loadersOf(ctx).sessionSchedule(session.id)) ?? null,
     context: (session: Session): ContextParent => ({ session }),
     events: (session: Session, args: { after?: string | null; limit?: number | null }) =>

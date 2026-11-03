@@ -133,7 +133,7 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
   const attachments = usePendingAttachments();
 
   const project = projects.find((p) => p.id === projectId);
-  const { data: infoData } = useQuery<{ project: (Pick<Project, 'id' | 'gitUrl' | 'defaultPermissionMode' | 'defaultContextCleanup'> & { git: { branch: string } | null; approvalConnections: string[] }) | null }>(PROJECT_LAUNCH_INFO, { variables: { id: projectId }, skip: !projectId });
+  const { data: infoData } = useQuery<{ project: (Pick<Project, 'id' | 'gitUrl' | 'defaultPermissionMode' | 'defaultContextCleanup' | 'defaultModel'> & { git: { branch: string } | null; approvalConnections: string[] }) | null }>(PROJECT_LAUNCH_INFO, { variables: { id: projectId }, skip: !projectId });
   const info = infoData?.project?.id === projectId ? infoData.project : null;
   const mainBranch = info?.git?.branch;
   const provider = providers.find((p) => p.type === providerType);
@@ -170,6 +170,14 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
     const mode = saved && (field.options ?? []).some((o) => o.value === saved) ? saved : projectDefaultMode;
     setValues((prev) => ({ ...prev, permissionMode: mode }));
   }, [provider, projectId, projectDefaultMode]);
+
+  // Modèle : celui du projet s'il en fixe un et qu'il fait partie de vos modèles (le serveur l'appliquerait de toute façon).
+  const projectModel = info?.defaultModel ?? null;
+  useEffect(() => {
+    const field = provider?.configFields.find((f) => f.key === 'model');
+    if (!field || !projectModel || !(field.options ?? []).some((o) => o.value === projectModel)) return;
+    setValues((prev) => ({ ...prev, model: projectModel }));
+  }, [provider, projectModel]);
 
   // En tant qu'agent : son type de session, puis son modèle (parmi ses modèles autorisés) et ses autorisations par défaut.
   useEffect(() => {

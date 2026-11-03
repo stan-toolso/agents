@@ -1,4 +1,5 @@
 import type { SessionCleanup } from '../sessions/types.js';
+import type { TaskModels } from './models.js';
 
 /** Modes d'autorisation proposés comme réglage par défaut d'un projet (voir le provider Claude). */
 export const projectPermissionModes = ['default', 'acceptEdits', 'bypassPermissions', 'plan'] as const;
@@ -24,6 +25,13 @@ export interface Project {
    * présélectionnée au lancement : compacter ou repartir d'une conversation neuve au-delà d'un seuil. Null : aucune.
    */
   defaultContextCleanup: SessionCleanup | null;
+  /**
+   * Modèle Claude des nouvelles sessions qui n'en choisissent pas (planifications, sessions de tâches, lancées par un
+   * agent sans modèle) ; null : le modèle par défaut du propriétaire. Ignoré s'il n'est pas autorisé pour le propriétaire.
+   */
+  defaultModel: string | null;
+  /** Modèle des sessions de tâches selon la priorité de la tâche, prioritaire sur `defaultModel` ; null : aucun. */
+  taskModels: TaskModels | null;
   /** Consignes ajoutées à l'instruction de toute session qui réalise une tâche du projet, après le texte de la tâche (vide : aucune). */
   taskInstructions: string;
   /** Espace personnel : la personne à qui il appartient (jamais partagé) ; null pour un projet ordinaire. */
@@ -46,6 +54,8 @@ export interface CreateProjectInput {
   runnerConfig?: Record<string, unknown> | null;
   defaultPermissionMode?: string | null;
   defaultContextCleanup?: SessionCleanup | null;
+  defaultModel?: string | null;
+  taskModels?: TaskModels | null;
   taskInstructions?: string | null;
   /** Espace personnel de cette personne (voir personal/service.ts). */
   personalOwnerId?: string | null;
@@ -66,6 +76,10 @@ export interface UpdateProjectInput {
   defaultPermissionMode?: string | null;
   /** Null (ou objet vide) : aucune limite. */
   defaultContextCleanup?: SessionCleanup | null;
+  /** Null ou vide : aucun. */
+  defaultModel?: string | null;
+  /** Null ou objet vide : aucun. */
+  taskModels?: TaskModels | null;
   taskInstructions?: string | null;
   /** Budget mensuel en USD ; null ou 0 : aucun. Modifié par la mutation setProjectBudget (pas par updateProject). */
   monthlyBudgetUsd?: number | null;

@@ -254,7 +254,7 @@ export default function SchedulesPage() {
           ))}
         </div>
       )}
-      {creating && <ScheduleModal projects={writable.map((p) => ({ id: p.id, name: p.isPersonal ? 'Mon espace' : p.name, defaultPermissionMode: p.defaultPermissionMode }))} onClose={() => setCreating(false)} />}
+      {creating && <ScheduleModal projects={writable.map((p) => ({ id: p.id, name: p.isPersonal ? 'Mon espace' : p.name, defaultPermissionMode: p.defaultPermissionMode, defaultModel: p.defaultModel }))} onClose={() => setCreating(false)} />}
       {editingItem && <ScheduleModal session={editingItem.session} onClose={() => setEditing(null)} />}
     </>
   );
