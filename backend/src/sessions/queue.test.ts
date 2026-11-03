@@ -14,7 +14,7 @@ const repo = vi.hoisted(() => {
   const queued = () => [...store.sessions.values()].filter((s) => s.status === 'queued').sort((a, b) => (a.queuedAt as Date).getTime() - (b.queuedAt as Date).getTime() || Number(String(a.id).slice(1)) - Number(String(b.id).slice(1)));
   return {
     create: vi.fn(async (input: Record<string, unknown>) => {
-      const s = { id: `s${++store.seq}`, projectId: input.projectId, worksessionId: null, parentSessionId: input.parentSessionId ?? null, name: input.name, provider: input.provider, status: 'pending', activity: null, prompt: input.prompt, promptAttachments: [], config: {}, externalId: null, exitCode: null, error: null, queuedAt: null, queuedStart: null };
+      const s = { id: `s${++store.seq}`, projectId: input.projectId, worksessionId: input.worksessionId ?? null, parentSessionId: input.parentSessionId ?? null, name: input.name, provider: input.provider, status: 'pending', activity: null, prompt: input.prompt, promptAttachments: [], config: {}, externalId: null, exitCode: null, error: null, queuedAt: null, queuedStart: null };
       store.sessions.set(s.id, s);
       return { ...s };
     }),

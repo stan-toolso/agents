@@ -116,9 +116,12 @@ export default function SessionHistoryPage() {
                 <Button size="sm" variant="link" className="p-0 px-1" title="Nouvelle session qui part d’un résumé de celle-ci" onClick={() => setRelaunch(s)}>
                   Relancer
                 </Button>
-                <Button size="sm" variant="link" className="p-0 px-1" title="Remet la session parmi les sessions actives, avec son dossier de travail" onClick={() => unarchive({ variables: { id: s.id } })}>
-                  Restaurer
-                </Button>
+                {/* Dossier supprimé depuis : restaurée, elle ne pourrait pas reprendre (le serveur refuse) ; on la relance. */}
+                {(s.kind === 'CHAT' || s.worksession) && (
+                  <Button size="sm" variant="link" className="p-0 px-1" title="Remet la session parmi les sessions actives, avec son dossier de travail" onClick={() => unarchive({ variables: { id: s.id } })}>
+                    Restaurer
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="link"
