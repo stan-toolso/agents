@@ -8,7 +8,7 @@ import { useAuth } from '../auth/AuthContext';
 import AgentAvatar from '../components/AgentAvatar';
 import ChannelThread from '../components/ChannelThread';
 import { useDialogs } from '../components/Dialogs';
-import { PullRequestRow, RequestRow, SessionRow, TaskRow, UsageTile, isRecent, plural, shorten, statusIcon } from '../components/DashboardRows';
+import { PullRequestRow, RequestRow, SessionRow, TaskRow, UsageTile, isRecent, plural, shorten, stalledHint, statusIcon } from '../components/DashboardRows';
 import { ProjectPageLoading } from '../components/PageLoading';
 import ProjectHeader from '../components/ProjectHeader';
 import TaskModal from '../components/TaskModal';
@@ -59,7 +59,8 @@ export default function ProjectDetailPage() {
   const { counts } = d;
   const failed = d.recentSessions.filter((s) => s.status === 'FAILED' && isRecent(s.endedAt ?? s.updatedAt, 24));
   const interrupted = d.recentSessions.filter((s) => s.status === 'INTERRUPTED' && s.activity === 'BUSY' && isRecent(s.endedAt ?? s.updatedAt, 24));
-  const toValidate = d.tasks.filter((t) => isOpen(t) && t.statusTag && fold(t.statusTag) === 'a valider');
+  // Une tâche « à valider » dont l'agent s'est arrêté est déjà comptée parmi les tâches à l'agent arrêté.
+  const toValidate = d.tasks.filter((t) => isOpen(t) && t.statusTag && fold(t.statusTag) === 'a valider' && !t.stalledSince);
   const todo = d.pendingRequests.length + failed.length + interrupted.length + d.staleTasks.length + d.pullRequests.length + toValidate.length;
   const upcomingTasks = d.tasks.filter((t) => isOpen(t) && t.dueDate).sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? '')).slice(0, 5);
   const activity = recentActivity(d);
@@ -108,7 +109,7 @@ export default function ProjectDetailPage() {
           </div>
           <div className="dash-tile-sub">
             {counts.overdueTasks > 0 && <span className="up">{plural(counts.overdueTasks, 'en retard', 'en retard')} · </span>}
-            {d.staleTasks.length > 0 && <span className="up">{plural(d.staleTasks.length, 'abandonnée', 'abandonnées')} · </span>}
+            {d.staleTasks.length > 0 && <span className="up">{plural(d.staleTasks.length, 'agent arrêté', 'agents arrêtés')} · </span>}
             {plural(counts.doneTasks7d, 'terminée', 'terminées')} sur 7 jours
           </div>
         </Link>
@@ -154,7 +155,7 @@ export default function ProjectDetailPage() {
               {d.pendingRequests.map((r) => <RequestRow key={r.id} request={r} showProject={false} />)}
               {failed.map((s) => <SessionRow key={s.id} session={s} hint={s.error ? shorten(s.error, 80) : 'en erreur'} icon="bi-x-octagon bad" showProject={false} refetch={REFETCH} />)}
               {interrupted.map((s) => <SessionRow key={s.id} session={s} hint="interrompue en plein travail par un redémarrage" icon="bi-pause-circle warn" showProject={false} refetch={REFETCH} />)}
-              {d.staleTasks.map((t) => <TaskRow key={t.id} task={t} showProject={false} hint="en cours, mais plus aucun agent dessus" icon="bi-person-x" />)}
+              {d.staleTasks.map((t) => <TaskRow key={t.id} task={t} showProject={false} hint={stalledHint(t)} icon="bi-person-x bad" />)}
               {toValidate.map((t) => <TaskRow key={t.id} task={t} showProject={false} hint="à valider : quelque chose à essayer" icon="bi-eye" />)}
               {d.pullRequests.map((pr) => <PullRequestRow key={pr.id} pr={pr} showProject={false} />)}
               {todo === 0 && <li className="empty">Rien à traiter : les agents n’ont besoin de rien pour l’instant.</li>}

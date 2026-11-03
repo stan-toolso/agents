@@ -8,6 +8,7 @@ const task = (over: Partial<Task> & { id: string }): Task => ({
   description: '',
   status: 'TODO',
   statusTag: null,
+  stalledSince: null,
   tags: [],
   priority: 'MEDIUM',
   dueDate: null,

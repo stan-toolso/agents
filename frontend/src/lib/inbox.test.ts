@@ -28,6 +28,17 @@ describe('file À traiter', () => {
     expect(filterInboxItems(items, { projectId: '', kind: '' })).toHaveLength(6);
   });
 
+  it('range une tâche « agent arrêté » après les sessions à reprendre et avant les PR', () => {
+    const withTasks = buildInboxItems({
+      requests: [],
+      sessions: [ses('int', 'INTERRUPTED', '2026-01-02T00:00:00Z')],
+      tasks: [{ id: 't1', stalledSince: '2026-01-01T00:00:00Z', updatedAt: '2026-01-05T00:00:00Z', project: { id: 'p3', name: 'P3' } } as any],
+      pullRequests: [pr('merge', false, '2025-12-02T00:00:00Z')],
+    });
+    expect(withTasks.map((i) => i.key)).toEqual(['session:int', 'task:t1', 'pr:merge']);
+    expect(filterInboxItems(withTasks, { kind: 'task' }).map((i) => i.projectId)).toEqual(['p3']);
+  });
+
   it('compte les éléments par projet', () => {
     expect(inboxProjects(items)).toEqual([
       { id: 'p1', name: 'P1', count: 4 },

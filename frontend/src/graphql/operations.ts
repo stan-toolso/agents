@@ -425,6 +425,8 @@ export interface Task {
   /** Confiée automatiquement à une session quand sa dernière dépendance est terminée. */
   autoStartWhenUnblocked: boolean;
   autoStartBy: { id: string; name: string } | null;
+  /** « Agent arrêté » : en cours, mais aucune session en charge ne tourne plus (ni PR ouverte) ; fin de la plus récente. */
+  stalledSince: string | null;
 }
 
 /** Tâche citée par une autre (dépendance). */
@@ -1781,6 +1783,7 @@ export const TASK_FIELDS = gql`
       id
       name
     }
+    stalledSince
   }
 `;
 
@@ -2360,6 +2363,8 @@ export interface Dashboard {
   runningSessions: Session[];
   recentSessions: Session[];
   attentionTasks: Task[];
+  /** Tâches « agent arrêté ». */
+  staleTasks: Task[];
   pullRequests: TrackedPullRequest[];
 }
 
@@ -2452,6 +2457,9 @@ export const DASHBOARD = gql`
         ...SessionFields
       }
       attentionTasks {
+        ...TaskFields
+      }
+      staleTasks {
         ...TaskFields
       }
       pullRequests {
@@ -2729,6 +2737,7 @@ export interface InboxCounts {
   requests: number;
   failedSessions: number;
   interruptedSessions: number;
+  stalledTasks: number;
   pullRequests: number;
   total: number;
 }
@@ -2738,6 +2747,8 @@ export interface Inbox {
   counts: InboxCounts;
   requests: HumanRequest[];
   sessions: Session[];
+  /** Tâches « agent arrêté » : en cours, sans session qui tourne. */
+  tasks: Task[];
   pullRequests: TrackedPullRequest[];
 }
 
@@ -2748,6 +2759,7 @@ export const INBOX_COUNTS = gql`
       requests
       failedSessions
       interruptedSessions
+      stalledTasks
       pullRequests
       total
     }
@@ -2758,6 +2770,7 @@ export const INBOX = gql`
   ${SESSION_FIELDS}
   ${REQUEST_FIELDS}
   ${TRACKED_PULL_REQUEST_FIELDS}
+  ${TASK_FIELDS}
   query Inbox {
     inbox {
       generatedAt
@@ -2773,6 +2786,9 @@ export const INBOX = gql`
       }
       sessions {
         ...SessionFields
+      }
+      tasks {
+        ...TaskFields
       }
       pullRequests {
         ...TrackedPullRequestFields

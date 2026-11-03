@@ -32,6 +32,7 @@ interface Row {
   dependent_ids: string[] | null;
   auto_start_when_unblocked: boolean | null;
   auto_start_by_id: string | null;
+  stalled_since?: Date | null;
   created_at: Date;
   updated_at: Date;
   completed_at: Date | null;
@@ -116,6 +117,7 @@ const toTask = (r: Row): Task => ({
   dependentIds: r.dependent_ids ?? [],
   autoStartWhenUnblocked: Boolean(r.auto_start_when_unblocked),
   autoStartById: r.auto_start_by_id ?? null,
+  stalledSince: r.stalled_since ?? null,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
   completedAt: r.completed_at,
@@ -123,13 +125,29 @@ const toTask = (r: Row): Task => ({
   cancelledAt: r.cancelled_at ?? null,
 });
 
+/** Statuts d'une session qui travaille encore (ou va travailler) : elle tient la tâche. */
+export const ACTIVE_SESSION_STATUSES = ['pending', 'queued', 'running'] as const;
+
+/**
+ * « Agent arrêté » (expression SQL sur l'alias `t`) : tâche en cours dont des sessions ont la charge, mais aucune ne
+ * tourne plus (terminée, arrêtée, en erreur, interrompue), et sans pull request ouverte (la suite est alors la fusion,
+ * pas l'agent). Vaut la fin la plus récente de ces sessions, null sinon.
+ */
+export const STALLED_SINCE_SQL = `(CASE WHEN t.status = 'in_progress'
+    AND NOT EXISTS (SELECT 1 FROM pull_requests pr WHERE pr.task_id = t.id AND pr.status = 'open')
+  THEN (SELECT CASE WHEN count(*) > 0 AND bool_and(s.status NOT IN (${ACTIVE_SESSION_STATUSES.map((x) => `'${x}'`).join(', ')}))
+                    THEN max(COALESCE(s.ended_at, s.updated_at)) END
+          FROM task_sessions ts JOIN sessions s ON s.id = ts.session_id
+         WHERE ts.task_id = t.id AND ts.in_charge_since IS NOT NULL) END)`;
+
 /** Colonnes d'une tâche avec le nombre de messages de son fil (conversation de la tâche). */
 const SELECT = `SELECT t.*, (SELECT count(*) FROM messages m JOIN conversations cv ON cv.id = m.conversation_id WHERE cv.task_id = t.id) AS comment_count,
   (SELECT array_agg(ts.session_id ORDER BY ts.in_charge_since DESC) FROM task_sessions ts WHERE ts.task_id = t.id AND ts.in_charge_since IS NOT NULL) AS session_ids, (SELECT count(*) FROM task_attachments a WHERE a.task_id = t.id AND a.comment_id IS NULL) AS attachment_count,
   (SELECT array_agg(d.depends_on_task_id ORDER BY d.created_at, d.depends_on_task_id) FROM task_dependencies d WHERE d.task_id = t.id) AS depends_on_ids,
   (SELECT array_agg(d.depends_on_task_id ORDER BY d.created_at, d.depends_on_task_id) FROM task_dependencies d JOIN tasks dt ON dt.id = d.depends_on_task_id
     WHERE d.task_id = t.id AND dt.status <> 'done') AS blocked_by_ids,
-  (SELECT array_agg(d.task_id ORDER BY d.created_at, d.task_id) FROM task_dependencies d WHERE d.depends_on_task_id = t.id) AS dependent_ids FROM tasks t`;
+  (SELECT array_agg(d.task_id ORDER BY d.created_at, d.task_id) FROM task_dependencies d WHERE d.depends_on_task_id = t.id) AS dependent_ids,
+  ${STALLED_SINCE_SQL} AS stalled_since FROM tasks t`;
 /** Tri : urgent d'abord, puis par date de création. */
 const ORDER = `ORDER BY CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, t.created_at ASC`;
 
@@ -295,6 +313,7 @@ export const taskRepository = {
       where.push(`(t.reporter_name ILIKE $${p} OR t.reporter_email ILIKE $${p})`);
     }
     if (filter.assigneeEmail) where.push(`lower(t.assignee_email) = lower($${params.push(filter.assigneeEmail)})`);
+    if (filter.stalled) where.push(`${STALLED_SINCE_SQL} IS NOT NULL`);
     params.push(Math.min(filter.limit ?? 200, 1000));
     const { rows } = await pool.query<Row>(`${SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ${ORDER} LIMIT $${params.length}`, params);
     return rows.map(toTask);

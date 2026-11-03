@@ -1181,6 +1181,19 @@ Le prompt système des agents indique, pour chaque tâche ouverte, ce qui la blo
 éclair si lancement automatique) sur les cartes, la grille et la fiche ; champ « Bloquée par » et interrupteur dans le
 formulaire ; listes « Bloquée par » / « Bloque » dans la fiche et le panneau de droite ; bouton « Confier » désactivé.
 
+**Agent arrêté.** Une tâche **en cours** dont des sessions ont la charge, mais dont **aucune ne tourne plus** (terminée,
+arrêtée, en erreur ou interrompue) et **sans pull request ouverte** (la suite serait alors la fusion), est « agent
+arrêté » : `Task.stalledSince` (fin de la plus récente de ces sessions), calculé en SQL par `STALLED_SINCE_SQL`
+(`tasks/repository.ts`, filtre `TaskFilter.stalled`). Elle apparaît dans « À traiter » (page `/inbox`, compteur
+`InboxCounts.stalledTasks` de la sidebar, tableau de bord global et de projet : `staleTasks`) dès le sondage suivant,
+avec « Reprendre » (modale de la tâche : message à sa session, qui repart avec son historique, ou nouvelle session dans
+le même dossier) et « Remettre à faire » ; badge rouge « agent arrêté » sur la grille, le kanban et la fiche. Quand le
+processus d'une session se termine (`sessionService.onEnded`, branché par `tasks/stalled.ts`) en laissant une telle
+tâche, les membres du projet reçoivent `task.stalled` (famille « Tâches », lien vers la session) ; les fins
+silencieuses (inactivité, archivage, remise à zéro, prise en main) et les interruptions par redémarrage (reprises
+d'office) ne notifient pas, mais la tâche est signalée quand même. Le prompt système rappelle aux agents de passer
+leurs tâches à `done`, de les rendre ou d'expliquer dans le fil ce qui reste avant de finir.
+
 ### Le fil d'une tâche : une conversation
 
 La fiche d'une tâche (`pages/TaskPage.tsx`) se lit comme un canal de discussion : la description **ouvre le fil**, puis

@@ -91,6 +91,8 @@ export interface Dashboard {
   runningSessions: Session[];
   recentSessions: Session[];
   attentionTasks: Task[];
+  /** Tâches « agent arrêté » : en cours, mais aucune session en charge ne tourne plus (`Task.stalledSince`). */
+  staleTasks: Task[];
   /** Pull requests suivies qui attendent une action : à fusionner puis à déployer. */
   pullRequests: TrackedPullRequest[];
 }
@@ -107,7 +109,6 @@ export interface ProjectTeamMember {
 /** Tableau de bord d'un projet : la vue d'ensemble restreinte au projet, plus ce qui n'a de sens que pour lui. */
 export interface ProjectDashboard extends Omit<Dashboard, 'projects'> {
   mergedPullRequests: TrackedPullRequest[];
-  staleTasks: Task[];
   schedules: ScheduleWithSession[];
   general: Conversation | null;
   team: ProjectTeamMember[];
@@ -265,7 +266,7 @@ async function recentSessions(projectIds: string[]): Promise<Session[]> {
 export const dashboardService = {
   async build(userId: string, projectIds: string[], now = new Date(), isAdmin = false): Promise<Dashboard> {
     const monthStart = currentMonthStart(now);
-    const [projects, stats, extra, usageData, pending, running, recent, tasks, unread, pullRequests, prCounts] = await Promise.all([
+    const [projects, stats, extra, usageData, pending, running, recent, tasks, unread, pullRequests, prCounts, stale] = await Promise.all([
       // L'espace personnel compte comme un projet du tableau de bord (ses sessions et tâches sont celles de la personne).
       projectService.listForUser(userId, { includePersonal: true }),
       projectStats(projectIds, monthStart),
@@ -278,6 +279,7 @@ export const dashboardService = {
       notificationService.countUnread({ projectIds, admin: isAdmin }),
       projectIds.length ? trackedPullRequestService.list({ projectIds, stage: ['to_merge', 'draft'], limit: 20 }) : Promise.resolve([]),
       trackedPullRequestService.countPending(projectIds),
+      projectIds.length ? taskRepository.list({ projectIds, status: ['in_progress'], stalled: true, limit: 50 }) : Promise.resolve([]),
     ]);
 
     const perProject: DashboardProject[] = projects.map((project) => {
@@ -323,6 +325,7 @@ export const dashboardService = {
       runningSessions: running,
       recentSessions: recent,
       attentionTasks: tasks,
+      staleTasks: stale,
       pullRequests,
     };
   },
@@ -346,8 +349,6 @@ export const dashboardService = {
     const { projects: _projects, ...rest } = base;
     // Les tâches ouvertes, et celles fermées ou touchées récemment : assez pour le flux et le débit, sans tout l'historique.
     const tasks = allTasks.filter((t) => t.status === 'todo' || t.status === 'in_progress' || t.updatedAt >= since || (t.completedAt && t.completedAt >= since));
-    const runningIds = new Set(base.runningSessions.map((s) => s.id));
-    const staleTasks = tasks.filter((t) => t.status === 'in_progress' && !t.sessionIds.some((id) => runningIds.has(id)));
 
     // L'équipe : chaque membre avec ses sessions en cours et les tâches dont elles ont la charge ; agents d'abord.
     const users = await userRepository.findByIds(members.map((m) => m.userId));
@@ -368,7 +369,6 @@ export const dashboardService = {
     return {
       ...rest,
       mergedPullRequests: merged,
-      staleTasks,
       schedules: [...schedules].sort((a, b) => (a.nextRunAt?.getTime() ?? Infinity) - (b.nextRunAt?.getTime() ?? Infinity)),
       general,
       team,

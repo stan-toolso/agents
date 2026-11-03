@@ -311,6 +311,13 @@ function task(p, title, status, priority, opts = {}) {
     worksession: () => opts.sessions?.[0]?.worksession ?? null,
     pullRequest: null,
     pullRequests: () => pullRequests.filter((pr) => pr.task === t),
+    // « Agent arrêté » (backend : STALLED_SINCE_SQL) : en cours, des sessions en charge, aucune ne tourne, pas de PR ouverte.
+    stalledSince: () => {
+      const own = opts.sessions ?? [];
+      if (status !== 'IN_PROGRESS' || !own.length || own.some((s) => ['RUNNING', 'PENDING', 'QUEUED'].includes(s.status))) return null;
+      if (pullRequests.some((pr) => pr.task === t && pr.status === 'OPEN')) return null;
+      return own.map((s) => s.endedAt ?? s.updatedAt).sort().at(-1) ?? null;
+    },
     createdAt: ago(opts.age ?? 60 * 24 * 3),
     updatedAt: ago(opts.updated ?? 60 * 2),
     completedAt: status === 'DONE' ? ago(opts.updated ?? 60 * 24) : null,
@@ -560,13 +567,15 @@ for (const p of teamProjects) {
 const live = () => sessions.filter((s) => s.kind === 'SESSION' && !s.archivedAt);
 const pending = () => requests.filter((r) => r.status === 'PENDING');
 const usageDays = Array.from({ length: 30 }, (_, i) => ({ __typename: 'DashboardUsageDay', day: day(i - 29), usd: Math.round((4 + 6 * Math.abs(Math.sin(i * 1.7)) + (i % 7 < 5 ? 3 : 0)) * 100) / 100 }));
+const stalledTasks = () => tasks.filter((t) => t.stalledSince());
 const inboxCounts = () => {
   const c = {
     __typename: 'InboxCounts', requests: pending().length,
     failedSessions: live().filter((s) => s.status === 'FAILED').length, interruptedSessions: live().filter((s) => s.status === 'INTERRUPTED').length,
+    stalledTasks: stalledTasks().length,
     pullRequests: pullRequests.filter((x) => x.stage === 'TO_MERGE').length,
   };
-  c.total = c.requests + c.failedSessions + c.interruptedSessions + c.pullRequests;
+  c.total = c.requests + c.failedSessions + c.interruptedSessions + c.stalledTasks + c.pullRequests;
   return c;
 };
 const dashboard = () => ({
@@ -597,6 +606,7 @@ const dashboard = () => ({
   runningSessions: live().filter((s) => s.status === 'RUNNING'),
   recentSessions: [...live()].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)).slice(0, 6),
   attentionTasks: [T.relances, T.pdf, T.tarifs],
+  staleTasks: stalledTasks(),
   pullRequests: pullRequests.filter((x) => x.stage !== 'MERGED'),
 });
 
@@ -667,7 +677,7 @@ const projectDashboard = (id) => {
     attentionTasks: tasks.filter((t) => t.project === p && ['URGENT', 'HIGH'].includes(t.priority) && t.status !== 'DONE'),
     pullRequests: pullRequests.filter((x) => x.project === p && x.stage !== 'MERGED'),
     mergedPullRequests: pullRequests.filter((x) => x.project === p && x.stage === 'MERGED'),
-    staleTasks: tasks.filter((t) => t.project === p && t.status === 'IN_PROGRESS' && !(t.sessionIds ?? []).some((sid) => ps.some((s) => s.id === sid && s.status === 'RUNNING'))),
+    staleTasks: stalledTasks().filter((t) => t.project === p),
     schedules: sessions.filter((s) => s.schedule && s.project === p).map((s) => s.schedule),
     general: conversations.find((c) => c.project === p && c.slug === 'general') ?? null,
     team: members.map((m) => {
@@ -781,6 +791,7 @@ export const demoRoot = {
   inbox: () => ({
     __typename: 'Inbox', generatedAt: new Date().toISOString(), counts: inboxCounts(), requests: pending(),
     sessions: live().filter((s) => ['FAILED', 'INTERRUPTED'].includes(s.status)),
+    tasks: stalledTasks(),
     pullRequests: pullRequests.filter((x) => x.stage === 'TO_MERGE'),
   }),
   inboxCounts,

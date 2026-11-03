@@ -24,7 +24,7 @@ import {
 import { PullRequestChip } from './PullRequests';
 import { TrackedPullRequestChip } from './TrackedPullRequests';
 import TaskActions from './TaskActions';
-import { formatPerson, isOverdue, TaskBlockedBadge, TaskPriorityBadge, TaskStatusBadge, TaskTags } from './TaskBadges';
+import { formatPerson, isOverdue, TaskBlockedBadge, TaskStalledBadge, TaskPriorityBadge, TaskStatusBadge, TaskTags } from './TaskBadges';
 import type { LaunchTarget } from './TaskLaunchModal';
 
 export interface TaskGridProps {
@@ -311,6 +311,7 @@ function Cell({ task: t, col, onEdit, onTag, target }: { task: Task; col: TaskCo
       return (
         <>
           <TaskBlockedBadge task={t} short className="me-1" />
+          <TaskStalledBadge task={t} short className="me-1" />
           <Link to={`/tasks/${t.id}`} className="fw-semibold text-reset text-decoration-none">
             {t.title}
           </Link>

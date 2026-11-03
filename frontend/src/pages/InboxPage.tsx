@@ -5,14 +5,15 @@ import { Link } from 'react-router-dom';
 import RequestCard from '../components/RequestCard';
 import { TrackedPullRequestChip } from '../components/TrackedPullRequests';
 import { useDialogs } from '../components/Dialogs';
-import { INBOX, RESUME_SESSION, type Inbox } from '../graphql/operations';
+import { INBOX, RESUME_SESSION, UPDATE_TASK, type Inbox } from '../graphql/operations';
+import { useTaskLauncher } from '../components/TaskLaunchModal';
 import { buildInboxItems, filterInboxItems, inboxProjects, type InboxItem, type InboxKind, type SessionReason } from '../lib/inbox';
 import { timeAgo } from '../lib/humanize';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { useTabTitle } from '../workbench/TabsContext';
 import './dashboard.css';
 
-const KIND_LABELS: Record<InboxKind, string> = { request: 'Demandes', session: 'Sessions', pullRequest: 'Pull requests' };
+const KIND_LABELS: Record<InboxKind, string> = { request: 'Demandes', session: 'Sessions', task: 'Tâches sans agent', pullRequest: 'Pull requests' };
 
 const REASONS: Record<SessionReason, { icon: string; text: string }> = {
   failed: { icon: 'bi-x-octagon bad', text: 'en erreur' },
@@ -21,8 +22,9 @@ const REASONS: Record<SessionReason, { icon: string; text: string }> = {
 
 /**
  * « À traiter » : tout ce qui attend une action humaine, tous projets confondus — demandes des agents
- * (réponse sur place), sessions en erreur ou interrompues, pull requests à fusionner. Une session qui
- * attend simplement des instructions n'y figure pas : elle ne demande rien. Triée par urgence puis ancienneté, filtrable par projet et par nature. Le compteur global
+ * (réponse sur place), sessions en erreur ou interrompues, tâches en cours dont l'agent s'est arrêté sans les terminer
+ * (reprendre, relancer ou remettre à faire), pull requests à fusionner. Une session qui attend simplement des
+ * instructions n'y figure pas : elle ne demande rien. Triée par urgence puis ancienneté, filtrable par projet et par nature. Le compteur global
  * vit dans la sidebar (query InboxCounts).
  */
 export default function InboxPage() {
@@ -75,11 +77,13 @@ export default function InboxPage() {
   );
 }
 
-const countOf = (inbox: Inbox, kind: InboxKind) => (kind === 'request' ? inbox.requests.length : kind === 'session' ? inbox.sessions.length : inbox.pullRequests.length);
+const countOf = (inbox: Inbox, kind: InboxKind) =>
+  kind === 'request' ? inbox.requests.length : kind === 'session' ? inbox.sessions.length : kind === 'task' ? (inbox.tasks ?? []).length : inbox.pullRequests.length;
 
 function InboxRow({ item }: { item: InboxItem }) {
   if (item.kind === 'request') return <RequestCard request={item.request} showSession />;
   if (item.kind === 'session') return <SessionItem item={item} />;
+  if (item.kind === 'task') return <StalledTaskItem item={item} />;
   return <PullRequestItem item={item} />;
 }
 
@@ -104,6 +108,38 @@ function SessionItem({ item }: { item: Extract<InboxItem, { kind: 'session' }> }
           </Button>
         )}
         <Button as={Link as any} to={`/sessions/${session.id}`} size="sm" variant="outline-secondary">Ouvrir</Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Tâche « agent arrêté » : « Reprendre » ouvre la modale de la tâche, qui propose de renvoyer un message à sa session
+ * (elle repart avec son historique) ou d'en lancer une nouvelle dans le même dossier ; « Remettre à faire » la rend au tableau.
+ */
+function StalledTaskItem({ item }: { item: Extract<InboxItem, { kind: 'task' }> }) {
+  const { task } = item;
+  const { showError } = useDialogs();
+  const { launchTask } = useTaskLauncher();
+  const [updateTask, { loading }] = useMutation(UPDATE_TASK, { refetchQueries: ['Inbox', 'InboxCounts', 'Tasks', 'Sidebar'], onError: (err) => void showError(err) });
+  return (
+    <div className="inbox-item">
+      <i className="bi bi-person-x bad icon" />
+      <div className="main">
+        <Link to={`/tasks/${task.id}`} className="title">{task.title}</Link>
+        <div className="meta">
+          {task.project.name} · en cours, mais l’agent s’est arrêté sans la terminer
+          {task.session && <> · <Link to={`/sessions/${task.session.id}`}>{task.session.name}</Link></>}
+          {' · '}{timeAgo(item.at)}
+        </div>
+      </div>
+      <div className="side">
+        <Button size="sm" variant="outline-primary" onClick={() => launchTask(task, undefined)} title="Renvoyer un message à sa session (elle repart avec son historique) ou relancer une nouvelle session dans le même dossier">
+          <i className="bi bi-play-fill" /> Reprendre
+        </Button>
+        <Button size="sm" variant="outline-secondary" disabled={loading} onClick={() => void updateTask({ variables: { id: task.id, input: { status: 'TODO' } } })}>
+          <i className="bi bi-arrow-counterclockwise" /> Remettre à faire
+        </Button>
       </div>
     </div>
   );

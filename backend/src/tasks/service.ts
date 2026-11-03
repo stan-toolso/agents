@@ -145,6 +145,12 @@ const readableMentions = (c: TaskComment): string => (c.mentions.length ? ` (men
 /** Demande à la session en charge de tenir l'étiquette d'état de sa tâche à jour. */
 const STATUS_TAG_HINT =
   "Tiens l'étiquette d'état de la tâche à jour à mesure que ton travail avance : un mot ou deux affichés à côté de son statut dans la sidebar et le tableau (`tasks.update` avec `status_tag`, ex. « analyse », « implémentation », « tests », « en revue », « bloquée » ; une chaîne vide la retire).";
+/**
+ * Rappel de fin : une tâche laissée « en cours » quand la session s'arrête est signalée « agent arrêté » à l'équipe
+ * (tasks/stalled.ts) ; l'agent la ferme, la rend ou explique ce qui la retient avant de finir.
+ */
+export const FINISH_TASK_HINT =
+  "Avant de terminer (dernier tour, archivage de la session), passe chaque tâche dont tu es en charge à `done` (`tasks.update`) si le travail est fini et vérifié ; sinon rends-la (`tasks.release`) ou laisse-la en cours avec un message dans son fil qui dit ce qui reste et ce que tu attends. Une tâche laissée « en cours » par une session arrêtée sans PR ouverte est signalée « agent arrêté » à l'équipe.";
 
 function validate(input: CreateTaskInput | UpdateTaskInput): void {
   if ('title' in input && input.title != null && !input.title.trim()) throw new AppError('Le titre de la tâche est obligatoire');
@@ -556,7 +562,7 @@ export const taskService = {
     lines.push(
       "Quand quelqu'un d'autre modifie l'une de ces tâches ou écrit dans son fil, tu reçois un texte commençant par « [Mise à jour de la tâche] », « [Commentaire sur la tâche] » ou « [Réaction sur la tâche] » qui décrit le changement. Ce qui t'est adressé (message du fil d'une tâche dont tu es en charge ou qui te mentionne, modification par une personne d'une tâche dont tu es en charge) arrive comme une instruction : tiens-en compte, et réponds à un message avec `tasks.comment` (`reply_to` pour rester dans son fil) quand il appelle une réponse ; un simple accusé se fait avec `tasks.react`. Le reste arrive comme une note discrète, jointe au résultat d'un outil ou à l'instruction suivante : prends-la en compte sans en rendre compte, sauf si elle change ton travail.",
     );
-    if (tasks.length) lines.push(STATUS_TAG_HINT);
+    if (tasks.length) lines.push(STATUS_TAG_HINT, FINISH_TASK_HINT);
     return lines.join('\n');
   },
 
