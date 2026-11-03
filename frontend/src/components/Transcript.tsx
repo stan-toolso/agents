@@ -598,7 +598,7 @@ interface WorkItem {
  * dépliée au clic. `live` : le tour continue, son dernier appel d'outil reste nommé (avec `…` tant qu'il
  * tourne) — la ligne change sur place plutôt que de clignoter entre deux appels.
  */
-function WorkGroup({ items, live }: { items: WorkItem[]; live: boolean }) {
+function WorkGroup({ items, live, plain = false }: { items: WorkItem[]; live: boolean; plain?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const tools = items.filter((i) => i.tool).map((i) => i.tool!);
   const messages = items.filter((i) => i.text).length;
@@ -609,7 +609,8 @@ function WorkGroup({ items, live }: { items: WorkItem[]; live: boolean }) {
   tools.forEach((t) => counts.set(t.name, (counts.get(t.name) ?? 0) + 1));
   const names = [...counts.entries()];
   const errors = tools.filter((t) => t.severity === 'error').length;
-  const latest = live ? tools[tools.length - 1] : undefined;
+  // En conversation, pas de commande en cours sous les yeux : l'indicateur « réfléchit… » suffit.
+  const latest = live && !plain ? tools[tools.length - 1] : undefined;
   const parts = [
     tools.length ? plural(tools.length, 'étape', 'étapes') : '',
     messages ? plural(messages, 'message', 'messages') : '',
@@ -659,8 +660,9 @@ const STICK_MARGIN = 80;
  * `technical` ajoute les lignes de service (démarrage, autorisations, audit des connexions, erreurs brutes) et
  * montre chaque étape ; sinon les étapes d'un tour sont repliées en une ligne (`WorkGroup`).
  * `draft` : réponse en cours d'écriture (streaming), affichée en bas avec un curseur jusqu'au message complet.
+ * `busy` : l'agent travaille (sans attendre de réponse) ; en conversation, une simple ligne « réfléchit… » le dit.
  */
-export default function Transcript({ events, draft = null, autoScroll = true, technical = false, loading = false, participants = null }: { events: SessionEvent[]; draft?: SessionLiveDraft | null; autoScroll?: boolean; technical?: boolean; loading?: boolean; participants?: ChatParticipants | null }) {
+export default function Transcript({ events, draft = null, autoScroll = true, technical = false, loading = false, participants = null, busy = false }: { events: SessionEvent[]; draft?: SessionLiveDraft | null; autoScroll?: boolean; technical?: boolean; loading?: boolean; participants?: ChatParticipants | null; busy?: boolean }) {
   // Sans le détail technique et avec ses interlocuteurs, la session se lit comme une conversation (`ChatRow`).
   const chat = !technical && participants ? participants : null;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -692,7 +694,7 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
   useEffect(() => {
     const el = containerRef.current;
     if (autoScroll && el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [events.length, draft?.text.length, draft?.thinking, autoScroll]);
+  }, [events.length, draft?.text.length, draft?.thinking, busy, autoScroll]);
 
   // Les nœuds des événements journalisés ne sont reconstruits qu'à l'arrivée d'événements (ou au changement de
   // mode) : pendant qu'un agent écrit, le brouillon est relevé toutes les 400 ms et seul le bloc « en direct »
@@ -724,7 +726,7 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
         // un instant plus tard.
         // Notes seules (arrivées pendant que l'agent attend) : rien à replier non plus.
         if ((!tail && run.every((i) => i.text || !i.tool) && run.filter((i) => i.text).length <= 1) || run.every((i) => i.note)) out.push(...run.map((i) => i.node));
-        else out.push(<WorkGroup key={key} items={run} live={tail} />);
+        else out.push(<WorkGroup key={key} items={run} live={tail} plain={Boolean(chat)} />);
         run = [];
       };
       items.forEach((item, i) => {
@@ -915,8 +917,9 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
                 ✻ Claude Code {String(p.claude_code_version ?? '')} · {String(p.model ?? '')} · {String(p.cwd ?? '')}
               </div>,
             );
-          } else if (p.subtype === 'task_notification' && p.summary) {
-            // Fin d'une commande ou d'un agent lancé en arrière-plan.
+          } else if (technical && p.subtype === 'task_notification' && p.summary) {
+            // Fin d'une commande ou d'un agent lancé en arrière-plan : son résumé est souvent la commande brute,
+            // du détail technique.
             nodes.push(
               <div key={e.id} className="cc-note">
                 ⏺ {String(p.summary)}
@@ -1089,10 +1092,13 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
   }, [events, technical, chat, results, subCalls, cwd]);
   // Ce que l'agent écrit en ce moment : le texte grandit à chaque relevé, puis le message journalisé le remplace.
   // En conversation, elle prolonge le message de l'agent du tour en cours, ou en ouvre un.
+  // Tant que l'agent travaille sans écrire, la conversation montre seulement qu'il réfléchit.
   const liveBody = draft?.text.trim() ? (
     <Markdown className="cc-body cc-chat-text" text={draft.text} />
-  ) : draft?.thinking ? (
-    <div className="cc-thinking">∴ Réflexion…</div>
+  ) : draft?.thinking || busy ? (
+    <div className="cc-thinking cc-chat-thinking">
+      <div>{chat?.agent.name ?? "L'agent"} réfléchit…</div>
+    </div>
   ) : null;
   const live = chat ? (
     liveBody &&

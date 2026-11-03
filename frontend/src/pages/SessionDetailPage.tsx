@@ -433,7 +433,7 @@ export default function SessionDetailPage() {
 
       {/* Sur mobile, la ligne vit dans le détail repliable de l'en-tête, avec les boutons. */}
       <div className="cc-toggle d-none d-md-flex">{technicalToggle}</div>
-      <Transcript events={shownEvents} draft={draft} loading={!eventsLoaded} technical={technical} participants={participants} />
+      <Transcript events={shownEvents} draft={draft} loading={!eventsLoaded} technical={technical} participants={participants} busy={Boolean(busy) && !pending.length} />
       {actions.modals}
 
       {pending.length > 0 && !readOnly && (
