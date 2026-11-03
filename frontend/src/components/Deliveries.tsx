@@ -10,7 +10,7 @@ import { useDialogs } from './Dialogs';
 type Role = 'ADMIN' | 'MEMBER' | 'VIEWER' | null | undefined;
 
 export function DeliveryStatusBadge({ status }: { status: Delivery['status'] }) {
-  const s = DELIVERY_STATUS_LABELS[status];
+  const s = DELIVERY_STATUS_LABELS[status] ?? { label: String(status).toLowerCase(), variant: 'secondary' };
   return (
     <Badge bg={s.variant} className="delivery-status">
       {status === 'RUNNING' && <span className="spinner-border spinner-border-sm me-1 delivery-spinner" aria-hidden />}
@@ -59,7 +59,7 @@ export function DeliverButton({ projectId, sessionId, taskId, worksessionId, bra
   };
 
   const btnClass = look === 'cc' ? 'cc-btn' : undefined;
-  const title = active ? `Livraison en cours : ${lastStep(latest!) ?? '…'}` : latest ? `Dernière livraison ${DELIVERY_STATUS_LABELS[latest.status].label} ${timeAgo(latest.createdAt)}${latest.error ? ` : ${latest.error}` : ''}` : 'Fusionner sur la branche principale après CI verte (et mettre en production)';
+  const title = active ? `Livraison en cours : ${lastStep(latest!) ?? '…'}` : latest ? `Dernière livraison ${DELIVERY_STATUS_LABELS[latest.status]?.label ?? latest.status} ${timeAgo(latest.createdAt)}${latest.error ? ` : ${latest.error}` : ''}` : 'Fusionner sur la branche principale après CI verte (et mettre en production)';
   const label = active ? (
     <>
       <span className="spinner-border spinner-border-sm me-1 delivery-spinner" aria-hidden /> Livraison en cours

@@ -48,7 +48,7 @@ export default function ProjectDeliveriesPage() {
   const runningDeploy = deliveries.find((d) => d.kind === 'DEPLOY' && d.status === 'RUNNING');
   const queuedDeploy = deliveries.find((d) => d.kind === 'DEPLOY' && d.status === 'QUEUED');
   const ci = ciQ.data?.ciStatus;
-  const ciLabel = ci ? CI_LABELS[ci.verdict] : null;
+  const ciLabel = ci ? (CI_LABELS[ci.verdict] ?? CI_LABELS.none) : null;
 
   const deploy = async () => {
     try {

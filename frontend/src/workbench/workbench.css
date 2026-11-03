@@ -1091,7 +1091,7 @@ a.task-mention:hover { background: rgba(var(--cc-accent-rgb), 0.24); color: var(
 /* ---- Livraisons (bouton « Livrer », page Livraisons d'un projet) ---------------------------------------------- */
 .delivery-spinner { width: 0.75rem; height: 0.75rem; border-width: 0.12em; vertical-align: -0.1em; }
 .delivery-row { cursor: pointer; }
-.delivery-last-step { max-width: 28rem; }
+.delivery-last-step, .delivery-table td:first-child .text-truncate { max-width: 15rem; }
 .delivery-detail > td { background: var(--cc-bg-elevated); }
 .delivery-steps { padding-left: 1.2rem; }
 .delivery-step-success { color: var(--cc-green); }
@@ -1099,6 +1099,6 @@ a.task-mention:hover { background: rgba(var(--cc-accent-rgb), 0.24); color: var(
 .delivery-step-error { color: var(--cc-red); }
 .delivery-output { max-height: 20rem; overflow: auto; white-space: pre-wrap; background: var(--cc-bg); border: 1px solid var(--cc-border); border-radius: 4px; padding: 0.5rem; color: var(--cc-dim); }
 @media (max-width: 767.98px) {
-  .delivery-last-step { max-width: 12rem; }
+  .delivery-last-step, .delivery-table td:first-child .text-truncate { max-width: 10rem; }
   .deploy-card .card-body > .d-flex { width: 100%; }
 }
