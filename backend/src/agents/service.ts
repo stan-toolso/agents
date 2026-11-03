@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Actor } from '../context/types.js';
-import { AppError, NotFoundError } from '../errors.js';
+import { AppError, NotFoundError, isInvalidUuidError } from '../errors.js';
 import { log } from '../log.js';
 import { projectService } from '../projects/service.js';
 import { slugify } from '../projects/slug.js';
@@ -67,17 +67,27 @@ function actionKey(input: AgentActionInput, taken: Set<string>): string {
   return key;
 }
 
+/** Agent de cet identifiant, null s'il n'existe pas ou si l'identifiant n'est pas un UUID (erreur PostgreSQL 22P02). */
+async function findAgent(id: string): Promise<Agent | null> {
+  try {
+    return await agentRepository.findById(id);
+  } catch (error) {
+    if (isInvalidUuidError(error)) return null;
+    throw error;
+  }
+}
+
 export const agentService = {
   templates: (): AgentTemplate[] => AGENT_TEMPLATES,
 
   async get(id: string): Promise<Agent> {
-    const agent = await agentRepository.findById(id);
+    const agent = await findAgent(id);
     if (!agent) throw new NotFoundError('Agent introuvable');
     return agent;
   },
 
   /** Profil d'un utilisateur s'il est un agent, null pour une personne (ou un identifiant inconnu). */
-  forUser: (userId: string | null | undefined): Promise<Agent | null> => (userId ? agentRepository.findById(userId) : Promise.resolve(null)),
+  forUser: (userId: string | null | undefined): Promise<Agent | null> => (userId ? findAgent(userId) : Promise.resolve(null)),
 
   listByProject: (projectId: string, opts?: { includeArchived?: boolean }) => agentRepository.listByProject(projectId, opts),
   listActive: (projectIds: string[]) => agentRepository.listActive(projectIds),

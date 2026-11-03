@@ -276,9 +276,10 @@ interface GqlAgentInput extends Omit<AgentInput, 'kind' | 'actions'> {
 const fromGqlAgentInput = (input: GqlAgentInput): AgentInput => ({ ...input, kind: input.kind ? (input.kind.toLowerCase() as AgentKind) : null, actions: input.actions ?? null });
 /** Membre du projet de l'agent et gestionnaire de l'agent (ou administrateur du projet). */
 async function guardAgentManager(ctx: Ctx, agentId: string): Promise<Agent> {
+  const user = requireUser(ctx); // avant toute lecture en base
   const agent = await agentService.get(agentId);
   await requireProject(ctx, agent.projectId, 'member');
-  await agentService.assertCanManage(requireUser(ctx).id, agent);
+  await agentService.assertCanManage(user.id, agent);
   return agent;
 }
 /** Bibliothèque visée par `agentId` : la bibliothèque propre d'un agent du projet (vérifié), sinon celle du projet. */
@@ -915,6 +916,7 @@ export const resolvers = {
       };
     },
     agent: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      requireUser(ctx);
       const agent = await agentService.get(args.id);
       await requireProject(ctx, agent.projectId, 'viewer');
       return agent;
@@ -1324,9 +1326,10 @@ export const resolvers = {
       return agentService.setManagers(args.id, args.managers.map((m) => ({ userId: m.userId, role: m.role.toLowerCase() as AgentManagerRole })));
     },
     summonAgent: async (_: unknown, args: { id: string; text: string; taskId?: string | null; attachments?: AttachmentInput[] | null }, ctx: Ctx) => {
+      const user = requireUser(ctx);
       const agent = await agentService.get(args.id);
       await requireProject(ctx, agent.projectId, 'member');
-      return agentService.summon(agent.id, { taskId: args.taskId ?? null, text: args.text, attachments: args.attachments ?? null, requestedById: requireUser(ctx).id });
+      return agentService.summon(agent.id, { taskId: args.taskId ?? null, text: args.text, attachments: args.attachments ?? null, requestedById: user.id });
     },
     takeOverSession: async (_: unknown, args: { id: string }, ctx: Ctx) => {
       await guardSession(ctx, args.id, 'member');
