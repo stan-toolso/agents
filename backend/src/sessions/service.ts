@@ -23,6 +23,7 @@ import { instanceRegistry } from '../instances/registry.js';
 import { callInstance } from '../instances/client.js';
 import type { Attachment, AttachmentInput, CreateSessionInput, RelaunchInput, Session, SessionFilter, SessionStatus } from './types.js';
 import { log } from '../log.js';
+import { claudeSettings } from '../settings/claude.js';
 import { reviewOf } from '../reviews/types.js';
 import { pullRequestRepository } from '../pullRequests/repository.js';
 import type { TrackedPullRequest } from '../pullRequests/types.js';
@@ -351,6 +352,23 @@ async function drainOnce(): Promise<void> {
   }
 }
 
+/** Modèle fixé par la configuration d'une session (chaîne non vide), sinon null. */
+const configModel = (config: Record<string, unknown> | null | undefined): string | null => (typeof config?.model === 'string' && config.model.trim() ? config.model.trim() : null);
+
+/** Le compte Claude qui servira la session de ce propriétaire (le sien, ou celui prêté à un agent) autorise-t-il ce modèle ? */
+async function modelAllowedForOwner(ownerId: string | null, model: string): Promise<boolean> {
+  if (!ownerId) return false;
+  try {
+    const accounts = await agentService.accountsForOwner(ownerId);
+    const settings = await claudeSettings.forUser(accounts?.claudeUserId ?? ownerId);
+    settings.assertModelAllowed(model);
+    return true;
+  } catch {
+    log.info(`[sessions] modèle du projet ${model} ignoré : non autorisé pour le propriétaire ${ownerId}`);
+    return false;
+  }
+}
+
 /**
  * PR encore ouverte du dossier de travail d'une session. Une session d'agent qui porte une PR ouverte ne s'archive pas
  * (ni par l'outil `sessions.archive`, ni d'office en fin de tour) : elle garde son contexte et son dossier pour les
@@ -450,6 +468,14 @@ export const sessionService = {
         throw new AppError(`Au plus ${MAX_RUNNING_CHILDREN} sessions lancées par cette session peuvent tourner en même temps : termine-en une (sessions.end) avant d'en lancer une autre`);
       }
       parentSessionId = parent.id;
+    }
+
+    // Modèle : celui choisi (ou celui de l'agent), sinon celui que le projet propose pour ce lancement (priorité de la
+    // tâche, puis défaut du projet), pourvu que le compte Claude du propriétaire l'autorise ; sinon rien n'est fixé et le
+    // modèle par défaut du propriétaire s'applique au démarrage.
+    if (input.provider === 'claude' && !configModel(input.config)) {
+      const proposed = input.defaultModel?.trim() || project.defaultModel;
+      if (proposed && (await modelAllowedForOwner(ownerId, proposed))) input = { ...input, config: { ...input.config, model: proposed } };
     }
 
     let worksessionId = input.worksessionId ?? null;

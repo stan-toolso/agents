@@ -41,6 +41,8 @@ const project = (id, name, slug, description, gitUrl, extra = {}) => ({
   taskInstructions: '',
   runnerConfig: {},
   defaultPermissionMode: 'default',
+  defaultModel: null,
+  taskModels: null,
   approvalConnections: [],
   isMember: true,
   isPersonal: false,
@@ -75,7 +77,7 @@ const key = (id) => id.slice(2);
 const member = (u, role) => ({ __typename: 'ProjectMember', user: u, role, invitedBy: null, createdAt: ago(60 * 24 * 60), pending: false });
 
 P.perso = project('p-perso', 'Espace de Camille', 'perso-camille', 'Mon espace personnel : chats et brouillons.', null, { isPersonal: true });
-P.site = project('p-site', 'Site vitrine Toolso', 'site-vitrine', 'Le site public toolso.io : pages produit, tarifs, blog et formulaire de contact (Astro).', 'https://github.com/toolso/site-vitrine');
+P.site = project('p-site', 'Site vitrine Toolso', 'site-vitrine', 'Le site public toolso.io : pages produit, tarifs, blog et formulaire de contact (Astro).', 'https://github.com/toolso/site-vitrine', { taskModels: { low: 'claude-sonnet-5-5' } });
 P.api = project('p-api', 'API Facturation', 'api-facturation', 'Service de facturation : abonnements Stripe, factures PDF, relances et exports comptables.', 'https://github.com/toolso/api-facturation');
 P.mobile = project('p-mobile', 'Appli Scouts', 'appli-scouts', 'Application mobile des groupes scouts : inscriptions aux camps, cotisations et messagerie des parents.', 'https://github.com/toolso/appli-scouts');
 P.data = project('p-data', 'Data & reporting', 'data-reporting', 'Tableaux de bord et rapports hebdomadaires (dbt, Metabase).', 'https://github.com/toolso/data-reporting');
@@ -129,7 +131,8 @@ function session(id, p, name, opts = {}) {
     workflowRun: null,
     prompt: opts.prompt ?? name,
     promptAttachments: [],
-    config: { model: 'default', permissionMode: opts.permissionMode ?? 'default' },
+    config: { model: opts.model ?? 'default', permissionMode: opts.permissionMode ?? 'default' },
+    model: opts.model ?? 'claude-opus-5-5',
     externalId: null,
     exitCode: opts.status === 'FAILED' ? 1 : null,
     error: opts.error ?? null,
@@ -177,15 +180,15 @@ const sessionsOf = (projectId, args = {}) =>
 
 const S = {
   tarifs: session('s-page-tarifs', P.site, 'Refonte de la page tarifs', { activity: 'BUSY', age: 70, updated: 0, cost: 1.86, tokens: 64_000, prompt: 'Refonds la page /tarifs : trois offres en cartes, un comparatif détaillé dessous et une FAQ. Garde le style du site.' }),
-  contact: session('s-formulaire-contact', P.site, 'Formulaire de contact sur mobile', { age: 60 * 5, updated: 25, cost: 0.74 }),
+  contact: session('s-formulaire-contact', P.site, 'Formulaire de contact sur mobile', { model: 'claude-sonnet-5-5', age: 60 * 5, updated: 25, cost: 0.74 }),
   blog: session('s-chris-tri-blog', P.site, 'Tri des demandes du blog', { owner: U.chris, requestedBy: U.me, age: 60 * 3, updated: 40, cost: 0.31, branch: null }),
   pdf: session('s-export-pdf', P.api, 'Export des factures en PDF', { owner: U.hugo, activity: 'BUSY', age: 50, updated: 1, cost: 1.12 }),
-  revuePdf: session('s-nora-revue-118', P.api, 'Revue de la PR #118', { owner: U.nora, requestedBy: U.hugo, age: 25, updated: 4, cost: 0.22, branch: null }),
+  revuePdf: session('s-nora-revue-118', P.api, 'Revue de la PR #118', { model: 'claude-haiku-5-5', owner: U.nora, requestedBy: U.hugo, age: 25, updated: 4, cost: 0.22, branch: null }),
   stripe: session('s-stripe-2026-10', P.api, 'Migration vers l’API Stripe 2026-10', { status: 'COMPLETED', age: 60 * 28, updated: 60 * 22, cost: 3.4 }),
   relances: session('s-relances-impayes', P.api, 'Relances automatiques des impayés', { status: 'INTERRUPTED', age: 60 * 30, updated: 60 * 20, cost: 0.95 }),
   push: session('s-notifs-camps', P.mobile, 'Notifications push des camps', { owner: U.lea, status: 'FAILED', age: 60 * 6, updated: 60 * 2, cost: 0.58, error: 'npm run test : 2 tests en échec (CampReminder.test.ts)' }),
   revue: session('s-max-cotisations', P.mobile, 'Paiement des cotisations en trois fois', { owner: U.max, requestedBy: U.lea, takenOverBy: U.lea, activity: 'BUSY', age: 35, updated: 0, cost: 0.66 }),
-  hebdo: session('s-rapport-hebdo', P.data, 'Rapport hebdo des inscriptions', { age: 60 * 24 * 6, updated: 60 * 9, cost: 2.1, branch: null }),
+  hebdo: session('s-rapport-hebdo', P.data, 'Rapport hebdo des inscriptions', { model: 'claude-sonnet-5-5', age: 60 * 24 * 6, updated: 60 * 9, cost: 2.1, branch: null }),
   chat1: session('c-idees-blog', P.perso, 'Idées d’articles pour le blog', { kind: 'CHAT', age: 60 * 2, updated: 50, cost: 0.08 }),
   chat2: session('c-compte-rendu', P.perso, 'Résumé du comité de pilotage', { kind: 'CHAT', age: 60 * 26, updated: 60 * 25, cost: 0.05 }),
   chat3: session('c-mail-client', P.perso, 'Réponse à un client mécontent', { kind: 'CHAT', age: 60 * 50, updated: 60 * 49, cost: 0.03 }),
