@@ -3,6 +3,7 @@ import { AppError } from '../errors.js';
 import { log } from '../log.js';
 import { notificationService } from '../notifications/service.js';
 import { projectService } from '../projects/service.js';
+import { autoArchiveConfig } from '../sessions/autoArchive.js';
 import { startTaskSession } from './launch.js';
 import { taskRepository } from './repository.js';
 import { taskService } from './service.js';
@@ -38,7 +39,7 @@ export async function launchUnblocked(task: Task, cause: Task): Promise<void> {
     if (agent) {
       if (agent.archivedAt) throw new AppError(`l'agent ${agent.name} a été retiré du projet`);
       if (!agent.enabled) throw new AppError(`l'agent ${agent.name} est en pause`);
-      session = await startTaskSession(task.id, { ownerId: agent.id, provider: agentService.providerOf(agent), config: agentService.sessionConfig(agent, null) });
+      session = await startTaskSession(task.id, { ownerId: agent.id, provider: agentService.providerOf(agent), config: agentService.sessionConfig(agent, autoArchiveConfig()) });
     } else {
       session = await startTaskSession(task.id, { ownerId: byId });
     }

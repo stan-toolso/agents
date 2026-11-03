@@ -35,7 +35,8 @@ const tagMatches = (task: Task, tag: string | null): boolean => !tag || task.tag
 /** Convoque sans jamais lever (l'action d'origine ne doit pas en dépendre). */
 async function summonQuietly(agent: Agent, opts: Omit<SummonOptions, 'actor'>, why: string): Promise<void> {
   try {
-    const session = await agentService.summon(agent.id, { ...opts, actor: { type: 'human' } });
+    // Personne ne pilote une session ouverte par un déclencheur : elle se range seule à la fin de son tour.
+    const session = await agentService.summon(agent.id, { ...opts, actor: { type: 'human' }, autoArchive: true });
     log.info(`[agents] ${agent.name} convoqué (${why}) : session ${session.id}`);
   } catch (err) {
     log.warn(`[agents] ${agent.name} non convoqué (${why}) : ${(err as Error).message}`);

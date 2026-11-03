@@ -25,6 +25,7 @@ import { log } from '../log.js';
 import { reviewOf } from '../reviews/types.js';
 import { agentService } from '../agents/service.js';
 import { normalizeContextLimit } from './context.js';
+import { AUTO_ARCHIVE_KEY, archivesWhenIdle, withoutAutoArchive } from './autoArchive.js';
 
 /** Texte d'une instruction sans texte : les fichiers joints sont l'instruction. */
 const ATTACHMENTS_ONLY_TEXT = 'Voir les fichiers joints.';
@@ -571,10 +572,16 @@ export const sessionService = {
           if (activity === 'idle' && drainingInstance) void park(id);
           // Fin d'un tour ordinaire : la limite de contexte choisie pour la session s'applique (rien sans limite). Les
           // exécutions planifiées appliquent la leur avant de démarrer (schedules/service.ts).
+          // Une session lancée sans personne (autoArchive) est rangée d'office à la place.
           else if (activity === 'idle' && !stopping && !scheduledRuns.has(id)) {
-            void import('./cleanup.js')
-              .then(({ cleanupService }) => cleanupService.afterTurn(id))
-              .catch((err) => log.error(`[cleanup] limite de contexte de la session ${id}`, err));
+            void sessionService
+              .archiveAfterTurn(id)
+              .then(async (archived) => {
+                if (archived) return;
+                const { cleanupService } = await import('./cleanup.js');
+                await cleanupService.afterTurn(id);
+              })
+              .catch((err) => log.error(`[sessions] fin de tour de la session ${id}`, err));
           }
         },
         recordConfig: async (changes) => {
@@ -677,13 +684,18 @@ export const sessionService = {
    * Envoie une instruction à la session. Si elle est en cours, l'instruction est transmise à
    * l'agent ; si elle est terminée, la session est relancée avec cette instruction (reprise).
    */
-  async sendMessage(id: string, text: string, files?: AttachmentInput[] | null, opts: { attachments?: Attachment[] } = {}): Promise<Session> {
+  async sendMessage(id: string, text: string, files?: AttachmentInput[] | null, opts: { attachments?: Attachment[]; byPerson?: boolean } = {}): Promise<Session> {
     const trimmed = text.trim() || (files?.length || opts.attachments?.length ? ATTACHMENTS_ONLY_TEXT : '');
     if (!trimmed) throw new AppError('Le message est vide');
     const session = await sessionRepository.findById(id);
     if (!session) throw new NotFoundError('Session introuvable');
     assertNotArchived(session);
     if (session.status === 'queued') throw queuedError();
+    // Une personne écrit directement dans la session : elle la pilote désormais, la session ne se range plus d'office.
+    if (opts.byPerson && session.config?.[AUTO_ARCHIVE_KEY] !== undefined) {
+      await publishSession(await sessionRepository.update(id, { config: withoutAutoArchive(session.config) }));
+      await emitEvent(id, 'system', { message: "Une personne écrit dans cette session : elle ne sera plus archivée d'office à la fin de ses tours", notice: true, reason: 'auto_archive_off' });
+    }
     const handle = running.get(id);
     if (handle && !handle.sendMessage) throw new AppError("Ce type de session n'accepte pas d'instructions en cours d'exécution");
     // `opts.attachments` : fichiers déjà enregistrés par l'instance qui a reçu l'instruction et nous l'a transmise.
@@ -762,17 +774,17 @@ export const sessionService = {
    * (outil `sessions.archive`) : l'archiver immédiatement couperait l'outil qui le demande. Renvoie `true` si
    * l'archivage est différé à la fin du tour.
    */
-  async archiveWhenDone(id: string, reason: string | null = null): Promise<boolean> {
+  async archiveWhenDone(id: string, reason: string | null = null, opts: { auto?: boolean } = {}): Promise<boolean> {
     const session = await sessionRepository.findById(id);
     if (!session) throw new NotFoundError('Session introuvable');
     if (session.archivedAt) return false;
+    if (archiveWhenDone.has(id)) return true; // déjà demandé : la fin du tour l'archivera
     if (!archiveWhenDoneListener) throw new AppError("L'archivage n'est pas disponible");
     const deferred = running.has(id);
-    await emitEvent(id, 'system', {
-      message: `${deferred ? "Session archivée par son agent à la fin de ce tour" : 'Session archivée par un agent'}${reason ? ` : ${reason}` : ''}`,
-      notice: true,
-      reason: 'agent_archive',
-    });
+    const message = opts.auto
+      ? "Session archivée d'office à la fin de son tour : lancée sans personne pour la piloter, elle se range seule (le fil de sa tâche ou de son canal rappellera l'agent)"
+      : `${deferred ? 'Session archivée par son agent à la fin de ce tour' : 'Session archivée par un agent'}${reason ? ` : ${reason}` : ''}`;
+    await emitEvent(id, 'system', { message, notice: true, reason: opts.auto ? 'auto_archive' : 'agent_archive' });
     if (deferred) {
       archiveWhenDone.add(id);
       try {
@@ -786,6 +798,29 @@ export const sessionService = {
     }
     await archiveWhenDoneListener(id);
     return false;
+  },
+
+  /**
+   * Fin de tour d'une session lancée sans personne (`archivesWhenIdle`, voir autoArchive.ts) : elle est archivée d'office,
+   * sauf si l'agent attend encore une session qu'il a lancée ou si un nouveau tour a déjà commencé. Renvoie `true` si
+   * l'archivage est engagé (la limite de contexte ne s'applique alors pas).
+   */
+  async archiveAfterTurn(id: string): Promise<boolean> {
+    if (archiveWhenDone.has(id)) return true;
+    if (!archiveWhenDoneListener || !running.has(id)) return false;
+    const session = await sessionRepository.findById(id);
+    if (!session || !archivesWhenIdle(session) || session.status !== 'running' || session.activity !== 'idle') return false;
+    const [runningChildren, queuedChildren] = await Promise.all([
+      sessionRepository.list({ parentSessionId: id, status: 'running', archived: 'exclude', limit: 1 }),
+      sessionRepository.list({ parentSessionId: id, status: 'queued', archived: 'exclude', limit: 1 }),
+    ]);
+    if (runningChildren.length || queuedChildren.length) {
+      log.info(`[sessions] session ${id} non archivée d'office : une session qu'elle a lancée tourne encore`);
+      return false;
+    }
+    await this.archiveWhenDone(id, null, { auto: true });
+    log.info(`[sessions] session ${id} archivée d'office à la fin de son tour`);
+    return true;
   },
 
   /** Écouteur qui archive une session (en cascade avec son dossier), branché au démarrage (index.ts : archiveSessionCascade). */
@@ -946,7 +981,8 @@ export const sessionService = {
       name: input.name?.trim() || source.name,
       provider: source.provider,
       prompt,
-      config: source.config,
+      // Relancée par une personne : elle la pilote, la nouvelle session ne se range pas d'office.
+      config: withoutAutoArchive(source.config),
       // La session relancée garde la limite de contexte de l'origine (aucune si elle n'en avait pas).
       cleanup: source.cleanup.contextAction === 'compact' || source.cleanup.contextAction === 'reset' ? source.cleanup : {},
     });

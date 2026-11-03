@@ -40,6 +40,7 @@ import { envFileService } from '../../envFiles/service.js';
 import { attachmentsNote, publicAttachment } from '../attachments.js';
 import { sessionIdentityPrompt } from '../identity.js';
 import { archivePromptSummary, createSessionsMcpServer, sessionsPromptSummary } from '../mcp.js';
+import { archivesWhenIdle } from '../autoArchive.js';
 import type { Attachment } from '../types.js';
 import { startMcpBridges, type McpBridges, type McpFactory } from './opencodeBridge.js';
 import { allowedByRules, claudeQuestions, claudeTool, mcpToolOf, OPENCODE_EDIT_TOOLS, opencodeAnswers, permissionSuggestions, permissionTitle, permissionTool, toolResultData, type OpencodePermissionRequest, type ToolCall } from './opencodeEvents.js';
@@ -321,7 +322,7 @@ class OpencodeRun {
       vaultService.promptSummary(vaultItems, ctx.project),
       await envFileService.promptSummary(ctx.project.id),
       sessionsPromptSummary(ctx.project),
-      archivePromptSummary({ agent: Boolean(agent), child: Boolean(ctx.session.parentSessionId) }),
+      archivePromptSummary({ agent: Boolean(agent), child: Boolean(ctx.session.parentSessionId), auto: archivesWhenIdle(ctx.session) }),
       googleAccountService.promptSummary(googleAccounts),
       sharedPagesPrompt(),
       ctx.session.worksessionId ? previewPrompt(previewsEnabled(), ctx.session.worksessionId) : '',

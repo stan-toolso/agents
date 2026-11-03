@@ -109,6 +109,8 @@ export function createAgentsMcpServer(project: Project, sessionId: string, scope
               // La personne qui a demandé la session de l'appelant reste celle qui demande ; un agent qui agit seul ne demande pour personne.
               requestedById: session?.requestedById ?? (caller ? null : (session?.ownerId ?? null)),
               actor: { type: 'human' },
+              // Convoqué par une session, pas par une personne : sa session se range seule à la fin de son tour.
+              autoArchive: true,
             });
             const follow = scope ? 'Utilise sessions.wait avec cet id pour obtenir sa réponse.' : "Il répondra dans le fil de la tâche s'il y en a une ; sinon consulte la session.";
             return `${target.name} convoqué${task_id ? ` sur la tâche ${task_id}` : ''} : session ${created.id} (« ${created.name} »). ${follow}`;
