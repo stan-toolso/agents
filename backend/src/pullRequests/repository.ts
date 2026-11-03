@@ -138,6 +138,20 @@ export const pullRequestRepository = {
   },
 
   /**
+   * PR ouverte (ni fusionnée ni fermée) d'une work session : celle qui la désigne ou qui porte sa branche dans son projet.
+   * Une session d'agent qui la porte reste active jusqu'à sa fusion (voir `sessionService.archiveWhenDone`).
+   */
+  async findOpenByWorksession(worksessionId: string): Promise<TrackedPullRequest | null> {
+    const { rows } = await pool.query<Row>(
+      `SELECT p.* FROM pull_requests p JOIN worksessions w ON w.id = $1
+        WHERE p.status = 'open' AND (p.worksession_id = w.id OR (p.project_id = w.project_id AND p.head_branch = w.branch))
+        ORDER BY p.opened_at DESC LIMIT 1`,
+      [worksessionId],
+    );
+    return rows[0] ? toPr(rows[0]) : null;
+  },
+
+  /**
    * PR suivie de chaque work session (sidebar) : celle qui la désigne (`worksession_id`) ou qui porte sa branche dans
    * son projet, la plus avancée d'abord (ordre `ORDER` : ouverte, en préparation, fusionnée, fermée). Clé : la work session.
    */

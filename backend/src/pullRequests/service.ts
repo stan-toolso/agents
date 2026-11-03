@@ -165,8 +165,20 @@ function notifyMerged(pr: TrackedPullRequest): void {
   }
 }
 
+/** Écouteurs des PR suivies qui passent à « fusionnée » ou « fermée » (rangement des sessions d'agents). */
+const endedListeners = new Map<string, (pr: TrackedPullRequest) => Promise<void> | void>();
+function notifyEnded(before: TrackedPullRequest['status'], pr: TrackedPullRequest): void {
+  if (before === pr.status || (pr.status !== 'merged' && pr.status !== 'closed')) return;
+  for (const [name, fn] of endedListeners) {
+    Promise.resolve()
+      .then(() => fn(pr))
+      .catch((err) => log.error(`[pull-requests] écouteur ${name}`, err));
+  }
+}
+
 export const trackedPullRequestService = {
   onMerged: (name: string, fn: (pr: TrackedPullRequest) => Promise<void> | void) => mergedListeners.set(name, fn),
+  onEnded: (name: string, fn: (pr: TrackedPullRequest) => Promise<void> | void) => endedListeners.set(name, fn),
 
   list: (filter?: TrackedPullRequestFilter) => pullRequestRepository.list(filter),
   forTask: (taskId: string) => pullRequestRepository.list({ taskId, limit: 100 }),
@@ -333,6 +345,7 @@ export const trackedPullRequestService = {
     if (!after) throw new NotFoundError('Pull request suivie introuvable');
     if (input.taskId && after.taskId) await this.linkTaskBranch(after.taskId, after.headBranch);
     if (before.status !== 'merged' && after.status === 'merged') notifyMerged(after);
+    notifyEnded(before.status, after);
     return after;
   },
 
@@ -341,6 +354,7 @@ export const trackedPullRequestService = {
     const tracked = await this.recordGithub(projectId, { ...pr, state: 'MERGED', mergedAt: pr.mergedAt ?? new Date() }, actor);
     const merged = (await pullRequestRepository.update(tracked.id, { status: 'merged', mergeSha: sha, mergedAt: tracked.mergedAt ?? new Date() })) ?? tracked;
     notifyMerged(merged);
+    notifyEnded(tracked.status, merged);
     return merged;
   },
 
@@ -515,6 +529,7 @@ export const trackedPullRequestService = {
     });
     if (updated && tracked.status === 'open' && status !== 'open') {
       if (status === 'merged') notifyMerged(updated);
+      notifyEnded(tracked.status, updated);
       const project = await projectService.get(tracked.projectId).catch(() => null);
       const ref = `${project && !sameRepo(updated.repo, projectRepoName(project)) ? updated.repo : ''}#${updated.number}`;
       void notificationService.notify({
