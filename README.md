@@ -1202,9 +1202,15 @@ canaux (ses chats en tiennent lieu).
   `post` avec `reply_to`, `react`), autorisé d'office, présent dans toute session d'un projet qui a des canaux (et dans
   les chats de l'espace personnel, avec le paramètre `project`). Le prompt système nomme les canaux et explique les
   textes `[Message dans un canal]`.
+- **Fichiers joints** : comme dans le fil d'une tâche, un message accepte des fichiers (captures collées, fichiers
+  déposés ou choisis ; le texte devient alors facultatif ; 10 fichiers, 10 Mo chacun), retirés ou ajoutés à
+  l'édition. Métadonnées dans `message_attachments`, contenu sous `WORKSPACES_ROOT/.message-attachments/<canal>/<id>/`,
+  téléchargement par `GET /api/message-attachments/<canal>/<id>` (cookie, accès lecteur au projet). Les agents les
+  reçoivent : joints à l'instruction quand le message leur est adressé (ou les convoque), nommés dans une note
+  discrète, et `conversations.read` montre les images en blocs image (les plus récentes, 10 et 12 Mo au plus).
 - **Non-lus** par personne et par canal (`conversation_reads`, marqué lu à l'affichage) : pastille sur l'onglet
   Conversations et dans la liste des canaux. Le canal affiché est sondé toutes les 4 s (`ChannelThread`).
-- Pas encore : fichiers joints aux messages d'un canal, messages directs, canaux privés, recherche, export dans
+- Pas encore : messages directs, canaux privés, recherche, export dans
   l'archive du projet.
 
 ## Tableau de bord et réglages d'un projet

@@ -98,7 +98,7 @@ import { worksessionLabel, type Worksession } from '../worksessions/types.js';
 import { resumableTaskSession, resumeTaskSession, startTaskSession } from '../tasks/launch.js';
 import { taskService } from '../tasks/service.js';
 import { conversationService } from '../conversations/service.js';
-import type { Conversation, Message, MessageReaction } from '../conversations/types.js';
+import type { Conversation, Message, MessageAttachment, MessageReaction } from '../conversations/types.js';
 import type { Task, TaskComment, TaskField, TaskPersonInput, TaskPriority, TaskReaction, TaskStatus, ProjectApiKey } from '../tasks/types.js';
 import type { TerminalRecord } from '../terminals/types.js';
 import type { AttachmentInput, CreateSessionInput, RelaunchInput, Session, SessionStatus } from '../sessions/types.js';
@@ -114,7 +114,7 @@ import { personAuthor } from '../sessions/instructionAuthor.js';
 
 type Ctx = AuthContext;
 /** Message d'un canal enrichi par le résolveur de la liste : ses réactions et ses réponses, lues en une fois. */
-type MessageWithRows = Message & { reactionRows?: MessageReaction[]; replyStat?: { count: number; lastAt: Date | null } | null };
+type MessageWithRows = Message & { reactionRows?: MessageReaction[]; attachmentRows?: MessageAttachment[]; replyStat?: { count: number; lastAt: Date | null } | null };
 type GqlRole = Uppercase<ProjectRole>;
 const fromGqlRole = (r?: GqlRole | null): ProjectRole => ((r ?? 'MEMBER').toLowerCase() as ProjectRole);
 
@@ -478,14 +478,16 @@ export const resolvers = {
     // Les réactions et les comptes de réponses de la page sont lus une fois et accrochés à chaque message.
     messages: async (c: Conversation, args: { before?: Date | null; limit?: number | null }) => {
       const messages = await conversationService.messages(c.id, { before: args.before ?? null, limit: args.limit ?? undefined });
-      const [reactions, replies] = await Promise.all([conversationService.reactions(messages.map((m) => m.id)), conversationService.replyStats(messages.filter((m) => !m.parentId).map((m) => m.id))]);
-      return messages.map((m): MessageWithRows => ({ ...m, reactionRows: reactions.filter((r) => r.messageId === m.id), replyStat: replies.get(m.id) ?? { count: 0, lastAt: null } }));
+      const ids = messages.map((m) => m.id);
+      const [reactions, replies, attachments] = await Promise.all([conversationService.reactions(ids), conversationService.replyStats(messages.filter((m) => !m.parentId).map((m) => m.id)), conversationService.attachments(ids)]);
+      return messages.map((m): MessageWithRows => ({ ...m, reactionRows: reactions.filter((r) => r.messageId === m.id), attachmentRows: attachments.filter((a) => a.messageId === m.id), replyStat: replies.get(m.id) ?? { count: 0, lastAt: null } }));
     },
     mentionables: (c: Conversation) => conversationService.mentionables(c.projectId),
   },
 
   Message: {
     reactions: async (m: MessageWithRows, _: unknown, ctx: Ctx) => groupReactions(m.reactionRows ?? (await conversationService.reactions([m.id])), ctx.user?.id),
+    attachments: (m: MessageWithRows) => m.attachmentRows ?? conversationService.attachments([m.id]),
     author: (m: Message, _: unknown, ctx: Ctx) => userOrNull(ctx, m.authorUserId),
     agent: async (m: Message, _: unknown, ctx: Ctx) => {
       if (!m.authorSessionId) return null;
@@ -1914,14 +1916,14 @@ export const resolvers = {
       await guardConversation(ctx, args.id, 'admin');
       return conversationService.setArchived(args.id, args.archived);
     },
-    postMessage: async (_: unknown, args: { conversationId: string; body: string; parentId?: string | null }, ctx: Ctx) => {
+    postMessage: async (_: unknown, args: { conversationId: string; body: string; parentId?: string | null; attachments?: AttachmentInput[] | null }, ctx: Ctx) => {
       await guardConversation(ctx, args.conversationId, 'member');
-      return conversationService.post(args.conversationId, args.body, actorOf(requireUser(ctx)), { parentId: args.parentId ?? null });
+      return conversationService.post(args.conversationId, args.body, actorOf(requireUser(ctx)), { parentId: args.parentId ?? null, attachments: args.attachments ?? null });
     },
-    updateMessage: async (_: unknown, args: { id: string; body: string }, ctx: Ctx) => {
+    updateMessage: async (_: unknown, args: { id: string; body: string; attachments?: AttachmentInput[] | null; removeAttachmentIds?: string[] | null }, ctx: Ctx) => {
       const { message } = await guardMessage(ctx, args.id);
       if (message.authorUserId !== requireUser(ctx).id) throw new AppError("Seul l'auteur modifie son message", 'FORBIDDEN');
-      return conversationService.updateMessage(args.id, args.body);
+      return conversationService.updateMessage(args.id, args.body, { attachments: args.attachments, removeAttachmentIds: args.removeAttachmentIds });
     },
     deleteMessage: async (_: unknown, args: { id: string }, ctx: Ctx) => {
       const { message, role } = await guardMessage(ctx, args.id);

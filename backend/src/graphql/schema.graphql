@@ -3857,6 +3857,8 @@ type Message {
   body: String!
   mentions: [TaskMention!]!
   reactions: [TaskReaction!]!
+  "Fichiers joints (captures collées, documents)."
+  attachments: [MessageAttachment!]!
   editable: Boolean!
   deletable: Boolean!
   "Pour un message racine : nombre de réponses et date de la dernière."
@@ -3866,6 +3868,15 @@ type Message {
   respondingSessions: [Session!]!
   createdAt: DateTime!
   updatedAt: DateTime!
+}
+
+"Fichier joint à un message d'un canal ; téléchargeable à GET /api/message-attachments/<canal>/<id> (cookie de session)."
+type MessageAttachment {
+  id: ID!
+  name: String!
+  mediaType: String!
+  size: Int!
+  createdAt: DateTime!
 }
 
 extend type Project {
@@ -3887,10 +3898,10 @@ extend type Mutation {
   updateConversation(id: ID!, name: String, topic: String): Conversation!
   "Archive ou rouvre un canal (administrateurs) ; le canal général ne s'archive pas."
   setConversationArchived(id: ID!, archived: Boolean!): Conversation!
-  "Poste un message (Markdown) ; parentId : réponse dans le fil d'un message. Les mentions (@Nom, @e-mail, @session:<id>) sont résolues : personnes notifiées, agents convoqués, sessions reliées au fil."
-  postMessage(conversationId: ID!, body: String!, parentId: ID): Message!
-  "Ses propres messages seulement."
-  updateMessage(id: ID!, body: String!): Message!
+  "Poste un message (Markdown) ; parentId : réponse dans le fil d'un message. Les mentions (@Nom, @e-mail, @session:<id>) sont résolues : personnes notifiées, agents convoqués, sessions reliées au fil. attachments : fichiers joints (le texte peut alors être vide)."
+  postMessage(conversationId: ID!, body: String!, parentId: ID, attachments: [AttachmentInput!]): Message!
+  "Ses propres messages seulement ; attachments : fichiers ajoutés, removeAttachmentIds : fichiers retirés."
+  updateMessage(id: ID!, body: String!, attachments: [AttachmentInput!], removeAttachmentIds: [ID!]): Message!
   "Ses propres messages, ou administrateur du projet (les réponses partent avec une racine)."
   deleteMessage(id: ID!): Boolean!
   "Pose une réaction, ou la retire si l'utilisateur l'avait déjà posée. Renvoie true si elle est posée."

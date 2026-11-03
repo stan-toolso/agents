@@ -31,6 +31,17 @@ export interface Message {
   updatedAt: Date;
 }
 
+/** Fichier joint à un message (capture collée, document) ; contenu sous WORKSPACES_ROOT/.message-attachments/<canal>/<id>/<nom>. */
+export interface MessageAttachment {
+  id: string;
+  conversationId: string;
+  messageId: string;
+  name: string;
+  mediaType: string;
+  size: number;
+  createdAt: Date;
+}
+
 /** Réaction (emoji) d'une personne ou d'une session sur un message. */
 export interface MessageReaction {
   id: string;
@@ -48,7 +59,7 @@ export type MessageActor = TaskActor;
 
 /** Changement diffusé aux écouteurs (sessions reliées au fil, déclencheurs des agents). */
 export type ConversationChange =
-  | { kind: 'posted'; conversation: Conversation; message: Message; root: Message; parent: Message | null }
+  | { kind: 'posted'; conversation: Conversation; message: Message; root: Message; parent: Message | null; attachments: MessageAttachment[] }
   | { kind: 'reacted'; conversation: Conversation; message: Message; reaction: MessageReaction; added: boolean };
 
 /** Slug d'un canal, nom technique de la table (conversation) : 60 caractères au plus. */

@@ -1,15 +1,16 @@
 import { formatSize, isImageType, taskAttachmentUrl, type AttachmentRef } from '../lib/attachments';
 
 /**
- * Fichiers joints à une tâche ou à un commentaire : vignette pour les images, lien de téléchargement pour le reste.
- * Avec `onToggleRemove`, chaque fichier peut être marqué à retirer (édition) ; `removed` liste ceux qui le sont.
+ * Fichiers joints à une tâche ou à un commentaire (ou, avec `urlFor`, à un message d'un canal) : vignette pour les
+ * images, lien de téléchargement pour le reste. Avec `onToggleRemove`, chaque fichier peut être marqué à retirer
+ * (édition) ; `removed` liste ceux qui le sont.
  */
-export default function TaskAttachments({ taskId, attachments, removed = [], onToggleRemove }: { taskId: string; attachments: AttachmentRef[]; removed?: string[]; onToggleRemove?: (id: string) => void }) {
+export default function TaskAttachments({ taskId, urlFor, attachments, removed = [], onToggleRemove }: { taskId?: string; urlFor?: (attachmentId: string) => string; attachments: AttachmentRef[]; removed?: string[]; onToggleRemove?: (id: string) => void }) {
   if (!attachments.length) return null;
   return (
     <div className="cc-attachments task-attachments">
       {attachments.map((a) => {
-        const url = taskAttachmentUrl(taskId, a.id);
+        const url = urlFor ? urlFor(a.id) : taskAttachmentUrl(taskId ?? '', a.id);
         const gone = removed.includes(a.id);
         return (
           <span key={a.id} className={`cc-chip${gone ? ' opacity-50 text-decoration-line-through' : ''}`} title={`${a.name} · ${a.mediaType} · ${formatSize(a.size)}`}>

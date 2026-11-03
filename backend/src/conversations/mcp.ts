@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { inScope, targetProject, withProjectParam, type ProjectScope } from '../personal/scope.js';
 import type { Project } from '../projects/types.js';
 import type { TaskActor } from '../tasks/types.js';
+import type { McpContent } from '../tasks/attachments.js';
+import { messageImageBlocks, pickShownImages } from './attachments.js';
 import { channelRef, conversationService, describeMessages } from './service.js';
 import type { Conversation } from './types.js';
 
@@ -59,7 +61,7 @@ export function createConversationsMcpServer(project: Project, sessionId: string
       ),
       tool(
         'read',
-        "Les derniers messages d'un canal (racines avec leurs réponses, du plus ancien au plus récent), ou un fil complet (thread : identifiant de son message racine). Chaque message porte son identifiant, pour y répondre ou y réagir.",
+        "Les derniers messages d'un canal (racines avec leurs réponses, du plus ancien au plus récent), ou un fil complet (thread : identifiant de son message racine). Chaque message porte son identifiant, pour y répondre ou y réagir ; les images jointes sont montrées (les plus récentes, dans la limite d'une réponse).",
         withProjectParam(
           {
             channel: z.string().describe('Canal : « général », « #general », son nom ou son identifiant'),
@@ -68,15 +70,23 @@ export function createConversationsMcpServer(project: Project, sessionId: string
           },
           scope,
         ),
-        async ({ channel: ref, thread, limit, project: projectRef }) =>
-          run(async () => {
+        async ({ channel: ref, thread, limit, project: projectRef }) => {
+          try {
             const c = await channel(ref, projectRef);
             const messages = thread ? await conversationService.thread(thread) : await conversationService.messages(c.id, { limit: limit ?? 30 });
             if (thread && messages[0] && messages[0].conversationId !== c.id) throw new Error("Ce fil n'appartient pas à ce canal");
-            if (!messages.length) return `${channelRef(c)} : aucun message.`;
-            const reactions = await conversationService.reactions(messages.map((m) => m.id));
-            return [`${line(c)}`, '', ...describeMessages(messages, reactions)].join('\n');
-          }),
+            if (!messages.length) return text(`${channelRef(c)} : aucun message.`);
+            const ids = messages.map((m) => m.id);
+            const [reactions, attachments] = await Promise.all([conversationService.reactions(ids), conversationService.attachments(ids)]);
+            // Les images les plus récentes d'abord dans la limite, montrées ensuite dans l'ordre du fil.
+            const shown = pickShownImages([...attachments].reverse()).reverse();
+            const body = [`${line(c)}`, '', ...describeMessages(messages, reactions, { attachments, delivery: { kind: 'tool', shown: new Set(shown.map((a) => a.id)) } })].join('\n');
+            const content: McpContent[] = [{ type: 'text', text: body }, ...(await messageImageBlocks(shown))];
+            return { content };
+          } catch (err) {
+            return failure(`Erreur : ${(err as Error).message}`);
+          }
+        },
       ),
       tool(
         'post',

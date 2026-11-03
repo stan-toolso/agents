@@ -1,10 +1,12 @@
 import type { Actor } from '../context/types.js';
+import { describeMessageAttachments, messageAttachmentsAsInstruction } from '../conversations/attachments.js';
 import { channelRef, conversationService, threadTitle } from '../conversations/service.js';
 import type { ConversationChange } from '../conversations/types.js';
 import { log } from '../log.js';
 import { trackedPullRequestService } from '../pullRequests/service.js';
 import type { TrackedPullRequest } from '../pullRequests/types.js';
 import { sessionRepository } from '../sessions/repository.js';
+import { fitInInstruction } from '../tasks/attachments.js';
 import { fold } from '../tasks/mentions.js';
 import { taskService } from '../tasks/service.js';
 import type { Task, TaskActor, TaskChange } from '../tasks/types.js';
@@ -166,7 +168,10 @@ async function onMessagePosted(change: Extract<ConversationChange, { kind: 'post
   const followers = (await agentSessions(await conversationService.sessionIdsOnThread(change.root.id).catch(() => [] as string[]))).map((x) => x.agent).filter((a) => a.triggers.threadFollowed);
   const mentioned = mentionedIds.size ? await agentRepository.findByIds([...mentionedIds]) : [];
   const agents = [...new Map([...mentioned, ...followers].map((a) => [a.id, a])).values()].filter((a) => a.enabled && !a.archivedAt && a.projectId === change.conversation.projectId);
-  const excerpt = m.body.length > 2000 ? `${m.body.slice(0, 2000)}…` : m.body;
+  const files = change.attachments.length ? await messageAttachmentsAsInstruction(change.attachments).catch(() => []) : [];
+  const joined = new Set(fitInInstruction(change.attachments).kept.map((a) => a.id));
+  const fileLines = describeMessageAttachments(change.attachments, { kind: 'instruction', ids: joined });
+  const excerpt = [m.body.length > 2000 ? `${m.body.slice(0, 2000)}…` : m.body || '(pas de texte)', ...fileLines].join('\n');
   const where = `le canal ${channelRef(change.conversation)}, fil « ${threadTitle(change.root)} »`;
   const reply = `\`conversations.post\`, channel « ${change.conversation.slug} », reply_to ${change.root.id}`;
   for (const agent of agents) {
@@ -175,7 +180,7 @@ async function onMessagePosted(change: Extract<ConversationChange, { kind: 'post
     const text = isMention
       ? `[Mention] ${m.authorName} te mentionne dans ${where} :\n\n${excerpt}\n\nRéponds dans le fil (${reply}) et agis selon tes instructions.`
       : `[Fil suivi] ${m.authorName} a écrit dans ${where}, que tu suis (ta session sur ce fil était archivée) :\n\n${excerpt}\n\nRelis le fil s'il le faut (\`conversations.read\`, thread ${change.root.id}). Si le message t'est adressé ou relève de ton rôle, réponds dans le fil (${reply}) et agis selon tes instructions ; sinon ne réponds pas. Puis archive cette session (\`sessions.archive\`) si tu n'as plus rien à y faire : le prochain message du fil la restaurera.`;
-    await summonQuietly(agent, { thread: { conversationId: change.conversation.id, rootMessageId: change.root.id }, requestedById: m.authorUserId, text }, isMention ? 'mention dans un canal' : 'fil suivi dans un canal');
+    await summonQuietly(agent, { thread: { conversationId: change.conversation.id, rootMessageId: change.root.id }, requestedById: m.authorUserId, text, attachments: files.length ? files : null }, isMention ? 'mention dans un canal' : 'fil suivi dans un canal');
   }
 }
 

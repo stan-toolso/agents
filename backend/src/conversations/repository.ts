@@ -2,7 +2,7 @@ import type { Actor } from '../context/types.js';
 import { toJson } from '../db/json.js';
 import { pool } from '../db/pool.js';
 import type { TaskMention } from '../tasks/types.js';
-import type { Conversation, Message, MessageReaction } from './types.js';
+import type { Conversation, Message, MessageAttachment, MessageReaction } from './types.js';
 
 interface ConversationRow {
   id: string;
@@ -68,6 +68,18 @@ const toMessage = (r: MessageRow): Message => ({
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
+
+interface AttachmentRow {
+  id: string;
+  conversation_id: string;
+  message_id: string;
+  name: string;
+  media_type: string;
+  size: number | string;
+  created_at: Date;
+}
+
+const toAttachment = (r: AttachmentRow): MessageAttachment => ({ id: r.id, conversationId: r.conversation_id, messageId: r.message_id, name: r.name, mediaType: r.media_type, size: Number(r.size), createdAt: r.created_at });
 
 const toReaction = (r: ReactionRow): MessageReaction => ({ id: r.id, messageId: r.message_id, emoji: r.emoji, actorType: r.actor_type, userId: r.user_id, sessionId: r.session_id, actorName: r.actor_name, createdAt: r.created_at });
 
@@ -197,6 +209,43 @@ export const conversationRepository = {
 
   async deleteMessage(id: string): Promise<boolean> {
     const { rowCount } = await pool.query('DELETE FROM messages WHERE id = $1', [id]);
+    return (rowCount ?? 0) > 0;
+  },
+
+  // ---- Fichiers joints ------------------------------------------------------------------------
+
+  /** Fichiers joints à des messages, dans l'ordre d'ajout. */
+  async listAttachments(messageIds: string[]): Promise<MessageAttachment[]> {
+    if (!messageIds.length) return [];
+    const { rows } = await pool.query<AttachmentRow>('SELECT * FROM message_attachments WHERE message_id = ANY($1::uuid[]) ORDER BY created_at ASC, id ASC', [messageIds]);
+    return rows.map(toAttachment);
+  },
+
+  /** Fichiers d'un message et de ses réponses (avant sa suppression : les lignes partent en cascade, pas les fichiers). */
+  async listAttachmentsWithReplies(messageId: string): Promise<MessageAttachment[]> {
+    const { rows } = await pool.query<AttachmentRow>('SELECT a.* FROM message_attachments a JOIN messages m ON m.id = a.message_id WHERE m.id = $1 OR m.parent_id = $1', [messageId]);
+    return rows.map(toAttachment);
+  },
+
+  async findAttachment(id: string): Promise<MessageAttachment | null> {
+    const { rows } = await pool.query<AttachmentRow>('SELECT * FROM message_attachments WHERE id = $1', [id]);
+    return rows[0] ? toAttachment(rows[0]) : null;
+  },
+
+  async createAttachment(input: Omit<MessageAttachment, 'createdAt'>): Promise<MessageAttachment> {
+    const { rows } = await pool.query<AttachmentRow>('INSERT INTO message_attachments (id, conversation_id, message_id, name, media_type, size) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *', [
+      input.id,
+      input.conversationId,
+      input.messageId,
+      input.name,
+      input.mediaType,
+      input.size,
+    ]);
+    return toAttachment(rows[0]);
+  },
+
+  async deleteAttachment(id: string): Promise<boolean> {
+    const { rowCount } = await pool.query('DELETE FROM message_attachments WHERE id = $1', [id]);
     return (rowCount ?? 0) > 0;
   },
 

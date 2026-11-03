@@ -333,7 +333,7 @@ const comments = [];
 const comment = (t, author, minutesAgo, body, extra = {}) => {
   const c = {
     __typename: 'TaskComment', id: `tc-${++commentSeq}`, taskId: t.id, parentId: null, authorType: author.kind === 'AGENT' ? 'session' : 'user',
-    authorName: author.name, author, authorSession: null, agent: author.agent ?? null, body, mentions: [], reactions: [], editable: author === U.me,
+    authorName: author.name, author, authorSession: null, agent: author.agent ?? null, body, mentions: [], reactions: [], attachments: [], editable: author === U.me,
     deletable: author === U.me, attachments: [], createdAt: ago(minutesAgo), updatedAt: ago(minutesAgo), ...extra,
   };
   comments.push(c);
@@ -368,7 +368,7 @@ const channel = (p, slug, name, topic, extra = {}) => {
 const message = (c, author, minutesAgo, body, extra = {}) => {
   const m = {
     __typename: 'Message', id: `msg-${++msgSeq}`, conversationId: c.id, parentId: null, authorType: author.kind === 'AGENT' ? 'agent' : 'human',
-    authorName: author.name, author, authorSession: null, agent: author.agent ?? null, body, mentions: [], reactions: [], editable: author === U.me,
+    authorName: author.name, author, authorSession: null, agent: author.agent ?? null, body, mentions: [], reactions: [], attachments: [], editable: author === U.me,
     deletable: author === U.me, replyCount: () => messages.filter((r) => r.parentId === m.id).length, lastReplyAt: () => messages.filter((r) => r.parentId === m.id).at(-1)?.createdAt ?? null,
     respondingSessions: [], createdAt: ago(minutesAgo), updatedAt: ago(minutesAgo), ...extra,
   };
@@ -394,7 +394,9 @@ message(C.siteGeneral, U.lea, 60 * 3 - 20, 'OK pour moi. @Chris tu passes la tâ
 message(C.siteGeneral, U.chris, 60 * 9, 'Point du matin : 2 PR fusionnées hier, 1 à relire (#142), aucune tâche bloquée. Les demandes du blog sont triées.', {
   reactions: [{ __typename: 'TaskReaction', emoji: '👍', count: 1, actors: ['Camille Laurent'], mine: true }],
 });
-message(C.siteGeneral, U.hugo, 60 * 26, 'Le support signale que la page tarifs n’affiche pas l’offre annuelle sur mobile. Quelqu’un peut jeter un œil ?');
+message(C.siteGeneral, U.hugo, 60 * 26, 'Le support signale que la page tarifs n’affiche pas l’offre annuelle sur mobile. Quelqu’un peut jeter un œil ?', {
+  attachments: [{ __typename: 'MessageAttachment', id: 'msg-att-1', name: 'ticket-support-4521.pdf', mediaType: 'application/pdf', size: 184_320, createdAt: ago(60 * 26) }],
+});
 message(C.siteLivraisons, U.me, 60 * 24 * 2, 'v1.7 en production. Rien à signaler sur les métriques.', { reactions: [{ __typename: 'TaskReaction', emoji: '🎉', count: 3, actors: ['Hugo Bernard', 'Léa Fontaine', 'Chris'], mine: false }] });
 message(C.siteLivraisons, U.chris, 60 * 24 * 2 + 30, 'Notes de version préparées dans le contexte (`releases/v1.7`).');
 message(C.apiGeneral, U.hugo, 60 * 5, '@Nora peux-tu relire la PR #118 ? Le calcul des totaux me semble fragile.', { mentions: [mention(U.nora)] });

@@ -8,6 +8,7 @@ import { googleAuth } from './auth/google.js';
 import { handleAuthRoute } from './auth/routes.js';
 import { handleAttachmentRoute } from './sessions/attachmentRoute.js';
 import { handleTaskAttachmentRoute } from './tasks/attachmentRoute.js';
+import { handleMessageAttachmentRoute } from './conversations/attachmentRoute.js';
 import { handleSharedPageRoute } from './sharedPages/viewRoute.js';
 import { handleFileViewRoute } from './files/viewRoute.js';
 import { handleTasksApiRoute } from './tasks/api.js';
@@ -218,6 +219,7 @@ async function main() {
       .then((handled) => handled || handleAuthRoute(req, res))
       .then((handled) => handled || handleAttachmentRoute(req, res))
       .then((handled) => handled || handleTaskAttachmentRoute(req, res))
+      .then((handled) => handled || handleMessageAttachmentRoute(req, res))
       .then((handled) => handled || handleSharedPageRoute(req, res))
       .then((handled) => handled || handleFileViewRoute(req, res))
       .then((handled) => handled || handlePreviewOpenRoute(req, res))

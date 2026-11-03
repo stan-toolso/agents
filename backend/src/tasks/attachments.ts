@@ -144,12 +144,12 @@ export const shownToAgent = (a: Pick<TaskAttachment, 'mediaType' | 'size'>): boo
 /** Comment les fichiers d'une tâche parviennent à l'agent qui lit son texte. */
 export type AttachmentDelivery = 'instruction' | 'tool' | 'none';
 
-const attachmentNote = (a: TaskAttachment, attached: AttachmentDelivery): string => {
+const attachmentNote = (a: Pick<TaskAttachment, 'mediaType' | 'size'>, attached: AttachmentDelivery): string => {
   if (attached === 'instruction') return ' — joint à cette instruction';
   if (attached === 'tool') return shownToAgent(a) ? ' — montré ci-dessous' : '';
   return '';
 };
 
-/** Bloc « Fichiers joints : » d'une tâche ou d'un commentaire, une ligne par fichier ; rien sans fichier. */
-export const describeAttachments = (attachments: TaskAttachment[], attached: AttachmentDelivery): string[] =>
+/** Bloc « Fichiers joints : » d'une tâche ou d'un commentaire (ou d'un message de canal), une ligne par fichier ; rien sans fichier. */
+export const describeAttachments = (attachments: Pick<TaskAttachment, 'name' | 'mediaType' | 'size'>[], attached: AttachmentDelivery): string[] =>
   attachments.length ? ['Fichiers joints :', ...attachments.map((a) => `- ${describeAttachment(a)}${attachmentNote(a, attached)}`)] : [];
