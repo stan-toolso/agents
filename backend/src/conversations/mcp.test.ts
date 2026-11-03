@@ -23,7 +23,7 @@ vi.mock('../personal/scope.js', () => ({
 const { createConversationsMcpServer, CONVERSATIONS_FREE_TOOLS, conversationsMcpPrompt } = await import('./mcp.js');
 
 const project = { id: 'p1', name: 'Skipper' } as Project;
-const general: Conversation = { id: 'c1', projectId: 'p1', slug: 'general', name: 'général', topic: 'Pilotage', createdById: null, lastMessageAt: new Date('2026-11-02T10:00:00Z'), createdAt: new Date(), updatedAt: new Date(), archivedAt: null };
+const general: Conversation = { id: 'c1', projectId: 'p1', kind: 'channel', taskId: null, slug: 'general', name: 'général', topic: 'Pilotage', createdById: null, lastMessageAt: new Date('2026-11-02T10:00:00Z'), createdAt: new Date(), updatedAt: new Date(), archivedAt: null };
 const root: Message = { id: 'm1', conversationId: 'c1', parentId: null, authorType: 'human', authorUserId: 'u1', authorSessionId: null, authorName: 'Alice', body: 'On livre ce soir ?', mentions: [], createdAt: new Date('2026-11-02T10:00:00Z'), updatedAt: new Date() };
 
 async function connect() {

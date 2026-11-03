@@ -269,3 +269,63 @@ export const UNREAD_MESSAGES_BY_PROJECT = gql`
     }
   }
 `;
+
+/** Fil d'une tâche suivi par l'utilisateur, dans l'onglet Conversations (route /projects/:id/conversations/task-<tâche>). */
+export interface FollowedTaskThread {
+  id: string;
+  slug: string;
+  messageCount: number;
+  lastMessageAt: string | null;
+  task: { id: string; title: string; status: string };
+}
+
+export const FOLLOWED_TASK_THREADS = gql`
+  query FollowedTaskThreads($id: ID!) {
+    project(id: $id) {
+      id
+      followedTaskThreads(limit: 30) {
+        id
+        slug
+        messageCount
+        lastMessageAt
+        task {
+          id
+          title
+          status
+        }
+      }
+    }
+  }
+`;
+
+/** Ce qu'il faut pour ouvrir le fil d'une tâche hors de sa page : le message d'ouverture (description). */
+export const TASK_THREAD_OPENING = gql`
+  query TaskThreadOpening($id: ID!) {
+    task(id: $id) {
+      id
+      title
+      status
+      description
+      createdAt
+      createdByType
+      createdBySession {
+        id
+        name
+        owner {
+          id
+          name
+        }
+      }
+      reporter {
+        name
+        email
+      }
+      attachments {
+        id
+        name
+        mediaType
+        size
+      }
+    }
+  }
+`;

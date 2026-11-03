@@ -10,7 +10,7 @@ vi.mock('./service.js', async () => {
 });
 const { feedsFor } = await import('./feed.js');
 
-const conversation: Conversation = { id: 'c1', projectId: 'p1', slug: 'general', name: 'général', topic: '', createdById: null, lastMessageAt: null, createdAt: new Date(), updatedAt: new Date(), archivedAt: null };
+const conversation: Conversation = { id: 'c1', projectId: 'p1', kind: 'channel', taskId: null, slug: 'general', name: 'général', topic: '', createdById: null, lastMessageAt: null, createdAt: new Date(), updatedAt: new Date(), archivedAt: null };
 const message = (over: Partial<Message> = {}): Message => ({
   id: 'm1',
   conversationId: 'c1',
@@ -53,7 +53,7 @@ describe('feedsFor (canaux)', () => {
 
   it("signale une réaction à la seule session autrice du message, en note", () => {
     const target = message({ authorType: 'agent', authorUserId: null, authorSessionId: 's1', authorName: 'Ben' });
-    const reaction: MessageReaction = { id: 'r1', messageId: 'm1', emoji: '👍', actorType: 'human', userId: 'u1', sessionId: null, actorName: 'Alice', createdAt: new Date() };
+    const reaction: MessageReaction = { id: 'r1', conversationId: 'c1', messageId: 'm1', emoji: '👍', actorType: 'human', userId: 'u1', sessionId: null, actorName: 'Alice', createdAt: new Date() };
     const change: ConversationChange = { kind: 'reacted', conversation, message: target, reaction, added: true };
     const feeds = feedsFor(change, ['s1', 's2']);
     expect(feeds).toHaveLength(1);

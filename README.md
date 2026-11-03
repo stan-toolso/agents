@@ -1171,7 +1171,7 @@ formulaire ; listes « Bloquée par » / « Bloque » dans la fiche et le pannea
 ### Le fil d'une tâche : une conversation
 
 La fiche d'une tâche (`pages/TaskPage.tsx`) se lit comme un canal de discussion : la description **ouvre le fil**, puis
-viennent les **messages** (table `task_comments`), de personnes ou de sessions d'agent, dans l'ordre ; à droite, ce qui
+viennent les **messages** (la conversation de la tâche, sur les tables des canaux : voir plus bas), de personnes ou de sessions d'agent, dans l'ordre ; à droite, ce qui
 décrit la tâche (personnes, dates, étiquettes, champs) et son code. Le composant `components/TaskThread.tsx` (aussi dans
 l'onglet « Tâche » du panneau de droite et dans la modale d'édition, en mode compact) offre, comme un fil Slack :
 
@@ -1211,9 +1211,23 @@ Chaque projet a des **canaux de conversation** (onglet « Conversations », rout
 `#général` est créé d'office, les membres en créent d'autres (nom, sujet ; un administrateur archive, le général ne
 s'archive pas). Un canal se lit comme le fil d'une tâche : des **messages** en Markdown, des **réponses en fil** (un
 niveau), des **réactions**, des **mentions**. Même vocabulaire et même moteur de rendu (`components/Thread.tsx`,
-partagé avec `TaskThread`), mais des tables à part (`conversations`, `messages`, `message_reactions`,
+partagé avec `TaskThread`) et mêmes tables (`conversations`, `messages`, `message_reactions`, `message_attachments`,
 `conversation_sessions`, `conversation_reads` ; module `backend/src/conversations`). L'espace personnel n'a pas de
 canaux (ses chats en tiennent lieu).
+
+**Le fil d'une tâche est une conversation** de genre « task » (`conversations.kind`, `conversations.task_id`, slug
+`task-<id>`), créée à son premier message ou à sa première réaction (fonction SQL `task_conversation_id`). Ses
+messages sont des `messages`, ses réactions des `message_reactions` (une réaction sur la tâche elle-même a un
+`message_id` nul) et les fichiers de ses messages des `message_attachments`, rangés sur le disque sous la tâche
+(`.task-attachments/<tâche>/`). `Task.comments` et les outils `tasks.comment` / `react` sont des façades
+(`taskRepository`) : les effets propres aux tâches (notifications `task.*`, sessions reliées à la tâche, convocation
+des agents) restent ceux de `taskService`. Les canaux ne montrent pas ces conversations et refusent d'y écrire. Dans
+l'onglet Conversations, la section **« Fils de tâches »** liste les fils que je suis (j'y ai écrit, réagi ou été
+mentionné, ou je suis responsable ou rapporteur de la tâche ; `Project.followedTaskThreads`) et ouvre le fil au centre
+(`/projects/:id/conversations/task-<tâche>`), le même que sur la page de la tâche. Les anciennes tables
+`task_comments` / `task_reactions` (et les lignes de `task_attachments` qui ont un `comment_id`) ne sont plus lues ;
+des triggers y recopient les écritures de l'ancienne version pendant une mise à jour bleu/vert, en attendant leur
+retrait.
 
 - **Partout dans l'application**, le bouton « Messages » de la barre du haut (à côté de la cloche, raccourci
   `Alt+M`) montre le total des messages non lus de mes projets (requête `unreadMessagesByProject`) et ouvre un

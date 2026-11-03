@@ -17,6 +17,11 @@
 .ch-hash { color: var(--cc-dimmer); font-weight: 500; }
 .ch-unread { font-size: 10px; }
 .ch-side-toggle { display: flex; align-items: center; gap: 4px; width: 100%; border: 0; background: transparent; color: var(--cc-dim); font-size: 12px; padding: 6px 8px; border-radius: 5px; text-align: left; }
+/* Fils de tâches suivis, sous les canaux. */
+.ch-task-threads { margin-top: 10px; }
+.ch-side-title-toggle { display: flex; align-items: center; gap: 4px; width: 100%; border: 0; background: transparent; text-align: left; }
+.ch-task-thread .ch-hash { font-size: 12px; }
+.ch-scroll > .tt > .tt-composer { position: sticky; bottom: 0; z-index: 1; background: var(--cc-bg-elevated); padding-bottom: 8px; }
 .ch-side-toggle:hover { background: var(--cc-bg-hover); color: var(--cc-fg); }
 .ch-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .ch-head { display: flex; align-items: baseline; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--cc-border); flex-wrap: wrap; }
@@ -53,12 +58,13 @@ a.ch-person:hover { background: var(--cc-bg-hover); }
   .ch-channels { border-right: 0; border-bottom: 1px solid var(--cc-border); padding: 0 0 6px; }
   .ch-channel-list { display: flex; flex-wrap: wrap; gap: 4px; }
   .ch-side-title { display: none; }
+  .ch-side-title.ch-side-title-toggle { display: flex; padding: 4px 0; }
   .ch-channel { border: 1px solid var(--cc-border); padding: 2px 8px; }
   .ch-head { padding: 8px 4px; }
   /* C'est la page qui défile ici : un .ch-body resté « auto + contain » sans rien à faire défiler bloque le geste
      tactile commencé sur un message (Chrome Android n'enchaîne plus vers la page). */
   .ch-body { padding: 4px 0; overflow: visible; overscroll-behavior: auto; }
-  .ch-scroll > .ch-thread > .tt-composer { background: var(--cc-bg); }
+  .ch-scroll > .ch-thread > .tt-composer, .ch-scroll > .tt > .tt-composer { background: var(--cc-bg); }
 }
 /* Panneau « Messages » de la barre du haut (workbench/MessagesPanel.tsx) : à droite, sur toute la hauteur, non modal. */
 .msg-panel { position: fixed; top: 0; right: 0; bottom: 0; z-index: 55; width: min(460px, 100vw); display: flex; flex-direction: column; background: var(--cc-bg-elevated); border-left: 1px solid var(--cc-border); box-shadow: -12px 0 40px var(--cc-shadow); font-size: 13px; }
