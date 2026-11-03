@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { TaskPriority, TaskStatus } from '../graphql/operations';
 import {
+  agingWip,
   burnup,
+  cumulativeFlow,
+  cycleTimes,
+  startedAt,
   byAssignee,
   byPriority,
   dashboardStats,
@@ -222,6 +226,71 @@ describe('dashboardStats', () => {
     expect(s.forecast).toBeNull();
     expect(s.throughput.mean).toBe(0);
     expect(s.leadTime).toEqual({ median: 0, p85: 0, count: 0 });
+  });
+});
+
+describe('dates de cycle', () => {
+  it('startedAt : la colonne, sinon la création (en cours, terminée), jamais pour une annulée sans date ni une à faire', () => {
+    expect(startedAt(task({ status: 'IN_PROGRESS', startedAt: iso(2026, 10, 3) }))).toBe(new Date(iso(2026, 10, 3)).getTime());
+    expect(startedAt(task({ status: 'IN_PROGRESS', createdAt: iso(2026, 10, 2) }))).toBe(new Date(iso(2026, 10, 2)).getTime());
+    expect(startedAt(task({ status: 'CANCELLED' }))).toBeNull();
+    expect(startedAt(task({ status: 'TODO', startedAt: iso(2026, 10, 3) }))).toBeNull();
+    // Jamais après la fin.
+    expect(startedAt(done(iso(2026, 10, 1), iso(2026, 10, 5), { startedAt: iso(2026, 10, 9) }))).toBe(new Date(iso(2026, 10, 5)).getTime());
+  });
+
+  it('cycleTimes : en cours → terminée, pour les tâches terminées sur la période', () => {
+    const tasks = [
+      done(iso(2026, 10, 1), iso(2026, 10, 20), { startedAt: iso(2026, 10, 18) }), // 2 j
+      done(iso(2026, 10, 1), iso(2026, 10, 15), { startedAt: iso(2026, 10, 9) }), // 6 j
+      done(iso(2026, 10, 10), iso(2026, 10, 14)), // sans date : depuis la création, 4 j
+      done(iso(2026, 8, 1), iso(2026, 8, 5), { startedAt: iso(2026, 8, 2) }), // hors période
+      task({ status: 'IN_PROGRESS', startedAt: iso(2026, 10, 1) }),
+    ];
+    expect(cycleTimes(tasks, NOW, 4)).toEqual([2, 4, 6]);
+  });
+
+  it('agingWip : tâches en cours, les plus anciennes d’abord', () => {
+    const a = task({ status: 'IN_PROGRESS', startedAt: iso(2026, 10, 22, 15) });
+    const b = task({ status: 'IN_PROGRESS', startedAt: iso(2026, 10, 14, 15) });
+    const items = agingWip([a, b, task(), done(iso(2026, 10, 1), iso(2026, 10, 2))], NOW);
+    expect(items.map((i) => i.task.id)).toEqual([b.id, a.id]);
+    expect(items[0].age).toBeCloseTo(10);
+    expect(items[1].age).toBeCloseTo(2);
+  });
+
+  it('cumulativeFlow : à faire, en cours et terminées à la fin de chaque jour, annulées retirées', () => {
+    const tasks = [
+      task({ createdAt: iso(2026, 10, 19, 9) }), // à faire depuis lundi
+      task({ status: 'IN_PROGRESS', createdAt: iso(2026, 10, 19, 9), startedAt: iso(2026, 10, 21, 9) }),
+      done(iso(2026, 10, 19, 9), iso(2026, 10, 23, 9), { startedAt: iso(2026, 10, 20, 9) }),
+      task({ status: 'CANCELLED', createdAt: iso(2026, 10, 19, 9), cancelledAt: iso(2026, 10, 22, 9), updatedAt: iso(2026, 10, 24, 9) }),
+    ];
+    const flow = cumulativeFlow(tasks, NOW, 1);
+    expect(flow.map((p) => [p.todo, p.inProgress, p.done])).toEqual([
+      [4, 0, 0], // lundi 19
+      [3, 1, 0], // mardi : la terminée démarre
+      [2, 2, 0], // mercredi : l'autre démarre
+      [1, 2, 0], // jeudi : l'annulée sort (cancelledAt, pas updatedAt)
+      [1, 1, 1], // vendredi : la terminée l'est
+      [1, 1, 1], // samedi 24 (NOW)
+    ]);
+  });
+
+  it('dashboardStats : cycle time et tâches en cours au-delà de son p85', () => {
+    const s = dashboardStats(
+      [
+        done(iso(2026, 10, 1), iso(2026, 10, 20), { startedAt: iso(2026, 10, 18) }),
+        done(iso(2026, 10, 1), iso(2026, 10, 21), { startedAt: iso(2026, 10, 19) }),
+        task({ status: 'IN_PROGRESS', startedAt: iso(2026, 10, 10) }),
+        task({ status: 'IN_PROGRESS', startedAt: iso(2026, 10, 24, 9) }),
+      ],
+      NOW,
+      8,
+    );
+    expect(s.cycleTime).toEqual({ median: 2, p85: 2, count: 2 });
+    expect(s.agingOverP85).toBe(1);
+    expect(s.flow[s.flow.length - 1]).toMatchObject({ todo: 0, inProgress: 2, done: 2 });
   });
 });
 

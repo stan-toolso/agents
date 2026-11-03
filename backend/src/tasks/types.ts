@@ -60,6 +60,10 @@ export interface Task {
   createdAt: Date;
   updatedAt: Date;
   completedAt: Date | null;
+  /** Passage en cours (premier, effacé au retour à « à faire ») ; null si jamais démarrée. */
+  startedAt: Date | null;
+  /** Passage en annulée ; null hors du statut annulée. */
+  cancelledAt: Date | null;
 }
 
 /** Entrée d'une personne : `undefined` = inchangé, `null` ou deux champs vides = retirée. */

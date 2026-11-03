@@ -33,6 +33,8 @@ interface Row {
   created_at: Date;
   updated_at: Date;
   completed_at: Date | null;
+  started_at: Date | null;
+  cancelled_at: Date | null;
 }
 
 interface CommentRow {
@@ -112,6 +114,8 @@ const toTask = (r: Row): Task => ({
   createdAt: r.created_at,
   updatedAt: r.updated_at,
   completedAt: r.completed_at,
+  startedAt: r.started_at ?? null,
+  cancelledAt: r.cancelled_at ?? null,
 });
 
 const toComment = (r: CommentRow): TaskComment => ({
@@ -189,6 +193,22 @@ async function syncPrimarySession(db: Queryable, taskId: string): Promise<void> 
   await db.query('UPDATE tasks SET session_id = (SELECT session_id FROM task_sessions WHERE task_id = $1 AND in_charge_since IS NOT NULL ORDER BY in_charge_since DESC LIMIT 1) WHERE id = $1', [taskId]);
 }
 
+/**
+ * Dates de cycle tenues à chaque changement de statut (vue pilotage : cycle time, flux cumulé). started_at garde le
+ * premier passage en cours (une terminée sans passer par en cours démarre à sa fin) et s'efface au retour à « à faire » ;
+ * completed_at et cancelled_at ne valent que dans leur statut. Les COALESCE laissent un statut répété sans effet.
+ */
+export function statusDateSets(status: TaskStatus): string[] {
+  const sets: string[] = [];
+  if (status === 'todo') sets.push('started_at = NULL');
+  else if (status !== 'cancelled') sets.push('started_at = COALESCE(started_at, now())');
+  return [
+    ...sets,
+    status === 'done' ? 'completed_at = COALESCE(completed_at, now())' : 'completed_at = NULL',
+    status === 'cancelled' ? 'cancelled_at = COALESCE(cancelled_at, now())' : 'cancelled_at = NULL',
+  ];
+}
+
 export const taskRepository = {
   async create(projectId: string, input: CreateTaskInput & { assignee?: TaskPerson | null; reporter?: TaskPerson | null }, actor: Actor): Promise<Task> {
     const status = input.status ?? 'todo';
@@ -197,8 +217,10 @@ export const taskRepository = {
       await client.query('BEGIN');
       const { rows } = await client.query<{ id: string }>(
         `INSERT INTO tasks (project_id, title, description, status, priority, session_id, created_by_type, created_by_session_id, due_date, completed_at,
-                            custom_fields, assignee_name, assignee_email, reporter_name, reporter_email, status_tag, tags, auto_start_when_unblocked, auto_start_by_id)
-         VALUES ($1, $2, $3, $4::task_status, $5, $6, $7, $8, $9, CASE WHEN $4::task_status = 'done' THEN now() ELSE NULL END, $10::jsonb, $11, $12, $13, $14, $15, $16::text[], $17, $18) RETURNING id`,
+                            custom_fields, assignee_name, assignee_email, reporter_name, reporter_email, status_tag, tags, auto_start_when_unblocked, auto_start_by_id,
+                            started_at, cancelled_at)
+         VALUES ($1, $2, $3, $4::task_status, $5, $6, $7, $8, $9, CASE WHEN $4::task_status = 'done' THEN now() ELSE NULL END, $10::jsonb, $11, $12, $13, $14, $15, $16::text[], $17, $18,
+                 CASE WHEN $4::task_status IN ('in_progress', 'done') THEN now() ELSE NULL END, CASE WHEN $4::task_status = 'cancelled' THEN now() ELSE NULL END) RETURNING id`,
         [
           projectId,
           input.title,
@@ -324,7 +346,7 @@ export const taskRepository = {
     }
     if (input.status != null) {
       sets.push(`status = $${params.push(input.status)}`);
-      sets.push(input.status === 'done' ? 'completed_at = COALESCE(completed_at, now())' : 'completed_at = NULL');
+      sets.push(...statusDateSets(input.status));
     }
     const client = await pool.connect();
     try {

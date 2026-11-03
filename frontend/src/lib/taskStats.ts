@@ -5,8 +5,9 @@ import type { Task, TaskPriority, TaskStatus } from '../graphql/operations';
  * (toutes, terminées et annulées comprises). Tout est pur, avec un instant `now` explicite, pour être testable ; le
  * rendu est dans components/TaskDashboard.tsx.
  *
- * Méthode : flux (créées / terminées par semaine), avancement cumulé (périmètre et terminées jour par jour), délai de
- * traitement (création → terminée), et prévision probabiliste de fin du reste à faire par simulation de Monte-Carlo sur
+ * Méthode : flux (créées / terminées par semaine), avancement cumulé (périmètre et terminées jour par jour), flux
+ * cumulé à trois bandes (à faire / en cours / terminées), délai de traitement (création → terminée), cycle time
+ * (en cours → terminée), vieillissement des tâches en cours, et prévision probabiliste de fin du reste à faire par simulation de Monte-Carlo sur
  * le débit hebdomadaire observé (méthode courante en Kanban : on rejoue des semaines tirées au hasard dans l'historique
  * jusqu'à épuiser le reste à faire, et on lit les percentiles des durées obtenues).
  */
@@ -16,6 +17,9 @@ export const DAY = 86_400_000;
 /** Sous-ensemble d'une tâche utilisé par les calculs (les tests construisent ces objets à la main). */
 export type StatTask = Pick<Task, 'id' | 'title' | 'status' | 'priority' | 'createdAt' | 'updatedAt' | 'completedAt' | 'dueDate' | 'statusTag' | 'assignee'> & {
   session?: Task['session'] | null;
+  /** Passage en cours et en annulée (colonnes tasks.started_at / cancelled_at) ; absents, on retombe sur les approximations. */
+  startedAt?: string | null;
+  cancelledAt?: string | null;
 };
 
 export const PERIOD_CHOICES: { weeks: number; label: string }[] = [
@@ -56,9 +60,19 @@ export function ageDays(iso: string, now: Date): number {
   return Math.max(0, Math.floor((now.getTime() - new Date(iso).getTime()) / DAY));
 }
 
-/** Date d'annulation approchée : la dernière mise à jour (le statut n'a pas d'historique propre). */
-const cancelledAt = (t: StatTask): number | null => (t.status === 'CANCELLED' ? new Date(t.updatedAt).getTime() : null);
+/** Date d'annulation ; à défaut (données antérieures), la dernière mise à jour. */
+const cancelledAt = (t: StatTask): number | null => (t.status === 'CANCELLED' ? new Date(t.cancelledAt ?? t.updatedAt).getTime() : null);
 const completedAt = (t: StatTask): number | null => (t.status === 'DONE' && t.completedAt ? new Date(t.completedAt).getTime() : null);
+/**
+ * Passage en cours. Une tâche en cours ou terminée sans date (données antérieures) est réputée démarrée à sa création ;
+ * une annulée sans date ne l'a jamais été. Jamais après la fin.
+ */
+export function startedAt(t: StatTask): number | null {
+  if (t.status === 'TODO') return null;
+  const s = t.startedAt ? new Date(t.startedAt).getTime() : t.status === 'CANCELLED' ? null : new Date(t.createdAt).getTime();
+  const d = completedAt(t);
+  return s != null && d != null ? Math.min(s, d) : s;
+}
 
 // ---- Flux hebdomadaire ----------------------------------------------------------------------------
 
@@ -128,6 +142,39 @@ export function burnup(tasks: StatTask[], now: Date, weeks: number): BurnupPoint
   return points;
 }
 
+// ---- Flux cumulé (cumulative flow) ----------------------------------------------------------------
+
+export interface FlowPoint {
+  date: Date;
+  /** À la fin du jour, parmi les tâches créées et non annulées : pas encore démarrées, démarrées non terminées, terminées. */
+  todo: number;
+  inProgress: number;
+  done: number;
+}
+
+/**
+ * Diagramme de flux cumulé : un point par jour (comme `burnup`), trois bandes empilées. L'état d'une tâche à une date
+ * se lit dans ses dates de cycle (créée, démarrée, terminée, annulée) : une tâche rouverte puis refermée ne compte que
+ * son dernier cycle, faute d'historique complet.
+ */
+export function cumulativeFlow(tasks: StatTask[], now: Date, weeks: number): FlowPoint[] {
+  const start = periodStart(now, weeks);
+  const dated = tasks.map((t) => ({ c: new Date(t.createdAt).getTime(), s: startedAt(t), d: completedAt(t), x: cancelledAt(t) }));
+  const points: FlowPoint[] = [];
+  for (let day = start; day.getTime() <= now.getTime(); day = addDays(day, 1)) {
+    const cutoff = Math.min(addDays(day, 1).getTime(), now.getTime());
+    const p: FlowPoint = { date: day, todo: 0, inProgress: 0, done: 0 };
+    for (const { c, s, d, x } of dated) {
+      if (c > cutoff || (x != null && x <= cutoff)) continue;
+      if (d != null && d <= cutoff) p.done++;
+      else if (s != null && s <= cutoff) p.inProgress++;
+      else p.todo++;
+    }
+    points.push(p);
+  }
+  return points;
+}
+
 // ---- Délai de traitement --------------------------------------------------------------------------
 
 /** Percentile `p` (0..1) d'une liste triée, par interpolation linéaire. */
@@ -149,6 +196,36 @@ export function leadTimes(tasks: StatTask[], now: Date, weeks: number): number[]
     out.push(Math.max(0, (d - new Date(t.createdAt).getTime()) / DAY));
   }
   return out.sort((a, b) => a - b);
+}
+
+/** Cycle time : délais en cours → terminée (en jours, décimaux) des tâches terminées pendant la période, triés. */
+export function cycleTimes(tasks: StatTask[], now: Date, weeks: number): number[] {
+  const start = periodStart(now, weeks).getTime();
+  const out: number[] = [];
+  for (const t of tasks) {
+    const d = completedAt(t);
+    const s = startedAt(t);
+    if (d == null || s == null || d < start || d > now.getTime()) continue;
+    out.push(Math.max(0, (d - s) / DAY));
+  }
+  return out.sort((a, b) => a - b);
+}
+
+export interface AgingItem<T> {
+  task: T;
+  /** Jours (décimaux) depuis le passage en cours. */
+  age: number;
+}
+
+/** Vieillissement des tâches en cours (aging WIP) : âge depuis le passage en cours, les plus anciennes d'abord. */
+export function agingWip<T extends StatTask>(tasks: T[], now: Date): AgingItem<T>[] {
+  const out: AgingItem<T>[] = [];
+  for (const t of tasks) {
+    if (t.status !== 'IN_PROGRESS') continue;
+    const s = startedAt(t);
+    if (s != null) out.push({ task: t, age: Math.max(0, (now.getTime() - s) / DAY) });
+  }
+  return out.sort((a, b) => b.age - a.age);
 }
 
 // ---- Prévision ------------------------------------------------------------------------------------
@@ -317,10 +394,15 @@ export interface DashboardStats {
   /** Débit : moyenne, mini et maxi hebdomadaires sur les semaines révolues de la période (la semaine en cours, incomplète, est exclue). */
   throughput: { mean: number; min: number; max: number; weeks: number };
   leadTime: { median: number; p85: number; count: number };
+  /** En cours → terminée, sur les tâches terminées pendant la période. */
+  cycleTime: { median: number; p85: number; count: number };
+  /** En cours depuis plus que le p85 du cycle time (0 sans référence). */
+  agingOverP85: number;
   forecast: Forecast | null;
   forecastDates: { p50: Date; p85: Date } | null;
   buckets: WeekBucket[];
   burnup: BurnupPoint[];
+  flow: FlowPoint[];
 }
 
 export function dashboardStats(tasks: StatTask[], now: Date, weeks: number): DashboardStats {
@@ -331,6 +413,8 @@ export function dashboardStats(tasks: StatTask[], now: Date, weeks: number): Das
   const doneSamples = (past.length ? past : buckets).map((b) => b.done);
   const mean = doneSamples.reduce((s, n) => s + n, 0) / Math.max(1, doneSamples.length);
   const lt = leadTimes(tasks, now, weeks);
+  const ct = cycleTimes(tasks, now, weeks);
+  const ctP85 = percentile(ct, 0.85);
   const fc = forecast(open.length, doneSamples);
   const weekAgo = addDays(now, -7).getTime();
   const twoWeeksAgo = addDays(now, -14).getTime();
@@ -359,10 +443,13 @@ export function dashboardStats(tasks: StatTask[], now: Date, weeks: number): Das
     cancelledPeriod: buckets.reduce((s, b) => s + b.cancelled, 0),
     throughput: { mean, min: Math.min(...doneSamples), max: Math.max(...doneSamples), weeks: doneSamples.length },
     leadTime: { median: percentile(lt, 0.5), p85: percentile(lt, 0.85), count: lt.length },
+    cycleTime: { median: percentile(ct, 0.5), p85: ctP85, count: ct.length },
+    agingOverP85: ct.length ? agingWip(tasks, now).filter((a) => a.age > ctP85).length : 0,
     forecast: fc,
     forecastDates: fc ? { p50: addDays(now, 7 * fc.p50), p85: addDays(now, 7 * fc.p85) } : null,
     buckets,
     burnup: burnup(tasks, now, weeks),
+    flow: cumulativeFlow(tasks, now, weeks),
   };
 }
 

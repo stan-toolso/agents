@@ -72,6 +72,8 @@ function publicTask(t: Task) {
     createdAt: t.createdAt.toISOString(),
     updatedAt: t.updatedAt.toISOString(),
     completedAt: t.completedAt?.toISOString() ?? null,
+    startedAt: t.startedAt?.toISOString() ?? null,
+    cancelledAt: t.cancelledAt?.toISOString() ?? null,
   };
 }
 

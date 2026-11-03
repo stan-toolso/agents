@@ -5,7 +5,7 @@ import type { Task } from '../graphql/operations';
 import { timeAgo } from '../lib/humanize';
 import { useElementWidth } from '../lib/useElementWidth';
 import {
-  ageDays,
+  agingWip,
   byAssignee,
   byPriority,
   DAY,
@@ -19,7 +19,9 @@ import {
   WATCH_LABELS,
   watchlist,
   type Breakdown,
+  type AgingItem,
   type DashboardStats,
+  type FlowPoint,
   type WatchReason,
   type WeekBucket,
 } from '../lib/taskStats';
@@ -78,6 +80,8 @@ export default function TaskDashboard({ tasks, showProject, onEdit, onTag, targe
     [tasks],
   );
   const watch = useMemo(() => watchlist(tasks, now), [tasks, now]);
+  const aging = useMemo(() => agingWip(tasks, now), [tasks, now]);
+  const ageOf = useMemo(() => new Map(aging.map((a) => [a.task.id, a.age])), [aging]);
   const next = useMemo(() => nextTasks(tasks, 8), [tasks]);
   const recentDone = useMemo(
     () =>
@@ -160,6 +164,18 @@ export default function TaskDashboard({ tasks, showProject, onEdit, onTag, targe
             title="Temps entre la création d’une tâche et sa fin, pour les tâches terminées sur la période"
           />
           <Tile
+            icon="bi-arrow-repeat"
+            label="Cycle time"
+            value={stats.cycleTime.count ? formatDays(stats.cycleTime.median) : '—'}
+            alert={stats.agingOverP85 > 0}
+            sub={
+              stats.cycleTime.count
+                ? `Médiane · 85 % en moins de ${formatDays(stats.cycleTime.p85)}${stats.agingOverP85 ? ` · ${stats.agingOverP85} en cours depuis plus longtemps` : ''}`
+                : 'Aucune tâche terminée sur la période'
+            }
+            title="Temps entre le passage en cours d’une tâche et sa fin, pour les tâches terminées sur la période"
+          />
+          <Tile
             icon="bi-calendar-check"
             label="Fin estimée du reste à faire"
             date
@@ -198,6 +214,19 @@ export default function TaskDashboard({ tasks, showProject, onEdit, onTag, targe
           <h3>Flux par semaine</h3>
           <div className="hint">Tâches créées et terminées chaque semaine ; la semaine en cours est incomplète.</div>
           <ThroughputChart buckets={stats.buckets} />
+        </div>
+      </div>
+
+      <div className="task-dash-grid2">
+        <div className="task-dash-card">
+          <h3>Flux cumulé</h3>
+          <div className="hint">Tâches à faire, en cours et terminées à la fin de chaque jour (hors annulées) : une bande « en cours » qui s’élargit signale un encours qui s’accumule.</div>
+          <FlowChart points={stats.flow} />
+        </div>
+        <div className="task-dash-card">
+          <h3>Vieillissement des tâches en cours</h3>
+          <div className="hint">Temps depuis le passage en cours, comparé au cycle time des tâches terminées sur la période.</div>
+          <AgingBars items={aging} median={stats.cycleTime.count ? stats.cycleTime.median : null} p85={stats.cycleTime.count ? stats.cycleTime.p85 : null} />
         </div>
       </div>
 
@@ -266,8 +295,8 @@ export default function TaskDashboard({ tasks, showProject, onEdit, onTag, targe
                   }
                   side={
                     <>
-                      <span className="age" title={`Créée le ${new Date(t.createdAt).toLocaleDateString()}`}>
-                        depuis {ageDays(t.createdAt, now)} j
+                      <span className="age" title={`En cours depuis le ${new Date(now.getTime() - (ageOf.get(t.id) ?? 0) * DAY).toLocaleDateString()} · créée le ${new Date(t.createdAt).toLocaleDateString()}`}>
+                        depuis {formatDays(ageOf.get(t.id) ?? 0)}
                       </span>
                       <TaskPriorityBadge priority={t.priority} short />
                     </>
@@ -335,7 +364,7 @@ export default function TaskDashboard({ tasks, showProject, onEdit, onTag, targe
                 task={t}
                 icon="bi-check2"
                 iconClass="good"
-                meta={`${projectOf(t)}terminée ${timeAgo(t.completedAt!)} · délai ${formatDays((new Date(t.completedAt!).getTime() - new Date(t.createdAt).getTime()) / DAY)}`}
+                meta={`${projectOf(t)}terminée ${timeAgo(t.completedAt!)} · délai ${formatDays((new Date(t.completedAt!).getTime() - new Date(t.createdAt).getTime()) / DAY)}${t.startedAt ? ` · cycle ${formatDays(Math.max(0, new Date(t.completedAt!).getTime() - new Date(t.startedAt).getTime()) / DAY)}` : ''}`}
                 side={<TaskPriorityBadge priority={t.priority} short />}
               />
             ))}
@@ -429,6 +458,57 @@ function Bars({ rows, empty = 'Aucune tâche.' }: { rows: Breakdown[]; empty?: s
           );
         })}
       </div>
+    </>
+  );
+}
+
+/**
+ * Vieillissement des tâches en cours : une barre par tâche (âge depuis le passage en cours), les plus anciennes
+ * d'abord, avec les repères médiane et p85 du cycle time ; au-delà du p85, la barre passe en alerte.
+ */
+function AgingBars({ items, median, p85, max = 10 }: { items: AgingItem<Task>[]; median: number | null; p85: number | null; max?: number }) {
+  if (items.length === 0) return <div className="hint mt-2">Aucune tâche en cours.</div>;
+  const shown = items.slice(0, max);
+  const scale = Math.max(1, shown[0].age, p85 ?? 0) * 1.05;
+  const pos = (d: number) => `${(d / scale) * 100}%`;
+  return (
+    <>
+      <div className="task-dash-legend">
+        <span>
+          <i className="task-dash-key sw done" /> en cours
+        </span>
+        {p85 !== null && (
+          <span>
+            <i className="task-dash-key sw over" /> au-delà du p85
+          </span>
+        )}
+        {median !== null && (
+          <span>
+            <i className="task-dash-key mark" /> médiane {formatDays(median)}
+          </span>
+        )}
+        {p85 !== null && (
+          <span>
+            <i className="task-dash-key mark p85" /> p85 {formatDays(p85)}
+          </span>
+        )}
+      </div>
+      <div className="task-dash-bars">
+        {shown.map(({ task: t, age }) => (
+          <div key={t.id} style={{ display: 'contents' }}>
+            <Link to={`/tasks/${t.id}`} className="lbl" title={t.title}>
+              {t.title}
+            </Link>
+            <div className="task-dash-aging" title={`En cours depuis ${formatDays(age)}`}>
+              <span className={p85 !== null && age > p85 ? 'over' : ''} style={{ width: pos(age) }} />
+              {median !== null && <i className="mark" style={{ left: pos(median) }} />}
+              {p85 !== null && <i className="mark p85" style={{ left: pos(p85) }} />}
+            </div>
+            <span className="num">{formatDays(age)}</span>
+          </div>
+        ))}
+      </div>
+      {items.length > max && <div className="hint mt-1">… et {items.length - max} autre{items.length - max > 1 ? 's' : ''}, plus récentes.</div>}
     </>
   );
 }
@@ -720,6 +800,122 @@ function ThroughputChart({ buckets }: { buckets: WeekBucket[] }) {
                 <td className="num">{b.cancelled}</td>
               </tr>
             ))}
+          </tbody>
+        </table>
+      </details>
+    </div>
+  );
+}
+
+/** Flux cumulé : trois aires empilées (terminées en bas, en cours, à faire en haut), un point par jour. */
+function FlowChart({ points }: { points: FlowPoint[] }) {
+  const [ref, width] = useElementWidth<HTMLDivElement>();
+  const [hover, setHover] = useState<number | null>(null);
+  const height = 190;
+  const padL = 30;
+  const padR = 12;
+  const padT = 12;
+  const padB = 22;
+  const plotW = Math.max(0, width - padL - padR);
+  const plotH = height - padT - padB;
+  const n = points.length;
+  const ticks = niceTicks(Math.max(...points.map((p) => p.todo + p.inProgress + p.done)));
+  const yTop = ticks[ticks.length - 1];
+  const x = (i: number) => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW);
+  const y = (v: number) => padT + plotH - (v / yTop) * plotH;
+  // Bande entre deux cumuls : le haut de gauche à droite, puis le bas de droite à gauche.
+  const band = (lo: (p: FlowPoint) => number, hi: (p: FlowPoint) => number) =>
+    `${points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(hi(p)).toFixed(1)}`).join(' ')} ${points
+      .map((p, i) => [i, p] as const)
+      .reverse()
+      .map(([i, p]) => `L${x(i).toFixed(1)},${y(lo(p)).toFixed(1)}`)
+      .join(' ')} Z`;
+  const done = (p: FlowPoint) => p.done;
+  const started = (p: FlowPoint) => p.done + p.inProgress;
+  const total = (p: FlowPoint) => p.done + p.inProgress + p.todo;
+  const last = points[n - 1];
+  const onMove = (e: React.PointerEvent<SVGRectElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const i = Math.round(((e.clientX - rect.left) / Math.max(1, plotW)) * (n - 1));
+    setHover(Math.max(0, Math.min(n - 1, i)));
+  };
+  const h = hover !== null ? points[hover] : null;
+
+  return (
+    <div ref={ref} className="task-dash-chart-wrap">
+      {width > 0 && (
+        <svg className="task-dash-chart" width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Flux cumulé : aujourd’hui ${last.todo} à faire, ${last.inProgress} en cours, ${last.done} terminées`}>
+          {ticks.map((t) => (
+            <g key={t}>
+              <line className="grid" x1={padL} x2={width - padR} y1={y(t)} y2={y(t)} />
+              <text x={padL - 4} y={y(t) + 3} textAnchor="end">
+                {t}
+              </text>
+            </g>
+          ))}
+          <path className="flow-done" d={band(() => 0, done)} />
+          <path className="flow-ip" d={band(done, started)} />
+          <path className="flow-todo" d={band(started, total)} />
+          {h && hover !== null && <line className="crosshair" x1={x(hover)} x2={x(hover)} y1={padT} y2={padT + plotH} />}
+          <text x={padL} y={height - 6}>
+            {shortDate(points[0].date)}
+          </text>
+          <text x={x(n - 1)} y={height - 6} textAnchor="end">
+            aujourd’hui
+          </text>
+          <rect className="hit" x={padL} y={0} width={plotW} height={height} onPointerMove={onMove} onPointerLeave={() => setHover(null)} />
+        </svg>
+      )}
+      {h && hover !== null && (
+        <Tooltip x={x(hover)} width={width}>
+          <div className="t">{longDate(h.date)}</div>
+          <div>
+            <i className="task-dash-key sw" />
+            <span className="v">{h.todo}</span> à faire
+          </div>
+          <div>
+            <i className="task-dash-key sw done" />
+            <span className="v">{h.inProgress}</span> en cours
+          </div>
+          <div>
+            <i className="task-dash-key sw finished" />
+            <span className="v">{h.done}</span> terminées
+          </div>
+        </Tooltip>
+      )}
+      <div className="task-dash-legend">
+        <span>
+          <i className="task-dash-key sw" /> À faire
+        </span>
+        <span>
+          <i className="task-dash-key sw done" /> En cours
+        </span>
+        <span>
+          <i className="task-dash-key sw finished" /> Terminées
+        </span>
+      </div>
+      <details className="task-dash-data">
+        <summary>Données par semaine</summary>
+        <table className="table table-sm mb-0">
+          <thead>
+            <tr>
+              <th>Jour</th>
+              <th className="num">À faire</th>
+              <th className="num">En cours</th>
+              <th className="num">Terminées</th>
+            </tr>
+          </thead>
+          <tbody>
+            {points
+              .filter((p, i) => i === n - 1 || p.date.getDay() === 1)
+              .map((p, i, all) => (
+                <tr key={p.date.getTime()}>
+                  <td>{i === all.length - 1 ? 'Aujourd’hui' : shortDate(p.date)}</td>
+                  <td className="num">{p.todo}</td>
+                  <td className="num">{p.inProgress}</td>
+                  <td className="num">{p.done}</td>
+                </tr>
+              ))}
           </tbody>
         </table>
       </details>
