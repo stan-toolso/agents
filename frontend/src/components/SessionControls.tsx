@@ -6,6 +6,7 @@ import { UNARCHIVE_SESSION } from '../graphql/sessions';
 import { sessionStateHint, sessionStatusLabels } from '../lib/humanize';
 import { sessionDotClass } from '../workbench/WorkspaceTabs';
 import { useDeletions } from '../workbench/useDeletions';
+import { DeliverButton } from './Deliveries';
 import { useDialogs } from './Dialogs';
 import RelaunchModal from './RelaunchModal';
 import ResumeSessionModal from './ResumeSessionModal';
@@ -95,6 +96,7 @@ export function useSessionActions(session: ControlledSession | null | undefined)
           Exécuter maintenant
         </button>
       )}
+      {session.worksession && !archived && !chat && <DeliverButton projectId={session.project.id} sessionId={id} worksessionId={session.worksession.id} branch={session.worksession.branch} myRole={session.project.myRole} />}
       {resumable && (
         <button type="button" className="cc-btn accent" title="Envoie un message dans la conversation de cette session, qui reprend là où elle s’était arrêtée" onClick={() => setResumingWith(true)}>
           <i className="bi bi-play-fill" /> Reprendre
@@ -139,7 +141,8 @@ export function useSessionActions(session: ControlledSession | null | undefined)
       </button>
       {archived || chat ? (
         <>
-          {archived && (
+          {/* Dossier supprimé depuis : restaurée, elle ne pourrait pas reprendre (le serveur refuse) ; on la relance. */}
+          {archived && (chat || session.worksession) && (
             <button type="button" className="cc-btn accent" title="Remet la session parmi les sessions actives" onClick={() => unarchiveSession({ variables: { id } })}>
               Restaurer
             </button>

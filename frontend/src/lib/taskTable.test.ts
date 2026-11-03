@@ -16,6 +16,8 @@ const task = (over: Partial<Task> & { id: string }): Task => ({
   createdAt: '2026-10-20T10:00:00Z',
   updatedAt: '2026-10-20T10:00:00Z',
   completedAt: null,
+  startedAt: null,
+  cancelledAt: null,
   customFields: [],
   assignee: null,
   reporter: null,

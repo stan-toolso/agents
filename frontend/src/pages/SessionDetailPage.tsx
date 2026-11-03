@@ -18,13 +18,13 @@ import { useDialogs } from '../components/Dialogs';
 import { useCachedName } from '../components/PageLoading';
 import { useAuth } from '../auth/AuthContext';
 
-import { bypassConnectionsWarning, permissionModeLabels, permissionModeShortLabels, sessionStatusLabels } from '../lib/humanize';
+import { bypassConnectionsWarning, dontAskConsequences, permissionModeLabels, permissionModeShortLabels, sessionStatusLabels, splitAllowedTools } from '../lib/humanize';
 import { describeTaskFeed } from '../lib/taskFeed';
 import AttachmentChips from '../components/AttachmentChips';
 import RequestPrompt from '../components/RequestPrompt';
 import { SessionChildren, SessionParentNote, parentStateHint, useSessionActions } from '../components/SessionControls';
 import { ContextBanner, ContextGauge } from '../components/ContextGauge';
-import Transcript, { type ChatParticipants } from '../components/Transcript';
+import Transcript, { ToolPermissionContext, type ChatParticipants, type ToolPermissionActions } from '../components/Transcript';
 import { fileToolResultCount } from '../lib/sessionChanges';
 import { isImageType, toAttachmentInputs, usePendingAttachments } from '../lib/attachments';
 import { confirmedPending, newPendingInstruction, withPendingInstructions, type PendingInstruction } from '../lib/pendingInstructions';
@@ -75,7 +75,7 @@ export default function SessionDetailPage() {
   const [sendMessage, { loading: sending, error: sendError }] = useMutation(SEND_SESSION_MESSAGE);
   const [interruptSession] = useMutation(INTERRUPT_SESSION, { onError: (err) => void showError(err) });
   const [resumeSession, { loading: resuming }] = useMutation(RESUME_SESSION, { onError: (err) => void showError(err) });
-  const { confirm, showError } = useDialogs();
+  const { confirm, choose, showError } = useDialogs();
   const [updateConfig, { loading: updatingConfig, error: configError }] = useMutation(UPDATE_SESSION_CONFIG);
   const { data: providersData } = useQuery<{ providers: Provider[] }>(PROVIDERS);
   // L'en-tête tient sur une ligne (nom, détail tronqué, jauge) ; un chevron déplie le détail complet, les actions et les sous-agents.
@@ -163,6 +163,9 @@ export default function SessionDetailPage() {
   // Chat : conversation légère de l'espace personnel, sans dossier de travail (ni panneau de droite, ni planification).
   const chat = session?.kind === 'CHAT';
   const archived = Boolean(session?.archivedAt);
+  // Dossier de travail supprimé (à la fusion de sa PR, par exemple) : la session ne reprend plus, le serveur refuse
+  // toute instruction ; on la relance dans un nouveau dossier.
+  const folderGone = Boolean(session && !chat && !session.worksession && session.status !== 'RUNNING');
   // Interlocuteurs de la conversation (rendu sans détail technique) : la personne qui pilote la session (qui a pris
   // la main, qui l'a demandée à l'agent, ou sa propriétaire), sinon la session d'agent qui l'a lancée ; en face,
   // l'agent de projet qui la joue, sinon le modèle.
@@ -236,7 +239,7 @@ export default function SessionDetailPage() {
     canInterrupt,
   );
 
-  const canSend = Boolean(text.trim() || attachments.items.length) && !sending && !encoding && !archived;
+  const canSend = Boolean(text.trim() || attachments.items.length) && !sending && !encoding && !archived && !folderGone;
   const submit = async () => {
     if (!canSend) return;
     const value = text.trim();
@@ -311,11 +314,51 @@ export default function SessionDetailPage() {
   // Un chat n'a ni fichiers ni commandes : seuls « demander » et « tout autoriser » ont un sens.
   const permissionOptions = (permissionField?.options ?? []).filter((o) => !chat || o.value === 'default' || o.value === 'bypassPermissions');
   const bypassWarning = (force = false) => (force || permissionMode === 'bypassPermissions' ? bypassConnectionsWarning(session.project.approvalConnections ?? []) : null);
+  // Outil refusé par le mode « Refuser sans demander » : l'autoriser pour la session depuis le transcript (ajouté aux
+  // outils pré-autorisés, appliqué à chaud par le serveur et gardé pour les prochaines exécutions).
+  const allowedTools = splitAllowedTools(session.config.allowedTools);
+  const toolPermissions: ToolPermissionActions | null =
+    readOnly || chat
+      ? null
+      : {
+          allowed: allowedTools,
+          allow: async (rule) => {
+            if (allowedTools.includes(rule)) return;
+            await updateConfig({ variables: { id, config: { allowedTools: [...allowedTools, rule].join(',') } } }).catch((err) => void showError(err));
+          },
+        };
+  const scheduleNotice = schedule ? ` Cette session porte la planification « ${schedule.name} » : ses exécutions tourneront aussi dans ce mode.` : '';
   const changeSetting = async (field: ConfigField, value: string) => {
+    if (field.key === 'permissionMode' && value === 'dontAsk') {
+      // « Refuser sans demander » est souvent pris pour « ne plus me déranger » : dire ce qui sera refusé, et proposer
+      // les modes qui répondent vraiment à cette intention.
+      const offered = new Set(permissionOptions.map((o) => o.value));
+      const choice = await choose({
+        title: 'Refuser sans demander ?',
+        message: (
+          <>
+            <p>Dans ce mode, l'agent ne vous demande plus rien : tout ce qui n'est pas autorisé d'avance est <strong>refusé</strong>, et il devra s'en passer. Seront refusés :</p>
+            <ul className="mb-2">
+              {dontAskConsequences({ approvalConnections: session.project.approvalConnections ?? [], scheduleName: schedule?.name ?? null }).map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+            <p className="mb-0">Pour ne plus être dérangé sans couper l'agent, choisissez plutôt « Modifier les fichiers librement » ou « Tout autoriser ».</p>
+          </>
+        ),
+        choices: [
+          { value: 'dontAsk', label: 'Refuser sans demander', variant: 'outline-danger' as const },
+          ...(offered.has('bypassPermissions') ? [{ value: 'bypassPermissions', label: 'Tout autoriser…' }] : []),
+          ...(offered.has('acceptEdits') ? [{ value: 'acceptEdits', label: 'Modifier les fichiers librement', variant: 'primary' as const, primary: true }] : []),
+        ],
+      });
+      if (!choice) return;
+      if (choice !== 'dontAsk') return changeSetting(field, choice);
+    }
     if (field.key === 'permissionMode' && value === 'bypassPermissions') {
       const ok = await confirm({
         title: 'Tout autoriser',
-        message: `L'agent agira sans aucune confirmation, y compris pour les commandes.${bypassWarning(true) ? ` ${bypassWarning(true)}` : ''} Continuer ?`,
+        message: `L'agent agira sans aucune confirmation, y compris pour les commandes.${bypassWarning(true) ? ` ${bypassWarning(true)}` : ''}${scheduleNotice} Continuer ?`,
         confirmLabel: 'Tout autoriser',
         danger: true,
       });
@@ -334,6 +377,8 @@ export default function SessionDetailPage() {
         : "L'agent travaille… (Échap deux fois pour l'interrompre)"
       : running
         ? "⏵ L'agent attend vos instructions"
+        : folderGone
+          ? `■ Dossier de travail supprimé${session.formerWorksession ? ` (branche ${session.formerWorksession.branch})` : ''} — la session ne peut plus reprendre : relancez-la dans un nouveau dossier${archived ? '' : ', ou archivez-la'}`
         : archived
           ? "■ Session archivée — restaurez-la pour reprendre la conversation, ou relancez-en une nouvelle"
           : session.status === 'QUEUED'
@@ -466,13 +511,15 @@ export default function SessionDetailPage() {
 
       {/* Sur mobile, la ligne vit dans le détail repliable de l'en-tête, avec les boutons. */}
       <div className="cc-toggle d-none d-md-flex">{technicalToggle}</div>
-      <Transcript events={shownEvents} draft={draft} loading={!eventsLoaded} technical={technical} participants={participants} busy={Boolean(busy) && !pending.length} />
+      <ToolPermissionContext.Provider value={toolPermissions}>
+        <Transcript events={shownEvents} draft={draft} loading={!eventsLoaded} technical={technical} participants={participants} busy={Boolean(busy) && !pending.length} />
+      </ToolPermissionContext.Provider>
       {actions.modals}
 
       {pending.length > 0 && !readOnly && (
         <div className="cc-prompts">
-          {pending.map((r) => (
-            <RequestPrompt key={r.id} request={r} />
+          {pending.map((r, i) => (
+            <RequestPrompt key={r.id} request={r} keyboard={i === 0} />
           ))}
         </div>
       )}
@@ -504,7 +551,7 @@ export default function SessionDetailPage() {
         </span>
       </div>
 
-      {!archived && !readOnly && (
+      {!archived && !folderGone && !readOnly && (
       <div
         className="cc-input"
         onClick={(e) => {

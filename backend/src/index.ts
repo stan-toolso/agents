@@ -10,6 +10,8 @@ import { handleAttachmentRoute } from './sessions/attachmentRoute.js';
 import { handleTaskAttachmentRoute } from './tasks/attachmentRoute.js';
 import { handleMessageAttachmentRoute } from './conversations/attachmentRoute.js';
 import { handleSharedPageRoute } from './sharedPages/viewRoute.js';
+import { handlePushActionRoute } from './notifications/pushActions.js';
+import { notificationChannelService } from './notifications/channels.js';
 import { handleFileViewRoute } from './files/viewRoute.js';
 import { handleTasksApiRoute } from './tasks/api.js';
 import { handleExportRoute } from './exports/routes.js';
@@ -61,6 +63,7 @@ import { handleInternalRoute } from './instances/internalRoute.js';
 import { handlePreviewOpenRoute, handlePreviewRoute, previewUpgrade } from './previews/proxy.js';
 import { previewRepository } from './previews/repository.js';
 import { previewService } from './previews/service.js';
+import { deliveryService } from './deliveries/service.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const typeDefs = readFileSync(path.join(here, 'graphql/schema.graphql'), 'utf8');
@@ -82,6 +85,8 @@ const orphanSweep = (() => {
     }
     const ended = await sessionService.endParkedIdle();
     if (ended.length) log.info(`[sessions] ${ended.length} session(s) garée(s) inactive(s) terminée(s)`);
+    // Livraisons d'une instance disparue marquées en échec, déploiements en attente relancés.
+    await deliveryService.recover(live).catch((err) => log.error('[deliveries] reprise', err));
     await instanceRegistry.prune();
   };
   return {
@@ -225,6 +230,7 @@ async function main() {
       .then((handled) => handled || handleTaskAttachmentRoute(req, res))
       .then((handled) => handled || handleMessageAttachmentRoute(req, res))
       .then((handled) => handled || handleSharedPageRoute(req, res))
+      .then((handled) => handled || handlePushActionRoute(req, res))
       .then((handled) => handled || handleFileViewRoute(req, res))
       .then((handled) => handled || handlePreviewOpenRoute(req, res))
       .then((handled) => handled || handleTasksApiRoute(req, res))
@@ -270,6 +276,8 @@ async function main() {
     await leadership.release();
     containerMonitor.stop();
     loginService.shutdown();
+    // Notifications retenues par l'anti-rafale des canaux (Slack, Discord, e-mail) : envoyées avant de partir.
+    await notificationChannelService.flush().catch(() => undefined);
     const [interrupted] = await Promise.all([sessionService.shutdown(), terminalService.shutdown()]);
     if (interrupted) log.info(`[sessions] ${interrupted} session(s) marquée(s) comme interrompue(s)`);
     // Les autres instances relancent les sessions interrompues ici (reprise automatique), puis oublient celle-ci.
@@ -300,16 +308,19 @@ async function main() {
     const timer = setInterval(() => {
       const sessions = sessionService.localCount();
       const terminals = terminalService.liveCount();
-      if (sessions + terminals === 0) {
+      // Une livraison menée ici (attente de la CI, commande de déploiement qui nous a justement envoyé SIGUSR2) va
+      // jusqu'au bout avant l'arrêt : son résultat est enregistré par l'instance qui la mène.
+      const deliveries = deliveryService.localCount();
+      if (sessions + terminals + deliveries === 0) {
         clearInterval(timer);
         void shutdown('drainage terminé');
       } else if (Date.now() >= deadline) {
         clearInterval(timer);
-        log.warn(`[instances] délai de drainage dépassé : ${sessions} session(s) et ${terminals} terminal(aux) encore ouverts`);
+        log.warn(`[instances] délai de drainage dépassé : ${sessions} session(s), ${terminals} terminal(aux) et ${deliveries} livraison(s) encore ouverts`);
         void shutdown('délai de drainage dépassé');
       } else if (Date.now() - lastReport >= 60_000) {
         lastReport = Date.now();
-        log.info(`[instances] drainage : ${sessions} session(s) et ${terminals} terminal(aux) encore ouverts`);
+        log.info(`[instances] drainage : ${sessions} session(s), ${terminals} terminal(aux) et ${deliveries} livraison(s) encore ouverts`);
       }
     }, 2_000);
   };

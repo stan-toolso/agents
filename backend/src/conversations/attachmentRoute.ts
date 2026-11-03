@@ -41,7 +41,8 @@ export async function handleMessageAttachmentRoute(req: IncomingMessage, res: Se
   const [, conversationId, attachmentId] = match;
   const conversation = await conversationRepository.findById(conversationId);
   const attachment = conversation ? await conversationRepository.findAttachment(attachmentId) : null;
-  if (!conversation || !attachment || attachment.conversationId !== conversation.id) {
+  // Les fichiers du fil d'une tâche se servent par la route des tâches (rangés sous la tâche).
+  if (!conversation || conversation.kind !== 'channel' || !attachment || attachment.conversationId !== conversation.id) {
     res.writeHead(404).end();
     return true;
   }

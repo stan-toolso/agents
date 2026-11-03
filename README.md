@@ -91,7 +91,7 @@ Trois notions :
 
 ## Démarrage rapide
 
-Mise en production (serveur, nginx, base RDS, pm2) : voir `DEPLOY.md`.
+Mise en production (cellule skipper-1, nginx, PostgreSQL local, déploiement bleu/vert) : voir `DEPLOY.md` et `deploy/cellule/README.md`.
 
 Paramètres (menu en bas de la sidebar), **propres à chaque personne** : **Claude** (abonnement
 connecté depuis la page ou clé API du coffre, modèles, budgets et consommation), **OpenCode** (modèle
@@ -247,6 +247,9 @@ backend/
       httpRoute.ts             # /api/forge/auth (connexion à Forgejo par la session Skipper, pour nginx), webhook, téléchargement des sauvegardes
       backups.ts               # table git_repository_backups
       browse.ts                # consultation d'un dépôt : références, historique, commit, arbre, fichier
+    deliveries/
+      service.ts               # livraisons : « Livrer » (base, push, PR, CI verte, fusion), déploiements sous verrou après CI verte, lots, reprise
+      repository.ts            # tables deliveries et deploy_configs
     pullRequests/
       types.ts                 # pull request suivie : statut, étape dérivée (en préparation, brouillon, à fusionner, fusionnée, annulée), dépôt, textes pour les agents
       repository.ts            # table pull_requests
@@ -376,7 +379,8 @@ fréquence, masqué après 30 s) ; la clé privée SSH et le jeton Google ne qui
 avec `restrict,command="…"`), clé d'hôte mémorisée à la première connexion et vérifiée ensuite, liste
 blanche de préfixes de commandes (qui désactive alors enchaînements et transferts). PostgreSQL : rôle
 dédié recommandé, « lecture seule » force des transactions `READ ONLY`, TLS avec certificat d'autorité
-optionnel (Cloud SQL), une seule instruction par appel, résultats tronqués à 200 lignes. Le champ « base de
+optionnel (Cloud SQL ; pour un hôte `*.<région>.rds.amazonaws.com` sans certificat, le bundle RDS de la
+région est téléchargé et gardé en cache, nom d'hôte vérifié), une seule instruction par appel, résultats tronqués à 200 lignes. Le champ « base de
 données » est facultatif : vide, l'élément couvre **le serveur entier** et l'agent nomme la base à chaque
 appel (paramètre `database` de `sql_query` et `sql_schema`, base de maintenance `postgres` par défaut ;
 `sql_schema` sans base liste les bases du serveur). API : l'agent
@@ -561,6 +565,19 @@ L'hébergement ne se désactive pas.
   `acceptEdits`, `bypassPermissions` ou `plan`, réglable dans le formulaire du projet) ; les sessions
   planifiées gardent le mode de leur session. Le formulaire de nouvelle session propose le dernier mode
   choisi sur ce projet dans ce navigateur (localStorage), sinon celui du projet.
+  Le mode `dontAsk` s'appelle **« Refuser sans demander »** : il ne veut pas dire « ne plus me déranger » mais
+  « refuser tout ce qui n'est pas autorisé d'avance ». Y passer depuis la page de session ouvre une modale qui dit ce
+  qui sera refusé (commandes et fichiers hors règles, outils de Skipper soumis à autorisation, navigateur, écritures
+  Google ; les connexions avec approbation restent soumises à un humain quel que soit le mode), signale la
+  planification que porte la session (ses exécutions prennent ce mode), et propose plutôt « Modifier les fichiers
+  librement » ou « Tout autoriser » (`dontAskConsequences` de `lib/humanize.ts`, `choose` de `Dialogs.tsx`). Un outil
+  refusé par ce mode est signalé dans le transcript avec **« Autoriser cet outil pour la session »** : la règle
+  déduite de l'appel (`ruleForCall` : `Bash(grep *)`, `mcp__vault__sql_query(prod)`, sinon l'outil) rejoint
+  `allowedTools` de la session ; le provider Claude l'applique à chaud par son hook `PreToolUse` (le CLI ne relit
+  pas `allowedTools`, et la décision d'un hook passe avant le mode), puis au prochain lancement par `allowedTools`.
+  Pour une commande Bash que le SDK ne sait pas généraliser (substitution `$(…)`, sous-shell : le CLI ne la tient
+  jamais pour sûre et ne suggère aucune règle), la demande d'autorisation propose quand même les règles déduites de
+  ses commandes simples (`editableRules`), à retenir pour la session ou le projet en un clic.
 - **PermissionRule** : autorisation d'outil mémorisée pour un projet (`toolName`, `ruleContent`
   optionnel, ex. `Bash(git status *)`). Créée en répondant « ne plus demander dans ce projet » à une
   demande d'autorisation ou à la main sur la page du projet ; chaque session Claude du projet les
@@ -930,7 +947,7 @@ dans un sous-dossier du dossier de travail ; `tasks.pr_register`, qui déclare u
 l'URL de n'importe quel dépôt GitHub ou par son numéro dans le dépôt du projet ; `tasks.pr_update` tient à jour
 statut, note et tâche, mais une PR en préparation ne change pas de statut ainsi ; `tasks.pr_merge` fusionne une PR
 ouverte quand une personne le demande : l'outil pose lui-même une demande d'autorisation, jamais mémorisable et posée
-même en mode « ne jamais demander », et la fusion est faite avec le compte de la personne qui l'accepte (`answered_by`
+même en mode « refuser sans demander », et la fusion est faite avec le compte de la personne qui l'accepte (`answered_by`
 de la demande, remis à l'outil par `requestService` sous la clé `answeredById` ; au moins membre du projet), à son nom,
 branche distante supprimée et tâches de la branche terminées, dossier de travail gardé (`pullRequests/mergeApproval.ts`) ;
 `tasks.pr_list` liste par
@@ -952,6 +969,29 @@ API : query `pullRequests(projectId, taskId, status, stage, limit)`, `pullReques
 `Dashboard.pullRequests` et compteurs `openPullRequests` / `pendingPullRequests` ;
 mutations `registerPullRequest`, `updatePullRequest`, `deletePullRequest`, `syncPullRequests` ;
 `githubPullRequest` et `mergePullRequest` acceptent `repo` (« owner/name ») pour une PR d'un autre dépôt.
+
+**Livraisons** (`backend/src/deliveries/`, table `deliveries`, migration `20261103T1224_deliveries`) : le bouton
+**« Livrer »** (actions d'une session qui a un dossier de travail, carte Code de la fiche d'une tâche ; membres)
+remplace les « push sur main » tapés à la main. Il refuse tout de suite un dossier avec des fichiers non commités, une
+opération git en cours ou un agent au travail, puis, en arrière-plan : fusion de la branche de base dans la branche,
+push (sous le nom de la branche, même si elle suivait `origin/main`), PR reprise ou ouverte, **attente des checks**
+(relus toutes les 15 s ; rouge = échec sans fusion ; aucun check au bout de 2 min = fusion signalée), fusion avec le
+compte de la personne qui a cliqué (branche distante supprimée, tâches de la branche terminées). Chaque étape s'écrit
+dans la livraison et dans le transcript de la session (événement `system`) ; un conflit (à la fusion de la base, ou
+base qui bouge pendant l'attente) est confié à l'agent de la session (`requestGitConflictResolution` avec
+`delivery: true` : il résout, vérifie et pousse, puis la personne relance). Une livraison au plus par dossier (index
+unique partiel). Case « Puis mettre en production » (administrateurs, si un déploiement est configuré).
+**Déploiement** par projet (table `deploy_configs`, onglet **Livraisons** `/projects/:id/deliveries`) : une commande
+lancée par le backend sur un serveur SSH du coffre (`{sha}` et `{branch}` remplacés par le commit vérifié), à la
+demande d'un administrateur (son clic vaut accord), **seulement quand la CI de la branche déployée est verte** (en
+cours : attente ; rouge : refus), **jamais deux à la fois** (index unique partiel sur le déploiement en cours), et les
+demandes faites pendant un déploiement **se regroupent** en un seul déploiement en attente (un seul redémarrage par lot).
+Pour Skipper, la commande est `deploy/cellule/deploy.sh --ref {sha}` en bleu/vert : l'instance qui mène le déploiement
+reçoit SIGUSR2 et attend la fin de la livraison avant de s'arrêter (drainage), et une livraison d'une instance
+disparue passe en échec (tâche des orphelins). L'onglet montre aussi la CI de la branche et l'**historique** (qui,
+quel commit, durée, résultat, étapes et sortie). Les agents lisent l'état de la CI avec l'outil `tasks.ci_status`
+(branche ou commit, même lecture des checks que les PR, `git/ci.ts`). API : queries `deliveries`, `delivery`,
+`deployConfig`, `ciStatus` ; mutations `deliver`, `requestDeploy`, `cancelDelivery`, `setDeployConfig`.
 
 **Revue de code par un agent** (`backend/src/reviews/`) : « Faire relire par un agent » (section « Branche vs base »
 du panneau git, menu « ⋮ » d'une PR suivie ouverte ou en préparation) lance une session Claude **en lecture seule**
@@ -1157,7 +1197,7 @@ leurs tâches à `done`, de les rendre ou d'expliquer dans le fil ce qui reste a
 ### Le fil d'une tâche : une conversation
 
 La fiche d'une tâche (`pages/TaskPage.tsx`) se lit comme un canal de discussion : la description **ouvre le fil**, puis
-viennent les **messages** (table `task_comments`), de personnes ou de sessions d'agent, dans l'ordre ; à droite, ce qui
+viennent les **messages** (la conversation de la tâche, sur les tables des canaux : voir plus bas), de personnes ou de sessions d'agent, dans l'ordre ; à droite, ce qui
 décrit la tâche (personnes, dates, étiquettes, champs) et son code. Le composant `components/TaskThread.tsx` (aussi dans
 l'onglet « Tâche » du panneau de droite et dans la modale d'édition, en mode compact) offre, comme un fil Slack :
 
@@ -1197,9 +1237,23 @@ Chaque projet a des **canaux de conversation** (onglet « Conversations », rout
 `#général` est créé d'office, les membres en créent d'autres (nom, sujet ; un administrateur archive, le général ne
 s'archive pas). Un canal se lit comme le fil d'une tâche : des **messages** en Markdown, des **réponses en fil** (un
 niveau), des **réactions**, des **mentions**. Même vocabulaire et même moteur de rendu (`components/Thread.tsx`,
-partagé avec `TaskThread`), mais des tables à part (`conversations`, `messages`, `message_reactions`,
+partagé avec `TaskThread`) et mêmes tables (`conversations`, `messages`, `message_reactions`, `message_attachments`,
 `conversation_sessions`, `conversation_reads` ; module `backend/src/conversations`). L'espace personnel n'a pas de
 canaux (ses chats en tiennent lieu).
+
+**Le fil d'une tâche est une conversation** de genre « task » (`conversations.kind`, `conversations.task_id`, slug
+`task-<id>`), créée à son premier message ou à sa première réaction (fonction SQL `task_conversation_id`). Ses
+messages sont des `messages`, ses réactions des `message_reactions` (une réaction sur la tâche elle-même a un
+`message_id` nul) et les fichiers de ses messages des `message_attachments`, rangés sur le disque sous la tâche
+(`.task-attachments/<tâche>/`). `Task.comments` et les outils `tasks.comment` / `react` sont des façades
+(`taskRepository`) : les effets propres aux tâches (notifications `task.*`, sessions reliées à la tâche, convocation
+des agents) restent ceux de `taskService`. Les canaux ne montrent pas ces conversations et refusent d'y écrire. Dans
+l'onglet Conversations, la section **« Fils de tâches »** liste les fils que je suis (j'y ai écrit, réagi ou été
+mentionné, ou je suis responsable ou rapporteur de la tâche ; `Project.followedTaskThreads`) et ouvre le fil au centre
+(`/projects/:id/conversations/task-<tâche>`), le même que sur la page de la tâche. Les anciennes tables
+`task_comments` / `task_reactions` (et les lignes de `task_attachments` qui ont un `comment_id`) ne sont plus lues ;
+des triggers y recopient les écritures de l'ancienne version pendant une mise à jour bleu/vert, en attendant leur
+retrait.
 
 - **Partout dans l'application**, le bouton « Messages » de la barre du haut (à côté de la cloche, raccourci
   `Alt+M`) montre le total des messages non lus de mes projets (requête `unreadMessagesByProject`) et ouvre un
@@ -1538,8 +1592,8 @@ de chaque exécution** pour ne pas garder un processus ouvert entre deux échéa
 (échéance, ou à la main avec la personne), échéance visée, début, fin, durée, coût, message et **début de la
 dernière réponse de l'agent** (« Voir la réponse »). Issues (`schedules/outcome.ts`, testé) :
 - **Terminée** ;
-- **Bloquée** : un appel d'outil a été refusé (`permission_denials` du résultat du tour : mode « Ne jamais me
-  demander », refus d'un humain), ou une demande d'autorisation est restée **dix minutes** sans réponse (la
+- **Bloquée** : un appel d'outil a été refusé (`permission_denials` du résultat du tour : mode « Refuser
+  sans demander », refus d'un humain), ou une demande d'autorisation est restée **dix minutes** sans réponse (la
   demande reste ouverte ; l'agent repart si quelqu'un y répond). L'agent a pu répondre poliment, l'exécution
   n'est quand même pas présentée comme réussie ;
 - **En erreur**, **Délai dépassé** (toujours au travail après quatre heures) ;
@@ -1895,6 +1949,27 @@ familles coupées : une famille ajoutée plus tard est reçue par défaut). Il f
 (`pushService.deliver`) et les notifications du navigateur affichées par la cloche quand la fenêtre n'a
 pas le focus ; la cloche elle-même affiche tout. Un type de notification absent des familles est toujours
 envoyé. API : `pushPreferences`, `setPushPreference(category, enabled)`.
+
+Une notification push de **demande d'autorisation** porte les boutons « Autoriser » et « Refuser » là où le
+navigateur les affiche (Chrome, Edge, Android ; ailleurs, le clic ouvre la session). Le service worker répond par
+`POST /api/push/action` avec un jeton signé propre au destinataire et à la demande (HMAC dérivé de la clé maîtresse,
+24 h, `notifications/pushActions.ts`) : le serveur revérifie que la personne est toujours membre du projet, répond à
+la demande en son nom et l'inscrit au journal d'audit (`request.answer`, `via: push`).
+
+**Canaux hors navigateur** (`notifications/channels.ts`, table `notification_channels`) : webhook **Slack**, webhook
+**Discord** ou **e-mail**, en plus de la cloche et du push. Un canal appartient à un projet (Réglages du projet,
+administrateurs : les notifications adressées à tous ses membres y sont relayées) ou à une personne (Paramètres ›
+Notifications : tout ce qu'elle verrait dans sa cloche). Chaque canal choisit ses familles (mêmes clés que
+`PUSH_CATEGORIES` ; par défaut demandes, sessions, tâches et budget), peut être mis en pause et testé ; l'adresse du
+webhook est chiffrée et n'est jamais renvoyée (seuls l'hôte et ses quatre derniers caractères). Seules les adresses
+`https://hooks.slack.com/…` et `https://discord.com/api/webhooks/…` sont acceptées. Le message porte un lien absolu
+(`APP_URL`) vers la demande ou la session. **Anti-rafale** (`notifications/batcher.ts`) : par canal, la première
+notification part aussitôt, les suivantes de la minute sont envoyées ensemble à la fin de la fenêtre ; une demande
+d'un agent part toujours aussitôt. La mémoire de l'anti-rafale est celle de l'instance, vidée à l'arrêt. L'e-mail
+passe par le serveur SMTP réglé dans Paramètres › Serveur (mot de passe chiffré, e-mail de test) ou par les variables
+`SMTP_URL` (ex. `smtps://user:mot-de-passe@smtp.exemple.fr:465`) et `SMTP_FROM`, qui l'emportent. API :
+`myNotificationChannels`, `projectNotificationChannels`, `create/update/delete/testNotificationChannel`,
+`smtpSettings`, `updateSmtpSettings`, `clearSmtpSettings`, `sendTestEmail`.
 
 ## Apparence
 

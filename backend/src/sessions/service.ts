@@ -305,6 +305,24 @@ function assertNotArchived(session: Session): void {
   if (session.archivedAt) throw new AppError("Cette session est archivée : restaurez-la d'abord, ou relancez une nouvelle session depuis son historique", 'ARCHIVED');
 }
 
+/**
+ * Une session (hors chat) ne s'exécute que dans sa work session : sans elle (dossier supprimé à la fusion de sa PR,
+ * retiré depuis l'interface ou l'outil `worksessions.delete`, session d'avant les work sessions), elle ne démarre pas,
+ * et surtout pas dans le checkout principal du projet, où l'agent se croirait sur sa branche alors qu'il est sur la
+ * branche principale (conversation neuve, le transcript étant rangé par dossier). Elle se relance dans un nouveau
+ * dossier (`relaunch`) ou reste archivée.
+ */
+export function assertHasWorksession(session: Pick<Session, 'kind' | 'worksessionId' | 'formerWorksession'>): void {
+  if (session.kind === 'chat' || session.worksessionId) return;
+  const former = session.formerWorksession;
+  throw new AppError(
+    former
+      ? `Le dossier de travail de cette session (branche ${former.branch}) a été supprimé, par exemple à la fusion de sa pull request : elle ne peut plus reprendre. Relancez-la (nouvelle session dans un nouveau dossier, avec cette conversation en contexte), ou laissez-la archivée.`
+      : "Cette session n'a pas de dossier de travail : elle ne peut plus reprendre. Relancez-la (nouvelle session dans un nouveau dossier, avec cette conversation en contexte), ou archivez-la.",
+    'NO_WORKSESSION',
+  );
+}
+
 /** Instruction refusée à une session en file d'attente. */
 const queuedError = () =>
   new AppError(
@@ -585,6 +603,7 @@ export const sessionService = {
     const session = await sessionRepository.findById(id);
     if (!session) throw new NotFoundError('Session introuvable');
     assertNotArchived(session);
+    assertHasWorksession(session);
     // `fromParked` : session garée, réservée pour cette instance par `sendMessage`, qui reprend son processus.
     if (session.status === 'running' && !opts.fromParked) throw new AppError('La session est déjà en cours');
     if (session.status === 'queued' && !opts.fromQueue) throw queuedError();
@@ -796,6 +815,8 @@ export const sessionService = {
     if (!session) throw new NotFoundError('Session introuvable');
     assertNotArchived(session);
     if (session.status === 'queued') throw queuedError();
+    // Sans processus, l'instruction relancerait la session : refusée d'emblée si son dossier n'existe plus.
+    if (!running.has(id) && session.status !== 'running') assertHasWorksession(session);
     // Une personne écrit directement dans la session : elle la pilote désormais, la session ne se range plus d'office.
     if (opts.byPerson && session.config?.[AUTO_ARCHIVE_KEY] !== undefined) {
       await publishSession(await sessionRepository.update(id, { config: withoutAutoArchive(session.config) }));
@@ -1060,6 +1081,8 @@ export const sessionService = {
     const session = await sessionRepository.findById(id);
     if (!session) throw new NotFoundError('Session introuvable');
     if (!session.archivedAt) return session;
+    // Dossier supprimé depuis : restaurée, elle resterait active sans pouvoir reprendre.
+    assertHasWorksession(session);
     if (session.worksessionId) {
       const [other] = (await sessionRepository.list({ worksessionId: session.worksessionId, archived: 'exclude', limit: 50 })).filter((s) => s.id !== id && !reviewOf(s));
       if (other && !reviewOf(session)) throw new AppError(`La session « ${other.name} » travaille déjà dans le dossier de cette session : archivez-la d'abord, ou relancez celle-ci`);

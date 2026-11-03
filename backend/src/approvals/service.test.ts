@@ -50,7 +50,8 @@ vi.mock('../requests/service.js', () => ({
   requestService: {
     get: async () => m.stored,
     cancel: async (id: string, by?: string) => (m.cancelled.push(id), { ...m.stored, status: 'cancelled', answeredById: by ?? null }),
-    answer: async (id: string, response: Record<string, unknown>, by: string) => (m.answered.push([id, response, by]), { ...m.stored, status: 'answered', response, answeredById: by }),
+    cancelOnce: async (id: string, by?: string) => (m.cancelled.push(id), { request: { ...m.stored, status: 'cancelled', answeredById: by ?? null }, settled: true }),
+    answerOnce: async (id: string, response: Record<string, unknown>, by: string) => (m.answered.push([id, response, by]), { request: { ...m.stored, status: 'answered', response, answeredById: by }, settled: true }),
   },
 }));
 

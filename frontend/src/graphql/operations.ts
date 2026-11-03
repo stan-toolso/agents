@@ -392,6 +392,10 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  /** Passage en cours (le premier ; effacé au retour à « à faire »), null si jamais démarrée. */
+  startedAt: string | null;
+  /** Passage en annulée, null hors de ce statut. */
+  cancelledAt: string | null;
   customFields: TaskField[];
   assignee: TaskPerson | null;
   reporter: TaskPerson | null;
@@ -1712,6 +1716,8 @@ export const TASK_FIELDS = gql`
     createdAt
     updatedAt
     completedAt
+    startedAt
+    cancelledAt
     customFields {
       key
       value

@@ -419,6 +419,10 @@ type Task {
   createdAt: DateTime!
   updatedAt: DateTime!
   completedAt: DateTime
+  "Passage en cours (le premier ; effacé si la tâche revient à « à faire ») : début du cycle time. Null si jamais démarrée."
+  startedAt: DateTime
+  "Passage en annulée, null hors de ce statut."
+  cancelledAt: DateTime
 }
 
 input CreateTaskInput {
@@ -1412,6 +1416,74 @@ type PullRequestReview {
   author: String!
   "APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED, PENDING"
   state: String!
+}
+
+"Livraison d'un projet : « merge » (bouton Livrer : base fusionnée, push, PR, checks verts, fusion) ou « deploy » (commande de déploiement du projet, sous verrou, après CI verte)."
+type Delivery {
+  id: ID!
+  projectId: ID!
+  "MERGE ou DEPLOY"
+  kind: String!
+  "QUEUED, RUNNING, SUCCEEDED, FAILED, CONFLICT, CANCELLED"
+  status: String!
+  requestedBy: User
+  "Personnes dont la demande a été regroupée dans ce déploiement (lot)."
+  joinedBy: [User!]!
+  session: Session
+  task: Task
+  worksessionId: ID
+  branch: String
+  prNumber: Int
+  prUrl: String
+  "Commit livré (tête de la branche, puis commit de fusion) ou déployé."
+  sha: String
+  steps: [DeliveryStep!]!
+  "Fin de la sortie de la commande de déploiement."
+  output: String
+  error: String
+  "La livraison peut encore être annulée (en attente, ou en cours avant la commande de déploiement)."
+  cancellable: Boolean!
+  createdAt: DateTime!
+  startedAt: DateTime
+  finishedAt: DateTime
+  "Durée en secondes (jusqu'à maintenant si elle tourne encore)."
+  durationSeconds: Int
+}
+
+type DeliveryStep {
+  at: DateTime!
+  message: String!
+  "info, warn, error, success"
+  level: String!
+}
+
+"Commande de déploiement d'un projet, lancée par le backend sur un serveur SSH du coffre ; {sha} et {branch} y sont remplacés par le commit vérifié."
+type DeployConfig {
+  vaultItem: String!
+  command: String!
+  "Branche dont la CI doit être verte et qui est déployée (null : branche principale du projet)."
+  branch: String
+  timeoutMinutes: Int!
+  updatedBy: User
+  updatedAt: DateTime!
+}
+
+input DeployConfigInput {
+  vaultItem: String!
+  command: String!
+  branch: String
+  timeoutMinutes: Int
+}
+
+"État de la CI d'une branche ou d'un commit (GitHub) : checks de son dernier commit."
+type CiStatus {
+  ref: String!
+  sha: String!
+  "SUCCESS, FAILURE, PENDING, ERROR, EXPECTED, ou null"
+  state: String
+  "success, failure, pending, none"
+  verdict: String!
+  checks: [PullRequestCheck!]!
 }
 
 "Pull request GitHub du dépôt d'un projet, ou d'un autre dépôt (lue avec le jeton de la connexion GitHub) ; pour un dépôt hébergé par Skipper, pull request de sa forge Forgejo ; pour un dépôt GitLab, merge request (numéro = iid)."
@@ -2445,6 +2517,65 @@ type PushCategory {
   adminsOnly: Boolean!
 }
 
+"Canal de notification hors navigateur : webhook Slack ou Discord, ou e-mail, d'un projet ou d'une personne."
+type NotificationChannel {
+  id: ID!
+  projectId: ID
+  userId: ID
+  "slack, discord ou email."
+  kind: String!
+  "Cible lisible sans secret : hôte du webhook et fin de son adresse, ou adresse e-mail."
+  targetHint: String!
+  "Familles relayées (PushCategory.key)."
+  categories: [String!]!
+  enabled: Boolean!
+  lastSentAt: DateTime
+  "Dernière erreur d'envoi (effacée au prochain envoi réussi)."
+  lastError: String
+  createdAt: DateTime!
+}
+
+input NotificationChannelInput {
+  "Projet propriétaire (administrateurs du projet) ; absent : canal personnel de la personne connectée."
+  projectId: ID
+  kind: String!
+  "Adresse du webhook (https://hooks.slack.com/…, https://discord.com/api/webhooks/…) ou adresse e-mail."
+  target: String!
+  "Familles relayées ; absent : demandes, sessions, tâches et budget."
+  categories: [String!]
+}
+
+input NotificationChannelPatch {
+  "Nouvelle cible (absent : inchangée)."
+  target: String
+  categories: [String!]
+  enabled: Boolean
+}
+
+"Serveur SMTP des notifications par e-mail (le mot de passe n'est jamais renvoyé)."
+type SmtpSettings {
+  "env (variable SMTP_URL, non modifiable ici), settings ou none."
+  source: String!
+  host: String
+  port: Int
+  secure: Boolean!
+  user: String
+  from: String
+  hasPassword: Boolean!
+}
+
+input SmtpSettingsInput {
+  host: String!
+  port: Int!
+  "TLS dès la connexion (port 465) ; sinon STARTTLS si le serveur le propose."
+  secure: Boolean!
+  user: String
+  "Absent : garder le mot de passe enregistré ; chaîne vide : le retirer."
+  password: String
+  "Expéditeur, ex. « Skipper <skipper@exemple.fr> »."
+  from: String!
+}
+
 "Relance : la nouvelle session reprend le dossier et la branche de la session d'origine (archivée), ou un nouveau dossier s'il a disparu."
 input RelaunchSessionInput {
   name: String
@@ -2692,6 +2823,14 @@ type Query {
   pushPublicKey: String!
   "Familles de notifications de la personne connectée, avec leur état (toutes reçues par défaut)."
   pushPreferences: [PushCategory!]!
+  "Canaux de notification personnels (e-mail, webhook) de la personne connectée."
+  myNotificationChannels: [NotificationChannel!]!
+  "Canaux de notification d'un projet (membres) : les notifications adressées à tous ses membres y sont relayées."
+  projectNotificationChannels(projectId: ID!): [NotificationChannel!]!
+  "Serveur SMTP des notifications par e-mail (administrateurs)."
+  smtpSettings: SmtpSettings!
+  "Un serveur SMTP est-il configuré (canaux e-mail utilisables) ?"
+  emailNotificationsAvailable: Boolean!
   "Fichiers d'environnement d'un projet (membres) : modèles écrits dans chaque nouveau dossier de travail."
   envFiles(projectId: ID!): [EnvFile!]!
   "Éléments du coffre (portée des agents de la personne connectée) qu'un fichier d'environnement peut référencer, avec leurs champs."
@@ -2773,6 +2912,13 @@ type Query {
   de l'utilisateur ; filtres par tâche, statut et étape. Celles qui attendent une action d'abord (à fusionner, à déployer).
   """
   pullRequests(projectId: ID, taskId: ID, status: [TrackedPullRequestStatus!], stage: [PullRequestStage!], limit: Int): [TrackedPullRequest!]!
+  "Livraisons d'un projet (historique), d'un dossier de travail ou d'une tâche, les plus récentes d'abord."
+  deliveries(projectId: ID!, worksessionId: ID, taskId: ID, kind: String, limit: Int): [Delivery!]!
+  delivery(id: ID!): Delivery
+  "Commande de déploiement du projet (null : pas de déploiement configuré)."
+  deployConfig(projectId: ID!): DeployConfig
+  "État de la CI d'une branche ou d'un commit du dépôt du projet (GitHub) ; défaut : branche principale."
+  ciStatus(projectId: ID!, ref: String): CiStatus
   pullRequest(id: ID!): TrackedPullRequest
   notifications(unreadOnly: Boolean = false, limit: Int): [Notification!]!
   unreadNotificationCount: Int!
@@ -3087,6 +3233,14 @@ type Mutation {
   syncPullRequests(projectId: ID!): [TrackedPullRequest!]!
   "L'onglet actif regarde ce projet : synchronise ses pull requests avec GitHub si la dernière synchronisation date de plus de 10 s, et renvoie les PR en cours (en préparation, brouillon, à fusionner) et celles fusionnées ou fermées depuis moins de 10 minutes."
   watchPullRequests(projectId: ID!): [TrackedPullRequest!]!
+  "Livrer le dossier de travail d'une session ou d'une tâche : base fusionnée, push, PR, checks verts, fusion avec le compte de la personne (membre) ; deploy : demander ensuite le déploiement du projet."
+  deliver(sessionId: ID, taskId: ID, deploy: Boolean): Delivery!
+  "Demande le déploiement du projet (administrateur) : rejoint celui qui attend déjà, sinon en met un en attente ; lancé sous verrou après CI verte."
+  requestDeploy(projectId: ID!): Delivery!
+  "Annule une livraison en attente, ou en cours tant que la commande de déploiement n'est pas lancée."
+  cancelDelivery(id: ID!): Delivery!
+  "Configure (ou retire, input null) la commande de déploiement du projet (administrateur)."
+  setDeployConfig(projectId: ID!, input: DeployConfigInput): DeployConfig
   "Demande à la session rattachée à la PR (TrackedPullRequest.session) de résoudre ses conflits avec la base : l'instruction lui est envoyée (la session est relancée si elle était terminée). Renvoie la session."
   resolvePullRequestConflicts(id: ID!): Session!
   "Fait relire une branche (dossier de travail) ou une PR suivie par un agent : session Claude en lecture seule dans le dossier de la branche, avec le diff par rapport à la base ; son rapport est publié dans le fil de la tâche et, pour une PR ouverte, en commentaire GitHub. Renvoie la session de relecture."
@@ -3161,6 +3315,17 @@ type Mutation {
   sendTestPush: Int!
   "Active ou coupe une famille de notifications push pour la personne connectée ; renvoie toutes ses familles."
   setPushPreference(category: String!, enabled: Boolean!): [PushCategory!]!
+  "Ajoute un canal de notification (projet : administrateurs du projet ; sinon canal personnel)."
+  createNotificationChannel(input: NotificationChannelInput!): NotificationChannel!
+  updateNotificationChannel(id: ID!, patch: NotificationChannelPatch!): NotificationChannel!
+  deleteNotificationChannel(id: ID!): Boolean!
+  "Envoie aussitôt un message de test sur le canal ; erreur avec la raison en cas d'échec."
+  testNotificationChannel(id: ID!): NotificationChannel!
+  "Règle le serveur SMTP (administrateurs)."
+  updateSmtpSettings(input: SmtpSettingsInput!): SmtpSettings!
+  clearSmtpSettings: SmtpSettings!
+  "Envoie un e-mail de test à la personne connectée (administrateurs)."
+  sendTestEmail: Boolean!
   "Termine le shell."
   closeTerminal(id: ID!): Terminal!
   deleteTerminal(id: ID!): Boolean!
@@ -3228,7 +3393,7 @@ enum ScheduleRunStatus {
   RUNNING
   "Terminée sans erreur ni refus."
   DONE
-  "Un appel d'outil a été refusé (mode « Ne jamais me demander », refus d'un humain) ou une demande est restée sans réponse : le travail n'a pas pu aller au bout."
+  "Un appel d'outil a été refusé (mode « Refuser sans demander », refus d'un humain) ou une demande est restée sans réponse : le travail n'a pas pu aller au bout."
   BLOCKED
   FAILED
   "Toujours au travail après le délai d'attente (4 h)."
@@ -3303,7 +3468,7 @@ input CreateScheduledSessionInput {
 }
 
 enum ScheduleToolSuggestionSource {
-  "Refusé pendant une exécution passée (mode « Ne jamais me demander », refus, demande sans réponse)."
+  "Refusé pendant une exécution passée (mode « Refuser sans demander », refus, demande sans réponse)."
   DENIED
   "Demandé pendant une exécution passée, puis accordé par une personne."
   ASKED
@@ -3898,8 +4063,21 @@ type MessageAttachment {
 extend type Project {
   "Canaux du projet (le général d'abord, créé au besoin)."
   conversations(includeArchived: Boolean): [Conversation!]!
-  "Messages non lus par l'utilisateur connecté, tous canaux confondus."
+  "Messages non lus par l'utilisateur connecté, tous canaux confondus (hors fils de tâches)."
   unreadMessages: Int!
+  "Fils de tâches que l'utilisateur connecté suit (il y a écrit, réagi ou y est mentionné ; ou il est responsable ou rapporteur de la tâche), le plus récemment actif d'abord (limit, défaut 30)."
+  followedTaskThreads(limit: Int): [TaskThreadSummary!]!
+}
+
+"Fil d'une tâche (sa conversation), tel qu'il apparaît dans l'onglet Conversations : on le lit et on y écrit comme dans la tâche."
+type TaskThreadSummary {
+  "Identifiant de la conversation de la tâche."
+  id: ID!
+  "Nom technique (« task-<id de la tâche> »), utilisé dans l'adresse de l'onglet Conversations."
+  slug: String!
+  task: Task!
+  messageCount: Int!
+  lastMessageAt: DateTime
 }
 
 extend type Query {

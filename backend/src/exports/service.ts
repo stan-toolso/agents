@@ -52,13 +52,18 @@ export async function collectProjectExport(projectId: string, now = new Date()):
       id: string; title: string; description: string; status: ExportedTask['status']; status_tag: string | null; priority: ExportedTask['priority']; tags: string[] | null;
       due_date: string | null; custom_fields: ExportedTask['customFields'] | null; assignee_name: string | null; assignee_email: string | null; reporter_name: string | null;
       reporter_email: string | null; branch: string | null; created_by_type: 'human' | 'agent'; created_at: Date; updated_at: Date; completed_at: Date | null;
+      started_at: Date | null; cancelled_at: Date | null;
     }>(`SELECT t.*, to_char(t.due_date, 'YYYY-MM-DD') AS due_date FROM tasks t WHERE t.project_id = $1 ORDER BY t.created_at, t.id`, [projectId]),
     pool.query<{ id: string; task_id: string; parent_id: string | null; author_type: 'human' | 'agent'; author_name: string; body: string; created_at: Date; updated_at: Date }>(
-      `SELECT c.* FROM task_comments c JOIN tasks t ON t.id = c.task_id WHERE t.project_id = $1 ORDER BY c.created_at, c.id`,
+      `SELECT m.*, cv.task_id FROM messages m JOIN conversations cv ON cv.id = m.conversation_id JOIN tasks t ON t.id = cv.task_id WHERE t.project_id = $1 ORDER BY m.created_at, m.id`,
       [projectId],
     ),
     pool.query<{ task_id: string; name: string; media_type: string; size: string | number }>(
-      `SELECT a.task_id, a.name, a.media_type, a.size FROM task_attachments a JOIN tasks t ON t.id = a.task_id WHERE t.project_id = $1 ORDER BY a.created_at`,
+      `SELECT task_id, name, media_type, size FROM (
+         SELECT a.task_id, a.name, a.media_type, a.size, a.created_at FROM task_attachments a JOIN tasks t ON t.id = a.task_id WHERE t.project_id = $1 AND a.comment_id IS NULL
+         UNION ALL
+         SELECT cv.task_id, a.name, a.media_type, a.size, a.created_at FROM message_attachments a JOIN conversations cv ON cv.id = a.conversation_id JOIN tasks t ON t.id = cv.task_id WHERE t.project_id = $1
+       ) x ORDER BY created_at`,
       [projectId],
     ),
     permissionRuleService.list(projectId),
@@ -133,6 +138,8 @@ export async function collectProjectExport(projectId: string, now = new Date()):
       createdAt: iso(t.created_at)!,
       updatedAt: iso(t.updated_at)!,
       completedAt: iso(t.completed_at),
+      startedAt: iso(t.started_at),
+      cancelledAt: iso(t.cancelled_at),
       comments: comments.get(t.id) ?? [],
       attachments: attachments.get(t.id) ?? [],
     })),
@@ -253,8 +260,10 @@ export async function importProjectArchive(projectId: string, archive: Buffer, o
         const status = TASK_STATUSES.has(t.status) ? t.status : 'todo';
         const { rows } = await client.query<{ id: string }>(
           `INSERT INTO tasks (project_id, title, description, status, priority, created_by_type, due_date, completed_at, custom_fields, assignee_name, assignee_email,
-                              reporter_name, reporter_email, status_tag, tags, branch, created_at, updated_at)
-           VALUES ($1, $2, $3, $4::task_status, $5::task_priority, $6, $7::date, $8, $9::jsonb, $10, $11, $12, $13, $14, $15::text[], $16, COALESCE($17, now()), COALESCE($18, now())) RETURNING id`,
+                              reporter_name, reporter_email, status_tag, tags, branch, created_at, updated_at,
+                              started_at, cancelled_at)
+           VALUES ($1, $2, $3, $4::task_status, $5::task_priority, $6, $7::date, $8, $9::jsonb, $10, $11, $12, $13, $14, $15::text[], $16, COALESCE($17, now()), COALESCE($18, now()),
+                   $19, $20) RETURNING id`,
           [
             projectId,
             title,
@@ -274,6 +283,8 @@ export async function importProjectArchive(projectId: string, archive: Buffer, o
             typeof t.branch === 'string' && t.branch ? t.branch : null,
             date(t.createdAt),
             date(t.updatedAt),
+            status === 'in_progress' || status === 'done' || status === 'cancelled' ? (date(t.startedAt) ?? (status === 'cancelled' ? null : (date(t.createdAt) ?? new Date()))) : null,
+            status === 'cancelled' ? (date(t.cancelledAt) ?? date(t.updatedAt) ?? new Date()) : null,
           ],
         );
         report.tasksCreated++;
@@ -283,13 +294,17 @@ export async function importProjectArchive(projectId: string, archive: Buffer, o
         for (const c of [...comments.filter((c) => !c.parentRef), ...comments.filter((c) => c.parentRef)]) {
           const parentId = c.parentRef ? ids.get(c.parentRef) : null;
           if (c.parentRef && !parentId) continue;
+          // Le fil d'une tâche est sa conversation (créée au premier message).
           const { rows: inserted } = await client.query<{ id: string }>(
-            `INSERT INTO task_comments (task_id, parent_id, author_type, author_name, body, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()), COALESCE($7, now())) RETURNING id`,
+            `INSERT INTO messages (conversation_id, parent_id, author_type, author_name, body, created_at, updated_at)
+             VALUES (task_conversation_id($1), $2, $3, $4, $5, COALESCE($6, now()), COALESCE($7, now())) RETURNING id`,
             [rows[0].id, parentId, c.authorType === 'agent' ? 'agent' : 'human', str(c.authorName, 'Inconnu'), c.body, date(c.createdAt), date(c.updatedAt)],
           );
           if (typeof c.ref === 'string') ids.set(c.ref, inserted[0].id);
           report.commentsCreated++;
+        }
+        if (comments.length) {
+          await client.query('UPDATE conversations c SET last_message_at = (SELECT max(m.created_at) FROM messages m WHERE m.conversation_id = c.id) WHERE c.task_id = $1', [rows[0].id]);
         }
       }
     }

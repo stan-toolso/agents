@@ -66,6 +66,7 @@ import { isEmptyNotificationResult, resultError } from './claudeResult.js';
 import { liveDraftService } from '../live.js';
 import { SESSION_ENV } from '../../runners/stats.js';
 import { log } from '../../log.js';
+import { failedMcpServers, mcpFailureNotice, readMcpLogDetail } from '../mcpFailures.js';
 import { REVIEW_ALLOWED_TOOLS, REVIEW_DISALLOWED_TOOLS, REVIEW_SYSTEM_PROMPT, REVIEW_TOOLS, reviewOf } from '../../reviews/types.js';
 import { agentService } from '../../agents/service.js';
 import { agentIdentityPrompt, agentsPromptSummary, scopedAgentsPromptSummary } from '../../agents/prompt.js';
@@ -80,6 +81,10 @@ interface ClaudeConfig {
   maxBudgetUsd?: number;
   allowedTools?: string;
 }
+
+/** Liste d'outils pré-autorisés d'une session (« Read,Bash(git:*) »). */
+export const splitAllowedTools = (value: unknown): string[] =>
+  value ? String(value).split(',').map((t) => t.trim()).filter(Boolean) : [];
 
 const permissionModes: PermissionMode[] = ['default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions'];
 
@@ -152,7 +157,7 @@ export class ClaudeProvider implements SessionProvider {
             { value: 'default', label: 'Me demander avant chaque action sensible', description: 'Chaque modification de fichier ou commande vous est soumise (recommandé).' },
             { value: 'acceptEdits', label: 'Modifier les fichiers librement', description: 'Les modifications de fichiers sont autorisées ; les commandes restent soumises.' },
             { value: 'plan', label: 'Réfléchir seulement, sans rien modifier', description: "L'agent analyse et propose un plan, sans toucher aux fichiers." },
-            { value: 'dontAsk', label: 'Ne jamais me demander', description: 'Les actions non autorisées sont refusées automatiquement.' },
+            { value: 'dontAsk', label: 'Refuser sans demander', description: "Les actions non autorisées d'avance sont refusées ; aucune demande ne vous sera faite. Pour ne plus être dérangé, préférez « Modifier les fichiers librement » ou « Tout autoriser »." },
             { value: 'bypassPermissions', label: 'Tout autoriser (risqué)', description: "L'agent agit sans aucune confirmation." },
           ],
         },
@@ -290,7 +295,11 @@ export class ClaudeProvider implements SessionProvider {
     // pas l'outil Skill (aucun outil intégré) : il lit le contexte par les outils MCP.
     const pluginDir = chat || review || !projectContext ? null : await materializeSkills(ctx.project);
     const agentPluginDir = chat || review || !agent ? null : await materializeSkills(ctx.project, agent.id);
-    const allowedTools = cfg.allowedTools ? String(cfg.allowedTools).split(',').map((t) => t.trim()).filter(Boolean) : [];
+    const allowedTools = splitAllowedTools(cfg.allowedTools);
+    // Outils pré-autorisés ajoutés en cours de session (« Autoriser cet outil pour la session » du transcript) : le CLI
+    // ne relit pas allowedTools à chaud, le hook PreToolUse les applique (sa décision passe avant le mode, y compris
+    // « Refuser sans demander »). Au prochain lancement, ils rejoignent allowedTools.
+    let liveAllowed: string[] = [];
     // Autorisations mémorisées pour le projet (« ne plus demander dans ce projet »).
     const projectRules = await permissionRuleService.list(ctx.project.id);
     const ruleUsage: RuleUsage = { rules: projectRules, asked: new Set(), pending: new Map() };
@@ -410,13 +419,16 @@ export class ClaudeProvider implements SessionProvider {
         ? undefined
         : {
             // Outils pré-autorisés de la planification : appliqués aux seuls tours qu'elle lance, y compris en mode
-            // « Ne jamais me demander » (le SDK n'y appelle pas canUseTool ; la décision d'un hook passe avant le mode).
+            // « Refuser sans demander » (le SDK n'y appelle pas canUseTool ; la décision d'un hook passe avant le mode).
             PreToolUse: [
               {
                 hooks: [
                   async (input) => {
                     const { tool_name: toolName, tool_input: toolInput } = input as { tool_name?: string; tool_input?: Record<string, unknown> };
                     if (!toolName) return {};
+                    if (liveAllowed.length && scheduleAllows(liveAllowed, toolName, toolInput ?? {}, ctx.cwd)) {
+                      return { hookSpecificOutput: { hookEventName: 'PreToolUse' as const, permissionDecision: 'allow' as const, permissionDecisionReason: 'Autorisé pour la session' } };
+                    }
                     const rules = await activeScheduleRules(ctx.session.id);
                     if (!rules || !scheduleAllows(rules, toolName, toolInput ?? {}, ctx.cwd)) return {};
                     await this.noteScheduleAllowed(ctx, toolName);
@@ -470,7 +482,7 @@ export class ClaudeProvider implements SessionProvider {
       // Taille du contexte : tokens d'entrée (dont cache) du dernier appel au modèle, relevée sur les messages assistant.
       let contextTokens: number | null = null;
       // Statut de limite d'utilisation rapporté en dernier à cette session : seuls ses changements sont journalisés.
-      const run: RunState = { rateLimitStatus: null };
+      const run: RunState = { rateLimitStatus: null, mcpReported: new Set() };
       try {
         for await (const message of stream) {
           // Le modèle travaille alors qu'aucun tour n'était en cours : tour lancé par le CLI lui-même (fin d'une
@@ -558,6 +570,12 @@ export class ClaudeProvider implements SessionProvider {
           if (!permissionModes.includes(mode)) throw new AppError(`permissionMode invalide : ${String(mode)}`);
           await stream.setPermissionMode(mode);
           applied.push('permissionMode');
+        }
+        if ('allowedTools' in patch && !review) {
+          const next = splitAllowedTools(patch.allowedTools);
+          liveAllowed = next.filter((rule) => !allowedTools.includes(rule));
+          // Un outil retiré de la liste de départ reste autorisé jusqu'au prochain lancement : changement non appliqué.
+          if (allowedTools.every((rule) => next.includes(rule))) applied.push('allowedTools');
         }
         if ('model' in patch) {
           const fresh = await claudeSettings.forSession(accounts?.claudeUserId ?? null);
@@ -788,6 +806,16 @@ export class ClaudeProvider implements SessionProvider {
         const reason = await explainBrowserFailure(ctx.project, `le serveur MCP playwright est « ${playwright.status} » dans le CLI.`);
         await ctx.emit('system', { notice: true, browser: true, message: `Navigateur headless indisponible : ${reason}` });
       }
+      // Autres serveurs MCP (coffre, tâches…) en échec ou sans outil : signalés dans le fil et les logs, cause tirée
+      // du journal du CLI dans le conteneur (un chat tourne sur le serveur, sans conteneur : statut seul).
+      // Le message d'init peut revenir à chaque tour : chaque serveur n'est signalé qu'une fois par exécution.
+      for (const failure of failedMcpServers(message)) {
+        if (run.mcpReported.has(failure.name)) continue;
+        run.mcpReported.add(failure.name);
+        const detail = ctx.session.kind === 'chat' ? null : await readMcpLogDetail(ctx.project, ctx.cwd, failure.name);
+        log.warn(`[mcp] session ${ctx.session.id} (${ctx.project.slug}) : serveur ${failure.name} en échec (statut ${failure.status})${detail ? ` : ${detail}` : ''}`);
+        await ctx.emit('system', { notice: true, mcpServer: failure.name, message: mcpFailureNotice(failure, detail) });
+      }
     }
     // Premier outil du navigateur utilisé par l'agent : la vue en direct est proposée dans la sidebar.
     if (message.type === 'assistant' && message.message.content.some((b) => b.type === 'tool_use' && b.name.startsWith('mcp__playwright__'))) {
@@ -810,6 +838,8 @@ interface RuleUsage {
 /** État propre à une exécution du provider (un processus Claude Code). */
 interface RunState {
   rateLimitStatus: string | null;
+  /** Serveurs MCP déjà signalés en échec. */
+  mcpReported: Set<string>;
 }
 
 type ContentBlock = { type?: string; source?: { type?: string; data?: string }; content?: unknown };

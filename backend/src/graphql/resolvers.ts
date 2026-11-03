@@ -15,6 +15,8 @@ import { contextService, HUMAN } from '../context/service.js';
 import { accountOf, googleAccountService } from '../google/service.js';
 import { pushPreferencesService } from '../notifications/preferences.js';
 import { pushService, type PushSubscriptionInput } from '../notifications/push.js';
+import { notificationChannelService, type ChannelInput, type ChannelPatch } from '../notifications/channels.js';
+import { smtpService, type SmtpInput } from '../notifications/smtp.js';
 import { searchService, type SearchKind } from '../search/service.js';
 import { sharedPageService } from '../sharedPages/service.js';
 import { envFileService } from '../envFiles/service.js';
@@ -38,6 +40,9 @@ import { fileService, type WorkspaceRef } from '../files/service.js';
 import { parseRepoFullName, pullRequestService, type MergeCleanup, type MergeMethod, type PullRequest, type PullRequestFilter } from '../git/pullRequests.js';
 import { foreignRepoOf, projectRepoName, trackedPullRequestService } from '../pullRequests/service.js';
 import { pullRequestSession, requestConflictResolution } from '../pullRequests/conflicts.js';
+import { deliveryService } from '../deliveries/service.js';
+import type { Delivery, DeployConfig, DeployConfigInput } from '../deliveries/types.js';
+import { ciVerdict } from '../git/pullRequests.js';
 import { requestGitConflictResolution } from '../git/conflicts.js';
 import { reviewService } from '../reviews/service.js';
 import { reviewOf, type SessionReview } from '../reviews/types.js';
@@ -174,6 +179,14 @@ const ownerDefaultModelOf = (ctx: Ctx, ownerId: string): Promise<string | null> 
     byOwner.set(ownerId, pending);
   }
   return pending;
+};
+/** Canal de notification : son propriétaire pour un canal personnel, un administrateur du projet sinon. */
+const guardNotificationChannel = async (ctx: Ctx, id: string) => {
+  const user = requireUser(ctx);
+  const channel = await notificationChannelService.get(id);
+  if (channel.projectId) await requireProject(ctx, channel.projectId, 'admin');
+  else if (channel.userId !== user.id) throw new NotFoundError('Canal de notification introuvable');
+  return user;
 };
 const guardRequest = async (ctx: Ctx, id: string, min: ProjectRole) => requireProject(ctx, await projectOfRequest(id), min);
 const guardTask = async (ctx: Ctx, id: string, min: ProjectRole) => requireProject(ctx, (await taskService.get(id)).projectId, min);
@@ -415,6 +428,9 @@ export const resolvers = {
     user: (n: Notification, _: unknown, ctx: Ctx) => userOrNull(ctx, n.userId),
   },
 
+  TaskThreadSummary: {
+    task: (t: { taskId: string }) => taskService.get(t.taskId),
+  },
   Task: {
     status: (t: Task) => t.status.toUpperCase(),
     priority: (t: Task) => t.priority.toUpperCase(),
@@ -543,6 +559,20 @@ export const resolvers = {
       return pullRequestService.get(pr.projectId, ctx.user?.id, pr.number, foreign).catch(() => null);
     },
     session: (pr: TrackedPullRequest) => pullRequestSession(pr),
+  },
+
+  Delivery: {
+    kind: (d: Delivery) => d.kind.toUpperCase(),
+    status: (d: Delivery) => d.status.toUpperCase(),
+    requestedBy: (d: Delivery, _: unknown, ctx: Ctx) => userOrNull(ctx, d.requestedById),
+    joinedBy: async (d: Delivery, _: unknown, ctx: Ctx) => (await Promise.all(d.joinedByIds.map((id) => userOrNull(ctx, id)))).filter(Boolean),
+    session: (d: Delivery) => (d.sessionId ? sessionService.get(d.sessionId).catch(() => null) : null),
+    task: (d: Delivery) => (d.taskId ? taskService.get(d.taskId).catch(() => null) : null),
+    cancellable: (d: Delivery) => (d.status === 'queued' || d.status === 'running') && !d.steps.some((st) => st.phase === 'command'),
+    durationSeconds: (d: Delivery) => (d.startedAt ? Math.round(((d.finishedAt ?? new Date()).getTime() - d.startedAt.getTime()) / 1000) : null),
+  },
+  DeployConfig: {
+    updatedBy: (c: DeployConfig, _: unknown, ctx: Ctx) => userOrNull(ctx, c.updatedById),
   },
 
   VaultItem: {
@@ -789,6 +819,12 @@ export const resolvers = {
     apiKeys: async (project: Project, _: unknown, ctx: Ctx) => ((await roleFor(ctx, project.id)) === 'admin' ? apiKeyService.list(project.id) : []),
     // Un espace personnel n'a pas de canaux (ses chats suffisent).
     conversations: (project: Project, args: { includeArchived?: boolean | null }) => (isPersonalProject(project) ? [] : conversationService.list(project.id, { includeArchived: Boolean(args.includeArchived) })),
+    followedTaskThreads: async (project: Project, args: { limit?: number | null }, ctx: Ctx) => {
+      if (!ctx.user || isPersonalProject(project)) return [];
+      const limit = Math.min(Math.max(args.limit ?? 30, 1), 100);
+      const threads = await conversationService.followedTaskThreads(project.id, ctx.user.id, ctx.user.email ?? null, limit);
+      return threads.map((t) => ({ id: t.conversation.id, slug: t.conversation.slug, taskId: t.conversation.taskId, messageCount: t.messageCount, lastMessageAt: t.conversation.lastMessageAt }));
+    },
     unreadMessages: async (project: Project, _: unknown, ctx: Ctx) => (ctx.user && !isPersonalProject(project) ? ((await conversationService.unreadByProject([project.id], ctx.user.id)).get(project.id) ?? 0) : 0),
     approvalConnections: async (project: Project, _: unknown, ctx: Ctx) => vaultService.approvalNames(await vaultService.agentItems(project.id, ctx.user?.id ?? null)),
     tasks: (project: Project, args: { status?: GqlTaskStatus[] | null }) => taskService.list({ projectId: project.id, status: fromGqlTaskStatuses(args.status) }),
@@ -994,6 +1030,27 @@ export const resolvers = {
       await requireProject(ctx, args.projectId, 'member');
       return pullRequestService.draft(args, requireUser(ctx).id);
     },
+    deliveries: async (_: unknown, args: { projectId: string; worksessionId?: string | null; taskId?: string | null; kind?: string | null; limit?: number | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId);
+      const kind = args.kind?.toLowerCase();
+      return deliveryService.list({ projectId: args.projectId, worksessionId: args.worksessionId ?? undefined, taskId: args.taskId ?? undefined, kind: kind === 'merge' || kind === 'deploy' ? kind : undefined, limit: args.limit ?? 50 });
+    },
+    delivery: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      const d = await deliveryService.get(args.id);
+      if (!d) return null;
+      await requireProject(ctx, d.projectId);
+      return d;
+    },
+    deployConfig: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId);
+      return deliveryService.getConfig(args.projectId);
+    },
+    ciStatus: async (_: unknown, args: { projectId: string; ref?: string | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId);
+      const project = await projectService.get(args.projectId);
+      const ci = await pullRequestService.ciStatus(args.projectId, requireUser(ctx).id, args.ref?.trim() || project.gitBranch || 'main');
+      return { ...ci, verdict: ciVerdict(ci.state, ci.checks) };
+    },
     pullRequests: async (_: unknown, args: { projectId?: string | null; taskId?: string | null; status?: string[] | null; stage?: string[] | null; limit?: number | null }, ctx: Ctx) => {
       if (args.projectId) {
         await requireProject(ctx, args.projectId);
@@ -1113,6 +1170,19 @@ export const resolvers = {
     pushPreferences: (_: unknown, __: unknown, ctx: Ctx) => {
       const user = requireUser(ctx);
       return pushPreferencesService.list(user.id, user.isAdmin);
+    },
+    myNotificationChannels: (_: unknown, __: unknown, ctx: Ctx) => notificationChannelService.list({ userId: requireUser(ctx).id }),
+    projectNotificationChannels: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'member');
+      return notificationChannelService.list({ projectId: args.projectId });
+    },
+    smtpSettings: (_: unknown, __: unknown, ctx: Ctx) => {
+      requireAdmin(ctx);
+      return smtpService.view();
+    },
+    emailNotificationsAvailable: (_: unknown, __: unknown, ctx: Ctx) => {
+      requireUser(ctx);
+      return smtpService.configured();
     },
     settings: (_: unknown, __: unknown, ctx: Ctx) => appSettings(ctx),
     vaultAwsAccounts: (_: unknown, args: { id: string }, ctx: Ctx) => awsService.accounts(vaultActor(ctx), args.id),
@@ -1464,6 +1534,31 @@ export const resolvers = {
     syncPullRequests: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId);
       return trackedPullRequestService.sync(args.projectId, requireUser(ctx).id, { force: true });
+    },
+    deliver: async (_: unknown, args: { sessionId?: string | null; taskId?: string | null; deploy?: boolean | null }, ctx: Ctx) => {
+      if (args.sessionId) await guardSession(ctx, args.sessionId, 'member');
+      else if (args.taskId) await requireProject(ctx, (await taskService.get(args.taskId)).projectId, 'member');
+      else throw new AppError('Livrer quoi ? Une session ou une tâche est attendue');
+      const userId = requireUser(ctx).id;
+      if (args.deploy) {
+        const projectId = args.sessionId ? await projectOfSession(args.sessionId) : (await taskService.get(args.taskId!)).projectId;
+        await requireProject(ctx, projectId, 'admin');
+      }
+      return deliveryService.deliver({ sessionId: args.sessionId, taskId: args.taskId, userId, deploy: Boolean(args.deploy) });
+    },
+    requestDeploy: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'admin');
+      return deliveryService.requestDeploy(args.projectId, requireUser(ctx).id);
+    },
+    cancelDelivery: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      const d = await deliveryService.get(args.id);
+      if (!d) throw new NotFoundError('Livraison introuvable');
+      await requireProject(ctx, d.projectId, d.kind === 'deploy' ? 'admin' : 'member');
+      return deliveryService.cancel(args.id, requireUser(ctx).id);
+    },
+    setDeployConfig: async (_: unknown, args: { projectId: string; input?: DeployConfigInput | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'admin');
+      return deliveryService.setConfig(args.projectId, args.input ?? null, requireUser(ctx).id);
     },
     watchPullRequests: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId);
@@ -2090,6 +2185,41 @@ export const resolvers = {
     setPushPreference: (_: unknown, args: { category: string; enabled: boolean }, ctx: Ctx) => {
       const user = requireUser(ctx);
       return pushPreferencesService.set(user.id, user.isAdmin, args.category, args.enabled);
+    },
+    createNotificationChannel: async (_: unknown, args: { input: ChannelInput & { projectId?: string | null } }, ctx: Ctx) => {
+      const user = requireUser(ctx);
+      const projectId = args.input.projectId ?? null;
+      if (projectId) await requireProject(ctx, projectId, 'admin');
+      return notificationChannelService.create({ projectId, userId: projectId ? null : user.id, admin: user.isAdmin }, args.input, user.id);
+    },
+    updateNotificationChannel: async (_: unknown, args: { id: string; patch: ChannelPatch }, ctx: Ctx) => {
+      const user = await guardNotificationChannel(ctx, args.id);
+      return notificationChannelService.update(args.id, user.isAdmin, args.patch);
+    },
+    deleteNotificationChannel: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      await guardNotificationChannel(ctx, args.id);
+      return notificationChannelService.delete(args.id);
+    },
+    testNotificationChannel: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      await guardNotificationChannel(ctx, args.id);
+      return notificationChannelService.test(args.id);
+    },
+    updateSmtpSettings: (_: unknown, args: { input: SmtpInput }, ctx: Ctx) => {
+      requireAdmin(ctx);
+      return smtpService.update(args.input);
+    },
+    clearSmtpSettings: (_: unknown, __: unknown, ctx: Ctx) => {
+      requireAdmin(ctx);
+      return smtpService.clear();
+    },
+    sendTestEmail: async (_: unknown, __: unknown, ctx: Ctx) => {
+      const user = requireAdmin(ctx);
+      try {
+        await smtpService.send({ to: user.email, subject: 'Skipper : test des notifications par e-mail', text: 'Le serveur SMTP de Skipper fonctionne.' });
+      } catch (err) {
+        throw new AppError(`Envoi impossible : ${(err as Error).message}`);
+      }
+      return true;
     },
     closeTerminal: async (_: unknown, args: { id: string }, ctx: Ctx) => {
       await guardTerminal(ctx, args.id, 'member');

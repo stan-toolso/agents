@@ -7,6 +7,8 @@ import type { Conversation, Message, MessageAttachment, MessageReaction } from '
 interface ConversationRow {
   id: string;
   project_id: string;
+  kind: 'channel' | 'task' | null;
+  task_id: string | null;
   slug: string;
   name: string;
   topic: string;
@@ -33,7 +35,8 @@ interface MessageRow {
 
 interface ReactionRow {
   id: string;
-  message_id: string;
+  conversation_id: string | null;
+  message_id: string | null;
   emoji: string;
   actor_type: 'human' | 'agent';
   user_id: string | null;
@@ -45,6 +48,8 @@ interface ReactionRow {
 const toConversation = (r: ConversationRow): Conversation => ({
   id: r.id,
   projectId: r.project_id,
+  kind: r.kind ?? 'channel',
+  taskId: r.task_id ?? null,
   slug: r.slug,
   name: r.name,
   topic: r.topic ?? '',
@@ -81,7 +86,7 @@ interface AttachmentRow {
 
 const toAttachment = (r: AttachmentRow): MessageAttachment => ({ id: r.id, conversationId: r.conversation_id, messageId: r.message_id, name: r.name, mediaType: r.media_type, size: Number(r.size), createdAt: r.created_at });
 
-const toReaction = (r: ReactionRow): MessageReaction => ({ id: r.id, messageId: r.message_id, emoji: r.emoji, actorType: r.actor_type, userId: r.user_id, sessionId: r.session_id, actorName: r.actor_name, createdAt: r.created_at });
+const toReaction = (r: ReactionRow): MessageReaction => ({ id: r.id, conversationId: r.conversation_id ?? null, messageId: r.message_id ?? null, emoji: r.emoji, actorType: r.actor_type, userId: r.user_id, sessionId: r.session_id, actorName: r.actor_name, createdAt: r.created_at });
 
 export interface MessageAuthor {
   type: Actor['type'];
@@ -93,10 +98,10 @@ export interface MessageAuthor {
 export const conversationRepository = {
   // ---- Canaux ----------------------------------------------------------------------------------
 
-  /** Canaux d'un projet, non archivés par défaut, le dernier actif d'abord (le canal général toujours en tête). */
+  /** Canaux d'un projet (pas les fils de tâches), non archivés par défaut, le dernier actif d'abord (le canal général toujours en tête). */
   async list(projectId: string, opts: { includeArchived?: boolean } = {}): Promise<Conversation[]> {
     const { rows } = await pool.query<ConversationRow>(
-      `SELECT * FROM conversations WHERE project_id = $1${opts.includeArchived ? '' : ' AND archived_at IS NULL'}
+      `SELECT * FROM conversations WHERE project_id = $1 AND kind = 'channel'${opts.includeArchived ? '' : ' AND archived_at IS NULL'}
        ORDER BY (slug = 'general') DESC, last_message_at DESC NULLS LAST, created_at ASC`,
       [projectId],
     );
@@ -111,6 +116,41 @@ export const conversationRepository = {
   async findBySlug(projectId: string, slug: string): Promise<Conversation | null> {
     const { rows } = await pool.query<ConversationRow>('SELECT * FROM conversations WHERE project_id = $1 AND slug = $2', [projectId, slug]);
     return rows[0] ? toConversation(rows[0]) : null;
+  },
+
+  /** La conversation (fil) d'une tâche, créée au besoin ; null si la tâche n'existe pas. */
+  async ensureForTask(taskId: string): Promise<Conversation | null> {
+    const { rows } = await pool.query<{ id: string | null }>('SELECT task_conversation_id($1) AS id', [taskId]);
+    return rows[0]?.id ? this.findById(rows[0].id) : null;
+  },
+
+  /** La conversation d'une tâche, si elle existe déjà. */
+  async findByTask(taskId: string): Promise<Conversation | null> {
+    const { rows } = await pool.query<ConversationRow>('SELECT * FROM conversations WHERE task_id = $1', [taskId]);
+    return rows[0] ? toConversation(rows[0]) : null;
+  },
+
+  /** Une tâche change de projet : son fil la suit. */
+  async moveTaskConversation(taskId: string, projectId: string): Promise<void> {
+    await pool.query('UPDATE conversations SET project_id = $2, updated_at = now() WHERE task_id = $1', [taskId, projectId]);
+  },
+
+  /**
+   * Fils de tâches que la personne suit dans un projet, le plus récemment actif d'abord : elle y a écrit, réagi ou
+   * y est mentionnée, ou elle est responsable ou rapporteur de la tâche (par e-mail).
+   */
+  async followedTaskThreads(projectId: string, userId: string, email: string | null, limit = 30): Promise<{ conversation: Conversation; title: string; status: string; messageCount: number }[]> {
+    const { rows } = await pool.query<ConversationRow & { title: string; status: string; message_count: string }>(
+      `SELECT c.*, t.title, t.status, (SELECT count(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count
+       FROM conversations c JOIN tasks t ON t.id = c.task_id
+       WHERE c.project_id = $1 AND c.kind = 'task' AND c.last_message_at IS NOT NULL AND (
+         EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND (m.author_user_id = $2 OR m.mentions @> jsonb_build_array(jsonb_build_object('kind', 'user', 'id', $2::text))))
+         OR EXISTS (SELECT 1 FROM message_reactions r WHERE r.conversation_id = c.id AND r.user_id = $2)
+         OR ($3::text IS NOT NULL AND (lower(t.assignee_email) = $3 OR lower(t.reporter_email) = $3)))
+       ORDER BY c.last_message_at DESC LIMIT $4`,
+      [projectId, userId, email?.toLowerCase() ?? null, limit],
+    );
+    return rows.map((r) => ({ conversation: toConversation(r), title: r.title, status: r.status, messageCount: Number(r.message_count) }));
   },
 
   async create(input: { projectId: string; slug: string; name: string; topic: string; createdById: string | null }): Promise<Conversation> {
@@ -150,6 +190,12 @@ export const conversationRepository = {
        ORDER BY created_at ASC, id ASC`,
       params,
     );
+    return rows.map(toMessage);
+  },
+
+  /** Tous les messages d'une conversation, du plus ancien au plus récent (le fil d'une tâche). */
+  async listAllMessages(conversationId: string): Promise<Message[]> {
+    const { rows } = await pool.query<MessageRow>('SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC, id ASC', [conversationId]);
     return rows.map(toMessage);
   },
 
@@ -202,8 +248,11 @@ export const conversationRepository = {
     }
   },
 
-  async updateMessage(id: string, body: string, mentions: TaskMention[]): Promise<Message | null> {
-    const { rows } = await pool.query<MessageRow>('UPDATE messages SET body = $2, mentions = $3::jsonb, updated_at = now() WHERE id = $1 RETURNING *', [id, body, toJson(mentions)]);
+  /** Modifie le texte d'un message (et ses mentions quand elles sont données). */
+  async updateMessage(id: string, body: string, mentions?: TaskMention[]): Promise<Message | null> {
+    const { rows } = mentions
+      ? await pool.query<MessageRow>('UPDATE messages SET body = $2, mentions = $3::jsonb, updated_at = now() WHERE id = $1 RETURNING *', [id, body, toJson(mentions)])
+      : await pool.query<MessageRow>('UPDATE messages SET body = $2, updated_at = now() WHERE id = $1 RETURNING *', [id, body]);
     return rows[0] ? toMessage(rows[0]) : null;
   },
 
@@ -257,17 +306,30 @@ export const conversationRepository = {
     return rows.map(toReaction);
   },
 
-  /** Pose la réaction si l'acteur ne l'a pas encore, la retire sinon. */
-  async toggleReaction(messageId: string, emoji: string, actor: MessageAuthor): Promise<{ reaction: MessageReaction; added: boolean }> {
+  /** Toutes les réactions d'une conversation (sur ses messages et sur son ouverture), les plus anciennes d'abord. */
+  async listConversationReactions(conversationId: string): Promise<MessageReaction[]> {
+    const { rows } = await pool.query<ReactionRow>(
+      `SELECT * FROM message_reactions WHERE conversation_id = $1
+       UNION SELECT r.* FROM message_reactions r JOIN messages m ON m.id = r.message_id WHERE m.conversation_id = $1 AND r.conversation_id IS NULL
+       ORDER BY created_at ASC, id ASC`,
+      [conversationId],
+    );
+    return rows.map(toReaction);
+  },
+
+  /** Pose la réaction si l'acteur ne l'a pas encore, la retire sinon. `messageId` null : l'ouverture de la conversation (description d'une tâche). */
+  async toggleReaction(target: { conversationId: string; messageId: string | null }, emoji: string, actor: MessageAuthor): Promise<{ reaction: MessageReaction; added: boolean }> {
     const key = actor.userId ?? actor.sessionId ?? null;
-    const { rows: existing } = await pool.query<ReactionRow>('SELECT * FROM message_reactions WHERE message_id = $1 AND emoji = $2 AND COALESCE(user_id, session_id) = $3', [messageId, emoji, key]);
+    const { rows: existing } = target.messageId
+      ? await pool.query<ReactionRow>('SELECT * FROM message_reactions WHERE message_id = $1 AND emoji = $2 AND COALESCE(user_id, session_id) = $3', [target.messageId, emoji, key])
+      : await pool.query<ReactionRow>('SELECT * FROM message_reactions WHERE conversation_id = $1 AND message_id IS NULL AND emoji = $2 AND COALESCE(user_id, session_id) = $3', [target.conversationId, emoji, key]);
     if (existing[0]) {
       await pool.query('DELETE FROM message_reactions WHERE id = $1', [existing[0].id]);
       return { reaction: toReaction(existing[0]), added: false };
     }
     const { rows } = await pool.query<ReactionRow>(
-      'INSERT INTO message_reactions (message_id, emoji, actor_type, user_id, session_id, actor_name) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [messageId, emoji, actor.type, actor.userId ?? null, actor.sessionId ?? null, actor.name],
+      'INSERT INTO message_reactions (conversation_id, message_id, emoji, actor_type, user_id, session_id, actor_name) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+      [target.conversationId, target.messageId, emoji, actor.type, actor.userId ?? null, actor.sessionId ?? null, actor.name],
     );
     return { reaction: toReaction(rows[0]), added: true };
   },
@@ -332,7 +394,7 @@ export const conversationRepository = {
     if (!projectIds.length) return new Map();
     const { rows } = await pool.query<{ project_id: string; n: string }>(
       `SELECT c.project_id, count(*) AS n FROM messages m
-       JOIN conversations c ON c.id = m.conversation_id AND c.archived_at IS NULL
+       JOIN conversations c ON c.id = m.conversation_id AND c.archived_at IS NULL AND c.kind = 'channel'
        LEFT JOIN conversation_reads r ON r.conversation_id = m.conversation_id AND r.user_id = $2
        WHERE c.project_id = ANY($1::uuid[]) AND m.author_user_id IS DISTINCT FROM $2 AND m.created_at > COALESCE(r.last_read_at, '-infinity'::timestamptz)
        GROUP BY c.project_id`,

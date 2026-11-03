@@ -1,6 +1,8 @@
 import { pool, type Queryable } from '../db/pool.js';
 import { toJson } from '../db/json.js';
 import type { Actor } from '../context/types.js';
+import { conversationRepository } from '../conversations/repository.js';
+import type { Message, MessageAttachment, MessageReaction } from '../conversations/types.js';
 import type { CreateTaskInput, Task, TaskAttachment, TaskComment, TaskFilter, TaskField, TaskMention, TaskPerson, TaskPriority, TaskReaction, TaskStatus, UpdateTaskInput } from './types.js';
 
 interface Row {
@@ -34,35 +36,40 @@ interface Row {
   created_at: Date;
   updated_at: Date;
   completed_at: Date | null;
+  started_at: Date | null;
+  cancelled_at: Date | null;
 }
 
-interface CommentRow {
-  id: string;
-  task_id: string;
-  parent_id: string | null;
-  author_type: 'human' | 'agent';
-  author_user_id: string | null;
-  author_session_id: string | null;
-  author_name: string;
-  body: string;
-  mentions: TaskMention[] | null;
-  created_at: Date;
-  updated_at: Date;
-}
+/** Un message de la conversation d'une tâche vu comme un commentaire de la tâche (façade). */
+const commentOf = (m: Message, taskId: string): TaskComment => ({
+  id: m.id,
+  taskId,
+  parentId: m.parentId,
+  authorType: m.authorType,
+  authorUserId: m.authorUserId,
+  authorSessionId: m.authorSessionId,
+  authorName: m.authorName,
+  body: m.body,
+  mentions: m.mentions,
+  createdAt: m.createdAt,
+  updatedAt: m.updatedAt,
+});
 
-interface ReactionRow {
-  id: string;
-  task_id: string;
-  comment_id: string | null;
-  emoji: string;
-  actor_type: 'human' | 'agent';
-  user_id: string | null;
-  session_id: string | null;
-  actor_name: string;
-  created_at: Date;
-}
+/** Une réaction de la conversation d'une tâche vue comme une réaction de la tâche (`commentId` null : sur la tâche elle-même). */
+const reactionOf = (r: MessageReaction, taskId: string): TaskReaction => ({
+  id: r.id,
+  taskId,
+  commentId: r.messageId,
+  emoji: r.emoji,
+  actorType: r.actorType,
+  userId: r.userId,
+  sessionId: r.sessionId,
+  actorName: r.actorName,
+  createdAt: r.createdAt,
+});
 
-const toReaction = (r: ReactionRow): TaskReaction => ({ id: r.id, taskId: r.task_id, commentId: r.comment_id, emoji: r.emoji, actorType: r.actor_type, userId: r.user_id, sessionId: r.session_id, actorName: r.actor_name, createdAt: r.created_at });
+/** Un fichier d'un message de la conversation d'une tâche vu comme un fichier de commentaire. */
+const commentAttachmentOf = (a: MessageAttachment, taskId: string): TaskAttachment => ({ id: a.id, taskId, commentId: a.messageId, name: a.name, mediaType: a.mediaType, size: a.size, createdAt: a.createdAt });
 
 interface AttachmentRow {
   id: string;
@@ -114,20 +121,8 @@ const toTask = (r: Row): Task => ({
   createdAt: r.created_at,
   updatedAt: r.updated_at,
   completedAt: r.completed_at,
-});
-
-const toComment = (r: CommentRow): TaskComment => ({
-  id: r.id,
-  taskId: r.task_id,
-  parentId: r.parent_id ?? null,
-  authorType: r.author_type,
-  authorUserId: r.author_user_id,
-  authorSessionId: r.author_session_id,
-  authorName: r.author_name,
-  body: r.body,
-  mentions: Array.isArray(r.mentions) ? r.mentions : [],
-  createdAt: r.created_at,
-  updatedAt: r.updated_at,
+  startedAt: r.started_at ?? null,
+  cancelledAt: r.cancelled_at ?? null,
 });
 
 /** Statuts d'une session qui travaille encore (ou va travailler) : elle tient la tâche. */
@@ -145,8 +140,8 @@ export const STALLED_SINCE_SQL = `(CASE WHEN t.status = 'in_progress'
           FROM task_sessions ts JOIN sessions s ON s.id = ts.session_id
          WHERE ts.task_id = t.id AND ts.in_charge_since IS NOT NULL) END)`;
 
-/** Colonnes d'une tâche avec le nombre de commentaires. */
-const SELECT = `SELECT t.*, (SELECT count(*) FROM task_comments c WHERE c.task_id = t.id) AS comment_count,
+/** Colonnes d'une tâche avec le nombre de messages de son fil (conversation de la tâche). */
+const SELECT = `SELECT t.*, (SELECT count(*) FROM messages m JOIN conversations cv ON cv.id = m.conversation_id WHERE cv.task_id = t.id) AS comment_count,
   (SELECT array_agg(ts.session_id ORDER BY ts.in_charge_since DESC) FROM task_sessions ts WHERE ts.task_id = t.id AND ts.in_charge_since IS NOT NULL) AS session_ids, (SELECT count(*) FROM task_attachments a WHERE a.task_id = t.id AND a.comment_id IS NULL) AS attachment_count,
   (SELECT array_agg(d.depends_on_task_id ORDER BY d.created_at, d.depends_on_task_id) FROM task_dependencies d WHERE d.task_id = t.id) AS depends_on_ids,
   (SELECT array_agg(d.depends_on_task_id ORDER BY d.created_at, d.depends_on_task_id) FROM task_dependencies d JOIN tasks dt ON dt.id = d.depends_on_task_id
@@ -207,6 +202,22 @@ async function syncPrimarySession(db: Queryable, taskId: string): Promise<void> 
   await db.query('UPDATE tasks SET session_id = (SELECT session_id FROM task_sessions WHERE task_id = $1 AND in_charge_since IS NOT NULL ORDER BY in_charge_since DESC LIMIT 1) WHERE id = $1', [taskId]);
 }
 
+/**
+ * Dates de cycle tenues à chaque changement de statut (vue pilotage : cycle time, flux cumulé). started_at garde le
+ * premier passage en cours (une terminée sans passer par en cours démarre à sa fin) et s'efface au retour à « à faire » ;
+ * completed_at et cancelled_at ne valent que dans leur statut. Les COALESCE laissent un statut répété sans effet.
+ */
+export function statusDateSets(status: TaskStatus): string[] {
+  const sets: string[] = [];
+  if (status === 'todo') sets.push('started_at = NULL');
+  else if (status !== 'cancelled') sets.push('started_at = COALESCE(started_at, now())');
+  return [
+    ...sets,
+    status === 'done' ? 'completed_at = COALESCE(completed_at, now())' : 'completed_at = NULL',
+    status === 'cancelled' ? 'cancelled_at = COALESCE(cancelled_at, now())' : 'cancelled_at = NULL',
+  ];
+}
+
 export const taskRepository = {
   async create(projectId: string, input: CreateTaskInput & { assignee?: TaskPerson | null; reporter?: TaskPerson | null }, actor: Actor): Promise<Task> {
     const status = input.status ?? 'todo';
@@ -215,8 +226,10 @@ export const taskRepository = {
       await client.query('BEGIN');
       const { rows } = await client.query<{ id: string }>(
         `INSERT INTO tasks (project_id, title, description, status, priority, session_id, created_by_type, created_by_session_id, due_date, completed_at,
-                            custom_fields, assignee_name, assignee_email, reporter_name, reporter_email, status_tag, tags, auto_start_when_unblocked, auto_start_by_id)
-         VALUES ($1, $2, $3, $4::task_status, $5, $6, $7, $8, $9, CASE WHEN $4::task_status = 'done' THEN now() ELSE NULL END, $10::jsonb, $11, $12, $13, $14, $15, $16::text[], $17, $18) RETURNING id`,
+                            custom_fields, assignee_name, assignee_email, reporter_name, reporter_email, status_tag, tags, auto_start_when_unblocked, auto_start_by_id,
+                            started_at, cancelled_at)
+         VALUES ($1, $2, $3, $4::task_status, $5, $6, $7, $8, $9, CASE WHEN $4::task_status = 'done' THEN now() ELSE NULL END, $10::jsonb, $11, $12, $13, $14, $15, $16::text[], $17, $18,
+                 CASE WHEN $4::task_status IN ('in_progress', 'done') THEN now() ELSE NULL END, CASE WHEN $4::task_status = 'cancelled' THEN now() ELSE NULL END) RETURNING id`,
         [
           projectId,
           input.title,
@@ -343,7 +356,7 @@ export const taskRepository = {
     }
     if (input.status != null) {
       sets.push(`status = $${params.push(input.status)}`);
-      sets.push(input.status === 'done' ? 'completed_at = COALESCE(completed_at, now())' : 'completed_at = NULL');
+      sets.push(...statusDateSets(input.status));
     }
     const client = await pool.connect();
     try {
@@ -373,6 +386,8 @@ export const taskRepository = {
       await releaseCharge(pool, id, null);
       // Les dépendances ne franchissent pas les projets.
       await pool.query('DELETE FROM task_dependencies WHERE task_id = $1 OR depends_on_task_id = $1', [id]);
+      // Le fil suit la tâche.
+      await conversationRepository.moveTaskConversation(id, projectId);
     }
     return rowCount ? this.findById(id) : null;
   },
@@ -427,47 +442,69 @@ export const taskRepository = {
   },
 
   // ---- Pièces jointes --------------------------------------------------------------------------
+  // Les fichiers de la tâche elle-même sont dans `task_attachments` (comment_id null) ; ceux des messages de son fil
+  // dans `message_attachments` (conversation de la tâche). Les deux restent sur le disque sous la tâche
+  // (tasks/attachments.ts). Les lignes de `task_attachments` qui ont un comment_id sont des copies d'avant la
+  // migration 20261103T1222, ignorées.
 
   /** Pièces jointes d'une tâche : les siennes (`commentId` null), celles d'un commentaire, ou toutes (`commentId` absent), les plus anciennes d'abord. */
   async listAttachments(taskId: string, commentId?: string | null): Promise<TaskAttachment[]> {
-    const scope = commentId === undefined ? '' : commentId === null ? ' AND comment_id IS NULL' : ' AND comment_id = $2';
-    const { rows } = await pool.query<AttachmentRow>(`SELECT * FROM task_attachments WHERE task_id = $1${scope} ORDER BY created_at ASC, id ASC`, commentId ? [taskId, commentId] : [taskId]);
-    return rows.map(toAttachment);
+    const own = async () => (await pool.query<AttachmentRow>('SELECT * FROM task_attachments WHERE task_id = $1 AND comment_id IS NULL ORDER BY created_at ASC, id ASC', [taskId])).rows.map(toAttachment);
+    const ofComments = async (messageId: string | null) => {
+      const { rows } = await pool.query<{ id: string; conversation_id: string; message_id: string; name: string; media_type: string; size: number | string; created_at: Date }>(
+        `SELECT a.* FROM message_attachments a JOIN conversations c ON c.id = a.conversation_id WHERE c.task_id = $1${messageId ? ' AND a.message_id = $2' : ''} ORDER BY a.created_at ASC, a.id ASC`,
+        messageId ? [taskId, messageId] : [taskId],
+      );
+      return rows.map((r) => commentAttachmentOf({ id: r.id, conversationId: r.conversation_id, messageId: r.message_id, name: r.name, mediaType: r.media_type, size: Number(r.size), createdAt: r.created_at }, taskId));
+    };
+    if (commentId === null) return own();
+    if (commentId) return ofComments(commentId);
+    const all = [...(await own()), ...(await ofComments(null))];
+    return all.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id));
   },
 
   async findAttachment(id: string): Promise<TaskAttachment | null> {
-    const { rows } = await pool.query<AttachmentRow>('SELECT * FROM task_attachments WHERE id = $1', [id]);
-    return rows[0] ? toAttachment(rows[0]) : null;
+    const { rows } = await pool.query<AttachmentRow>('SELECT * FROM task_attachments WHERE id = $1 AND comment_id IS NULL', [id]);
+    if (rows[0]) return toAttachment(rows[0]);
+    const a = await conversationRepository.findAttachment(id);
+    const c = a ? await conversationRepository.findById(a.conversationId) : null;
+    return a && c?.taskId ? commentAttachmentOf(a, c.taskId) : null;
   },
 
   async createAttachment(input: Omit<TaskAttachment, 'createdAt'>): Promise<TaskAttachment> {
-    const { rows } = await pool.query<AttachmentRow>('INSERT INTO task_attachments (id, task_id, comment_id, name, media_type, size) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *', [
+    await pool.query('UPDATE tasks SET updated_at = now() WHERE id = $1', [input.taskId]);
+    if (input.commentId) {
+      const c = await conversationRepository.ensureForTask(input.taskId);
+      if (!c) throw new Error(`Tâche ${input.taskId} introuvable`);
+      const a = await conversationRepository.createAttachment({ id: input.id, conversationId: c.id, messageId: input.commentId, name: input.name, mediaType: input.mediaType, size: input.size });
+      return commentAttachmentOf(a, input.taskId);
+    }
+    const { rows } = await pool.query<AttachmentRow>('INSERT INTO task_attachments (id, task_id, comment_id, name, media_type, size) VALUES ($1, $2, NULL, $3, $4, $5) RETURNING *', [
       input.id,
       input.taskId,
-      input.commentId,
       input.name,
       input.mediaType,
       input.size,
     ]);
-    await pool.query('UPDATE tasks SET updated_at = now() WHERE id = $1', [input.taskId]);
     return toAttachment(rows[0]);
   },
 
   async deleteAttachment(id: string): Promise<boolean> {
-    const { rowCount } = await pool.query('DELETE FROM task_attachments WHERE id = $1', [id]);
-    return (rowCount ?? 0) > 0;
+    const { rowCount } = await pool.query('DELETE FROM task_attachments WHERE id = $1 AND comment_id IS NULL', [id]);
+    return (rowCount ?? 0) > 0 || conversationRepository.deleteAttachment(id);
   },
 
-  // ---- Commentaires ----------------------------------------------------------------------------
+  // ---- Commentaires : messages de la conversation de la tâche ------------------------------------
 
   async listComments(taskId: string): Promise<TaskComment[]> {
-    const { rows } = await pool.query<CommentRow>('SELECT * FROM task_comments WHERE task_id = $1 ORDER BY created_at ASC, id ASC', [taskId]);
-    return rows.map(toComment);
+    const c = await conversationRepository.findByTask(taskId);
+    return c ? (await conversationRepository.listAllMessages(c.id)).map((m) => commentOf(m, taskId)) : [];
   },
 
   async findComment(id: string): Promise<TaskComment | null> {
-    const { rows } = await pool.query<CommentRow>('SELECT * FROM task_comments WHERE id = $1', [id]);
-    return rows[0] ? toComment(rows[0]) : null;
+    const m = await conversationRepository.findMessage(id);
+    const c = m ? await conversationRepository.findById(m.conversationId) : null;
+    return m && c?.taskId ? commentOf(m, c.taskId) : null;
   },
 
   async addComment(
@@ -476,45 +513,33 @@ export const taskRepository = {
     author: { type: Actor['type']; userId?: string | null; sessionId?: string | null; name: string },
     opts: { parentId?: string | null; mentions?: TaskMention[] } = {},
   ): Promise<TaskComment> {
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const { rows } = await client.query<CommentRow>(
-        `INSERT INTO task_comments (task_id, parent_id, author_type, author_user_id, author_session_id, author_name, body, mentions) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb) RETURNING *`,
-        [taskId, opts.parentId ?? null, author.type, author.userId ?? null, author.sessionId ?? null, author.name, body, toJson(opts.mentions ?? [])],
-      );
-      await client.query('UPDATE tasks SET updated_at = now() WHERE id = $1', [taskId]);
-      await client.query('COMMIT');
-      return toComment(rows[0]);
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    const c = await conversationRepository.ensureForTask(taskId);
+    if (!c) throw new Error(`Tâche ${taskId} introuvable`);
+    const m = await conversationRepository.addMessage(c.id, body, author, opts);
+    await pool.query('UPDATE tasks SET updated_at = now() WHERE id = $1', [taskId]);
+    return commentOf(m, taskId);
   },
 
   async updateComment(id: string, body: string, mentions?: TaskMention[]): Promise<TaskComment | null> {
-    const { rows } = mentions
-      ? await pool.query<CommentRow>('UPDATE task_comments SET body = $2, mentions = $3::jsonb, updated_at = now() WHERE id = $1 RETURNING *', [id, body, toJson(mentions)])
-      : await pool.query<CommentRow>('UPDATE task_comments SET body = $2, updated_at = now() WHERE id = $1 RETURNING *', [id, body]);
-    return rows[0] ? toComment(rows[0]) : null;
+    const current = await this.findComment(id);
+    if (!current) return null;
+    const m = await conversationRepository.updateMessage(id, body, mentions);
+    return m ? commentOf(m, current.taskId) : null;
   },
 
   async deleteComment(id: string): Promise<boolean> {
-    const { rowCount } = await pool.query('DELETE FROM task_comments WHERE id = $1', [id]);
-    return (rowCount ?? 0) > 0;
+    return (await this.findComment(id)) ? conversationRepository.deleteMessage(id) : false;
   },
 
   /** Relie une session à la tâche (historique task_sessions ; sans effet si elle l'est déjà). */
   linkSession: (taskId: string, sessionId: string) => linkSession(pool, taskId, sessionId),
 
-  // ---- Réactions -------------------------------------------------------------------------------
+  // ---- Réactions : celles de la conversation de la tâche -----------------------------------------
 
   /** Toutes les réactions d'une tâche (sur ses messages et sur elle-même), les plus anciennes d'abord. */
   async listReactions(taskId: string): Promise<TaskReaction[]> {
-    const { rows } = await pool.query<ReactionRow>('SELECT * FROM task_reactions WHERE task_id = $1 ORDER BY created_at ASC, id ASC', [taskId]);
-    return rows.map(toReaction);
+    const c = await conversationRepository.findByTask(taskId);
+    return c ? (await conversationRepository.listConversationReactions(c.id)).map((r) => reactionOf(r, taskId)) : [];
   },
 
   /**
@@ -522,20 +547,10 @@ export const taskRepository = {
    * ce qui s'est passé.
    */
   async toggleReaction(taskId: string, commentId: string | null, emoji: string, actor: { type: Actor['type']; userId?: string | null; sessionId?: string | null; name: string }): Promise<{ reaction: TaskReaction; added: boolean }> {
-    const key = actor.userId ?? actor.sessionId ?? null;
-    const { rows: existing } = await pool.query<ReactionRow>(
-      `SELECT * FROM task_reactions WHERE task_id = $1 AND comment_id IS NOT DISTINCT FROM $2 AND emoji = $3 AND COALESCE(user_id, session_id) = $4`,
-      [taskId, commentId, emoji, key],
-    );
-    if (existing[0]) {
-      await pool.query('DELETE FROM task_reactions WHERE id = $1', [existing[0].id]);
-      return { reaction: toReaction(existing[0]), added: false };
-    }
-    const { rows } = await pool.query<ReactionRow>(
-      `INSERT INTO task_reactions (task_id, comment_id, emoji, actor_type, user_id, session_id, actor_name) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [taskId, commentId, emoji, actor.type, actor.userId ?? null, actor.sessionId ?? null, actor.name],
-    );
-    return { reaction: toReaction(rows[0]), added: true };
+    const c = await conversationRepository.ensureForTask(taskId);
+    if (!c) throw new Error(`Tâche ${taskId} introuvable`);
+    const { reaction, added } = await conversationRepository.toggleReaction({ conversationId: c.id, messageId: commentId }, emoji, actor);
+    return { reaction: reactionOf(reaction, taskId), added };
   },
 
   // ---- Mentions --------------------------------------------------------------------------------

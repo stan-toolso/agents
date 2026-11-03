@@ -34,14 +34,56 @@ interface Opened {
   sshHostKey: string | null;
 }
 
+/** Région d'un point de terminaison RDS (`<instance>.<id>.<région>.rds.amazonaws.com`), ou null. */
+export function rdsRegion(host: string): string | null {
+  const m = /\.([a-z]{2}(?:-[a-z]+)+-\d+)\.rds\.amazonaws\.com\.?$/i.exec(host.trim());
+  return m ? m[1].toLowerCase() : null;
+}
+
+/** URL du bundle des autorités RDS d'une région (publié par AWS). */
+export const rdsBundleUrl = (region: string) => `https://truststore.pki.rds.amazonaws.com/${region}/${region}-bundle.pem`;
+
+/** Bundles RDS déjà téléchargés, par région (les autorités changent rarement : gardés pour la vie du processus). */
+const rdsBundles = new Map<string, Promise<string | null>>();
+
+/**
+ * Bundle des autorités RDS de la région, téléchargé une fois. null si le téléchargement échoue : la connexion
+ * retombe alors sur les autorités publiques et l'erreur dit quoi coller dans l'élément.
+ */
+export function rdsBundle(region: string, fetchImpl: typeof fetch = fetch): Promise<string | null> {
+  let p = rdsBundles.get(region);
+  if (!p) {
+    p = (async () => {
+      try {
+        const res = await fetchImpl(rdsBundleUrl(region), { signal: AbortSignal.timeout(10_000) });
+        const pem = res.ok ? await res.text() : '';
+        return pem.includes('-----BEGIN CERTIFICATE-----') ? pem : null;
+      } catch {
+        return null;
+      }
+    })();
+    rdsBundles.set(region, p);
+    // Un échec n'est pas gardé : la prochaine connexion réessaie.
+    void p.then((pem) => { if (!pem) rdsBundles.delete(region); });
+  }
+  return p;
+}
+
 /**
  * TLS : avec un certificat d'autorité fourni, la chaîne est vérifiée contre lui seul, sans contrôle du nom
- * d'hôte (Cloud SQL nomme l'instance, pas son adresse) ; sinon contre les autorités publiques, nom compris,
- * sauf VAULT_POSTGRES_SSL_VERIFY=false (certificats auto-signés).
+ * d'hôte (Cloud SQL nomme l'instance, pas son adresse). Pour un hôte RDS sans certificat fourni, le bundle de
+ * la région est téléchargé et la chaîne vérifiée contre lui, nom d'hôte compris (le certificat RDS porte le
+ * point de terminaison ; `servername` le garde à travers un tunnel SSH). Sinon contre les autorités publiques,
+ * nom compris, sauf VAULT_POSTGRES_SSL_VERIFY=false (certificats auto-signés).
  */
-function sslConfig(creds: PostgresCredentials): pg.ClientConfig['ssl'] {
+export async function sslConfig(creds: Pick<PostgresCredentials, 'ssl' | 'sslCa' | 'host'>, fetchImpl?: typeof fetch): Promise<pg.ClientConfig['ssl']> {
   if (!creds.ssl) return false;
   if (creds.sslCa) return { ca: creds.sslCa, rejectUnauthorized: true, checkServerIdentity: () => undefined };
+  const region = rdsRegion(creds.host);
+  if (region) {
+    const ca = await rdsBundle(region, fetchImpl);
+    if (ca) return { ca, rejectUnauthorized: true, servername: creds.host.trim().replace(/\.$/, '') };
+  }
   return { rejectUnauthorized: process.env.VAULT_POSTGRES_SSL_VERIFY !== 'false' };
 }
 
@@ -77,7 +119,7 @@ async function open(creds: PostgresCredentials, readOnly: boolean): Promise<Open
     user: creds.username,
     password: creds.password ?? undefined,
     database: creds.database,
-    ssl: sslConfig(creds),
+    ssl: await sslConfig(creds),
     connectionTimeoutMillis: 15_000,
     statement_timeout: SQL_TIMEOUT_MS,
     application_name: 'skipper',

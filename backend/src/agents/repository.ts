@@ -233,7 +233,7 @@ export const agentRepository = {
       `SELECT task_id FROM (
          SELECT ts.task_id, max(ts.linked_at) AS at FROM task_sessions ts JOIN sessions s ON s.id = ts.session_id WHERE s.owner_id = $1 GROUP BY ts.task_id
          UNION ALL
-         SELECT c.task_id, max(c.created_at) FROM task_comments c JOIN sessions s ON s.id = c.author_session_id WHERE s.owner_id = $1 GROUP BY c.task_id
+         SELECT c.task_id, max(m.created_at) FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN sessions s ON s.id = m.author_session_id WHERE s.owner_id = $1 AND c.task_id IS NOT NULL GROUP BY c.task_id
        ) t GROUP BY task_id ORDER BY max(at) DESC LIMIT $2`,
       [agentId, limit],
     );

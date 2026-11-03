@@ -127,6 +127,10 @@ export const AUDITED: Record<string, MutationAudit> = {
   deleteProjectPermissionRules: { action: 'permission.delete', project: 'projectId', targetId: () => null, details: (a, r) => ({ ids: r ?? a.ids }) },
   createProjectApiKey: { action: 'api_key.create', project: 'projectId', targetId: (_a, r) => r?.key?.id ?? r?.id, label: (a) => a.name },
   deleteProjectApiKey: { action: 'api_key.delete', lookup: ['api_key', 'id'] },
+  // Canaux de notification d'un projet (Slack, Discord, e-mail) ; un canal personnel n'a pas de projet : rien n'est inscrit.
+  createNotificationChannel: { action: 'notification_channel.create', project: 'input.projectId', targetId: (_a, r) => r?.id, label: (_a, r) => (r ? `${r.kind} ${r.targetHint}` : null), details: (a) => ({ kind: a.input?.kind, categories: a.input?.categories }) },
+  updateNotificationChannel: { action: 'notification_channel.update', lookup: ['notification_channel', 'id'], details: (a) => ({ fields: keysOf(a.patch), categories: a.patch?.categories, enabled: a.patch?.enabled }) },
+  deleteNotificationChannel: { action: 'notification_channel.delete', lookup: ['notification_channel', 'id'] },
   // Panneau git.
   gitCommit: git('git.commit', (a) => ({ message: a.message, stageAll: a.stageAll })),
   gitPush: git('git.push'),
@@ -209,6 +213,8 @@ export const AUDITED: Record<string, MutationAudit> = {
   addSharedPageMember: { action: 'page.share', lookup: ['shared_page', 'id'], details: (a) => ({ email: a.email }) },
   removeSharedPageMember: { action: 'page.unshare', lookup: ['shared_page', 'id'], details: (a) => ({ userId: a.userId }) },
   deleteSharedPage: { action: 'page.delete', lookup: ['shared_page', 'id'] },
+  // Livraisons : la configuration du déploiement (livrer, déployer et annuler sont inscrits par deliveries/service.ts).
+  setDeployConfig: { action: 'delivery.config', project: 'projectId', targetId: () => null, details: (a) => ({ vaultItem: a.input?.vaultItem ?? null, command: a.input?.command ?? null, branch: a.input?.branch ?? null }) },
   // Application (hors projet).
   inviteUser: { action: 'user.invite', app: true, targetId: (_a, r) => r?.id, label: (a) => a.email, details: (a) => ({ isAdmin: a.isAdmin }) },
   setUserAdmin: { action: 'user.admin', app: true, lookup: ['user', 'userId'], details: (a) => ({ isAdmin: a.isAdmin }) },
@@ -216,13 +222,16 @@ export const AUDITED: Record<string, MutationAudit> = {
   deleteUser: { action: 'user.delete', app: true, lookup: ['user', 'userId'] },
   setMaintenanceMode: { action: 'app.maintenance', app: true, targetId: () => null, details: (a) => ({ enabled: a.enabled, message: a.message }) },
   updateServerSettings: { action: 'app.settings', app: true, targetId: () => null, details: (a) => a },
+  // Jamais le mot de passe dans les détails.
+  updateSmtpSettings: { action: 'app.smtp', app: true, targetId: () => null, details: (a) => ({ host: a.input?.host, port: a.input?.port, secure: a.input?.secure, user: a.input?.user, from: a.input?.from, password: a.input?.password == null ? 'inchangé' : 'modifié' }) },
+  clearSmtpSettings: { action: 'app.smtp', app: true, targetId: () => null, details: () => ({ cleared: true }) },
   updateBillingSettings: { action: 'app.billing', app: true, targetId: () => null, details: (a) => ({ fields: keysOf(a.input) }) },
   addCtoTimeEntry: { action: 'app.cto_time_add', app: true, details: (a) => ({ input: a.input }) },
   deleteCtoTimeEntry: { action: 'app.cto_time_delete', app: true },
 };
 
 /** Mutations sensibles inscrites par leur service (les agents passent par les mêmes chemins) : voir tasks/service.ts. */
-export const AUDITED_BY_SERVICE = new Set(['createTask', 'updateTask']);
+export const AUDITED_BY_SERVICE = new Set(['createTask', 'updateTask', 'deliver', 'requestDeploy', 'cancelDelivery']);
 
 /**
  * Mutations sans trace, et pourquoi : réglages et comptes personnels, lectures déguisées (synchronisations, liens),
@@ -243,6 +252,8 @@ export const NOT_AUDITED = new Set([
   // Contrôle du navigateur headless d'un projet : lecture d'état, rien n'est modifié.
   'testProjectBrowser',
   'subscribePush', 'unsubscribePush', 'sendTestPush', 'setPushPreference', 'markNotificationRead', 'markAllNotificationsRead',
+  // Envois de test, sans effet durable.
+  'testNotificationChannel', 'sendTestEmail',
   // Espace personnel et instructions aux sessions (le transcript les garde).
   'createChat', 'sendSessionMessage',
   // Fils de discussion : nominatifs par nature.

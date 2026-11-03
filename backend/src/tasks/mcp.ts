@@ -6,7 +6,7 @@ import { createSdkMcpServer, tool, type McpSdkServerConfigWithInstance } from '@
 import { z } from 'zod';
 import { inScope, targetProject, withProjectParam, type ProjectScope } from '../personal/scope.js';
 import type { Project } from '../projects/types.js';
-import { pullRequestService, type MergeMethod } from '../git/pullRequests.js';
+import { describeCi, pullRequestService, type MergeMethod } from '../git/pullRequests.js';
 import type { MergeApproval } from '../pullRequests/mergeApproval.js';
 import { localCheck, localCheckRefusal } from '../pullRequests/localCheck.js';
 import { foreignRepoOf, trackedPullRequestService } from '../pullRequests/service.js';
@@ -25,12 +25,12 @@ const failure = (t: string) => ({ content: [{ type: 'text' as const, text: t }],
  * Outils du serveur `tasks` autorisés d'office (réversibles, sans coût, sans effet hors de la base). `pr_open`
  * n'y est pas : il pousse la branche et ouvre une pull request sur GitHub avec le compte de la personne, donc
  * passe par la demande d'autorisation. `pr_merge` y est parce qu'il pose lui-même sa demande (`approveMerge`) :
- * la personne qui l'accepte fusionne avec son compte, même en mode « ne jamais demander » ; en mode « Tout autoriser », la
+ * la personne qui l'accepte fusionne avec son compte, même en mode « refuser sans demander » ; en mode « Tout autoriser », la
  * personne qui pilote la session (au moins membre) l'accepte implicitement (`implicitMergeApprover`).
  * `request_approval` y est aussi : il ne fait que poser une demande d'accord à un administrateur (ou constater l'accord
- * implicite de la personne qui a demandé le travail), sans rien exécuter.
+ * implicite de la personne qui a demandé le travail), sans rien exécuter. `ci_status` ne fait que lire l'état de la CI.
  */
-export const TASKS_FREE_TOOLS = ['list', 'get', 'create', 'update', 'claim', 'release', 'comment', 'react', 'people', 'request_approval', 'pr_list', 'pr_register', 'pr_update', 'pr_merge'].map((t) => `mcp__tasks__${t}`);
+export const TASKS_FREE_TOOLS = ['list', 'get', 'create', 'update', 'claim', 'release', 'comment', 'react', 'people', 'request_approval', 'pr_list', 'pr_register', 'pr_update', 'pr_merge', 'ci_status'].map((t) => `mcp__tasks__${t}`);
 
 /** Ce que le provider de la session fournit au serveur `tasks`. */
 export interface TasksMcpOptions {
@@ -336,6 +336,25 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
             const outcome = await approvalService.request({ projectId: t.projectId, sessionId, taskId: t.id, action, details, actor });
             if (outcome.implicit) return `Accord implicite : ${outcome.approver.name || outcome.approver.email}, administrateur du projet, t'a demandé ce travail. Aucune demande n'est posée ; tu peux faire l'action (c'est tracé dans le fil de la tâche).`;
             return `Demande d'accord posée (${outcome.request.id}) aux administrateurs du projet et annoncée dans le fil de la tâche. Ne fais pas l'action maintenant : termine ton tour. La décision t'arrivera en message dans le fil de la tâche ; un accord donné en réponse dans le fil par un administrateur vaut aussi.`;
+          }),
+      ),
+
+      // ---- CI -----------------------------------------------------------------------------------------------
+      tool(
+        'ci_status',
+        "État de la CI (checks GitHub Actions et statuts externes) d'une branche ou d'un commit du dépôt du projet : verte, rouge, en cours ou sans check, avec le détail des checks. Sans ref : la branche de ton dossier de travail. Lecture seule ; ne boucle pas dessus (pas de sleep) : relis-la plus tard, ou laisse « Livrer » attendre la CI.",
+        { ref: z.string().optional().describe('Branche (« main », « task/… ») ou SHA de commit ; défaut : la branche de ton dossier de travail, sinon la branche principale') },
+        async ({ ref }) =>
+          run(async () => {
+            const s = await sessionContext();
+            let target = ref?.trim();
+            if (!target && s.worksessionId) target = (await worksessionService.get(s.worksessionId)).branch;
+            target ||= project.gitBranch || 'main';
+            const accounts = await agentService.accountsForSession(s);
+            const account = accounts ? await gitAccountFor(accounts, project.gitUrl) : null;
+            const ci = await pullRequestService.ciStatus(project.id, account?.userId ?? s.ownerId, target);
+            const lines = ci.checks.map((c) => `- ${c.name} : ${c.state}${c.url ? ` (${c.url})` : ''}`);
+            return [`${target} @ ${ci.sha.slice(0, 7)} : ${describeCi(ci)}`, ...lines].join('\n');
           }),
       ),
 

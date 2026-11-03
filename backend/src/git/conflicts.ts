@@ -27,8 +27,12 @@ const OPERATION_LABEL: Record<GitOperation, string> = { merge: 'une fusion (merg
 /** Fichiers en conflit (non fusionnés) d'un état git. */
 export const conflictedFiles = (status: Pick<GitStatus, 'changes'>) => status.changes.filter((c) => c.conflicted).map((c) => c.path);
 
-/** La consigne envoyée à l'agent : résoudre, vérifier, terminer l'opération, ne pas pousser. */
-export function gitConflictPrompt(status: Pick<GitStatus, 'branch' | 'operation' | 'changes'>): string {
+/**
+ * La consigne envoyée à l'agent : résoudre, vérifier, terminer l'opération, ne pas pousser. `delivery` : conflit
+ * rencontré par « Livrer » (fusion de la base avant la PR) ; l'agent pousse alors la résolution, et la personne relance
+ * la livraison.
+ */
+export function gitConflictPrompt(status: Pick<GitStatus, 'branch' | 'operation' | 'changes'>, opts: { delivery?: boolean } = {}): string {
   const files = conflictedFiles(status);
   const op = status.operation;
   const where = status.branch ? `sur la branche \`${status.branch}\`` : 'en HEAD détaché';
@@ -42,7 +46,9 @@ export function gitConflictPrompt(status: Pick<GitStatus, 'branch' | 'operation'
       '3. lance les vérifications du projet (typecheck, et les tests concernés) et corrige ce que la résolution a cassé ;',
       `4. termine l'opération${op ? ` (\`${CONTINUE[op]}\`)` : ''} et vérifie que \`git status\` ne signale plus de conflit ni d'opération en cours.`,
     ].join('\n'),
-    "**Ne pousse pas** (ni `git push`, ni pull request) : la personne relit et pousse elle-même depuis le panneau git. N'abandonne pas l'opération (`--abort`) sans le lui demander. Rends compte brièvement des conflits rencontrés et de la façon dont tu les as résolus.",
+    opts.delivery
+      ? "Ce conflit vient de « Livrer » (fusion de la branche de base avant la pull request). Une fois l'opération terminée et les vérifications passées, **pousse** la branche (`git push`), sans fusionner la pull request : la personne relancera la livraison. N'abandonne pas l'opération (`--abort`) sans le lui demander. Rends compte brièvement des conflits rencontrés et de la façon dont tu les as résolus."
+      : "**Ne pousse pas** (ni `git push`, ni pull request) : la personne relit et pousse elle-même depuis le panneau git. N'abandonne pas l'opération (`--abort`) sans le lui demander. Rends compte brièvement des conflits rencontrés et de la façon dont tu les as résolus.",
   ].join('\n\n');
 }
 
@@ -50,11 +56,11 @@ export function gitConflictPrompt(status: Pick<GitStatus, 'branch' | 'operation'
  * Confie la résolution des conflits du dossier à un agent : la session active du dossier reçoit la consigne (relancée
  * si elle est terminée), sinon une nouvelle session Claude est lancée dans ce dossier. Renvoie la session.
  */
-export async function requestGitConflictResolution(ref: WorkspaceRef, ownerId: string): Promise<Session> {
+export async function requestGitConflictResolution(ref: WorkspaceRef, ownerId: string, opts: { delivery?: boolean } = {}): Promise<Session> {
   if (!ref.worksessionId) throw new AppError("Aucune session ne travaille dans le dossier principal du projet : résolvez les conflits dans un terminal, ou depuis le dossier d'une session");
   const status = await gitService.status(ref);
   if (!conflictedFiles(status).length && !status.operation) throw new AppError('Aucun conflit à résoudre dans ce dossier');
-  const prompt = gitConflictPrompt(status);
+  const prompt = gitConflictPrompt(status, opts);
   // Une session de relecture (lecture seule) ne peut rien résoudre : la session qui travaille dans le dossier.
   const active = (await sessionRepository.list({ projectId: ref.projectId, worksessionId: ref.worksessionId, archived: 'exclude', limit: 20 })).find((s) => !reviewOf(s));
   if (active) return sessionService.sendMessage(active.id, prompt, null, { author: await userAuthor(ownerId) });
