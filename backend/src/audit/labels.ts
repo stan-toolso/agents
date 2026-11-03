@@ -86,6 +86,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'git.resolve_conflicts': 'a confié les conflits à un agent',
   'pull_request.open': 'a ouvert la pull request',
   'pull_request.merge': 'a fusionné la pull request',
+  'pull_request.merge_implicit': 'a fusionné la pull request avec un accord implicite (mode « Tout autoriser »)',
   'pull_request.register': 'a suivi la pull request',
   'pull_request.update': 'a modifié le suivi de la pull request',
   'pull_request.untrack': 'a cessé de suivre la pull request',
