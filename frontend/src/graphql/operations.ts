@@ -51,6 +51,10 @@ export interface SessionSchedule {
   prompt: string;
   enabled: boolean;
   endAfterRun: boolean;
+  /** Archivage automatique des sessions d'exécution (chaque exécution a sa propre session). */
+  archivePolicy: ScheduleArchivePolicy;
+  /** Délai avant archivage après la fin d'une exécution, en minutes (AFTER_DELAY). */
+  archiveAfterMinutes: number | null;
   /** Outils pré-autorisés pour les seules exécutions de la planification (règles au format Claude Code). */
   allowedTools: string[];
   nextRunAt: string | null;
@@ -58,6 +62,8 @@ export interface SessionSchedule {
   lastResult: string | null;
   updatedAt: string;
 }
+
+export type ScheduleArchivePolicy = 'ON_FINISH' | 'PREVIOUS_ON_RUN' | 'AFTER_DELAY' | 'NEVER';
 
 export type ScheduleRunStatus = 'RUNNING' | 'DONE' | 'BLOCKED' | 'FAILED' | 'TIMEOUT' | 'SKIPPED' | 'MISSED';
 
@@ -74,6 +80,8 @@ export interface ScheduleRun {
   costUsd: number | null;
   message: string | null;
   answer: string | null;
+  /** Session créée pour cette exécution (null : exécution d'avant, jouée dans la session de la planification). */
+  session: { id: string; name: string; archivedAt: string | null } | null;
 }
 
 /** Planification telle que la liste la montre : avec sa session, son projet et ses dernières exécutions. */
@@ -781,6 +789,8 @@ export const SESSION_FIELDS = gql`
       prompt
       enabled
       endAfterRun
+      archivePolicy
+      archiveAfterMinutes
       allowedTools
       nextRunAt
       lastRunAt
@@ -1243,6 +1253,11 @@ export const SCHEDULE_RUN_FIELDS = gql`
     costUsd
     message
     answer
+    session {
+      id
+      name
+      archivedAt
+    }
   }
 `;
 
@@ -1260,6 +1275,8 @@ export const SESSION_SCHEDULES = gql`
       prompt
       enabled
       endAfterRun
+      archivePolicy
+      archiveAfterMinutes
       allowedTools
       nextRunAt
       lastRunAt

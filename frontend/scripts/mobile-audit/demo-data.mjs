@@ -211,7 +211,7 @@ const S = {
   chat2: session('c-compte-rendu', P.perso, 'Résumé du comité de pilotage', { kind: 'CHAT', age: 60 * 26, updated: 60 * 25, cost: 0.05 }),
   chat3: session('c-mail-client', P.perso, 'Réponse à un client mécontent', { kind: 'CHAT', age: 60 * 50, updated: 60 * 49, cost: 0.03 }),
 };
-S.hebdo.schedule = { __typename: 'SessionSchedule', sessionId: S.hebdo.id, name: 'Rapport du lundi', customName: 'Rapport du lundi', session: S.hebdo, project: P.data, cron: '0 8 * * 1', timezone: 'Europe/Paris', prompt: 'Prépare le rapport hebdomadaire des inscriptions et publie-le.', enabled: true, endAfterRun: false, allowedTools: ['Bash(npm run report *)'], nextRunAt: inDays(5), lastRunAt: ago(60 * 9), cleanup: null };
+S.hebdo.schedule = { __typename: 'SessionSchedule', sessionId: S.hebdo.id, name: 'Rapport du lundi', customName: 'Rapport du lundi', session: S.hebdo, project: P.data, cron: '0 8 * * 1', timezone: 'Europe/Paris', prompt: 'Prépare le rapport hebdomadaire des inscriptions et publie-le.', enabled: true, endAfterRun: false, archivePolicy: 'PREVIOUS_ON_RUN', archiveAfterMinutes: null, allowedTools: ['Bash(npm run report *)'], nextRunAt: inDays(5), lastRunAt: ago(60 * 9), cleanup: null };
 const chats = sessions.filter((s) => s.kind === 'CHAT');
 // Lien public de lecture de la session « page tarifs » (/share/<DEMO_SHARE_TOKEN>, servi par le mock).
 export const DEMO_SHARE_TOKEN = 'demo-partage-page-tarifs-0123456789abcdefgh';

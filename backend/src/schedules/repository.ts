@@ -1,5 +1,5 @@
 import { pool } from '../db/pool.js';
-import type { ScheduleRun, ScheduleRunStatus, ScheduleRunTrigger, ScheduleWithSession, SessionSchedule } from './types.js';
+import type { ScheduleArchivePolicy, ScheduleRun, ScheduleRunStatus, ScheduleRunTrigger, ScheduleWithSession, SessionSchedule } from './types.js';
 
 interface Row {
   session_id: string;
@@ -9,6 +9,8 @@ interface Row {
   prompt: string;
   enabled: boolean;
   end_after_run: boolean;
+  archive_policy: ScheduleArchivePolicy | null;
+  archive_after_minutes: number | null;
   allowed_tools: string[] | null;
   next_run_at: Date | null;
   last_run_at: Date | null;
@@ -20,6 +22,7 @@ interface Row {
 interface RunRow {
   id: string;
   session_id: string;
+  run_session_id: string | null;
   trigger: ScheduleRunTrigger;
   triggered_by: string | null;
   status: ScheduleRunStatus;
@@ -41,6 +44,8 @@ const toSchedule = (r: Row): SessionSchedule => ({
   prompt: r.prompt,
   enabled: r.enabled,
   endAfterRun: r.end_after_run,
+  archivePolicy: r.archive_policy ?? 'previous_on_run',
+  archiveAfterMinutes: r.archive_after_minutes ?? null,
   allowedTools: r.allowed_tools ?? [],
   nextRunAt: r.next_run_at,
   lastRunAt: r.last_run_at,
@@ -52,6 +57,7 @@ const toSchedule = (r: Row): SessionSchedule => ({
 const toRun = (r: RunRow): ScheduleRun => ({
   id: r.id,
   sessionId: r.session_id,
+  runSessionId: r.run_session_id ?? null,
   trigger: r.trigger,
   triggeredBy: r.triggered_by,
   status: r.status,
@@ -91,17 +97,23 @@ export const scheduleRepository = {
   },
 
   /** Crée ou remplace la planification d'une session. `name` ou `allowedTools` undefined : inchangés. */
-  async upsert(sessionId: string, values: { name?: string | null; cron: string; timezone: string; prompt: string; enabled: boolean; endAfterRun: boolean; nextRunAt: Date | null; allowedTools?: string[] }): Promise<SessionSchedule> {
+  async upsert(
+    sessionId: string,
+    values: { name?: string | null; cron: string; timezone: string; prompt: string; enabled: boolean; endAfterRun: boolean; nextRunAt: Date | null; allowedTools?: string[]; archive?: { policy: ScheduleArchivePolicy; afterMinutes: number | null } },
+  ): Promise<SessionSchedule> {
     const { rows } = await pool.query<Row>(
-      `INSERT INTO session_schedules (session_id, cron, timezone, prompt, enabled, end_after_run, next_run_at, name, allowed_tools)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($10::text[], '{}'))
+      `INSERT INTO session_schedules (session_id, cron, timezone, prompt, enabled, end_after_run, next_run_at, name, allowed_tools, archive_policy, archive_after_minutes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($10::text[], '{}'), COALESCE($11, 'previous_on_run'), $12)
        ON CONFLICT (session_id) DO UPDATE SET
          cron = EXCLUDED.cron, timezone = EXCLUDED.timezone, prompt = EXCLUDED.prompt, enabled = EXCLUDED.enabled,
          end_after_run = EXCLUDED.end_after_run, next_run_at = EXCLUDED.next_run_at,
          name = CASE WHEN $9 THEN EXCLUDED.name ELSE session_schedules.name END,
-         allowed_tools = COALESCE($10::text[], session_schedules.allowed_tools), updated_at = now()
+         allowed_tools = COALESCE($10::text[], session_schedules.allowed_tools),
+         archive_policy = COALESCE($11, session_schedules.archive_policy),
+         archive_after_minutes = CASE WHEN $11 IS NULL THEN session_schedules.archive_after_minutes ELSE EXCLUDED.archive_after_minutes END,
+         updated_at = now()
        RETURNING *`,
-      [sessionId, values.cron, values.timezone, values.prompt, values.enabled, values.endAfterRun, values.nextRunAt, values.name ?? null, values.name !== undefined, values.allowedTools ?? null],
+      [sessionId, values.cron, values.timezone, values.prompt, values.enabled, values.endAfterRun, values.nextRunAt, values.name ?? null, values.name !== undefined, values.allowedTools ?? null, values.archive?.policy ?? null, values.archive?.afterMinutes ?? null],
     );
     return toSchedule(rows[0]);
   },
@@ -172,6 +184,43 @@ export const scheduleRepository = {
     await pool.query('UPDATE session_schedule_runs SET start_event_id = $2 WHERE id = $1', [runId, eventId]);
   },
 
+  async setRunSession(runId: string, runSessionId: string): Promise<void> {
+    await pool.query('UPDATE session_schedule_runs SET run_session_id = $2 WHERE id = $1', [runId, runSessionId]);
+  },
+
+  /** Une exécution de cette planification est-elle encore en cours (sur n'importe quelle instance) ? */
+  async hasRunning(sessionId: string): Promise<boolean> {
+    const { rows } = await pool.query(`SELECT 1 FROM session_schedule_runs WHERE session_id = $1 AND status = 'running' LIMIT 1`, [sessionId]);
+    return rows.length > 0;
+  },
+
+  /** Sessions d'exécutions closes de cette planification encore actives (hors `exceptId`) : archivées au lancement d'une nouvelle. */
+  async activeRunSessions(sessionId: string, exceptId: string | null = null): Promise<string[]> {
+    const { rows } = await pool.query<{ id: string }>(
+      `SELECT DISTINCT s.id FROM session_schedule_runs r JOIN sessions s ON s.id = r.run_session_id
+       WHERE r.session_id = $1 AND r.status <> 'running' AND s.archived_at IS NULL AND s.id <> $2::uuid AND s.id <> r.session_id
+       LIMIT 50`,
+      [sessionId, exceptId ?? '00000000-0000-0000-0000-000000000000'],
+    );
+    return rows.map((r) => r.id);
+  },
+
+  /** Sessions d'exécutions closes depuis plus que le délai de leur planification (`after_delay`), encore actives. */
+  async runSessionsPastDelay(now: Date): Promise<string[]> {
+    const { rows } = await pool.query<{ id: string }>(
+      `SELECT DISTINCT s.id FROM session_schedule_runs r
+       JOIN session_schedules sc ON sc.session_id = r.session_id
+       JOIN sessions s ON s.id = r.run_session_id
+       WHERE sc.archive_policy = 'after_delay' AND sc.archive_after_minutes IS NOT NULL
+         AND r.status <> 'running' AND r.finished_at IS NOT NULL
+         AND r.finished_at <= $1::timestamptz - make_interval(mins => sc.archive_after_minutes)
+         AND s.archived_at IS NULL AND s.id <> r.session_id
+       LIMIT 50`,
+      [now],
+    );
+    return rows.map((r) => r.id);
+  },
+
   /**
    * Clôt une exécution encore en cours. Renvoie null si elle était déjà close (une autre instance, ou la
    * reprise des exécutions orphelines, l'a fait) : seul celui qui clôt notifie.
@@ -214,9 +263,10 @@ export const scheduleRepository = {
    * close après la fin du tour).
    */
   async activeRunRules(sessionId: string): Promise<string[] | null> {
+    // La session est celle de l'exécution (run_session_id) ; avant, l'exécution se jouait dans la session de la planification.
     const { rows } = await pool.query<{ allowed_tools: string[] | null }>(
-      `SELECT sc.allowed_tools FROM session_schedules sc
-       WHERE sc.session_id = $1 AND EXISTS (SELECT 1 FROM session_schedule_runs r WHERE r.session_id = sc.session_id AND r.status = 'running')`,
+      `SELECT sc.allowed_tools FROM session_schedule_runs r JOIN session_schedules sc ON sc.session_id = r.session_id
+       WHERE r.status = 'running' AND COALESCE(r.run_session_id, r.session_id) = $1 LIMIT 1`,
       [sessionId],
     );
     return rows[0] ? (rows[0].allowed_tools ?? []) : null;
