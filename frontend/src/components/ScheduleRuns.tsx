@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { ScheduleRun } from '../graphql/operations';
 import { formatCost, formatDuration } from '../lib/humanize';
 import { isRunProblem, scheduleRunStatus } from '../lib/schedules';
@@ -51,6 +52,12 @@ export function RunHistory({ runs, empty = 'Aucune exécution pour l’instant.'
               <RunStatus run={r} />
               <span className="sch-run-when">{when(r.scheduledFor && r.status === 'MISSED' ? r.scheduledFor : r.startedAt)}</span>
               {meta.length > 0 && <span className="sch-run-meta">{meta.join(' · ')}</span>}
+              {r.session && (
+                <Link to={`/sessions/${r.session.id}`} className="sch-link" title={r.session.archivedAt ? `Session « ${r.session.name} » (archivée)` : `Session « ${r.session.name} »`}>
+                  <i className={`bi ${r.session.archivedAt ? 'bi-archive' : 'bi-box-arrow-up-right'} me-1`} />
+                  Session
+                </Link>
+              )}
               {r.answer && (
                 <button type="button" className="sch-link ms-auto" onClick={() => setOpen(open === r.id ? null : r.id)}>
                   {open === r.id ? 'Masquer la réponse' : 'Voir la réponse'}

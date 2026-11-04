@@ -1038,6 +1038,15 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
                       : action === 'resumed'
                         ? `Planification${named} reprise`
                         : 'Planification retirée';
+          if (action === 'spawned' && p.runSessionId) {
+            nodes.push(
+              <div key={e.id} className="cc-note">
+                {stamp(true)}⏰ Exécution planifiée{named}{p.manual ? ' (lancée à la main)' : ''} dans une nouvelle session :{' '}
+                <Link to={`/sessions/${String(p.runSessionId)}`}>ouvrir</Link>
+              </div>,
+            );
+            break;
+          }
           const warn = action === 'skipped' || (action === 'done' && (status === 'blocked' || status === 'failed' || status === 'timeout'));
           nodes.push(
             <div key={e.id} className={`cc-note${warn ? ' warn' : ''}`}>

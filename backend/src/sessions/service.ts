@@ -904,7 +904,7 @@ export const sessionService = {
    * l'archivage est différé à la fin du tour. Refusé tant que la PR du dossier est ouverte (`openPullRequestOf`), sauf
    * `force` (Skipper range la session à la fin de sa PR).
    */
-  async archiveWhenDone(id: string, reason: string | null = null, opts: { auto?: boolean; force?: boolean } = {}): Promise<boolean> {
+  async archiveWhenDone(id: string, reason: string | null = null, opts: { auto?: boolean; force?: boolean; schedule?: boolean } = {}): Promise<boolean> {
     const session = await sessionRepository.findById(id);
     if (!session) throw new NotFoundError('Session introuvable');
     if (session.archivedAt) return false;
@@ -913,12 +913,14 @@ export const sessionService = {
     const open = opts.force ? null : await openPullRequestOf(session);
     if (open) throw new AppError(openPullRequestRefusal(open));
     const deferred = running.has(id);
-    const message = opts.auto
+    const message = opts.schedule
+      ? `Session archivée par sa planification${deferred ? ' à la fin de ce tour' : ''}${reason ? ` : ${reason}` : ''}`
+      : opts.auto
       ? "Session archivée d'office à la fin de son tour : lancée sans personne pour la piloter, elle se range seule (le fil de sa tâche ou de son canal rappellera l'agent)"
       : opts.force
         ? `Session archivée par Skipper${deferred ? ' à la fin de ce tour' : ''}${reason ? ` : ${reason}` : ''}`
         : `${deferred ? 'Session archivée par son agent à la fin de ce tour' : 'Session archivée par un agent'}${reason ? ` : ${reason}` : ''}`;
-    await emitEvent(id, 'system', { message, notice: true, reason: opts.auto ? 'auto_archive' : opts.force ? 'pr_ended_archive' : 'agent_archive' });
+    await emitEvent(id, 'system', { message, notice: true, reason: opts.schedule ? 'schedule_archive' : opts.auto ? 'auto_archive' : opts.force ? 'pr_ended_archive' : 'agent_archive' });
     if (deferred) {
       archiveWhenDone.add(id);
       try {

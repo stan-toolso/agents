@@ -3357,9 +3357,21 @@ type Subscription {
 
 # ---- Planification des sessions --------------------------------------------------------------------
 
-"Planification d'une session : à chaque échéance de l'expression cron, l'instruction est envoyée à la session (relancée si elle est terminée)."
+"Archivage automatique des sessions créées par les exécutions d'une planification."
+enum ScheduleArchivePolicy {
+  "Archivée dès la fin de l'exécution (sauf demande encore en attente de réponse)."
+  ON_FINISH
+  "Les sessions des exécutions précédentes sont archivées au lancement d'une nouvelle (défaut)."
+  PREVIOUS_ON_RUN
+  "Archivée archiveAfterMinutes après la fin de l'exécution."
+  AFTER_DELAY
+  "Jamais archivée d'office."
+  NEVER
+}
+
+"Planification portée par une session : à chaque échéance de l'expression cron, une nouvelle session (mêmes projet, propriétaire, provider et réglages) est créée et reçoit l'instruction."
 type SessionSchedule {
-  "Identifiant de la session planifiée (une planification par session au plus)."
+  "Identifiant de la session de la planification (une planification par session au plus) : elle porte les réglages des exécutions."
   sessionId: ID!
   "Nom affiché de la planification : le sien, sinon celui de la session."
   name: String!
@@ -3374,8 +3386,12 @@ type SessionSchedule {
   "Instruction envoyée à la session à chaque exécution."
   prompt: String!
   enabled: Boolean!
-  "Terminer la session à la fin de chaque exécution (défaut) ; sinon elle reste ouverte aux instructions."
+  "Terminer la session d'une exécution à la fin de son tour (défaut) ; sinon elle reste ouverte aux instructions."
   endAfterRun: Boolean!
+  "Archivage automatique des sessions d'exécution."
+  archivePolicy: ScheduleArchivePolicy!
+  "Délai avant archivage après la fin d'une exécution, en minutes (AFTER_DELAY)."
+  archiveAfterMinutes: Int
   "Outils pré-autorisés pour les seules exécutions de la planification (règles au format Claude Code : Bash(git log *), mcp__vault__sql_query(production)…)."
   allowedTools: [String!]!
   nextRunAt: DateTime
@@ -3423,6 +3439,8 @@ type ScheduleRun {
   message: String
   "Début de la dernière réponse de l'agent."
   answer: String
+  "Session créée pour cette exécution (null : exécution d'avant, jouée dans la session de la planification, ignorée ou manquée)."
+  session: Session
 }
 
 input SessionScheduleInput {
@@ -3435,6 +3453,10 @@ input SessionScheduleInput {
   enabled: Boolean
   "Défaut : true."
   endAfterRun: Boolean
+  "Archivage des sessions d'exécution (absent : inchangé ; à la création : PREVIOUS_ON_RUN)."
+  archivePolicy: ScheduleArchivePolicy
+  "Délai en minutes pour AFTER_DELAY."
+  archiveAfterMinutes: Int
   "Outils pré-autorisés pour les exécutions (absent : inchangés ; liste vide : aucun)."
   allowedTools: [String!]
   "Réglage de nettoyage de la session, enregistré en même temps que la planification (absent : inchangé). Proposé par défaut : « fresh »."
@@ -3455,6 +3477,8 @@ input CreateScheduledSessionInput {
   prompt: String!
   enabled: Boolean
   endAfterRun: Boolean
+  archivePolicy: ScheduleArchivePolicy
+  archiveAfterMinutes: Int
   allowedTools: [String!]
   cleanup: SessionCleanupInput
   "Provider de la session (défaut : claude)."

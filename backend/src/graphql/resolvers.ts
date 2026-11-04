@@ -686,6 +686,7 @@ export const resolvers = {
   SessionSchedule: {
     name: async (schedule: SessionSchedule, _: unknown, ctx: Ctx) => scheduleLabel(schedule, (await loadersOf(ctx).session(schedule.sessionId)) ?? { name: 'Planification' }),
     customName: (schedule: SessionSchedule) => schedule.name,
+    archivePolicy: (schedule: SessionSchedule) => schedule.archivePolicy.toUpperCase(),
     session: (schedule: SessionSchedule, _: unknown, ctx: Ctx) => loadersOf(ctx).session(schedule.sessionId),
     project: async (schedule: SessionSchedule, _: unknown, ctx: Ctx) => {
       const session = await loadersOf(ctx).session(schedule.sessionId);
@@ -697,6 +698,7 @@ export const resolvers = {
     trigger: (run: ScheduleRun) => run.trigger.toUpperCase(),
     status: (run: ScheduleRun) => run.status.toUpperCase(),
     triggeredBy: (run: ScheduleRun, _: unknown, ctx: Ctx) => (run.triggeredBy ? loadersOf(ctx).user(run.triggeredBy) : null),
+    session: (run: ScheduleRun, _: unknown, ctx: Ctx) => (run.runSessionId ? loadersOf(ctx).session(run.runSessionId) : null),
   },
   WorkflowRun: {
     workflow: (r: WorkflowRun) => workflowService.get(r.workflowId),

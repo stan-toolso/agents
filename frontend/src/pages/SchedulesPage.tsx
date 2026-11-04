@@ -44,7 +44,7 @@ function ScheduleCard({ item, showProject, onEdit }: { item: ScheduleListItem; s
       <div className="sch-card-head">
         <div className="sch-card-main">
           <div className="d-flex align-items-center gap-2 flex-wrap">
-            <Link to={`/sessions/${item.sessionId}`} className="sch-card-title" title="Ouvrir la session de cette planification (transcript de toutes ses exécutions)">
+            <Link to={`/sessions/${item.sessionId}`} className="sch-card-title" title="Ouvrir la session de cette planification (ses réglages valent pour chaque exécution, qui a sa propre session)">
               <i className="bi bi-alarm me-1 text-secondary" />
               {item.name}
             </Link>
@@ -78,7 +78,7 @@ function ScheduleCard({ item, showProject, onEdit }: { item: ScheduleListItem; s
               </Link>
             )}
             {sessionNamed && (
-              <span title="Session qui exécute cette planification">
+              <span title="Session qui porte cette planification">
                 <i className="bi bi-chat-dots me-1" />
                 {item.session.name}
               </span>
@@ -120,6 +120,11 @@ function ScheduleCard({ item, showProject, onEdit }: { item: ScheduleListItem; s
                 </>
               ) : (
                 'jamais exécutée'
+              )}
+              {last?.session && (
+                <Link to={`/sessions/${last.session.id}`} className="sch-link ms-2" title={`Session de la dernière exécution : « ${last.session.name} »${last.session.archivedAt ? ' (archivée)' : ''}`}>
+                  Session
+                </Link>
               )}
               {item.runs.length > 0 && (
                 <button type="button" className="sch-link ms-2" onClick={() => setOpen(!open)}>
@@ -225,7 +230,7 @@ export default function SchedulesPage() {
         </div>
       </div>
       <p className="text-secondary small">
-        Une planification envoie une instruction à sa session à heures fixes. {counts.active} active{counts.active > 1 ? 's' : ''}
+        Une planification lance à heures fixes une nouvelle session qui reçoit son instruction. {counts.active} active{counts.active > 1 ? 's' : ''}
         {soonest?.nextRunAt ? (
           <>
             {' '}

@@ -11,21 +11,33 @@ import {
   PROVIDERS,
   UPDATE_SESSION_CONFIG,
   type Provider,
+  type ScheduleArchivePolicy,
   type ScheduleRun,
   type Session,
 } from '../graphql/operations';
 import { browserTimeZone, buildCron, cronPresetLabels as presetLabels, describeCron, detectCronPreset as detectPreset, weekdayLabels, type CronPreset as Preset } from '../lib/cron';
-import { formatTokens, permissionModeShortLabels } from '../lib/humanize';
+import { permissionModeShortLabels } from '../lib/humanize';
 import { modelOptions } from '../lib/models';
 import { useDialogs } from './Dialogs';
 import { RunHistory } from './ScheduleRuns';
 import ScheduleTools from './ScheduleTools';
 
-/** Conversation de l'agent entre deux exécutions : neuve à chaque fois (défaut), compactée ou oubliée au-delà d'un seuil, ou laissée telle quelle. */
-type ContextMode = 'fresh' | 'compact' | 'reset' | '';
-const withThreshold = (m: ContextMode) => m === 'compact' || m === 'reset';
-/** Seuil de compaction proposé (k tokens), aligné sur DEFAULT_SCHEDULE_CONTEXT_MAX_TOKENS du serveur. */
-const DEFAULT_COMPACT_K = 100;
+/** Archivage automatique des sessions d'exécution : libellés et explications. */
+const ARCHIVE_POLICIES: { value: ScheduleArchivePolicy; label: string; hint: string }[] = [
+  { value: 'PREVIOUS_ON_RUN', label: "Archiver l'ancienne à chaque nouvelle exécution", hint: 'La session de la dernière exécution reste dans la sidebar jusqu’à la suivante, qui la range.' },
+  { value: 'ON_FINISH', label: 'Archiver dès la fin de l’exécution', hint: 'La session est rangée dès que l’agent a fini (sauf si une demande attend votre réponse) ; elle reste consultable depuis l’historique ci-dessous.' },
+  { value: 'AFTER_DELAY', label: 'Archiver après un délai', hint: 'La session est rangée ce délai après la fin de l’exécution.' },
+  { value: 'NEVER', label: 'Ne jamais archiver', hint: 'Chaque exécution laisse sa session active : pensez à les ranger vous-même.' },
+];
+type DelayUnit = 'minutes' | 'hours' | 'days';
+const UNIT_MINUTES: Record<DelayUnit, number> = { minutes: 1, hours: 60, days: 1440 };
+/** Délai en minutes vers la plus grande unité exacte (24 h → 1 jour). */
+function splitDelay(minutes: number | null | undefined): { amount: string; unit: DelayUnit } {
+  const m = minutes && minutes > 0 ? minutes : 1440;
+  if (m % 1440 === 0) return { amount: String(m / 1440), unit: 'days' };
+  if (m % 60 === 0) return { amount: String(m / 60), unit: 'hours' };
+  return { amount: String(m), unit: 'minutes' };
+}
 const PERMISSION_MODES = ['default', 'acceptEdits', 'dontAsk', 'bypassPermissions'] as const;
 
 /** Ce que le mode d'autorisation implique pour une exécution sans personne devant l'écran. */
@@ -64,6 +76,12 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
   const [prompt, setPrompt] = useState(existing?.prompt ?? session?.prompt ?? '');
   const [enabled, setEnabled] = useState(existing?.enabled ?? true);
   const [endAfterRun, setEndAfterRun] = useState(existing?.endAfterRun ?? true);
+  const [archivePolicy, setArchivePolicy] = useState<ScheduleArchivePolicy>(existing?.archivePolicy ?? 'PREVIOUS_ON_RUN');
+  const initialDelay = splitDelay(existing?.archiveAfterMinutes);
+  const [delayAmount, setDelayAmount] = useState(initialDelay.amount);
+  const [delayUnit, setDelayUnit] = useState<DelayUnit>(initialDelay.unit);
+  const archiveAfterMinutes = Math.round(Number(delayAmount) * UNIT_MINUTES[delayUnit]);
+  const archiveValid = archivePolicy !== 'AFTER_DELAY' || (Number.isFinite(archiveAfterMinutes) && archiveAfterMinutes >= 1 && archiveAfterMinutes <= 90 * 1440);
   const [allowedTools, setAllowedTools] = useState<string[]>(existing?.allowedTools ?? []);
   const currentMode = String(session?.config.permissionMode ?? project?.defaultPermissionMode ?? 'default');
   const [permissionMode, setPermissionMode] = useState(currentMode);
@@ -76,13 +94,6 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
   const models = modelOptions(providersData?.providers.find((p) => p.type === provider)?.configFields);
   const currentModel = typeof session?.config.model === 'string' ? session.config.model : '';
   const [model, setModel] = useState(currentModel);
-  const cleanupNow = session?.cleanup ?? { retentionDays: null, contextAction: null, contextMaxTokens: null };
-  // Nouvelle planification : nettoyage actif d'office (conversation neuve à chaque exécution). Planification existante : son réglage actuel.
-  const [contextMode, setContextMode] = useState<ContextMode>(existing ? ((cleanupNow.contextAction as ContextMode) ?? '') : 'fresh');
-  const [contextMaxK, setContextMaxK] = useState(String(Math.round((cleanupNow.contextMaxTokens ?? DEFAULT_COMPACT_K * 1000) / 1000)));
-  const contextValid = !withThreshold(contextMode) || Number(contextMaxK) >= 10;
-  // Planification existante sans nettoyage : le contexte grossit à chaque exécution ; on propose d'activer le réglage par défaut.
-  const missingCleanup = Boolean(existing) && !cleanupNow.contextAction && contextMode === '';
   const creating = !session;
 
   const cron = buildCron(preset, time, weekday, monthDay, custom);
@@ -106,17 +117,22 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
   const [runNow, { loading: launching }] = useMutation(RUN_SESSION_SCHEDULE_NOW, { refetchQueries: ['SessionScheduleRuns', 'SessionSchedules'] });
   const busy = saving || clearing || creatingSession || configuring;
   const error = saveError ?? clearError ?? createError;
-  const canSubmit = Boolean(cron && prompt.trim() && contextValid && (!creating || (name.trim() && projectId)));
+  const canSubmit = Boolean(cron && prompt.trim() && archiveValid && (!creating || (name.trim() && projectId)));
 
   const submit = async () => {
     if (!canSubmit) return;
-    // Le nettoyage remplace l'objet entier : la purge du transcript est reportée telle quelle.
-    const cleanup = {
-      retentionDays: cleanupNow.retentionDays,
-      contextAction: contextMode || null,
-      contextMaxTokens: withThreshold(contextMode) ? Number(contextMaxK) * 1000 : null,
+    // Chaque exécution a sa propre session, neuve : plus de nettoyage de conversation à régler ici.
+    const input = {
+      name: name.trim() || null,
+      cron,
+      timezone,
+      prompt: prompt.trim(),
+      enabled,
+      endAfterRun,
+      archivePolicy,
+      archiveAfterMinutes: archivePolicy === 'AFTER_DELAY' ? archiveAfterMinutes : null,
+      allowedTools,
     };
-    const input = { name: name.trim() || null, cron, timezone, prompt: prompt.trim(), enabled, endAfterRun, allowedTools, cleanup };
     if (creating) {
       const res = await create({ variables: { input: { ...input, name: name.trim(), projectId, config: { permissionMode, ...(model ? { model } : {}) } } } }).catch(() => null);
       if (res?.data) {
@@ -151,8 +167,8 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
         <Modal.Body>
           <p className="text-secondary small">
             {creating
-              ? "Une session est créée pour cette planification, dans son propre dossier de travail. À chaque échéance, l'instruction lui est envoyée ; l'historique de ses exécutions reste consultable."
-              : "À chaque échéance, l'instruction ci-dessous est envoyée à cette session : si elle est terminée, elle est relancée ; si l'agent travaille encore, l'échéance est ignorée."}
+              ? "À chaque échéance, une nouvelle session est créée, dans son propre dossier de travail, et reçoit l'instruction. Une session porte les réglages de la planification (modèle, autorisations) ; l'historique des exécutions et leurs sessions restent consultables."
+              : "À chaque échéance, une nouvelle session est créée avec les réglages de celle-ci (modèle, autorisations, propriétaire) et reçoit l'instruction ci-dessous ; si l'exécution précédente n'est pas finie, l'échéance est ignorée."}
           </p>
           <div className="row g-2 mb-3">
             <div className={creating && projects.length > 1 ? 'col-sm-7' : 'col-12'}>
@@ -306,44 +322,38 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
             )}
           </Form.Group>
           <ScheduleTools value={allowedTools} onChange={setAllowedTools} projectId={session?.project.id ?? projectId} sessionId={existing ? session!.id : null} prompt={prompt} permissionMode={permissionMode} />
-          <Form.Group className="mb-2">
-            <Form.Label className="mb-1">Conversation de l'agent entre deux exécutions</Form.Label>
-            <Form.Select value={contextMode} onChange={(e) => setContextMode(e.target.value as ContextMode)}>
-              <option value="fresh">Nouvelle conversation à chaque exécution (recommandé)</option>
-              <option value="compact">Compacter quand le contexte dépasse un seuil</option>
-              <option value="reset">Repartir d'une conversation neuve quand le contexte dépasse un seuil</option>
-              <option value="">Ne rien faire (le contexte grossit à chaque exécution)</option>
-            </Form.Select>
-          </Form.Group>
-          {withThreshold(contextMode) && (
-            <div className="d-flex align-items-center gap-2 mb-2 ms-4">
-              <span>Seuil :</span>
-              <Form.Control type="number" min={10} step={10} value={contextMaxK} onChange={(e) => setContextMaxK(e.target.value)} style={{ width: '6rem' }} />
-              <span>k tokens</span>
+          <Form.Group className="mb-3">
+            <Form.Label className="mb-1">Archivage des sessions d'exécution</Form.Label>
+            <div className="d-flex flex-wrap gap-2 align-items-center">
+              <Form.Select value={archivePolicy} onChange={(e) => setArchivePolicy(e.target.value as ScheduleArchivePolicy)} style={{ flex: '1 1 16rem' }}>
+                {ARCHIVE_POLICIES.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.label}
+                  </option>
+                ))}
+              </Form.Select>
+              {archivePolicy === 'AFTER_DELAY' && (
+                <div className="d-flex gap-2 align-items-center">
+                  <Form.Control type="number" min={1} value={delayAmount} onChange={(e) => setDelayAmount(e.target.value)} style={{ width: '5.5rem' }} aria-label="Délai" isInvalid={!archiveValid} />
+                  <Form.Select value={delayUnit} onChange={(e) => setDelayUnit(e.target.value as DelayUnit)} style={{ width: '8rem' }} aria-label="Unité du délai">
+                    <option value="minutes">minutes</option>
+                    <option value="hours">heures</option>
+                    <option value="days">jours</option>
+                  </Form.Select>
+                </div>
+              )}
             </div>
-          )}
-          <Form.Text className="d-block mb-3">
-            {contextMode === 'fresh' && "Avant chaque exécution, l'agent repart d'une conversation vide : le contexte reste stable d'une fois sur l'autre. Le transcript affiché est conservé."}
-            {contextMode === 'compact' && "Avant une exécution, si le contexte dépasse le seuil, /compact est envoyé à l'agent : il résume la conversation et repart de ce résumé."}
-            {contextMode === 'reset' && "Avant une exécution, si le contexte dépasse le seuil, l'agent repart d'une conversation vide ; le transcript affiché est conservé."}
-            {contextMode === '' && "Chaque exécution relit toutes les précédentes : le contexte, et le coût de chaque tour, grossissent sans fin."}
-            {session && session.contextTokens !== null && <> Contexte actuel : {formatTokens(session.contextTokens)} tokens.</>}
-          </Form.Text>
-          {missingCleanup && (
-            <Alert variant="warning" className="d-flex align-items-center justify-content-between gap-2 py-2">
-              <span>
-                Cette planification n'a pas de nettoyage{session?.contextTokens != null ? <> : le contexte atteint déjà {formatTokens(session.contextTokens)} tokens</> : null}.
-              </span>
-              <Button size="sm" variant="outline-secondary" className="flex-shrink-0" onClick={() => setContextMode('fresh')}>
-                Activer le nettoyage par défaut
-              </Button>
-            </Alert>
-          )}
+            <Form.Text>
+              {ARCHIVE_POLICIES.find((p) => p.value === archivePolicy)?.hint}
+              {archivePolicy === 'AFTER_DELAY' && !archiveValid && ' Le délai va d’une minute à 90 jours.'}
+              {' '}Une session dont la PR est encore ouverte n'est jamais archivée d'office.
+            </Form.Text>
+          </Form.Group>
           <Form.Check
             type="switch"
             id="schedule-end-after-run"
             className="mb-2"
-            label="Terminer la session à la fin de chaque exécution (elle est relancée à l'échéance suivante)"
+            label="Terminer la session de chaque exécution à la fin de son tour (sinon elle reste ouverte à vos instructions)"
             checked={endAfterRun}
             onChange={(e) => setEndAfterRun(e.target.checked)}
           />
@@ -376,7 +386,7 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
           <div>
             {existing && (
               <Button variant="outline-danger" disabled={busy} onClick={async () => {
-                  if (await confirm({ title: 'Retirer la planification', message: `Plus aucune exécution de « ${existing.name} », et son historique est effacé. La session et son transcript sont conservés.`, confirmLabel: 'Retirer', danger: true })) void clear({ variables: { id: session!.id } });
+                  if (await confirm({ title: 'Retirer la planification', message: `Plus aucune exécution de « ${existing.name} », et son historique est effacé. Cette session, celles des exécutions et leurs transcripts sont conservés.`, confirmLabel: 'Retirer', danger: true })) void clear({ variables: { id: session!.id } });
                 }}>
                 Retirer la planification
               </Button>

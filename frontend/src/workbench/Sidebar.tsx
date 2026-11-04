@@ -132,7 +132,7 @@ const MAIN_MENU: { to: string; label: string; icon: string; title?: string }[] =
   { to: '/tasks', label: 'Tâches', icon: 'bi-check2-square' },
   { to: '/shared', label: 'Pages', icon: 'bi-file-earmark-richtext', title: 'Pages partagées' },
   { to: '/vault', label: 'Coffre', icon: 'bi-shield-lock' },
-  { to: '/schedules', label: 'Planifications', icon: 'bi-alarm', title: 'Planifications : sessions relancées à heures fixes, prochaines échéances et historique' },
+  { to: '/schedules', label: 'Planifications', icon: 'bi-alarm', title: 'Planifications : une nouvelle session à heures fixes, prochaines échéances et historique' },
   { to: '/workflows', label: 'Workflows', icon: 'bi-diagram-3', title: "Workflows : enchaînements d'appels de modèle, de sessions et de tâches" },
   { to: '/requests', label: 'Demandes', icon: 'bi-bell' },
 ];

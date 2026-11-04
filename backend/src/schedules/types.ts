@@ -1,7 +1,19 @@
 import type { SessionCleanup } from '../sessions/types.js';
 
-/** Planification d'une session : l'instruction est envoyée à chaque échéance de l'expression cron. */
+/**
+ * Archivage automatique des sessions d'exécution (chaque exécution a sa propre session) : dès la fin de
+ * l'exécution, les précédentes au lancement d'une nouvelle (défaut), un délai après la fin, ou jamais.
+ */
+export type ScheduleArchivePolicy = 'on_finish' | 'previous_on_run' | 'after_delay' | 'never';
+export const SCHEDULE_ARCHIVE_POLICIES: ScheduleArchivePolicy[] = ['on_finish', 'previous_on_run', 'after_delay', 'never'];
+export const DEFAULT_ARCHIVE_POLICY: ScheduleArchivePolicy = 'previous_on_run';
+
+/**
+ * Planification portée par une session : à chaque échéance de l'expression cron, une nouvelle session est créée
+ * (mêmes projet, propriétaire, provider et réglages que la session de la planification) et reçoit l'instruction.
+ */
 export interface SessionSchedule {
+  /** Session de la planification : elle porte les réglages des exécutions, et n'exécute rien elle-même. */
   sessionId: string;
   /** Nom de la planification (« Revue quotidienne Curso ») ; null : celui de la session. */
   name: string | null;
@@ -12,8 +24,12 @@ export interface SessionSchedule {
   /** Instruction envoyée à la session à chaque exécution. */
   prompt: string;
   enabled: boolean;
-  /** Terminer la session à la fin de chaque exécution (sinon elle reste ouverte aux instructions). */
+  /** Terminer la session d'une exécution à la fin de son tour (sinon elle reste ouverte aux instructions). */
   endAfterRun: boolean;
+  /** Archivage automatique des sessions d'exécution. */
+  archivePolicy: ScheduleArchivePolicy;
+  /** Délai avant archivage après la fin d'une exécution (`after_delay`), en minutes. */
+  archiveAfterMinutes: number | null;
   /**
    * Outils pré-autorisés pour les seules exécutions de la planification (règles au format Claude Code :
    * `Bash(git status *)`, `mcp__vault__sql_query(production)`…). Hors exécution planifiée, ils ne valent rien.
@@ -35,6 +51,10 @@ export interface SessionScheduleInput {
   prompt: string;
   enabled?: boolean | null;
   endAfterRun?: boolean | null;
+  /** Archivage des sessions d'exécution (absent : inchangé ; défaut à la création : previous_on_run). */
+  archivePolicy?: ScheduleArchivePolicy | null;
+  /** Délai en minutes pour `after_delay`. */
+  archiveAfterMinutes?: number | null;
   /** Outils pré-autorisés pour les exécutions (absent ou null : inchangés). */
   allowedTools?: string[] | null;
   /** Réglage de nettoyage de la session, enregistré en même temps (null ou absent : inchangé). */
@@ -53,7 +73,10 @@ export type ScheduleRunStatus = 'running' | 'done' | 'blocked' | 'failed' | 'tim
 
 export interface ScheduleRun {
   id: string;
+  /** Session de la planification. */
   sessionId: string;
+  /** Session créée pour cette exécution (null : exécution d'avant, jouée dans la session de la planification, ou ignorée). */
+  runSessionId: string | null;
   trigger: ScheduleRunTrigger;
   triggeredBy: string | null;
   status: ScheduleRunStatus;
