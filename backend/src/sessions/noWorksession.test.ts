@@ -69,3 +69,31 @@ describe('session dont le dossier de travail a été supprimé', () => {
     await expect(sessionService.unarchive('c1')).resolves.toMatchObject({ archivedAt: null });
   });
 });
+
+describe('message envoyé à une session archivée', () => {
+  it("refusé sans l'option unarchive (agents, fils)", async () => {
+    store.sessions.set('a1', { ...base, id: 'a1', worksessionId: 'w1', archivedAt: new Date() });
+    const { sessionService } = await import('./service.js');
+    await expect(sessionService.sendMessage('a1', 'continue')).rejects.toMatchObject({ code: 'ARCHIVED' });
+    expect(store.sessions.get('a1')!.archivedAt).toBeInstanceOf(Date);
+  });
+
+  it('une personne la restaure avec son dossier puis la relance avec son message', async () => {
+    store.sessions.set('a2', { ...base, id: 'a2', worksessionId: 'w2', archivedAt: new Date() });
+    const { sessionService } = await import('./service.js');
+    const start = vi.spyOn(sessionService, 'start').mockImplementation(async (id: string) => ({ id }) as never);
+    await sessionService.sendMessage('a2', 'reprends', null, { byPerson: true, unarchive: true });
+    expect(store.sessions.get('a2')!.archivedAt).toBeNull();
+    expect(worksessions.restore).toHaveBeenCalledWith('w2');
+    expect(repo.addEvent).toHaveBeenCalledWith('a2', 'system', expect.objectContaining({ reason: 'unarchived_by_message' }));
+    expect(start).toHaveBeenCalledWith('a2', 'reprends', [], expect.anything());
+    start.mockRestore();
+  });
+
+  it('reste archivée si son dossier a été supprimé', async () => {
+    store.sessions.set('a3', { ...base, id: 'a3', worksessionId: null, archivedAt: new Date(), formerWorksession: { name: 'task-x', branch: 'task/x', label: 'x' } });
+    const { sessionService } = await import('./service.js');
+    await expect(sessionService.sendMessage('a3', 'reprends', null, { unarchive: true })).rejects.toMatchObject({ code: 'NO_WORKSESSION' });
+    expect(store.sessions.get('a3')!.archivedAt).toBeInstanceOf(Date);
+  });
+});
