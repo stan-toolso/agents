@@ -29,6 +29,8 @@ import { fileToolResultCount } from '../lib/sessionChanges';
 import { isImageType, toAttachmentInputs, usePendingAttachments } from '../lib/attachments';
 import { confirmedPending, newPendingInstruction, withPendingInstructions, type PendingInstruction } from '../lib/pendingInstructions';
 import DictationButton from '../components/DictationButton';
+import SessionPullRequestCard from '../components/SessionPullRequestCard';
+import type { TrackedPullRequestSummary } from '../graphql/pullRequests';
 import '../components/terminal.css';
 import '../components/chat.css';
 import { sessionExportUrl } from '../lib/exports';
@@ -48,7 +50,11 @@ import {
   type SessionChanges as SessionChangesData,
 } from '../graphql/operations';
 
-type SessionWithRequests = Session & { requests: HumanRequest[]; childSessions: ChildSession[] };
+type SessionWithRequests = Omit<Session, 'worksession'> & {
+  requests: HumanRequest[];
+  childSessions: ChildSession[];
+  worksession: (NonNullable<Session['worksession']> & { trackedPullRequest?: TrackedPullRequestSummary | null }) | null;
+};
 
 const TECH_KEY = 'skipper.session.technical';
 const draftKey = (id: string) => `skipper.session.draft.${id}`;
@@ -242,8 +248,14 @@ export default function SessionDetailPage() {
   const canSend = Boolean(text.trim() || attachments.items.length) && !sending && !encoding && !folderGone;
   const submit = async () => {
     if (!canSend) return;
-    const value = text.trim();
-    const items = attachments.items;
+    await deliver(text.trim(), attachments.items);
+  };
+  // Instruction d'une action de la carte de PR : envoyée comme si la personne l'avait écrite, sans toucher au brouillon.
+  const sendAction = async (value: string) => {
+    if (sending || encoding || folderGone) return;
+    await deliver(value, [], false);
+  };
+  const deliver = async (value: string, items: typeof attachments.items, fromInput = true) => {
     // Le message apparaît dans le transcript et la zone de saisie se vide avant tout échange avec le serveur.
     const pending = newPendingInstruction(
       value,
@@ -251,9 +263,11 @@ export default function SessionDetailPage() {
       events.length,
     );
     setPendingInstructions((list) => [...list, pending]);
-    setText('');
-    attachments.reset();
-    if (inputRef.current) inputRef.current.style.height = 'auto';
+    if (fromInput) {
+      setText('');
+      attachments.reset();
+      if (inputRef.current) inputRef.current.style.height = 'auto';
+    }
     setEncoding(true);
     try {
       const files = items.length ? await toAttachmentInputs(items) : null;
@@ -264,8 +278,10 @@ export default function SessionDetailPage() {
     } catch {
       // L'erreur est affichée par sendError ; le message revient dans la zone de saisie pour être renvoyé.
       dropPending([pending]);
-      setText(value);
-      requestAnimationFrame(() => inputRef.current?.focus());
+      if (fromInput) {
+        setText(value);
+        requestAnimationFrame(() => inputRef.current?.focus());
+      }
     } finally {
       setEncoding(false);
     }
@@ -523,6 +539,10 @@ export default function SessionDetailPage() {
             <RequestPrompt key={r.id} request={r} keyboard={i === 0} />
           ))}
         </div>
+      )}
+
+      {!chat && !readOnly && !folderGone && (
+        <SessionPullRequestCard projectId={session.project.id} pr={session.worksession?.trackedPullRequest} disabled={sending || encoding} onInstruction={sendAction} />
       )}
 
       <div className="cc-status">

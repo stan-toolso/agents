@@ -1004,10 +1004,18 @@ export const SESSION = gql`
   ${SESSION_FIELDS}
   ${SESSION_SHARE_FIELDS}
   ${REQUEST_FIELDS}
+  ${TASK_PULL_REQUEST_FIELDS}
   query Session($id: ID!) {
     session(id: $id) {
       ...SessionFields
       viewerCanTakeOver
+      worksession {
+        id
+        # PR suivie du dossier de travail : carte « à fusionner » de la page (mise à jour aussi par watchPullRequests).
+        trackedPullRequest {
+          ...TaskPullRequestFields
+        }
+      }
       project {
         id
         approvalConnections

@@ -672,6 +672,21 @@ export const pullRequestService = {
     return res.html_url;
   },
 
+  /** Ferme la PR sans la fusionner (GitHub, GitLab ou Forgejo) avec le compte de la personne ; la branche est gardée. */
+  async close(projectId: string, userId: string | null | undefined, number: number, repoRef?: GithubRepoRef | null): Promise<PullRequest> {
+    const repo = repoRef ?? (await projectRepo(projectId));
+    const pr = await this.get(projectId, userId, number, repoRef);
+    if (pr.state !== 'OPEN') throw new AppError(`La pull request #${number} n'est pas ouverte`);
+    if (await onForgejo(projectId, repoRef)) await forgejoPulls.close(repo, number, await forgejoActor(userId));
+    else {
+      const gl = await onGitlab(projectId, repoRef);
+      if (gl) await gitlabMergeRequests.close(await gitlabTarget(gl, userId), number);
+      else await rest(await requireToken(projectId, userId, repoRef), 'PATCH', `/repos/${repo.owner}/${repo.name}/pulls/${number}`, { state: 'closed' });
+    }
+    invalidate(repo);
+    return this.get(projectId, userId, number, repoRef).catch(() => ({ ...pr, state: 'CLOSED' as const }));
+  },
+
   /**
    * Fusionne la PR, puis nettoie selon `cleanup` : branche distante, worksession(s) et branche locale de
    * la branche de la PR (sessions encore ouvertes arrêtées si `stopSessions`), tâches liées terminées.
