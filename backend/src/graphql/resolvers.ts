@@ -1887,7 +1887,7 @@ export const resolvers = {
     },
     sendSessionMessage: async (_: unknown, args: { id: string; text: string; attachments?: AttachmentInput[] | null }, ctx: Ctx) => {
       await guardSession(ctx, args.id, 'member');
-      return sessionService.sendMessage(args.id, args.text, args.attachments, { byPerson: true, author: personAuthor(requireUser(ctx)) });
+      return sessionService.sendMessage(args.id, args.text, args.attachments, { byPerson: true, unarchive: true, author: personAuthor(requireUser(ctx)) });
     },
     endSession: async (_: unknown, args: { id: string }, ctx: Ctx) => {
       await guardSession(ctx, args.id, 'member');

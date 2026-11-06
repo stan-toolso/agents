@@ -239,7 +239,7 @@ export default function SessionDetailPage() {
     canInterrupt,
   );
 
-  const canSend = Boolean(text.trim() || attachments.items.length) && !sending && !encoding && !archived && !folderGone;
+  const canSend = Boolean(text.trim() || attachments.items.length) && !sending && !encoding && !folderGone;
   const submit = async () => {
     if (!canSend) return;
     const value = text.trim();
@@ -257,7 +257,8 @@ export default function SessionDetailPage() {
     setEncoding(true);
     try {
       const files = items.length ? await toAttachmentInputs(items) : null;
-      await sendMessage({ variables: { id, text: value, attachments: files } });
+      // Une session archivée est restaurée par le message : la sidebar la remet parmi les sessions actives.
+      await sendMessage({ variables: { id, text: value, attachments: files }, refetchQueries: archived ? ['Sidebar'] : [] });
       // Le serveur a journalisé l'instruction : on la relève tout de suite plutôt qu'au prochain tour de sondage.
       refreshEvents();
     } catch {
@@ -380,7 +381,7 @@ export default function SessionDetailPage() {
         : folderGone
           ? `■ Dossier de travail supprimé${session.formerWorksession ? ` (branche ${session.formerWorksession.branch})` : ''} — la session ne peut plus reprendre : relancez-la dans un nouveau dossier${archived ? '' : ', ou archivez-la'}`
         : archived
-          ? "■ Session archivée — restaurez-la pour reprendre la conversation, ou relancez-en une nouvelle"
+          ? "■ Session archivée — écrivez un message pour la restaurer et reprendre la conversation"
           : session.status === 'QUEUED'
           ? `⧗ En file d'attente${session.queuePosition ? ` (rang ${session.queuePosition})` : ''} — la limite de sessions simultanées est atteinte, l'agent démarrera dès qu'une place se libère`
           : session.status === 'PENDING'
@@ -551,7 +552,7 @@ export default function SessionDetailPage() {
         </span>
       </div>
 
-      {!archived && !folderGone && !readOnly && (
+      {!folderGone && !readOnly && (
       <div
         className="cc-input"
         onClick={(e) => {
@@ -566,7 +567,7 @@ export default function SessionDetailPage() {
             ref={inputRef}
             rows={1}
             value={text}
-            placeholder={running ? "Écrivez ce que l'agent doit faire…" : 'Écrivez une nouvelle instruction pour reprendre…'}
+            placeholder={running ? "Écrivez ce que l'agent doit faire…" : archived ? 'Écrivez un message pour restaurer la session et reprendre…' : 'Écrivez une nouvelle instruction pour reprendre…'}
             onChange={(e) => {
               historyPos.current = null;
               setText(e.target.value);

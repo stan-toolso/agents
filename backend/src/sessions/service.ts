@@ -807,13 +807,25 @@ export const sessionService = {
    * l'agent ; si elle est terminée, la session est relancée avec cette instruction (reprise). `author` : qui écrit
    * (personne, session d'agent), journalisé et annoncé au modèle ; Skipper à défaut.
    */
-  async sendMessage(id: string, text: string, files?: AttachmentInput[] | null, opts: { attachments?: Attachment[]; byPerson?: boolean; author?: InstructionAuthor | null } = {}): Promise<Session> {
+  async sendMessage(
+    id: string,
+    text: string,
+    files?: AttachmentInput[] | null,
+    opts: { attachments?: Attachment[]; byPerson?: boolean; author?: InstructionAuthor | null; unarchive?: boolean } = {},
+  ): Promise<Session> {
     const author = opts.author ?? SYSTEM_AUTHOR;
     const trimmed = text.trim() || (files?.length || opts.attachments?.length ? ATTACHMENTS_ONLY_TEXT : '');
     if (!trimmed) throw new AppError('Le message est vide');
-    const session = await sessionRepository.findById(id);
+    let session = await sessionRepository.findById(id);
     if (!session) throw new NotFoundError('Session introuvable');
-    assertNotArchived(session);
+    if (session.archivedAt) {
+      // Une personne qui écrit dans une session archivée la restaure (avec son dossier) puis la relance avec son
+      // message. Refusé comme la restauration si le dossier a disparu ou si une autre session y travaille.
+      if (!opts.unarchive) assertNotArchived(session);
+      await this.unarchive(id);
+      await emitEvent(id, 'system', { message: 'Session restaurée par un nouveau message', notice: true, reason: 'unarchived_by_message' });
+      session = (await sessionRepository.findById(id))!;
+    }
     if (session.status === 'queued') throw queuedError();
     // Sans processus, l'instruction relancerait la session : refusée d'emblée si son dossier n'existe plus.
     if (!running.has(id) && session.status !== 'running') assertHasWorksession(session);

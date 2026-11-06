@@ -22,8 +22,8 @@ Trois notions :
   Une tâche a **son** dossier et sa branche `task/<slug>`, créés à sa première session et repris par les
   suivantes. La consigne de départ est facultative : sans consigne, la session est créée sans démarrer et
   la première instruction envoyée depuis sa page la lance. On peut lui envoyer des instructions à tout
-  moment, comme dans Claude Code ; une session terminée est relancée (reprise de la conversation) par un
-  simple message. Un agent peut lui-même lancer d'autres sessions (outil MCP `sessions`) ; elles gardent
+  moment, comme dans Claude Code ; une session terminée, arrêtée, interrompue ou archivée est relancée (reprise de la
+  conversation) par un simple message — archivée, elle est d'abord restaurée avec son dossier. Un agent peut lui-même lancer d'autres sessions (outil MCP `sessions`) ; elles gardent
   la trace de la session qui les a lancées.
 - **Work session** : le nom technique de ce dossier de travail (table `worksessions`, serveur MCP
   `worksessions`, champs `worksessionId` de l'API). **L'interface ne la nomme jamais** : elle crée et
