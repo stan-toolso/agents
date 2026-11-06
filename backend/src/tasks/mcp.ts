@@ -454,6 +454,32 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
           }),
       ),
       tool(
+        'pr_close',
+        "Ferme (annule) une pull request suivie sans la fusionner, sur la forge (GitHub, GitLab ou Forgejo), seulement quand une personne te l'a demandé ; soumis à son autorisation. La branche et le dossier de travail sont gardés, la PR reste réouvrable depuis la forge. comment : un commentaire posté sur la PR avant de la fermer (la raison).",
+        {
+          id: z.string().describe('Identifiant de la PR suivie (donné par pr_list ou get), son numéro dans le dépôt du projet (« 42 », « #42 ») ou son URL'),
+          comment: z.string().optional().describe('Commentaire posté sur la PR avant la fermeture (la raison)'),
+        },
+        async ({ id, comment }) =>
+          run(async () => {
+            const pr = await trackedPullRequestService.resolve(project.id, id);
+            if (pr.number == null) throw new Error("Cette PR est en préparation (pas encore ouverte) : il n'y a rien à fermer sur la forge");
+            if (pr.status !== 'open') throw new Error(`La PR ${pullRequestRef(pr, projectRepo)} n'est pas ouverte (statut : ${pr.status})`);
+            const s = await sessionContext();
+            const accounts = await agentService.accountsForSession(s);
+            const account = accounts ? await gitAccountFor(accounts, project.gitUrl) : null;
+            if (account?.readOnly && !account.pullRequests) throw new Error(`Ton compte ${account.host === 'gitlab' ? 'GitLab' : 'GitHub'} est prêté en lecture seule : demande à une personne de fermer la PR depuis l'onglet Pull requests du projet`);
+            const userId = account?.userId ?? s.ownerId;
+            const repo = foreignRepoOf(pr, projectRepo);
+            const warnings: string[] = [];
+            if (comment?.trim()) await pullRequestService.comment(project.id, userId, pr.number, comment.trim(), repo).catch((err) => warnings.push(`Commentaire non posté : ${(err as Error).message}`));
+            await pullRequestService.close(project.id, userId, pr.number, repo);
+            const closed = await trackedPullRequestService.update(pr.id, { status: 'closed' });
+            await auditService.record({ projectId: project.id, actor: { sessionId }, action: 'pull_request.close', targetType: 'pull_request', targetId: String(pr.number), targetLabel: `#${pr.number} ${pr.title}`, details: { url: pr.url } });
+            return [`Pull request fermée sans fusion :`, describePullRequest(closed, projectRepo), ...warnings.map((w) => `Attention : ${w}`)].join('\n');
+          }),
+      ),
+      tool(
         'pr_update',
         "Met à jour une pull request suivie : statut (open, merged, closed = annulée), note, tâche reliée. Le statut suit aussi la forge (GitHub, GitLab, Forgejo) tout seul. Une PR en préparation (pas encore ouverte) n'accepte que la note et la tâche : ouvre-la avec pr_open.",
         {

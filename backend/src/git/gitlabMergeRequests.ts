@@ -314,6 +314,11 @@ export const gitlabMergeRequests = {
     });
   },
 
+  /** Ferme la MR sans la fusionner (réouvrable depuis GitLab). */
+  async close(t: GitlabTarget, iid: number): Promise<void> {
+    await gitlabApi(t, 'PUT', mrPath(t, iid), { state_event: 'close' });
+  },
+
   /** Commentaire (note) sur la MR ; renvoie son URL. */
   async comment(t: GitlabTarget, iid: number, body: string): Promise<string> {
     const note = await gitlabApi<{ id: number }>(t, 'POST', `${mrPath(t, iid)}/notes`, { body });

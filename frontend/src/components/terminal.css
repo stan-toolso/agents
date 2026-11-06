@@ -231,6 +231,50 @@ div.cc-chat-text:not(.cc-md) { white-space: pre-wrap; overflow-wrap: anywhere; }
 .cc-prompt .cc-rule-edit textarea { resize: vertical; white-space: pre; }
 
 /* Bas de page : ligne d'état sobre (sans filet), puis la zone de saisie en boîte arrondie. */
+/* Carte « pull request à fusionner » (components/SessionPullRequestCard.tsx) : au-dessus de la ligne d'état, ses
+   boutons envoient une instruction à la session. */
+.cc-pr-card {
+  font-family: var(--bs-font-sans-serif);
+  margin: 8px 16px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--cc-border);
+  border-left: 3px solid var(--cc-green);
+  border-radius: 8px;
+  background: var(--cc-bg-elevated);
+  box-shadow: 0 1px 3px var(--cc-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cc-pr-card-head { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.cc-pr-card-icon { color: var(--cc-green); font-size: 18px; line-height: 1.2; flex: 0 0 auto; }
+.cc-pr-card-main { flex: 1 1 auto; min-width: 0; }
+.cc-pr-card-title { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--cc-dim); }
+.cc-pr-card-kicker { text-transform: uppercase; letter-spacing: .04em; font-size: 11px; color: var(--cc-dimmer); }
+.cc-pr-card-title .cc-link { font-size: 12px; font-weight: 600; }
+.cc-pr-card-ext { color: var(--cc-dimmer); font-size: 11px; }
+.cc-pr-card-ext:hover { color: var(--cc-accent); }
+.cc-pr-card-name { color: var(--cc-fg); font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-pr-card-meta { font-size: 12px; color: var(--cc-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-pr-card-status { display: inline-flex; align-items: center; gap: 5px; }
+.cc-pr-card-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--cc-dimmer); display: inline-block; }
+.cc-pr-card-status.ok { color: var(--cc-green); }
+.cc-pr-card-status.ok .cc-pr-card-dot { background: var(--cc-green); }
+.cc-pr-card-status.warn { color: var(--cc-yellow); }
+.cc-pr-card-status.warn .cc-pr-card-dot { background: var(--cc-yellow); }
+.cc-pr-card-status.bad { color: var(--cc-red); }
+.cc-pr-card-status.bad .cc-pr-card-dot { background: var(--cc-red); }
+.cc-pr-card:has(.cc-pr-card-status.bad) { border-left-color: var(--cc-red); }
+.cc-pr-card:has(.cc-pr-card-status.bad) .cc-pr-card-icon { color: var(--cc-red); }
+.cc-pr-card-branches { color: var(--cc-dimmer); }
+.cc-pr-card-close { border: 0; background: transparent; color: var(--cc-dimmer); padding: 0 2px; cursor: pointer; font-size: 12px; }
+.cc-pr-card-close:hover { color: var(--cc-fg); }
+.cc-pr-card-actions { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 28px; }
+.cc-pr-card-actions .cc-btn { font-size: 12px; padding: 3px 10px; display: inline-flex; align-items: center; gap: 5px; }
+.cc-pr-card-actions .cc-btn.primary { background: var(--cc-accent); border-color: var(--cc-accent); color: var(--cc-accent-contrast); }
+.cc-pr-card-actions .cc-btn.primary:hover:not(:disabled) { background: var(--cc-accent-hover); border-color: var(--cc-accent-hover); }
+.cc-pr-card-actions .cc-btn.danger { margin-left: auto; }
+
 .cc-status {
   font-family: var(--bs-font-sans-serif);
   padding: 8px 16px 2px;
@@ -381,6 +425,11 @@ div.cc-chat-text:not(.cc-md) { white-space: pre-wrap; overflow-wrap: anywhere; }
   .cc-hint { padding: 0 8px 8px; justify-content: flex-end; }
   .cc-hint .cc-hint-text { display: none; }
   .cc-prompts { max-height: 75%; min-height: 160px; }
+  .cc-pr-card { margin: 6px 6px 0; padding: 8px 10px; }
+  .cc-pr-card-meta .cc-pr-card-branches { display: none; }
+  .cc-pr-card-actions { padding-left: 0; }
+  .cc-pr-card-actions .cc-btn { flex: 1 1 auto; justify-content: center; padding: 5px 8px; }
+  .cc-pr-card-actions .cc-btn.danger { margin-left: 0; }
   .cc-prompt { margin: 10px 8px; padding: 8px 10px; }
   .cc-result { margin-left: 8px; }
 }

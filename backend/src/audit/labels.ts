@@ -93,6 +93,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'pull_request.open': 'a ouvert la pull request',
   'pull_request.merge': 'a fusionné la pull request',
   'pull_request.merge_implicit': 'a fusionné la pull request avec un accord implicite (mode « Tout autoriser »)',
+  'pull_request.close': 'a fermé sans fusion la pull request',
   'pull_request.register': 'a suivi la pull request',
   'pull_request.update': 'a modifié le suivi de la pull request',
   'pull_request.untrack': 'a cessé de suivre la pull request',

@@ -28,6 +28,8 @@ vi.mock('./attachments.js', () => ({ describeAttachments: () => [], imageBlocks:
 vi.mock('../pullRequests/service.js', () => ({ trackedPullRequestService: m.prs, foreignRepoOf: (p: { repo: string }, projectRepo: string) => (p.repo && p.repo !== projectRepo ? { owner: p.repo.split('/')[0], name: p.repo.split('/')[1] } : null) }));
 vi.mock('../git/pullRequests.js', () => ({
   pullRequestService: {
+    close: async (...args: unknown[]) => void m.calls.push(['close', args]),
+    comment: async (...args: unknown[]) => (m.calls.push(['comment', args]), 'https://github.com/o/r/pull/42#c1'),
     merge: async (...args: unknown[]) => {
       m.calls.push(['merge', args]);
       return { pullRequest: { number: args[2], state: 'MERGED' }, sha: 'abcdef1234567', deletedWorksessionIds: [], completedTaskIds: [], warnings: [] };
@@ -176,10 +178,11 @@ describe('serveur MCP tasks', () => {
   it('déclare tous ses outils (schémas acceptés par le SDK), dont ceux des pull requests', async () => {
     const client = await connect();
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
-    expect(names).toEqual(['ci_status', 'claim', 'comment', 'create', 'get', 'list', 'people', 'pr_list', 'pr_merge', 'pr_open', 'pr_register', 'pr_update', 'react', 'release', 'request_approval', 'update']);
+    expect(names).toEqual(['ci_status', 'claim', 'comment', 'create', 'get', 'list', 'people', 'pr_close', 'pr_list', 'pr_merge', 'pr_open', 'pr_register', 'pr_update', 'react', 'release', 'request_approval', 'update']);
     // Tout outil libre existe ; pr_open (pousse et ouvre sur GitHub) n'est pas libre.
     for (const free of TASKS_FREE_TOOLS) expect(names).toContain(free.replace('mcp__tasks__', ''));
     expect(TASKS_FREE_TOOLS).not.toContain('mcp__tasks__pr_open');
+    expect(TASKS_FREE_TOOLS).not.toContain('mcp__tasks__pr_close');
   });
 
   it('request_approval pose une demande ou constate l’accord implicite, sans exécuter l’action', async () => {
@@ -441,5 +444,20 @@ describe('serveur MCP tasks', () => {
     expect(closed.isError).toBe(true);
     expect(asked).toBe(false);
     expect(m.calls.filter(([n]) => n === 'merge')).toHaveLength(0);
+  });
+
+  it('pr_close commente puis ferme la PR sur la forge avec le compte de la session, et refuse une PR qui n’est pas ouverte', async () => {
+    const client = await connect();
+    const r = await client.callTool({ name: 'pr_close', arguments: { id: '#42', comment: 'Plus nécessaire' } });
+    expect(r.isError).toBeFalsy();
+    expect(textOf(r)).toContain('fermée sans fusion');
+    expect(m.calls.find(([n]) => n === 'comment')?.[1]).toEqual(['p', 'u1', 42, 'Plus nécessaire', null]);
+    expect(m.calls.find(([n]) => n === 'close')?.[1]).toEqual(['p', 'u1', 42, null]);
+    expect(m.calls.find(([n]) => n === 'update')?.[1]).toEqual(['pr1', { status: 'closed' }]);
+    m.calls = [];
+    m.prs.resolve = async () => pr({ status: 'merged' });
+    const merged = await client.callTool({ name: 'pr_close', arguments: { id: 'pr1' } });
+    expect(merged.isError).toBe(true);
+    expect(m.calls.filter(([n]) => n === 'close')).toHaveLength(0);
   });
 });

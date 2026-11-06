@@ -427,6 +427,11 @@ export const forgejoPulls = {
     return (await forgejoApi<FjPull>('GET', `${repoPath(repo)}/pulls/${number}`)).merge_commit_sha ?? null;
   },
 
+  /** Ferme la PR sans la fusionner, au nom de `sudo` (réouvrable depuis Forgejo). */
+  async close(repo: { owner: string; name: string }, number: number, sudo: string | null): Promise<void> {
+    await forgejoApi('PATCH', `${repoPath(repo)}/pulls/${number}`, { state: 'closed' }, { sudo });
+  },
+
   async deleteBranch(repo: { owner: string; name: string }, branch: string): Promise<void> {
     await forgejoApi('DELETE', `${repoPath(repo)}/branches/${branch.split('/').map(encodeURIComponent).join('/')}`).catch((err) => {
       // Branche déjà supprimée : 404, ou 500 « object does not exist » selon les versions de Forgejo.
