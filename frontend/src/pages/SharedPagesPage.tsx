@@ -68,6 +68,12 @@ export default function SharedPagesPage() {
               <tr key={p.id}>
                 <td style={{ maxWidth: 420 }}>
                   <Link to={`/shared/${p.id}`}>{p.title}</Link>
+                  {p.openComments > 0 && (
+                    <Link to={`/shared/${p.id}`} className="badge rounded-pill text-bg-secondary ms-2 text-decoration-none" title={`${p.openComments} commentaire${p.openComments > 1 ? 's' : ''} à traiter`}>
+                      <i className="bi bi-chat-left-text me-1" />
+                      {p.openComments}
+                    </Link>
+                  )}
                   {p.description && <div className="small text-secondary text-truncate">{p.description}</div>}
                 </td>
                 <td className="d-none d-md-table-cell">{p.owner.id === user?.id ? 'Vous' : p.owner.name}</td>

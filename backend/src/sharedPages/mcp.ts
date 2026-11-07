@@ -6,8 +6,10 @@ import { config } from '../config.js';
 import { AppError } from '../errors.js';
 import type { Project } from '../projects/types.js';
 import type { Session } from '../sessions/types.js';
+import { userService } from '../users/service.js';
+import { sharedPageCommentService } from './commentService.js';
 import { sharedPageService } from './service.js';
-import type { SharedPage } from './types.js';
+import type { SharedPage, SharedPageComment } from './types.js';
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
 const failure = (t: string) => ({ content: [{ type: 'text' as const, text: t }], isError: true });
@@ -16,7 +18,7 @@ export const pageUrl = (id: string) => `${config.appUrl}/shared/${id}`;
 
 /** Paragraphe du prompt système décrivant les pages partagées aux agents. */
 export function sharedPagesPrompt(): string {
-  return "Pour remettre un rapport, un tableau de bord ou toute page consultable, écris un fichier HTML autonome dans le dossier de travail (styles et scripts en ligne ; scripts externes seulement depuis un CDN) et publie-le avec l'outil `pages.publish` : il renvoie un lien `/shared/<id>`, privé pour la personne qui pilote la session jusqu'à ce qu'elle l'ouvre à d'autres (`anyone_with_link`, ou le bouton Partager). Pour mettre une page à jour, publie à nouveau avec `page_id`. `pages.list` liste les pages existantes. Donne le lien dans ta réponse.";
+  return "Pour remettre un rapport, un tableau de bord ou toute page consultable, écris un fichier HTML autonome dans le dossier de travail (styles et scripts en ligne ; scripts externes seulement depuis un CDN) et publie-le avec l'outil `pages.publish` : il renvoie un lien `/shared/<id>`, privé pour la personne qui pilote la session jusqu'à ce qu'elle l'ouvre à d'autres (`anyone_with_link`, ou le bouton Partager). Pour mettre une page à jour, publie à nouveau avec `page_id`. `pages.list` liste les pages existantes. Donne le lien dans ta réponse. Les lecteurs d'une page y laissent des commentaires, généraux ou ancrés sur un élément de la page (sélecteur CSS et extrait du texte) : `pages.comments` les lit (les non traités d'abord), `pages.reply` répond dans le fil d'un commentaire, `pages.resolve` le marque traité une fois pris en compte (par exemple après avoir publié une nouvelle version).";
 }
 
 async function describeAccess(page: SharedPage): Promise<string> {
@@ -88,8 +90,56 @@ export function createSharedPagesMcpServer(ctx: SharedPagesMcpContext): McpSdkSe
           return lines.join('\n');
         }),
       ),
+      tool(
+        'comments',
+        "Commentaires laissés sur une page partagée (fil par commentaire, ancre sur un élément de la page, état traité). Par défaut, seuls les commentaires non traités.",
+        {
+          page_id: z.string().describe('Identifiant de la page'),
+          all: z.boolean().optional().describe('Inclure les commentaires traités'),
+        },
+        async ({ page_id, all }) =>
+          run(async () => {
+            const page = await sharedPageService.getFor(owner(), page_id);
+            const roots = (await sharedPageCommentService.roots(page.id)).filter((c) => all || !c.resolvedAt);
+            if (!roots.length) return all ? 'Aucun commentaire sur cette page.' : 'Aucun commentaire non traité sur cette page (all: true pour voir les traités).';
+            const out: string[] = [`${roots.length} commentaire(s) sur « ${page.title} » (v${page.version}) :`];
+            for (const c of roots) {
+              out.push(await formatComment(c, page));
+              for (const r of await sharedPageCommentService.replies(c.id)) out.push(`    ↳ ${await authorName(r)} · ${r.createdAt.toISOString()} : ${r.body.replace(/\n/g, '\n      ')}`);
+            }
+            return out.join('\n');
+          }),
+      ),
+      tool('reply', "Répond dans le fil d'un commentaire d'une page partagée, au nom du propriétaire de la session.", { comment_id: z.string(), body: z.string().describe('Texte de la réponse') }, async ({ comment_id, body }) =>
+        run(async () => {
+          const reply = await sharedPageCommentService.reply(await actor(), comment_id, body);
+          return `Réponse ${reply.id} postée sur le commentaire ${comment_id}.`;
+        }),
+      ),
+      tool('resolve', "Marque un commentaire d'une page partagée traité (ou le rouvre avec resolved: false).", { comment_id: z.string(), resolved: z.boolean().optional().describe('Défaut : true') }, async ({ comment_id, resolved }) =>
+        run(async () => {
+          const c = await sharedPageCommentService.resolve(await actor(), comment_id, resolved ?? true);
+          return c.resolvedAt ? `Commentaire ${c.id} marqué traité.` : `Commentaire ${c.id} rouvert.`;
+        }),
+      ),
     ],
   });
+
+  async function actor() {
+    return { user: await userService.get(owner()), sessionId: ctx.session.id };
+  }
+}
+
+async function authorName(c: SharedPageComment): Promise<string> {
+  const u = await userService.get(c.authorId).catch(() => null);
+  return (u?.name ?? 'quelqu’un') + (c.sessionId ? ' (agent)' : '');
+}
+
+async function formatComment(c: SharedPageComment, page: SharedPage): Promise<string> {
+  const where = c.anchor ? `sur <${c.anchor.tag ?? '?'}> \`${c.anchor.selector}\`${c.anchor.text ? ` « ${c.anchor.text} »` : ''}` : 'général';
+  const state = c.resolvedAt ? 'traité' : 'à traiter';
+  const version = c.version !== page.version ? ` · v${c.version}` : '';
+  return `- ${c.id} · ${state} · ${where}${version} · ${await authorName(c)} · ${c.createdAt.toISOString()}\n  ${c.body.replace(/\n/g, '\n  ')}`;
 }
 
 /**

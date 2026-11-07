@@ -43,3 +43,34 @@ export interface PublishInput {
   sessionId?: string | null;
   sourcePath?: string | null;
 }
+
+/** Élément de la page visé par un commentaire (choisi en cliquant dans la page). */
+export interface CommentAnchor {
+  /** Sélecteur CSS de l'élément, calculé par le script injecté dans la page. */
+  selector: string;
+  /** Extrait du texte de l'élément, pour le reconnaître dans la liste. */
+  text: string | null;
+  /** Balise de l'élément (en minuscules). */
+  tag: string | null;
+}
+
+/**
+ * Commentaire sur une page partagée : général ou ancré sur un élément. Un commentaire racine ouvre une
+ * micro-conversation (réponses avec `parentId`) et porte l'état « traité » (`resolvedAt`).
+ */
+export interface SharedPageComment {
+  id: string;
+  pageId: string;
+  parentId: string | null;
+  authorId: string;
+  /** Posté par une session d'agent. */
+  sessionId: string | null;
+  body: string;
+  anchor: CommentAnchor | null;
+  /** Version de la page au moment du commentaire. */
+  version: number;
+  resolvedAt: Date | null;
+  resolvedById: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}

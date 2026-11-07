@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { authSession, readCookie, SESSION_COOKIE } from '../auth/session.js';
 import { config } from '../config.js';
 import { AppError } from '../errors.js';
+import { INJECT_MAX_BYTES, injectCommentScript } from './inject.js';
 import { downloadName, sharedPageService } from './service.js';
 
 const ROUTE = /^\/api\/shared\/([0-9a-f-]{36})$/;
@@ -10,6 +11,8 @@ const ROUTE = /^\/api\/shared\/([0-9a-f-]{36})$/;
  * GET /api/shared/<id>[?v=N][&download=1] : contenu HTML d'une page partagée, servi dans un bac à sable
  * (CSP `sandbox` sans `allow-same-origin` : origine opaque, la page ne lit ni le stockage de l'application
  * ni son API avec le cookie). Les droits sont revérifiés à chaque chargement. Renvoie false hors route.
+ * Hors téléchargement (`download=1`) et sauf `raw=1`, le script des commentaires ancrés est injecté dans la page
+ * (voir `inject.ts`) : il dialogue avec l'application par postMessage pour pointer un élément et placer les repères.
  */
 export async function handleSharedPageRoute(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const url = new URL(req.url ?? '/', config.apiUrl);
@@ -27,7 +30,10 @@ export async function handleSharedPageRoute(req: IncomingMessage, res: ServerRes
   try {
     const page = await sharedPageService.getFor(user.id, match[1]);
     const v = url.searchParams.get('v');
-    const { html } = await sharedPageService.content(page, v ? Number(v) : null);
+    const content = await sharedPageService.content(page, v ? Number(v) : null);
+    const download = url.searchParams.get('download') === '1';
+    const raw = download || url.searchParams.get('raw') === '1' || content.html.length > INJECT_MAX_BYTES;
+    const html = raw ? content.html : Buffer.from(injectCommentScript(content.html.toString('utf8')), 'utf8');
     res.writeHead(200, {
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Length': html.length,
@@ -36,7 +42,7 @@ export async function handleSharedPageRoute(req: IncomingMessage, res: ServerRes
       'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer',
-      ...(url.searchParams.get('download') === '1' ? { 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(downloadName(page.title))}` } : {}),
+      ...(download ? { 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(downloadName(page.title))}` } : {}),
     });
     res.end(req.method === 'HEAD' ? undefined : html);
   } catch (err) {

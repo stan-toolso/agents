@@ -18,10 +18,11 @@ import { pushService, type PushSubscriptionInput } from '../notifications/push.j
 import { notificationChannelService, type ChannelInput, type ChannelPatch } from '../notifications/channels.js';
 import { smtpService, type SmtpInput } from '../notifications/smtp.js';
 import { searchService, type SearchKind } from '../search/service.js';
+import { sharedPageCommentService } from '../sharedPages/commentService.js';
 import { sharedPageService } from '../sharedPages/service.js';
 import { envFileService } from '../envFiles/service.js';
 import type { EnvFile } from '../envFiles/types.js';
-import type { SharedPage, SharedPageMember, SharedPageVersion } from '../sharedPages/types.js';
+import type { SharedPage, SharedPageComment, SharedPageMember, SharedPageVersion } from '../sharedPages/types.js';
 import { readRawFile } from '../files/service.js';
 import { fingerprint } from '../vault/ssh.js';
 import { isOauthToken, vaultService, type VaultItemWithPermission } from '../vault/service.js';
@@ -737,6 +738,15 @@ export const resolvers = {
       const members = await sharedPageService.members(p.id);
       return { owner: p.ownerId === user.id, member: members.some((m) => m.userId === user.id) };
     },
+    comments: (p: SharedPage) => sharedPageCommentService.roots(p.id),
+    openComments: (p: SharedPage) => sharedPageCommentService.countOpen(p.id),
+  },
+  SharedPageComment: {
+    author: (c: SharedPageComment, _: unknown, ctx: Ctx) => userOrNull(ctx, c.authorId),
+    viaAgent: (c: SharedPageComment) => c.sessionId != null,
+    resolved: (c: SharedPageComment) => c.resolvedAt != null,
+    resolvedBy: (c: SharedPageComment, _: unknown, ctx: Ctx) => userOrNull(ctx, c.resolvedById),
+    replies: (c: SharedPageComment) => (c.parentId ? [] : sharedPageCommentService.replies(c.id)),
   },
   SharedPageMember: {
     user: (m: SharedPageMember) => userService.get(m.userId),
@@ -2178,6 +2188,12 @@ export const resolvers = {
     addSharedPageMember: (_: unknown, args: { id: string; email: string }, ctx: Ctx) => sharedPageService.addMember(requireUser(ctx), args.id, args.email),
     removeSharedPageMember: (_: unknown, args: { id: string; userId: string }, ctx: Ctx) => sharedPageService.removeMember(requireUser(ctx), args.id, args.userId),
     deleteSharedPage: (_: unknown, args: { id: string }, ctx: Ctx) => sharedPageService.delete(requireUser(ctx).id, args.id),
+    addSharedPageComment: (_: unknown, args: { pageId: string; body: string; anchor?: unknown; version?: number | null }, ctx: Ctx) =>
+      sharedPageCommentService.add({ user: requireUser(ctx) }, args.pageId, { body: args.body, anchor: args.anchor, version: args.version }),
+    replySharedPageComment: (_: unknown, args: { commentId: string; body: string }, ctx: Ctx) => sharedPageCommentService.reply({ user: requireUser(ctx) }, args.commentId, args.body),
+    updateSharedPageComment: (_: unknown, args: { id: string; body: string }, ctx: Ctx) => sharedPageCommentService.update({ user: requireUser(ctx) }, args.id, args.body),
+    resolveSharedPageComment: (_: unknown, args: { id: string; resolved: boolean }, ctx: Ctx) => sharedPageCommentService.resolve({ user: requireUser(ctx) }, args.id, args.resolved),
+    deleteSharedPageComment: (_: unknown, args: { id: string }, ctx: Ctx) => sharedPageCommentService.delete({ user: requireUser(ctx) }, args.id),
     subscribePush: async (_: unknown, args: { input: PushSubscriptionInput }, ctx: Ctx) => {
       await pushService.subscribe(requireUser(ctx).id, args.input);
       return true;

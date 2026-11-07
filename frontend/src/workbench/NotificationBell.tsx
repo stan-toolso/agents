@@ -27,6 +27,7 @@ const icons: Record<string, string> = {
   'session.failed': 'bi-x-octagon',
   'session.created': 'bi-chat-dots',
   'page.shared': 'bi-file-earmark-richtext',
+  'page.commented': 'bi-chat-left-text',
   'claude.rate_limit': 'bi-speedometer2',
   'server.memory_low': 'bi-memory',
   'container.memory_high': 'bi-memory',

@@ -107,6 +107,31 @@ export interface SharedPage {
   session: { id: string; name: string } | null;
   sourcePath: string | null;
   viewerAccess: { owner: boolean; member: boolean };
+  /** Commentaires non traités. */
+  openComments: number;
+}
+
+/** Élément de la page visé par un commentaire (choisi en cliquant dans la page). */
+export interface SharedPageAnchor {
+  selector: string;
+  text: string | null;
+  tag: string | null;
+}
+
+/** Commentaire d'une page partagée : racine (micro-conversation avec `replies`, état traité) ou réponse. */
+export interface SharedPageComment {
+  id: string;
+  author: { id: string; name: string };
+  viaAgent: boolean;
+  body: string;
+  anchor: SharedPageAnchor | null;
+  version: number;
+  resolved: boolean;
+  resolvedBy: { id: string; name: string } | null;
+  resolvedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  replies: SharedPageComment[];
 }
 
 export const SHARED_PAGE_FIELDS = gql`
@@ -157,6 +182,97 @@ export const SHARED_PAGE_FIELDS = gql`
       owner
       member
     }
+    openComments
+  }
+`;
+
+export const SHARED_PAGE_COMMENT_FIELDS = gql`
+  fragment SharedPageCommentFields on SharedPageComment {
+    id
+    author {
+      id
+      name
+    }
+    viaAgent
+    body
+    anchor {
+      selector
+      text
+      tag
+    }
+    version
+    resolved
+    resolvedBy {
+      id
+      name
+    }
+    resolvedAt
+    createdAt
+    updatedAt
+  }
+`;
+
+/** Commentaires d'une page, avec leurs réponses (sondés à part de la page, plus souvent). */
+export const SHARED_PAGE_COMMENTS = gql`
+  ${SHARED_PAGE_COMMENT_FIELDS}
+  query SharedPageComments($id: ID!) {
+    sharedPage(id: $id) {
+      id
+      version
+      openComments
+      comments {
+        ...SharedPageCommentFields
+        replies {
+          ...SharedPageCommentFields
+        }
+      }
+    }
+  }
+`;
+
+export const ADD_SHARED_PAGE_COMMENT = gql`
+  mutation AddSharedPageComment($pageId: ID!, $body: String!, $anchor: SharedPageAnchorInput, $version: Int) {
+    addSharedPageComment(pageId: $pageId, body: $body, anchor: $anchor, version: $version) {
+      id
+    }
+  }
+`;
+
+export const REPLY_SHARED_PAGE_COMMENT = gql`
+  mutation ReplySharedPageComment($commentId: ID!, $body: String!) {
+    replySharedPageComment(commentId: $commentId, body: $body) {
+      id
+    }
+  }
+`;
+
+export const UPDATE_SHARED_PAGE_COMMENT = gql`
+  mutation UpdateSharedPageComment($id: ID!, $body: String!) {
+    updateSharedPageComment(id: $id, body: $body) {
+      id
+      body
+      updatedAt
+    }
+  }
+`;
+
+export const RESOLVE_SHARED_PAGE_COMMENT = gql`
+  mutation ResolveSharedPageComment($id: ID!, $resolved: Boolean!) {
+    resolveSharedPageComment(id: $id, resolved: $resolved) {
+      id
+      resolved
+      resolvedAt
+      resolvedBy {
+        id
+        name
+      }
+    }
+  }
+`;
+
+export const DELETE_SHARED_PAGE_COMMENT = gql`
+  mutation DeleteSharedPageComment($id: ID!) {
+    deleteSharedPageComment(id: $id)
   }
 `;
 
