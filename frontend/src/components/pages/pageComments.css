@@ -90,5 +90,22 @@
   .sp-body.picking .pc-panel { display: none; }
 }
 
+/* Saisie rapide (mobile) : en bas de l'écran, par-dessus la page, au-dessus du clavier. */
+.pc-quick {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 1050; padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  background: var(--cc-bg-elevated); border-top: 1px solid var(--cc-border); box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.18);
+  display: flex; flex-direction: column; gap: 6px; font-size: 13px;
+}
+.pc-quick-anchor { display: flex; align-items: center; gap: 6px; color: var(--cc-dim); min-width: 0; }
+.pc-quick-anchor .bi-geo-alt-fill { color: var(--cc-accent); }
+.pc-quick-row { display: flex; align-items: flex-end; gap: 6px; }
+.pc-quick-input { flex: 1; min-width: 0; resize: none; font-size: 16px; /* 16 px : iOS ne zoome pas sur le champ */ }
+.pc-quick-btn {
+  flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--cc-border); background: var(--cc-bg);
+  color: var(--cc-fg); display: inline-flex; align-items: center; justify-content: center; font-size: 18px; padding: 0; cursor: pointer;
+}
+.pc-quick-btn.send { background: var(--cc-accent); border-color: var(--cc-accent); color: #fff; }
+.pc-quick-btn.send:disabled { opacity: 0.45; cursor: default; }
+
 /* Panneau fermé : monté mais caché (les repères restent dans la page), à toutes les largeurs. */
 .pc-panel.hidden { display: none !important; }

@@ -17,6 +17,11 @@ export interface User {
   isAdmin: boolean;
   /** Super administrateur : administrateur de l'application qui administre aussi tous les projets, membre ou non. */
   isSuperAdmin: boolean;
+  /**
+   * Invité des pages partagées : invité depuis le partage d'une page, sans projet ni autre droit ; il ne voit que les
+   * pages partagées avec lui (garde graphql/security.ts). Une invitation sur un projet ou dans l'application l'efface.
+   */
+  isGuest: boolean;
   createdAt: Date;
   lastLoginAt: Date | null;
   /** Date du mot de passe en cours ; null : pas de mot de passe (l'empreinte n'est jamais chargée avec l'utilisateur). */

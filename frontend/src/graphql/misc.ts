@@ -102,7 +102,7 @@ export interface SharedPage {
   version: number;
   createdAt: string;
   updatedAt: string;
-  members: { user: { id: string; name: string; email: string }; addedBy: { id: string; name: string } | null; addedAt: string }[];
+  members: { user: { id: string; name: string; email: string; isGuest?: boolean }; addedBy: { id: string; name: string } | null; addedAt: string }[];
   versions: { version: number; size: number; createdBy: { id: string; name: string } | null; createdAt: string }[];
   project: { id: string; name: string } | null;
   session: { id: string; name: string } | null;
@@ -154,6 +154,7 @@ export const SHARED_PAGE_FIELDS = gql`
         id
         name
         email
+        isGuest
       }
       addedBy {
         id
@@ -324,8 +325,8 @@ export const UPDATE_SHARED_PAGE = gql`
 
 export const ADD_SHARED_PAGE_MEMBER = gql`
   ${SHARED_PAGE_FIELDS}
-  mutation AddSharedPageMember($id: ID!, $email: String!) {
-    addSharedPageMember(id: $id, email: $email) {
+  mutation AddSharedPageMember($id: ID!, $email: String!, $invite: Boolean) {
+    addSharedPageMember(id: $id, email: $email, invite: $invite) {
       ...SharedPageFields
     }
   }
@@ -407,6 +408,13 @@ const CHANNEL_FIELDS = gql`
     lastSentAt
     lastError
     createdAt
+  }
+`;
+
+/** Un e-mail peut-il partir (serveur SMTP configuré) ? Sert à dire si l'invitation à une page a été envoyée. */
+export const EMAIL_AVAILABLE = gql`
+  query EmailAvailable {
+    emailNotificationsAvailable
   }
 `;
 

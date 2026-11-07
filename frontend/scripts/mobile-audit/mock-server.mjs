@@ -43,6 +43,8 @@ function scalar(type, field, parentType) {
     case 'Float':
       return f.includes('cost') || f.includes('usd') ? 12.3456 : 0.5;
     case 'Boolean':
+      // Invité des pages partagées : l'interface complète est celle à auditer.
+      if (f === 'isguest') return false;
       return /exists|enabled|active|configured|connected|^is|^has|^can|visible|^ok|healthy|available|^staged/.test(f);
     case 'DateTime':
       return new Date(Date.now() - counter * 3600_000).toISOString();

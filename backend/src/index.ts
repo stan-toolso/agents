@@ -34,7 +34,7 @@ import { authSession, readCookie, SESSION_COOKIE } from './auth/session.js';
 import { config } from './config.js';
 import { captureProcessWarnings, log } from './log.js';
 import { appErrorLogPlugin, maskGraphQLError, operationTimingPlugin, yogaLogger } from './graphql/logging.js';
-import { csrfPreventionPlugin, introspectionGuardPlugin } from './graphql/security.js';
+import { csrfPreventionPlugin, guestGuardPlugin, introspectionGuardPlugin } from './graphql/security.js';
 import { isAllowedOrigin } from './origin.js';
 import { pool } from './db/pool.js';
 import { runMigrations } from './db/migrate.js';
@@ -212,7 +212,7 @@ async function main() {
     landingPage: false,
     logging: yogaLogger,
     // Prévention CSRF (requêtes « simples » d'un autre site) et introspection réservée aux utilisateurs connectés.
-    plugins: [csrfPreventionPlugin(), introspectionGuardPlugin(), appErrorLogPlugin(), operationTimingPlugin()],
+    plugins: [csrfPreventionPlugin(), introspectionGuardPlugin(), guestGuardPlugin(), appErrorLogPlugin(), operationTimingPlugin()],
     cors: (request) => {
       const origin = request.headers.get('origin');
       return isAllowedOrigin(origin) ? { origin, credentials: true } : { origin: appOrigin, credentials: true };

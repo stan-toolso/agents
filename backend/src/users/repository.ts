@@ -10,6 +10,7 @@ interface UserRow {
   google_sub: string | null;
   is_admin: boolean;
   is_super_admin: boolean;
+  guest?: boolean | null;
   created_at: Date;
   last_login_at: Date | null;
   password_set_at?: Date | null;
@@ -46,6 +47,7 @@ const toUser = (r: UserRow): User => ({
   googleSub: r.google_sub,
   isAdmin: r.is_admin,
   isSuperAdmin: Boolean(r.is_super_admin),
+  isGuest: Boolean(r.guest),
   createdAt: r.created_at,
   lastLoginAt: r.last_login_at,
   passwordSetAt: r.password_set_at ?? null,
@@ -82,11 +84,14 @@ export const userRepository = {
     return rows[0] ? toUser(rows[0]) : null;
   },
 
-  /** Crée un utilisateur « invité » (pas encore connecté), ou un agent de projet (`kind: 'agent'`, identifiant imposé). */
-  async create(input: { id?: string | null; email: string; name: string; isAdmin?: boolean; kind?: UserKind | null }): Promise<User> {
+  /**
+   * Crée un utilisateur « invité » (pas encore connecté), un invité des pages partagées (`guest`, sans aucun autre
+   * droit), ou un agent de projet (`kind: 'agent'`, identifiant imposé).
+   */
+  async create(input: { id?: string | null; email: string; name: string; isAdmin?: boolean; kind?: UserKind | null; guest?: boolean }): Promise<User> {
     const { rows } = await pool.query<UserRow>(
-      'INSERT INTO users (id, email, name, is_admin, kind) VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5) RETURNING *',
-      [input.id ?? null, input.email.toLowerCase(), input.name, Boolean(input.isAdmin), input.kind ?? 'person'],
+      'INSERT INTO users (id, email, name, is_admin, kind, guest) VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5, $6) RETURNING *',
+      [input.id ?? null, input.email.toLowerCase(), input.name, Boolean(input.isAdmin), input.kind ?? 'person', Boolean(input.guest)],
     );
     return toUser(rows[0]);
   },
@@ -287,13 +292,21 @@ export const userRepository = {
     return rows.map((r) => r.project_id);
   },
 
+  /** Ajoute ou met à jour une appartenance ; un invité des pages partagées qui entre dans un projet devient une personne ordinaire. */
   async upsertMembership(input: { projectId: string; userId: string; role: ProjectRole; invitedById?: string | null }): Promise<ProjectMember> {
+    await this.clearGuest(input.userId);
     const { rows } = await pool.query<MemberRow>(
       `INSERT INTO project_members (project_id, user_id, role, invited_by) VALUES ($1, $2, $3, $4)
        ON CONFLICT (project_id, user_id) DO UPDATE SET role = EXCLUDED.role RETURNING *`,
       [input.projectId, input.userId, input.role, input.invitedById ?? null],
     );
     return toMember(rows[0]);
+  },
+
+  /** L'invité des pages partagées devient une personne ordinaire (invitation sur un projet ou dans l'application). */
+  async clearGuest(id: string): Promise<User | null> {
+    const { rows } = await pool.query<UserRow>('UPDATE users SET guest = false WHERE id = $1 AND guest RETURNING *', [id]);
+    return rows[0] ? toUser(rows[0]) : null;
   },
 
   async removeMembership(projectId: string, userId: string): Promise<boolean> {

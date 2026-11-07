@@ -51,6 +51,7 @@ const RepoPage = lazy(() => import('./pages/RepoPage'));
 const ProjectAgentsPage = lazy(() => import('./pages/ProjectAgentsPage'));
 const AgentPage = lazy(() => import('./pages/AgentPage'));
 const SharedSessionPage = lazy(() => import('./pages/SharedSessionPage'));
+const GuestLayout = lazy(() => import('./components/GuestLayout'));
 
 /** Routes des pages ; `location` est celle de l'onglet rendu (figée pour un onglet caché). */
 function PageRoutes({ location, isAdmin }: { location: Location; isAdmin: boolean }) {
@@ -136,6 +137,13 @@ function Gate() {
     );
   }
   if (!user) return <LoginPage />;
+  // Invité des pages partagées : seulement les pages partagées avec lui, sans sidebar ni onglets.
+  if (user.isGuest)
+    return (
+      <Suspense fallback={<PageLoading />}>
+        <GuestLayout />
+      </Suspense>
+    );
   return (
     <Layout>
       <TabPages render={(location) => <PageRoutes location={location} isAdmin={user.isAdmin} />} />

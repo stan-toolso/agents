@@ -90,7 +90,7 @@ export default function LoginPage() {
         <div className="mb-4 text-center" style={{ fontSize: 28, fontWeight: 600, color: 'var(--cc-accent)' }}>
           ✻ Skipper
         </div>
-        <p className="text-secondary mb-4 text-center">Pilotage de sessions d'agents. Connectez-vous avec le compte invité sur vos projets.</p>
+        <p className="text-secondary mb-4 text-center">Pilotage de sessions d'agents. Connectez-vous avec le compte invité sur vos projets, ou celui de l'adresse avec laquelle on vous a partagé une page.</p>
         {shownError && (
           <Alert variant="warning" className="text-start py-2 small">
             {shownError}

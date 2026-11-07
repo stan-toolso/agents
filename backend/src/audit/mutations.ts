@@ -210,7 +210,7 @@ export const AUDITED: Record<string, MutationAudit> = {
   // Pages partagées : publication et ouverture à d'autres.
   publishSharedPage: { action: 'page.publish', project: 'projectId', label: (a) => a.title, details: (a) => ({ path: a.path, pageId: a.pageId }) },
   updateSharedPage: { action: 'page.update', lookup: ['shared_page', 'id'], details: (a) => ({ input: a.input }) },
-  addSharedPageMember: { action: 'page.share', lookup: ['shared_page', 'id'], details: (a) => ({ email: a.email }) },
+  addSharedPageMember: { action: 'page.share', lookup: ['shared_page', 'id'], details: (a) => ({ email: a.email, ...(a.invite ? { invite: true } : {}) }) },
   removeSharedPageMember: { action: 'page.unshare', lookup: ['shared_page', 'id'], details: (a) => ({ userId: a.userId }) },
   deleteSharedPage: { action: 'page.delete', lookup: ['shared_page', 'id'] },
   // Livraisons : la configuration du déploiement (livrer, déployer et annuler sont inscrits par deliveries/service.ts).

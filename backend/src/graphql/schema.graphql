@@ -65,6 +65,11 @@ type User {
   isAdmin: Boolean!
   "Super administrateur : administrateur de l'application qui administre aussi tous les projets, membre ou non."
   isSuperAdmin: Boolean!
+  """
+  Invité des pages partagées : invité depuis le partage d'une page, sans projet ni autre droit ; il ne voit que les
+  pages partagées avec lui. Une invitation sur un projet ou dans l'application en fait une personne ordinaire.
+  """
+  isGuest: Boolean!
   createdAt: DateTime!
   "Null tant que l'utilisateur ne s'est jamais connecté."
   lastLoginAt: DateTime
@@ -3347,7 +3352,12 @@ type Mutation {
   "Publie un fichier HTML d'un workspace comme page partagée (membres), nouvelle page ou nouvelle version (pageId)."
   publishSharedPage(projectId: ID!, worksessionId: ID, path: String!, title: String!, pageId: ID): SharedPage!
   updateSharedPage(id: ID!, input: SharedPageInput!): SharedPage!
-  addSharedPageMember(id: ID!, email: String!): SharedPage!
+  """
+  Ajoute une personne à la page (propriétaire). Une adresse sans compte Skipper est refusée (code NO_ACCOUNT), sauf avec
+  invite : un compte d'invité est créé, qui ne verra que les pages partagées avec lui (e-mail d'invitation si un
+  serveur SMTP est configuré).
+  """
+  addSharedPageMember(id: ID!, email: String!, invite: Boolean = false): SharedPage!
   "Le propriétaire retire qui il veut ; une personne ajoutée peut se retirer elle-même."
   removeSharedPageMember(id: ID!, userId: ID!): SharedPage!
   deleteSharedPage(id: ID!): Boolean!
