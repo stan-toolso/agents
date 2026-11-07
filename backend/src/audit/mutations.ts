@@ -258,6 +258,8 @@ export const NOT_AUDITED = new Set([
   'createChat', 'sendSessionMessage',
   // Fils de discussion : nominatifs par nature.
   'addTaskComment', 'toggleTaskReaction', 'updateTaskComment', 'deleteTaskComment',
+  // Commentaires des pages partagées : micro-conversations nominatives, comme les fils.
+  'addSharedPageComment', 'replySharedPageComment', 'updateSharedPageComment', 'resolveSharedPageComment', 'deleteSharedPageComment',
   'postMessage', 'updateMessage', 'deleteMessage', 'toggleMessageReaction', 'markConversationRead',
   // Git sans effet durable, synchronisations et lectures.
   'gitStage', 'gitUnstage', 'gitFetch', 'backupHostedGit', 'syncPullRequests', 'watchPullRequests',

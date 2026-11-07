@@ -44,6 +44,7 @@ const KNOWN_TYPES = [
   'workflow.failed',
   'context.created',
   'page.shared',
+  'page.commented',
   'container.memory_high',
   'container.cpu_saturated',
   'claude.rate_limit',

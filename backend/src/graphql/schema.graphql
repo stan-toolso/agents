@@ -2471,6 +2471,47 @@ type SharedPage {
   session: Session
   sourcePath: String
   viewerAccess: SharedPageViewerAccess!
+  "Commentaires racines (chacun avec ses réponses), du plus ancien au plus récent."
+  comments: [SharedPageComment!]!
+  "Nombre de commentaires non traités."
+  openComments: Int!
+}
+
+"""
+Commentaire sur une page partagée : général, ou ancré sur un élément de la page (choisi en cliquant dedans).
+Un commentaire racine est une micro-conversation (réponses) avec un état « traité ».
+"""
+type SharedPageComment {
+  id: ID!
+  author: User!
+  "Posté par une session d'agent (outil pages.reply)."
+  viaAgent: Boolean!
+  body: String!
+  "Élément de la page visé ; null pour un commentaire général (et pour une réponse)."
+  anchor: SharedPageAnchor
+  "Version de la page au moment du commentaire."
+  version: Int!
+  resolved: Boolean!
+  resolvedBy: User
+  resolvedAt: DateTime
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  "Réponses, de la plus ancienne à la plus récente (vide pour une réponse)."
+  replies: [SharedPageComment!]!
+}
+
+type SharedPageAnchor {
+  "Sélecteur CSS de l'élément dans la page."
+  selector: String!
+  "Extrait du texte de l'élément."
+  text: String
+  tag: String
+}
+
+input SharedPageAnchorInput {
+  selector: String!
+  text: String
+  tag: String
 }
 
 type SharedPageMember {
@@ -3308,6 +3349,15 @@ type Mutation {
   "Le propriétaire retire qui il veut ; une personne ajoutée peut se retirer elle-même."
   removeSharedPageMember(id: ID!, userId: ID!): SharedPage!
   deleteSharedPage(id: ID!): Boolean!
+  "Commentaire sur une page que l'on voit : général, ou ancré sur un élément (anchor). version : celle affichée (la dernière par défaut)."
+  addSharedPageComment(pageId: ID!, body: String!, anchor: SharedPageAnchorInput, version: Int): SharedPageComment!
+  replySharedPageComment(commentId: ID!, body: String!): SharedPageComment!
+  "Texte d'un commentaire ou d'une réponse (auteur seulement)."
+  updateSharedPageComment(id: ID!, body: String!): SharedPageComment!
+  "Marque un commentaire traité (ou le rouvre) : quiconque voit la page."
+  resolveSharedPageComment(id: ID!, resolved: Boolean!): SharedPageComment!
+  "Auteur ou propriétaire de la page ; un commentaire part avec ses réponses."
+  deleteSharedPageComment(id: ID!): Boolean!
   "Abonne cet appareil aux notifications push (notifications système, même application fermée)."
   subscribePush(input: PushSubscriptionInput!): Boolean!
   unsubscribePush(endpoint: String!): Boolean!

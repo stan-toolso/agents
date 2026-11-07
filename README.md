@@ -1929,6 +1929,24 @@ version ; la page est servie par `GET /api/shared/:id[?v=N][&download=1]` dans u
 `sandbox` sans `allow-same-origin` : la page ne lit ni les cookies ni l'API), l'accès étant revérifié
 à chaque chargement. Être ajouté à une page envoie une notification.
 
+La page (`pages/SharedPagePage.tsx`) a un en-tête d'une ligne : le titre (cliquer déplie les détails : propriétaire,
+accès, choix de la version, origine), **Commentaires**, **Partager** (propriétaire) et un menu « ⋯ » (copier le lien,
+ouvrir dans un onglet, télécharger, renommer, supprimer, quitter).
+
+**Commentaires** (`backend/src/sharedPages/commentService.ts`, table `shared_page_comments`,
+`components/pages/PageComments.tsx`) : toute personne qui voit la page y laisse des commentaires, **généraux** ou
+**ancrés sur un élément de la page** (« Pointer un endroit » puis un clic dans la page, comme dans un document
+partagé). Chaque commentaire est une micro-conversation (réponses) avec un état **traité** (à traiter / traités /
+tous) ; l'auteur modifie son texte, l'auteur ou le propriétaire supprime, quiconque voit la page traite ou rouvre.
+Pour pointer un élément et placer les repères numérotés, le serveur injecte dans la page servie un script en ligne
+(`sharedPages/comment-client.js`, `inject.ts` ; pas pour `download=1` ni `raw=1`) qui dialogue avec l'application
+**par `postMessage` seulement** (le cadre est en bac à sable, sans cookie ni stockage) : repères à afficher, choix
+d'un élément (sélecteur CSS, balise, extrait du texte), clic sur un repère, mise en avant d'un élément, repères
+introuvables dans la version affichée. Un commentaire garde la version de la page où il a été fait. Nouveau
+commentaire ou réponse : notification `page.commented` au propriétaire et aux participants du fil (lien
+`/shared/<id>?comment=<id>` qui ouvre le panneau dessus). Les agents lisent et répondent avec `pages.comments`,
+`pages.reply` et `pages.resolve` (outils libres), par exemple pour corriger une page et marquer les retours traités.
+
 ## Notifications
 
 Chaque notification vise soit tous les membres d'un projet, soit une personne (`notifications.user_id`).
