@@ -1,4 +1,4 @@
-import { visit, type DocumentNode } from 'graphql';
+import { Kind, visit, type DocumentNode, type FragmentDefinitionNode, type OperationDefinitionNode, type SelectionSetNode } from 'graphql';
 import { createGraphQLError, type Plugin } from 'graphql-yoga';
 import type { AuthContext } from '../auth/access.js';
 
@@ -53,6 +53,71 @@ export function introspectionGuardPlugin(): Plugin<AuthContext> {
       if (!context.user && usesIntrospection(args.document)) {
         setResultAndStopExecution({ errors: [createGraphQLError("L'introspection du schéma est réservée aux utilisateurs connectés.", { extensions: { code: 'FORBIDDEN' } })] });
       }
+    },
+  };
+}
+
+/**
+ * Champs racines permis à un invité des pages partagées (`User.isGuest`) : lui-même, les pages partagées avec lui et
+ * leurs commentaires, quitter une page, ses notifications. Tout le reste (projets, espace personnel, chats, coffre,
+ * réglages, recherche…) lui est refusé, même là où un résolveur ne vérifierait qu'une connexion : c'est une liste
+ * blanche, un nouveau champ est fermé aux invités tant qu'on ne l'ajoute pas ici.
+ */
+export const GUEST_ROOT_FIELDS: Record<'query' | 'mutation' | 'subscription', ReadonlySet<string>> = {
+  query: new Set(['me', 'costDisplay', 'sharedPage', 'sharedPages', 'notifications', 'unreadNotificationCount', '__typename']),
+  mutation: new Set([
+    'addSharedPageComment',
+    'replySharedPageComment',
+    'updateSharedPageComment',
+    'resolveSharedPageComment',
+    'deleteSharedPageComment',
+    'removeSharedPageMember',
+    'markNotificationRead',
+    'markAllNotificationsRead',
+    '__typename',
+  ]),
+  subscription: new Set(['notificationCreated']),
+};
+
+/** Champs racines de l'opération exécutée refusés à un invité (fragments au premier niveau compris). */
+export function guestForbiddenFields(document: DocumentNode, operationName?: string | null): string[] {
+  const operations = document.definitions.filter((d): d is OperationDefinitionNode => d.kind === Kind.OPERATION_DEFINITION);
+  const operation = operationName ? operations.find((o) => o.name?.value === operationName) : operations[0];
+  if (!operation) return [];
+  const fragments = new Map(document.definitions.filter((d): d is FragmentDefinitionNode => d.kind === Kind.FRAGMENT_DEFINITION).map((f) => [f.name.value, f]));
+  const allowed = GUEST_ROOT_FIELDS[operation.operation];
+  const refused: string[] = [];
+  const seen = new Set<string>();
+  const walk = (set: SelectionSetNode) => {
+    for (const sel of set.selections) {
+      if (sel.kind === Kind.FIELD) {
+        if (!allowed.has(sel.name.value)) refused.push(sel.name.value);
+      } else if (sel.kind === Kind.INLINE_FRAGMENT) walk(sel.selectionSet);
+      else if (!seen.has(sel.name.value)) {
+        seen.add(sel.name.value);
+        const fragment = fragments.get(sel.name.value);
+        if (fragment) walk(fragment.selectionSet);
+      }
+    }
+  };
+  walk(operation.selectionSet);
+  return refused;
+}
+
+/** Un invité des pages partagées n'exécute que les champs de GUEST_ROOT_FIELDS (requêtes, mutations, abonnements). */
+export function guestGuardPlugin(): Plugin<AuthContext> {
+  return {
+    onExecute({ args, setResultAndStopExecution }) {
+      const context = args.contextValue as Partial<AuthContext>;
+      if (!context.user?.isGuest) return;
+      const refused = guestForbiddenFields(args.document, args.operationName);
+      if (refused.length) setResultAndStopExecution({ errors: [createGraphQLError(`Réservé aux membres des projets (${refused.join(', ')}) : votre compte ne donne accès qu'aux pages partagées avec vous.`, { extensions: { code: 'FORBIDDEN' } })] });
+    },
+    onSubscribe({ args, setResultAndStopExecution }) {
+      const context = args.contextValue as Partial<AuthContext>;
+      if (!context.user?.isGuest) return;
+      const refused = guestForbiddenFields(args.document, args.operationName);
+      if (refused.length) setResultAndStopExecution({ errors: [createGraphQLError(`Réservé aux membres des projets (${refused.join(', ')}).`, { extensions: { code: 'FORBIDDEN' } })] });
     },
   };
 }

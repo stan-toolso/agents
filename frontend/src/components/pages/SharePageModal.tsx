@@ -1,7 +1,7 @@
-import { useMutation, useQuery } from '@apollo/client';
+import { ApolloError, useMutation, useQuery } from '@apollo/client';
 import { useState } from 'react';
 import { Alert, Button, Form, Modal, Table } from 'react-bootstrap';
-import { ADD_SHARED_PAGE_MEMBER, REMOVE_SHARED_PAGE_MEMBER, UPDATE_SHARED_PAGE, type SharedPage } from '../../graphql/misc';
+import { ADD_SHARED_PAGE_MEMBER, EMAIL_AVAILABLE, REMOVE_SHARED_PAGE_MEMBER, UPDATE_SHARED_PAGE, type SharedPage } from '../../graphql/misc';
 import { VAULT_SHARE_CANDIDATES } from '../../graphql/vault';
 import { useDialogs } from '../Dialogs';
 
@@ -13,6 +13,10 @@ export default function SharePageModal({ page, onClose }: { page: SharedPage; on
   const { data } = useQuery<{ vaultShareCandidates: { id: string; name: string; email: string }[] }>(VAULT_SHARE_CANDIDATES);
   const [email, setEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Adresse sans compte Skipper : on propose d'inviter la personne (compte limité aux pages partagées avec elle).
+  const [noAccount, setNoAccount] = useState<string | null>(null);
+  const [invitedNote, setInvitedNote] = useState<string | null>(null);
+  const { data: mail } = useQuery<{ emailNotificationsAvailable: boolean }>(EMAIL_AVAILABLE, { skip: !noAccount });
   const [copied, setCopied] = useState(false);
   const [add, { loading: adding }] = useMutation(ADD_SHARED_PAGE_MEMBER, { refetchQueries: ['SharedPage', 'SharedPages'] });
   const [remove] = useMutation(REMOVE_SHARED_PAGE_MEMBER, { refetchQueries: ['SharedPage', 'SharedPages'] });
@@ -21,12 +25,33 @@ export default function SharePageModal({ page, onClose }: { page: SharedPage; on
   const link = `${window.location.origin}/shared/${page.id}`;
   const run = async (fn: () => Promise<unknown>) => {
     setError(null);
+    setNoAccount(null);
+    setInvitedNote(null);
     try {
       await fn();
     } catch (err) {
       setError((err as Error).message);
     }
   };
+  const addEmail = (address: string, invite = false) =>
+    run(async () => {
+      try {
+        await add({ variables: { id: page.id, email: address, invite } });
+      } catch (err) {
+        if (!invite && err instanceof ApolloError && err.graphQLErrors.some((g) => g.extensions?.code === 'NO_ACCOUNT')) {
+          setNoAccount(address);
+          return;
+        }
+        throw err;
+      }
+      setEmail('');
+      if (invite)
+        setInvitedNote(
+          mail?.emailNotificationsAvailable
+            ? `${address} est invité : un e-mail lui donne le lien de la page. Il se connectera avec le compte Google de cette adresse et ne verra que les pages partagées avec lui.`
+            : `${address} est invité. Envoyez-lui le lien de la page (« Copier le lien ») : il se connectera avec le compte Google de cette adresse et ne verra que les pages partagées avec lui.`,
+        );
+    });
   return (
     <Modal show onHide={onClose} centered>
       <Modal.Header closeButton>
@@ -38,10 +63,7 @@ export default function SharePageModal({ page, onClose }: { page: SharedPage; on
           onSubmit={(e) => {
             e.preventDefault();
             if (!email.trim()) return;
-            void run(async () => {
-              await add({ variables: { id: page.id, email: email.trim() } });
-              setEmail('');
-            });
+            void addEmail(email.trim());
           }}
         >
           <Form.Control size="sm" type="email" list="share-page-candidates" placeholder="adresse@exemple.fr" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
@@ -70,6 +92,11 @@ export default function SharePageModal({ page, onClose }: { page: SharedPage; on
               <tr key={m.user.id}>
                 <td>
                   {m.user.name} <span className="text-secondary">{m.user.email}</span>
+                  {m.user.isGuest && (
+                    <span className="badge rounded-pill text-bg-secondary ms-1" title="Invité : ne voit que les pages partagées avec lui">
+                      invité
+                    </span>
+                  )}
                 </td>
                 <td className="text-secondary">ajouté le {fmtDay(m.addedAt)}</td>
                 <td className="text-end">
@@ -94,8 +121,28 @@ export default function SharePageModal({ page, onClose }: { page: SharedPage; on
             <option value="restricted">Restreint : seules les personnes ci-dessus</option>
             <option value="link">Toute personne connectée à Skipper disposant du lien</option>
           </Form.Select>
-          <Form.Text className="text-secondary">{page.linkAccess ? 'Le lien suffit à toute personne ayant un compte Skipper.' : 'Le lien ne fonctionne que pour les personnes ajoutées.'}</Form.Text>
+          <Form.Text className="text-secondary">{page.linkAccess ? 'Le lien suffit à toute personne ayant un compte Skipper (sauf les invités, qui ne voient que les pages où ils ont été ajoutés).' : 'Le lien ne fonctionne que pour les personnes ajoutées.'}</Form.Text>
         </Form.Group>
+        {noAccount && (
+          <Alert variant="info" className="mt-3 mb-0 py-2 small">
+            <div className="mb-2">
+              <strong>{noAccount}</strong> n'a pas encore de compte Skipper. Vous pouvez l'inviter : il se connectera avec le compte Google de cette adresse et ne verra que les pages partagées avec lui (aucun projet, aucun menu).
+            </div>
+            <div className="d-flex gap-2 flex-wrap">
+              <Button size="sm" disabled={adding} onClick={() => void addEmail(noAccount, true)}>
+                <i className="bi bi-envelope-plus me-1" /> Inviter et partager
+              </Button>
+              <Button size="sm" variant="outline-secondary" onClick={() => setNoAccount(null)}>
+                Annuler
+              </Button>
+            </div>
+          </Alert>
+        )}
+        {invitedNote && (
+          <Alert variant="success" className="mt-3 mb-0 py-2 small">
+            {invitedNote}
+          </Alert>
+        )}
         {error && (
           <Alert variant="danger" className="mt-3 mb-0 py-2">
             {error}

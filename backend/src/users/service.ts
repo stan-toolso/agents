@@ -32,8 +32,23 @@ export const userService = {
     if (!EMAIL_RE.test(normalized)) throw new AppError('Adresse e-mail invalide');
     const existing = await userRepository.findByEmail(normalized);
     if (existing?.kind === 'agent') throw new AppError('Cette adresse est celle d’un agent de projet : un agent ne s’invite pas');
-    if (existing) return isAdmin && !existing.isAdmin ? (await userRepository.setAdmin(existing.id, true))! : existing;
+    if (existing) {
+      const person = existing.isGuest ? ((await userRepository.clearGuest(existing.id)) ?? existing) : existing;
+      return isAdmin && !person.isAdmin ? (await userRepository.setAdmin(person.id, true))! : person;
+    }
     return userRepository.create({ email: normalized, name: nameFromEmail(normalized), isAdmin });
+  },
+
+  /**
+   * Invité des pages partagées : retrouve la personne par son e-mail, sinon crée un compte qui ne donne accès qu'aux
+   * pages partagées avec lui (aucun projet, aucun menu). Il se connecte ensuite avec le compte Google de cette adresse.
+   */
+  async findOrCreateGuest(email: string): Promise<{ user: User; created: boolean }> {
+    const normalized = email.trim().toLowerCase();
+    if (!EMAIL_RE.test(normalized)) throw new AppError('Adresse e-mail invalide');
+    const existing = await userRepository.findByEmail(normalized);
+    if (existing) return { user: existing, created: false };
+    return { user: await userRepository.create({ email: normalized, name: nameFromEmail(normalized), guest: true }), created: true };
   },
 
   async setAdmin(userId: string, isAdmin: boolean): Promise<User> {
@@ -42,12 +57,15 @@ export const userService = {
       if (user.isSuperAdmin) throw new AppError("Retirez d'abord le rôle de super administrateur");
       if (user.isAdmin && (await userRepository.countAppAdmins()).admins <= 1) throw new AppError("L'application doit garder au moins un administrateur");
     }
+    // Un invité des pages partagées promu administrateur devient une personne ordinaire.
+    if (isAdmin && user.isGuest) await userRepository.clearGuest(userId);
     return (await userRepository.setAdmin(userId, isAdmin)) ?? user;
   },
 
   async setSuperAdmin(userId: string, isSuperAdmin: boolean): Promise<User> {
     const user = await this.get(userId);
     if (!isSuperAdmin && user.isSuperAdmin && (await userRepository.countAppAdmins()).superAdmins <= 1) throw new AppError("L'application doit garder au moins un super administrateur");
+    if (isSuperAdmin && user.isGuest) await userRepository.clearGuest(userId);
     return (await userRepository.setSuperAdmin(userId, isSuperAdmin)) ?? user;
   },
 

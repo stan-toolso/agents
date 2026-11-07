@@ -1,6 +1,10 @@
 import { AppError, NotFoundError } from '../errors.js';
+import { config } from '../config.js';
+import { log } from '../log.js';
 import { notificationService } from '../notifications/service.js';
+import { smtpService } from '../notifications/smtp.js';
 import { userRepository } from '../users/repository.js';
+import { userService } from '../users/service.js';
 import type { User } from '../users/types.js';
 import { sharedPageRepository } from './repository.js';
 import type { PublishInput, SharedPage } from './types.js';
@@ -20,6 +24,35 @@ function cleanDescription(raw: string | null | undefined): string | null {
   return d || null;
 }
 
+const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+
+/** Contenu de l'e-mail d'invitation à une page partagée (pur, testé). */
+export function invitationEmail(actor: Pick<User, 'name' | 'email'>, page: Pick<SharedPage, 'id' | 'title'>, to: string, appUrl: string): { subject: string; text: string; html: string } {
+  const link = `${appUrl.replace(/\/$/, '')}/shared/${page.id}`;
+  const subject = `${actor.name} vous a partagé « ${page.title} »`;
+  const text = [
+    `${actor.name} (${actor.email}) a partagé une page avec vous sur Skipper : « ${page.title} ».`,
+    '',
+    `Ouvrez-la ici : ${link}`,
+    '',
+    `Connectez-vous avec le compte Google de l'adresse ${to}. Vous ne verrez que les pages partagées avec vous, et pourrez y laisser des commentaires.`,
+  ].join('\n');
+  const html = `<p>${escapeHtml(actor.name)} (${escapeHtml(actor.email)}) a partagé une page avec vous sur Skipper : <strong>${escapeHtml(page.title)}</strong>.</p>
+<p><a href="${escapeHtml(link)}">Ouvrir la page</a></p>
+<p style="color:#666">Connectez-vous avec le compte Google de l'adresse ${escapeHtml(to)}. Vous ne verrez que les pages partagées avec vous, et pourrez y laisser des commentaires.</p>`;
+  return { subject, text, html };
+}
+
+/** E-mail d'invitation, si un serveur SMTP est configuré ; un échec est journalisé (le lien reste à envoyer à la main). */
+async function sendInvitation(actor: User, page: SharedPage, user: User): Promise<void> {
+  try {
+    if (!(await smtpService.configured())) return;
+    await smtpService.send({ to: user.email, ...invitationEmail(actor, page, user.email, config.appUrl) });
+  } catch (err) {
+    log.warn(`[pages] e-mail d'invitation à ${user.email} : ${(err as Error).message}`);
+  }
+}
+
 /** Nom de fichier sûr pour un téléchargement. */
 export const downloadName = (title: string) => `${title.replace(/[^\p{L}\p{N} _.-]/gu, '').trim().slice(0, 80) || 'page'}.html`;
 
@@ -30,16 +63,20 @@ export const sharedPageService = {
     return page;
   },
 
-  /** Peut-on voir la page ? Propriétaire, lien ouvert, ou membre. */
-  async canView(page: SharedPage, userId: string): Promise<boolean> {
-    if (page.ownerId === userId || page.linkAccess) return true;
+  /**
+   * Peut-on voir la page ? Propriétaire, lien ouvert, ou membre. Le lien ouvert vaut pour les personnes de Skipper,
+   * pas pour un invité des pages partagées (`guest`) : lui ne voit que les pages où il a été ajouté.
+   */
+  async canView(page: SharedPage, userId: string, guest = false): Promise<boolean> {
+    if (page.ownerId === userId || (page.linkAccess && !guest)) return true;
     return sharedPageRepository.isMember(page.id, userId);
   },
 
   /** Page visible par la personne ; sinon « introuvable » (l'existence n'est pas révélée). */
   async getFor(userId: string, id: string): Promise<SharedPage> {
     const page = await this.get(id);
-    if (!(await this.canView(page, userId))) throw new NotFoundError('Page partagée introuvable, ou non partagée avec vous');
+    const guest = page.linkAccess && page.ownerId !== userId ? Boolean((await userRepository.findById(userId))?.isGuest) : false;
+    if (!(await this.canView(page, userId, guest))) throw new NotFoundError('Page partagée introuvable, ou non partagée avec vous');
     return page;
   },
 
@@ -111,13 +148,27 @@ export const sharedPageService = {
     return (await sharedPageRepository.update(id, patch)) ?? this.get(id);
   },
 
-  async addMember(actor: User, id: string, email: string): Promise<SharedPage> {
+  /**
+   * Ajoute une personne à la page. Une adresse sans compte Skipper est refusée (code NO_ACCOUNT), sauf avec `invite` :
+   * un compte d'invité des pages partagées est alors créé (il ne verra que les pages partagées avec lui) et, si un
+   * serveur SMTP est configuré, un e-mail d'invitation lui donne le lien.
+   */
+  async addMember(actor: User, id: string, email: string, opts: { invite?: boolean } = {}): Promise<SharedPage> {
     const page = await this.getOwned(actor.id, id);
-    const user = await userRepository.findByEmail(email.trim().toLowerCase());
-    if (!user) throw new AppError(`Aucun compte Skipper pour ${email.trim()} : seules les personnes qui peuvent se connecter peuvent être ajoutées`);
+    const address = email.trim().toLowerCase();
+    let user = await userRepository.findByEmail(address);
+    let invited = false;
+    if (!user) {
+      if (!opts.invite) throw new AppError(`Aucun compte Skipper pour ${email.trim()} : invitez cette personne pour qu'elle puisse se connecter et voir la page`, 'NO_ACCOUNT');
+      if (actor.isGuest) throw new AppError('Un invité ne peut pas inviter de nouvelles personnes', 'FORBIDDEN');
+      ({ user, created: invited } = await userService.findOrCreateGuest(address));
+    }
+    if (user.kind === 'agent') throw new AppError("Cette adresse est celle d'un agent de projet : une page se partage avec des personnes");
     if (user.id === page.ownerId) throw new AppError('Le propriétaire voit toujours la page');
     if (await sharedPageRepository.addMember(id, user.id, actor.id)) {
       void notificationService.notify({ type: 'page.shared', title: `${actor.name} a partagé une page avec vous`, message: page.title, link: `/shared/${page.id}`, userId: user.id, payload: { pageId: page.id } });
+      // Jamais connecté : la cloche ne l'atteint pas, l'e-mail (s'il est possible) lui apporte le lien.
+      if (invited || !user.lastLoginAt) void sendInvitation(actor, page, user);
     }
     return page;
   },

@@ -110,6 +110,8 @@ export interface User {
   avatarUrl: string | null;
   isAdmin: boolean;
   isSuperAdmin: boolean;
+  /** Invité des pages partagées : ne voit que les pages partagées avec lui (aucun projet, aucun menu). */
+  isGuest?: boolean;
   createdAt: string;
   lastLoginAt: string | null;
 }
@@ -603,6 +605,7 @@ export const USER_FIELDS = gql`
     avatarUrl
     isAdmin
     isSuperAdmin
+    isGuest
     createdAt
     lastLoginAt
   }

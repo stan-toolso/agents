@@ -1953,6 +1953,19 @@ l'agent » dans le panneau) et/ou une demande libre (« Demander une mise à jou
 La session est relancée, ou restaurée si elle était archivée ; l'agent modifie le fichier HTML, republie avec
 `pages.publish` (`page_id`) puis marque les commentaires traités avec `pages.resolve`.
 
+**Invités des pages** (`users.guest`, `User.isGuest`) : partager une page avec une adresse qui n'a pas de compte
+Skipper propose de l'**inviter** (« Inviter et partager », `addSharedPageMember(invite: true)` ; sans `invite`,
+l'erreur `NO_ACCOUNT`). Un compte d'invité est créé : la personne se connecte avec le compte Google de cette adresse
+et ne voit **que les pages où elle a été ajoutée** (pas celles ouvertes « à toute personne avec le lien »), qu'elle lit
+et commente. Ni projet, ni espace personnel, ni chat, ni coffre, ni réglage : le serveur n'exécute pour elle que les
+champs racines de la liste blanche `GUEST_ROOT_FIELDS` (`backend/src/graphql/security.ts`, plugin `guestGuardPlugin`
+; un nouveau champ lui est fermé tant qu'on ne l'y ajoute pas), et les routes HTTP hors projet la refusent (compte
+Google du coffre, forge). Le frontend lui donne une interface réduite (`components/GuestLayout.tsx` : la liste
+« Pages partagées avec vous », la page ouverte, la déconnexion). Si un serveur SMTP est configuré, un e-mail
+d'invitation lui donne le lien ; sinon le propriétaire le lui envoie (« Copier le lien »). L'inviter sur un projet,
+dans l'application ou le passer administrateur en fait une personne ordinaire. La page Utilisateurs marque ces
+comptes « invité des pages ».
+
 ## Notifications
 
 Chaque notification vise soit tous les membres d'un projet, soit une personne (`notifications.user_id`).

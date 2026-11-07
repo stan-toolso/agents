@@ -2186,7 +2186,7 @@ export const resolvers = {
       return sharedPageService.publish({ ownerId: requireUser(ctx).id, title: args.title, html: file.data, pageId: args.pageId ?? null, projectId: args.projectId, sourcePath: args.path });
     },
     updateSharedPage: (_: unknown, args: { id: string; input: { title?: string | null; description?: string | null; linkAccess?: boolean | null } }, ctx: Ctx) => sharedPageService.update(requireUser(ctx).id, args.id, args.input),
-    addSharedPageMember: (_: unknown, args: { id: string; email: string }, ctx: Ctx) => sharedPageService.addMember(requireUser(ctx), args.id, args.email),
+    addSharedPageMember: (_: unknown, args: { id: string; email: string; invite?: boolean | null }, ctx: Ctx) => sharedPageService.addMember(requireUser(ctx), args.id, args.email, { invite: Boolean(args.invite) }),
     removeSharedPageMember: (_: unknown, args: { id: string; userId: string }, ctx: Ctx) => sharedPageService.removeMember(requireUser(ctx), args.id, args.userId),
     deleteSharedPage: (_: unknown, args: { id: string }, ctx: Ctx) => sharedPageService.delete(requireUser(ctx).id, args.id),
     addSharedPageComment: (_: unknown, args: { pageId: string; body: string; anchor?: unknown; version?: number | null }, ctx: Ctx) =>
