@@ -6,6 +6,7 @@ import { projectService } from '../projects/service.js';
 import { slugify } from '../projects/slug.js';
 import { isPersonalProject } from '../projects/types.js';
 import { scheduleService } from '../schedules/service.js';
+import { scheduleRepository } from '../schedules/repository.js';
 import { sessionRepository } from '../sessions/repository.js';
 import { sessionService } from '../sessions/service.js';
 import type { AttachmentInput, Session } from '../sessions/types.js';
@@ -194,7 +195,12 @@ export const agentService = {
     return t;
   },
 
-  /** Actions validées, clés uniques, identifiants des sessions planifiées repris des actions existantes de même clé. */
+  /** Planification d'une action existante (et sa référence d'avant la refonte, résolue à la synchronisation). */
+  scheduleRefOf(a: AgentAction | undefined): Pick<AgentAction, 'scheduleId' | 'scheduleSessionId'> {
+    return { scheduleId: a?.scheduleId ?? null, ...(a?.scheduleSessionId ? { scheduleSessionId: a.scheduleSessionId } : {}) };
+  },
+
+  /** Actions validées, clés uniques, planifications reprises des actions existantes de même clé. */
   prepareActions(inputs: AgentActionInput[], existing: AgentAction[]): AgentAction[] {
     if (inputs.length > ACTION_MAX) throw new AppError(`Au plus ${ACTION_MAX} actions par agent`);
     const taken = new Set<string>();
@@ -204,7 +210,7 @@ export const agentService = {
       if (!label) throw new AppError('Chaque action a un libellé');
       if (!instruction) throw new AppError(`L'action « ${label} » n'a pas d'instruction`);
       const key = actionKey(a, taken);
-      return { key, label: label.slice(0, 80), instruction, cron: a.cron?.trim() || null, timezone: a.timezone?.trim() || null, scheduleSessionId: existing.find((e) => e.key === key)?.scheduleSessionId ?? null };
+      return { key, label: label.slice(0, 80), instruction, cron: a.cron?.trim() || null, timezone: a.timezone?.trim() || null, ...this.scheduleRefOf(existing.find((e) => e.key === key)) };
     });
   },
 
@@ -242,19 +248,20 @@ export const agentService = {
     const agent = await this.get(id);
     const updated = await agentRepository.update(id, { enabled });
     for (const a of agent.actions) {
-      if (a.scheduleSessionId) await scheduleService.setEnabled(a.scheduleSessionId, enabled && Boolean(a.cron)).catch(() => undefined);
+      const scheduleId = await this.actionScheduleId(a);
+      if (scheduleId) await scheduleService.setEnabled(scheduleId, enabled && Boolean(a.cron)).catch(() => undefined);
     }
     return updated ?? agent;
   },
 
   /**
-   * Retire l'agent du projet : profil archivé, appartenance retirée, sessions planifiées de ses actions supprimées.
+   * Retire l'agent du projet : profil archivé, appartenance retirée, planifications de ses actions supprimées.
    * L'utilisateur et ses sessions restent (historique, coûts) ; il ne réagit plus à rien et ne se mentionne plus.
    */
   async remove(id: string): Promise<boolean> {
     const agent = await this.get(id);
-    for (const a of agent.actions) if (a.scheduleSessionId) await this.dropActionSchedule(a.scheduleSessionId);
-    await agentRepository.update(id, { archivedAt: new Date(), enabled: false, actions: agent.actions.map((a) => ({ ...a, scheduleSessionId: null })) });
+    for (const a of agent.actions) await this.dropActionSchedule(await this.actionScheduleId(a));
+    await agentRepository.update(id, { archivedAt: new Date(), enabled: false, actions: agent.actions.map(({ scheduleSessionId: _legacy, ...a }) => ({ ...a, scheduleId: null })) });
     await userRepository.removeMembership(agent.projectId, agent.id);
     return true;
   },
@@ -592,42 +599,53 @@ export const agentService = {
 
   // ---- Actions planifiées ----------------------------------------------------------------------
 
-  /** Une session planifiée par action à `cron` (créée, mise à jour, supprimée) ; l'agent en est le propriétaire. */
+  /** Planification d'une action : la sienne, ou celle que portait sa session d'avant la refonte des planifications. */
+  async actionScheduleId(a: AgentAction): Promise<string | null> {
+    if (a.scheduleId) return a.scheduleId;
+    if (!a.scheduleSessionId) return null;
+    return (await scheduleRepository.findByLegacySession(a.scheduleSessionId))?.id ?? null;
+  },
+
+  /** Une planification par action à `cron` (créée, mise à jour, supprimée) ; l'agent est le propriétaire de ses exécutions. */
   async syncActionSchedules(agent: Agent, previous: AgentAction[] = agent.actions): Promise<void> {
-    const actions = [...agent.actions];
+    const actions: AgentAction[] = [];
     let changed = false;
     for (const prev of previous) {
-      if (prev.scheduleSessionId && !actions.some((a) => a.key === prev.key)) await this.dropActionSchedule(prev.scheduleSessionId);
+      if (!agent.actions.some((a) => a.key === prev.key)) await this.dropActionSchedule(await this.actionScheduleId(prev));
     }
-    for (const action of actions) {
+    for (const current of agent.actions) {
+      const { scheduleSessionId: legacy, ...action } = current;
+      const known = await this.actionScheduleId(current);
+      if (legacy || known !== action.scheduleId) changed = true;
+      action.scheduleId = known;
       const name = `${agent.name} · ${action.label}`.slice(0, 120);
       if (action.cron) {
         try {
-          if (action.scheduleSessionId && (await sessionRepository.findById(action.scheduleSessionId))) {
-            await scheduleService.set(action.scheduleSessionId, { name, cron: action.cron, timezone: action.timezone, prompt: action.instruction, enabled: agent.enabled });
-            continue;
+          if (action.scheduleId && (await scheduleService.get(action.scheduleId))) {
+            await scheduleService.update(action.scheduleId, { name, cron: action.cron, timezone: action.timezone, prompt: action.instruction, enabled: agent.enabled });
+          } else {
+            const schedule = await scheduleService.create(
+              { projectId: agent.projectId, name, cron: action.cron, timezone: action.timezone, prompt: action.instruction, enabled: agent.enabled, provider: this.providerOf(agent), config: this.sessionConfig(agent, null) },
+              { ownerId: agent.id },
+            );
+            action.scheduleId = schedule.id;
+            changed = true;
           }
-          const session = await scheduleService.createWithSession(
-            { projectId: agent.projectId, name, cron: action.cron, timezone: action.timezone, prompt: action.instruction, enabled: agent.enabled, provider: this.providerOf(agent), config: this.sessionConfig(agent, null) },
-            agent.id,
-          );
-          action.scheduleSessionId = session.id;
-          changed = true;
         } catch (err) {
           throw new AppError(`Action « ${action.label} » : ${(err as Error).message}`);
         }
-      } else if (action.scheduleSessionId) {
-        await this.dropActionSchedule(action.scheduleSessionId);
-        action.scheduleSessionId = null;
+      } else if (action.scheduleId) {
+        await this.dropActionSchedule(action.scheduleId);
+        action.scheduleId = null;
         changed = true;
       }
+      actions.push(action);
     }
     if (changed) await agentRepository.update(agent.id, { actions });
   },
 
-  async dropActionSchedule(sessionId: string): Promise<void> {
-    await scheduleService.remove(sessionId).catch(() => undefined);
-    await sessionService.archive(sessionId).catch(() => undefined);
+  async dropActionSchedule(scheduleId: string | null): Promise<void> {
+    if (scheduleId) await scheduleService.remove(scheduleId).catch(() => undefined);
   },
 
   // ---- Activité ---------------------------------------------------------------------------------

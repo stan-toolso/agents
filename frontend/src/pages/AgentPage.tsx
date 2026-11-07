@@ -321,10 +321,10 @@ function ProfileForm({ agent }: { agent: Agent }) {
                       <Form.Control size="sm" value={a.timezone ?? ''} onChange={(e) => setAction(i, { timezone: e.target.value })} placeholder="Fuseau (Europe/Paris)" />
                     </Col>
                   </Row>
-                  {agent.actions.find((x) => x.key === a.key)?.scheduleSession && (
+                  {agent.actions.find((x) => x.key === a.key)?.schedule && (
                     <div className="small text-secondary mt-1">
                       <i className="bi bi-alarm me-1" />
-                      Planifiée : <Link to={`/sessions/${agent.actions.find((x) => x.key === a.key)!.scheduleSession!.id}`}>{agent.actions.find((x) => x.key === a.key)!.scheduleSession!.name}</Link>
+                      Planifiée : <Link to={`/projects/${agent.actions.find((x) => x.key === a.key)!.schedule!.project.id}/schedules?edit=${agent.actions.find((x) => x.key === a.key)!.schedule!.id}`}>{agent.actions.find((x) => x.key === a.key)!.schedule!.name}</Link>
                     </div>
                   )}
                 </div>

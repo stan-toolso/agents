@@ -44,7 +44,8 @@ const normalizeAction = (a: Partial<AgentAction>): AgentAction => ({
   instruction: String(a.instruction ?? ''),
   cron: a.cron?.trim() || null,
   timezone: a.timezone?.trim() || null,
-  scheduleSessionId: a.scheduleSessionId ?? null,
+  scheduleId: a.scheduleId ?? null,
+  ...(a.scheduleSessionId ? { scheduleSessionId: a.scheduleSessionId } : {}),
 });
 
 const toAgent = (r: Row): Agent => ({

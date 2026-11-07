@@ -1,7 +1,7 @@
 import { useMutation } from '@apollo/client';
 import { useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
-import { END_SESSION, HAND_BACK_SESSION, INTERRUPT_SESSION, TAKE_OVER_SESSION, RESUME_SESSION, RUN_SESSION_SCHEDULE_NOW, STOP_SESSION, type ChildSession, type Session } from '../graphql/operations';
+import { Link, useNavigate } from 'react-router-dom';
+import { END_SESSION, HAND_BACK_SESSION, INTERRUPT_SESSION, TAKE_OVER_SESSION, RESUME_SESSION, RUN_SCHEDULE_NOW, STOP_SESSION, type ChildSession, type Session } from '../graphql/operations';
 import { UNARCHIVE_SESSION } from '../graphql/sessions';
 import { sessionStateHint, sessionStatusLabels } from '../lib/humanize';
 import { sessionDotClass } from '../workbench/WorkspaceTabs';
@@ -34,7 +34,8 @@ export function useSessionActions(session: ControlledSession | null | undefined)
   const [resumeSession, { loading: resuming }] = useMutation(RESUME_SESSION, { onError });
   const [endSession] = useMutation(END_SESSION, { onError });
   const [stopSession] = useMutation(STOP_SESSION, { onError });
-  const [runScheduleNow] = useMutation(RUN_SESSION_SCHEDULE_NOW, { onError });
+  const [runScheduleNow] = useMutation<{ runScheduleNow: { id: string } | null }>(RUN_SCHEDULE_NOW, { onError, refetchQueries: ['Sidebar'] });
+  const navigate = useNavigate();
   const [unarchiveSession] = useMutation(UNARCHIVE_SESSION, { refetchQueries: ['Sidebar'], onError });
   const { archiveSession, deleteSession } = useDeletions();
   const [scheduling, setScheduling] = useState(false);
@@ -87,12 +88,17 @@ export function useSessionActions(session: ControlledSession | null | undefined)
         </button>
       ))}
       {!chat && (
-        <button type="button" className="cc-btn" title={schedule ? 'Modifier la planification de cette session' : 'Relancer cette session à intervalles réguliers avec une instruction'} onClick={openSchedule}>
+        <button type="button" className="cc-btn" title={schedule ? `Session lancée par la planification « ${schedule.name} » : la modifier` : 'Créer une planification qui lance à heures fixes une nouvelle session avec les réglages de celle-ci'} onClick={openSchedule}>
           <i className="bi bi-alarm" /> {schedule ? (schedule.enabled ? 'Planification' : 'Planification (en pause)') : 'Planifier'}
         </button>
       )}
       {schedule && !busy && (
-        <button type="button" className="cc-btn" title="Exécute la planification maintenant, sans attendre l'échéance" onClick={() => runScheduleNow({ variables: { id } })}>
+        <button
+          type="button"
+          className="cc-btn"
+          title="Lance une nouvelle exécution de la planification, dans une nouvelle session"
+          onClick={() => void runScheduleNow({ variables: { id: schedule.id } }).then((res) => res.data?.runScheduleNow && navigate(`/sessions/${res.data.runScheduleNow.id}`))}
+        >
           Exécuter maintenant
         </button>
       )}
@@ -160,7 +166,16 @@ export function useSessionActions(session: ControlledSession | null | undefined)
   );
   const modals = (
     <>
-      {scheduling && <ScheduleModal session={session} onClose={() => setScheduling(false)} />}
+      {scheduling &&
+        (schedule ? (
+          <ScheduleModal schedule={schedule} onClose={() => setScheduling(false)} />
+        ) : (
+          <ScheduleModal
+            projects={[{ id: session.project.id, name: session.project.name }]}
+            defaults={{ projectId: session.project.id, provider: session.provider, config: session.config, prompt: session.prompt ?? '', name: session.name }}
+            onClose={() => setScheduling(false)}
+          />
+        ))}
       {settingsOpen && <SessionSettingsModal session={session} focus={settingsOpen === 'context' ? 'context' : undefined} onClose={() => setSettingsOpen(false)} />}
       {resumingWith && (
         <ResumeSessionModal

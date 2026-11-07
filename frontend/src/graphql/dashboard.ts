@@ -13,14 +13,14 @@ export interface ProjectTeamMember {
 }
 
 export interface ProjectSchedule {
-  sessionId: string;
+  id: string;
   name: string;
   cron: string;
   enabled: boolean;
   nextRunAt: string | null;
   lastRunAt: string | null;
   lastResult: string | null;
-  session: { id: string; name: string; owner: { id: string; name: string } | null };
+  owner: { id: string; name: string } | null;
 }
 
 export interface ProjectDashboard {
@@ -134,20 +134,16 @@ export const PROJECT_DASHBOARD = gql`
         ...TaskFields
       }
       schedules {
-        sessionId
+        id
         name
         cron
         enabled
         nextRunAt
         lastRunAt
         lastResult
-        session {
+        owner {
           id
           name
-          owner {
-            id
-            name
-          }
         }
       }
       general {

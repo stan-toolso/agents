@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { WorkspaceIndex, attachedElsewhere, ownerGroups, sessionGroups, sessionTree, subagentsSummary } from './workspaces';
+import { WorkspaceIndex, attachedElsewhere, ownerGroups, runLabel, scheduleGroups, sessionGroups, sessionTree, subagentsSummary } from './workspaces';
 
 const s = (id: string, parent: string | null = null) => ({ id, name: `Session ${id}`, parentSession: parent ? { id: parent } : null });
 
@@ -163,5 +163,25 @@ describe('ownerGroups', () => {
   it('fait passer devant les groupes qui attendent une réponse ou travaillent', () => {
     const { groups } = ownerGroups([ws('c1', 'a1'), ws('x1', 'u2', { status: 'RUNNING', activity: 'BUSY' })], 'me');
     expect(groups.map((g) => g.key)).toEqual(['u2', 'a1']);
+  });
+});
+
+describe('scheduleGroups', () => {
+  const revue = { id: 'sc1', name: 'Revue des bases', enabled: true };
+  const ws = (key: string, schedule: typeof revue | null) => ({ key, session: { schedule } });
+
+  it('range sous leur planification les sessions qu’elle a lancées, dans l’ordre reçu, et laisse le reste', () => {
+    const { rest, groups } = scheduleGroups([ws('a', null), ws('r2', revue), ws('b', null), ws('r1', revue), ws('x', { id: 'sc2', name: 'Autre', enabled: false })]);
+    expect(rest.map((w) => w.key)).toEqual(['a', 'b']);
+    expect(groups.map((g) => [g.key, g.schedule.name, g.items.map((w) => w.key)])).toEqual([
+      ['sc1', 'Revue des bases', ['r2', 'r1']],
+      ['sc2', 'Autre', ['x']],
+    ]);
+  });
+
+  it('runLabel : ne garde que la date quand la session porte le nom de sa planification', () => {
+    expect(runLabel('Revue des bases · 07/11 12:35', 'Revue des bases')).toBe('07/11 12:35');
+    expect(runLabel('Renommée à la main', 'Revue des bases')).toBe('Renommée à la main');
+    expect(runLabel('Revue des bases · ', 'Revue des bases')).toBe('Revue des bases · ');
   });
 });

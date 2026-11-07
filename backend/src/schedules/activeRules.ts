@@ -24,7 +24,8 @@ export async function activeScheduleRules(sessionId: string): Promise<string[] |
   return rules;
 }
 
-/** Oublie le cache d'une session (planification modifiée, exécution ouverte ou close). */
-export function forgetScheduleRules(sessionId: string): void {
-  cache.delete(sessionId);
+/** Oublie le cache d'une session (exécution ouverte ou close) ; null : de toutes (planification modifiée). */
+export function forgetScheduleRules(sessionId: string | null): void {
+  if (sessionId === null) cache.clear();
+  else cache.delete(sessionId);
 }

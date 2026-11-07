@@ -44,8 +44,8 @@ export interface SidebarSession {
   agent?: { id: string; name: string; avatar: { emoji: string | null; color: string | null } } | null;
   /** Session d'agent qui a lancé celle-ci (outil MCP sessions.create) ; null pour une session lancée par un humain. */
   parentSession: { id: string } | null;
-  /** Planification de la session (pictogramme d'alarme dans la sidebar). */
-  schedule?: { sessionId: string; name: string; enabled: boolean } | null;
+  /** Planification qui a lancé la session (session d'une exécution) : la sidebar la range sous la ligne de sa planification. */
+  schedule?: { id: string; name: string; enabled: boolean } | null;
   /** Dossier de travail ; null pour une session d'avant les work sessions (checkout principal) ou dont le dossier a été supprimé. */
   worksession?: SidebarWorksession | null;
 }
@@ -356,4 +356,37 @@ export function ownerGroups<T extends { session: Pick<SidebarSession, 'owner' | 
   };
   const groups = [...byOwner.values()].sort((a, b) => rank(a) - rank(b) || (a.agent?.name ?? a.owner.name).localeCompare(b.agent?.name ?? b.owner.name, 'fr'));
   return { mine, groups };
+}
+
+/** Planification et les dossiers des sessions qu'elle a lancées (une ligne dans la sidebar, ses exécutions dessous). */
+export interface ScheduleGroup<T> {
+  key: string;
+  schedule: { id: string; name: string; enabled: boolean };
+  items: T[];
+}
+
+/**
+ * Range sous leur planification les dossiers des sessions qu'elle a lancées (sessions d'exécution) : une seule ligne
+ * par planification, ses exécutions dessous, la plus récente d'abord (ordre de la liste reçue). Le reste est rendu tel quel.
+ */
+export function scheduleGroups<T extends { session: Pick<SidebarSession, 'schedule'> | null }>(items: T[]): { rest: T[]; groups: ScheduleGroup<T>[] } {
+  const rest: T[] = [];
+  const byId = new Map<string, ScheduleGroup<T>>();
+  for (const item of items) {
+    const schedule = item.session?.schedule;
+    if (!schedule) {
+      rest.push(item);
+      continue;
+    }
+    const group = byId.get(schedule.id) ?? { key: schedule.id, schedule, items: [] };
+    group.items.push(item);
+    byId.set(schedule.id, group);
+  }
+  return { rest, groups: [...byId.values()] };
+}
+
+/** Nom d'une session d'exécution sous la ligne de sa planification : « Revue · 07/11 12:35 » devient « 07/11 12:35 ». */
+export function runLabel(sessionName: string, scheduleName: string): string {
+  const prefix = `${scheduleName} · `;
+  return sessionName.startsWith(prefix) && sessionName.length > prefix.length ? sessionName.slice(prefix.length) : sessionName;
 }

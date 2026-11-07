@@ -21,7 +21,7 @@ import AddMenu from './AddMenu';
 import { useDeletions } from './useDeletions';
 import { useTabs } from './TabsContext';
 import { SubagentsCount, initialsOf, sessionDotClass } from './WorkspaceTabs';
-import { attachedElsewhere, mineFirst, openItemsOf, ownerGroups, participates, sessionGroups, subagentsSummary, workspaceState, type SessionNode, type SidebarProject, type SidebarSession, type OwnerGroup, type SidebarTerminal, type Workspace } from './workspaces';
+import { attachedElsewhere, mineFirst, openItemsOf, ownerGroups, participates, runLabel, scheduleGroups, sessionGroups, subagentsSummary, workspaceState, type ScheduleGroup, type SessionNode, type SidebarProject, type SidebarSession, type OwnerGroup, type SidebarTerminal, type Workspace } from './workspaces';
 
 const EXPANDED_KEY = 'skipper.workbench.expanded';
 const FILTER_KEY = 'skipper.workbench.sessionFilter';
@@ -319,6 +319,63 @@ function OwnerGroupRow({ group, expanded, onToggle }: { group: OwnerGroup<Worksp
   );
 }
 
+/**
+ * Ligne d'une planification : les sessions de ses exécutions s'affichent dessous (dépliée par défaut). Un clic replie
+ * ou déplie ; le menu ouvre la planification (réglages, historique, « Exécuter maintenant »).
+ */
+function ScheduleGroupRow({ group, projectId, expanded, onToggle }: { group: ScheduleGroup<Workspace>; projectId: string; expanded: boolean; onToggle: () => void }) {
+  const [menu, setMenu] = useState(false);
+  const sessions = group.items.map((ws) => ws.session!);
+  const sum = subagentsSummary(sessions);
+  const count = `${sessions.length} exécution${sessions.length > 1 ? 's' : ''}`;
+  const items: MenuItem[] = [
+    { label: 'Modifier la planification', icon: 'bi-pencil', to: `/projects/${projectId}/schedules?edit=${group.schedule.id}` },
+    { label: 'Planifications du projet', icon: 'bi-alarm', to: `/projects/${projectId}/schedules` },
+  ];
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className={`wb-row wb-row-btn wb-schedule-group${expanded ? ' open' : ''}`}
+      style={{ paddingLeft: 18 }}
+      title={`Planification « ${group.schedule.name} »${group.schedule.enabled ? '' : ' (en pause)'} · ${count} dans la sidebar · cliquer pour ${expanded ? 'replier' : 'déplier'}`}
+      onClick={onToggle}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onToggle();
+        }
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setMenu(true);
+      }}
+    >
+      <ScheduleIcon schedule={group.schedule} />
+      <span className="wb-row-label">{group.schedule.name}</span>
+      {sum.state && <span className={`wb-dot ${sum.state}`} />}
+      {sum.pending > 0 ? <span className="wb-badge">{sum.pending}</span> : sessions.length > 1 && <span className="wb-state">{sessions.length}</span>}
+      <i className={`bi bi-chevron-${expanded ? 'down' : 'right'} wb-subagents-chevron`} />
+      <span className={`wb-row-actions${menu ? ' open' : ''}`}>
+        <button
+          type="button"
+          className="wb-plus"
+          title="Actions de la planification"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setMenu((v) => !v);
+          }}
+        >
+          <i className="bi bi-three-dots" />
+        </button>
+        {menu && <PopMenu items={items} onClose={() => setMenu(false)} />}
+      </span>
+    </div>
+  );
+}
+
 function TerminalRow({ t, indent }: { t: SidebarTerminal; indent: number }) {
   const location = useLocation();
   const { showError } = useDialogs();
@@ -344,7 +401,7 @@ function TerminalRow({ t, indent }: { t: SidebarTerminal; indent: number }) {
  * La carte du checkout principal (`primary`) ne subsiste que pour les sessions et terminaux d'avant les work
  * sessions : elle liste ses sessions comme avant.
  */
-function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOthers, onShowOthers }: { ws: Workspace; pr: PullRequestRef | null | undefined; expanded: boolean; onToggle: () => void; tabUrl: string | null; filterMine: boolean; showOthers: boolean; onShowOthers: () => void }) {
+function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOthers, onShowOthers, label }: { ws: Workspace; pr: PullRequestRef | null | undefined; expanded: boolean; onToggle: () => void; tabUrl: string | null; filterMine: boolean; showOthers: boolean; onShowOthers: () => void; /** Nom affiché à la place de celui du dossier (session d'exécution sous sa planification : la date seule). */ label?: string }) {
   const location = useLocation();
   const { user } = useAuth();
   const { activeKey, workspaces } = useTabs();
@@ -453,7 +510,7 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
         <Link to={headTo} className="wb-ws-link">
           {session ? <span className={`wb-dot ${sessionDotClass(session)}`} /> : <span className={`wb-ws-state ${state ?? 'none'}`} />}
           {!ws.primary && <i className={`bi ${ws.task ? 'bi-check2-square' : 'bi-git'} wb-icon ${icon.cls}`} />}
-          <span className="wb-ws-name">{ws.name}</span>
+          <span className="wb-ws-name">{label ?? ws.name}</span>
           {ws.primary && ws.projectName && <span className="wb-tag" title="Sessions et terminaux d'avant les work sessions, dans le checkout principal">principal</span>}
           {!ws.exists && <span className="wb-tag missing">absent</span>}
           {session?.agent ? (
@@ -813,11 +870,14 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
                 // Les dossiers de la personne restent à plat ; ceux des autres sont rangés par personne ou agent, sous une
                 // ligne repliable. Avec le filtre « les miennes », ces groupes sont cachés (comptés), sauf celui de la page affichée.
                 const isShown = (ws: Workspace) => location.pathname.startsWith(`/sessions/${ws.session!.id}`);
-                const { mine: mineCards, groups } = ownerGroups(cards, userId);
+                // Les sessions lancées par une planification se rangent sous une seule ligne, celle de la planification.
+                const { rest: plainCards, groups: runGroups } = scheduleGroups(cards);
+                const { mine: mineCards, groups } = ownerGroups(plainCards, userId);
                 const othersVisible = !(filter === 'mine' && !showOthers);
                 const shownGroups = othersVisible ? groups : groups.filter((g) => g.items.some(isShown));
-                const hiddenOthers = groups.filter((g) => !shownGroups.includes(g)).reduce((n, g) => n + g.items.length, 0);
-                const card = (ws: Workspace) => (
+                const shownRuns = othersVisible ? runGroups : runGroups.filter((g) => g.items.some((ws) => participates(ws.session!, userId) || isShown(ws)));
+                const hiddenOthers = [...groups.filter((g) => !shownGroups.includes(g)), ...runGroups.filter((g) => !shownRuns.includes(g))].reduce((n, g) => n + g.items.length, 0);
+                const card = (ws: Workspace, label?: string) => (
                   <WorkspaceCard
                     key={ws.key}
                     ws={ws}
@@ -828,11 +888,22 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
                     filterMine={filter === 'mine'}
                     showOthers={showOthers}
                     onShowOthers={() => setOthersShown((prev) => new Set([...prev, p.id]))}
+                    label={label}
                   />
                 );
                 return (
                   <>
-                    {mineCards.map(card)}
+                    {mineCards.map((ws) => card(ws))}
+                    {shownRuns.map((g) => {
+                      const groupKey = `schedule:${p.id}:${g.key}`;
+                      const groupOpen = expanded[groupKey] ?? true;
+                      return (
+                        <div key={groupKey} className="wb-schedule-block">
+                          <ScheduleGroupRow group={g} projectId={p.id} expanded={groupOpen} onToggle={() => toggle(groupKey, true)} />
+                          {groupOpen && g.items.map((ws) => card(ws, runLabel(ws.name, g.schedule.name)))}
+                        </div>
+                      );
+                    })}
                     {shownGroups.map((g) => {
                       const groupKey = `owner:${p.id}:${g.key}`;
                       const defaultOpen = g.items.some((ws) => isShown(ws) || ws.session!.pendingRequestCount > 0);
@@ -840,7 +911,7 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
                       return (
                         <div key={groupKey} className="wb-owner-block">
                           <OwnerGroupRow group={g} expanded={groupOpen} onToggle={() => toggle(groupKey, defaultOpen)} />
-                          {groupOpen && g.items.map(card)}
+                          {groupOpen && g.items.map((ws) => card(ws))}
                         </div>
                       );
                     })}

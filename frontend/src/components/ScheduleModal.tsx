@@ -1,19 +1,19 @@
 import { useLazyQuery, useMutation, useQuery } from '@apollo/client';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Form, Modal } from 'react-bootstrap';
+import { useNavigate } from 'react-router-dom';
 import {
-  CLEAR_SESSION_SCHEDULE,
-  CREATE_SCHEDULED_SESSION,
-  RUN_SESSION_SCHEDULE_NOW,
+  CREATE_SCHEDULE,
+  DELETE_SCHEDULE,
+  RUN_SCHEDULE_NOW,
   SCHEDULE_NEXT_RUNS,
-  SESSION_SCHEDULE_RUNS,
-  SET_SESSION_SCHEDULE,
+  SESSION_SCHEDULE,
+  UPDATE_SCHEDULE,
   PROVIDERS,
-  UPDATE_SESSION_CONFIG,
   type Provider,
   type ScheduleArchivePolicy,
-  type ScheduleRun,
-  type Session,
+  type ScheduleListItem,
+  type SessionSchedule,
 } from '../graphql/operations';
 import { browserTimeZone, buildCron, cronPresetLabels as presetLabels, describeCron, detectCronPreset as detectPreset, weekdayLabels, type CronPreset as Preset } from '../lib/cron';
 import { permissionModeShortLabels } from '../lib/humanize';
@@ -56,16 +56,29 @@ export interface ScheduleModalProject {
   defaultModel?: string | null;
 }
 
+/** Réglages repris d'une session pour en faire une planification (bouton « Planifier » de la session). */
+export interface ScheduleDefaults {
+  projectId: string;
+  provider?: string;
+  config?: Record<string, unknown>;
+  prompt?: string;
+  name?: string;
+}
+
+const configString = (config: Record<string, unknown> | undefined, key: string) => (typeof config?.[key] === 'string' ? (config[key] as string) : '');
+
 /**
- * Modale d'une planification. Avec `session` : planifier cette session, ou modifier sa planification (avec son
- * historique). Sans session : nouvelle planification, portée par une session créée pour elle dans le projet choisi.
+ * Modale d'une planification. Avec `schedule` : la modifier (avec son historique). Sans : nouvelle planification,
+ * dans l'un des `projects`, éventuellement préremplie (`defaults`) depuis une session. Une planification est un objet
+ * du projet : elle ne crée aucune session avant sa première exécution, et chaque exécution lance la sienne.
  */
-export default function ScheduleModal({ session, projects = [], onClose, onCreated }: { session?: Session; projects?: ScheduleModalProject[]; onClose: () => void; onCreated?: (session: Session) => void }) {
+export default function ScheduleModal({ schedule, projects = [], defaults, onClose, onCreated }: { schedule?: SessionSchedule | null; projects?: ScheduleModalProject[]; defaults?: ScheduleDefaults; onClose: () => void; onCreated?: (schedule: SessionSchedule) => void }) {
   const { showError, confirm } = useDialogs();
-  const existing = session?.schedule ?? null;
+  const navigate = useNavigate();
+  const existing = schedule ?? null;
   const detected = useMemo(() => detectPreset(existing?.cron ?? '0 9 * * 1-5'), [existing?.cron]);
-  const [name, setName] = useState(existing?.customName ?? '');
-  const [projectId, setProjectId] = useState(projects[0]?.id ?? '');
+  const [name, setName] = useState(existing?.customName ?? defaults?.name ?? '');
+  const [projectId, setProjectId] = useState(defaults?.projectId ?? projects[0]?.id ?? '');
   const project = projects.find((p) => p.id === projectId);
   const [preset, setPreset] = useState<Preset>(existing ? detected.preset : 'weekdays');
   const [time, setTime] = useState(detected.time);
@@ -73,7 +86,7 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
   const [monthDay, setMonthDay] = useState(detected.monthDay);
   const [custom, setCustom] = useState(existing?.cron ?? '0 9 * * 1-5');
   const [timezone, setTimezone] = useState(existing?.timezone ?? browserTimeZone());
-  const [prompt, setPrompt] = useState(existing?.prompt ?? session?.prompt ?? '');
+  const [prompt, setPrompt] = useState(existing?.prompt ?? defaults?.prompt ?? '');
   const [enabled, setEnabled] = useState(existing?.enabled ?? true);
   const [endAfterRun, setEndAfterRun] = useState(existing?.endAfterRun ?? true);
   const [archivePolicy, setArchivePolicy] = useState<ScheduleArchivePolicy>(existing?.archivePolicy ?? 'PREVIOUS_ON_RUN');
@@ -83,18 +96,20 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
   const archiveAfterMinutes = Math.round(Number(delayAmount) * UNIT_MINUTES[delayUnit]);
   const archiveValid = archivePolicy !== 'AFTER_DELAY' || (Number.isFinite(archiveAfterMinutes) && archiveAfterMinutes >= 1 && archiveAfterMinutes <= 90 * 1440);
   const [allowedTools, setAllowedTools] = useState<string[]>(existing?.allowedTools ?? []);
-  const currentMode = String(session?.config.permissionMode ?? project?.defaultPermissionMode ?? 'default');
-  const [permissionMode, setPermissionMode] = useState(currentMode);
+  const creating = !existing;
+  // Réglages des exécutions : ceux de la planification, sinon ceux de la session d'origine, sinon le défaut du projet.
+  const sourceConfig = existing?.config ?? defaults?.config;
+  const initialMode = configString(sourceConfig, 'permissionMode') || (existing ? 'default' : (project?.defaultPermissionMode ?? 'default'));
+  const [permissionMode, setPermissionMode] = useState(initialMode);
   useEffect(() => {
-    if (!session) setPermissionMode(project?.defaultPermissionMode ?? 'default');
-  }, [session, project?.defaultPermissionMode]);
-  // Modèle des exécutions : celui de la session (vide : modèle par défaut, celui du projet à la création).
+    if (creating && !configString(defaults?.config, 'permissionMode')) setPermissionMode(project?.defaultPermissionMode ?? 'default');
+  }, [creating, defaults?.config, project?.defaultPermissionMode]);
   const { data: providersData } = useQuery<{ providers: Provider[] }>(PROVIDERS);
-  const provider = session?.provider ?? 'claude';
+  const provider = existing?.provider ?? defaults?.provider ?? 'claude';
   const models = modelOptions(providersData?.providers.find((p) => p.type === provider)?.configFields);
-  const currentModel = typeof session?.config.model === 'string' ? session.config.model : '';
-  const [model, setModel] = useState(currentModel);
-  const creating = !session;
+  const initialModel = configString(sourceConfig, 'model');
+  const [model, setModel] = useState(initialModel);
+  const targetProjectId = existing?.project.id ?? projectId;
 
   const cron = buildCron(preset, time, weekday, monthDay, custom);
   const [loadPreview, preview] = useLazyQuery<{ scheduleNextRuns: string[] }>(SCHEDULE_NEXT_RUNS, { fetchPolicy: 'network-only' });
@@ -104,19 +119,19 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
     return () => clearTimeout(handle);
   }, [cron, timezone, loadPreview]);
 
-  const runs = useQuery<{ session: { id: string; schedule: { sessionId: string; runs: ScheduleRun[] } | null } | null }>(SESSION_SCHEDULE_RUNS, {
-    variables: { id: session?.id ?? '', limit: 10 },
+  const runs = useQuery<{ sessionSchedule: ScheduleListItem | null }>(SESSION_SCHEDULE, {
+    variables: { id: existing?.id ?? '', limit: 10 },
     skip: !existing,
     fetchPolicy: 'cache-and-network',
   });
 
-  const [save, { loading: saving, error: saveError }] = useMutation(SET_SESSION_SCHEDULE);
-  const [create, { loading: creatingSession, error: createError }] = useMutation<{ createScheduledSession: Session }>(CREATE_SCHEDULED_SESSION, { refetchQueries: ['SessionSchedules'] });
-  const [updateConfig, { loading: configuring }] = useMutation(UPDATE_SESSION_CONFIG);
-  const [clear, { loading: clearing, error: clearError }] = useMutation(CLEAR_SESSION_SCHEDULE, { onCompleted: onClose, refetchQueries: ['SessionSchedules'] });
-  const [runNow, { loading: launching }] = useMutation(RUN_SESSION_SCHEDULE_NOW, { refetchQueries: ['SessionScheduleRuns', 'SessionSchedules'] });
-  const busy = saving || clearing || creatingSession || configuring;
-  const error = saveError ?? clearError ?? createError;
+  const refetchQueries = ['SessionSchedules', 'SessionSchedule', 'Sidebar'];
+  const [save, { loading: saving, error: saveError }] = useMutation(UPDATE_SCHEDULE, { refetchQueries });
+  const [create, { loading: creatingSchedule, error: createError }] = useMutation<{ createSchedule: SessionSchedule }>(CREATE_SCHEDULE, { refetchQueries });
+  const [remove, { loading: removing, error: removeError }] = useMutation(DELETE_SCHEDULE, { onCompleted: onClose, refetchQueries });
+  const [runNow, { loading: launching }] = useMutation<{ runScheduleNow: { id: string } | null }>(RUN_SCHEDULE_NOW, { refetchQueries });
+  const busy = saving || removing || creatingSchedule;
+  const error = saveError ?? removeError ?? createError;
   const canSubmit = Boolean(cron && prompt.trim() && archiveValid && (!creating || (name.trim() && projectId)));
 
   const submit = async () => {
@@ -132,22 +147,29 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
       archivePolicy,
       archiveAfterMinutes: archivePolicy === 'AFTER_DELAY' ? archiveAfterMinutes : null,
       allowedTools,
+      // Valeur vide : réglage retiré (défaut du projet ou du propriétaire).
+      config: { permissionMode, model },
     };
     if (creating) {
-      const res = await create({ variables: { input: { ...input, name: name.trim(), projectId, config: { permissionMode, ...(model ? { model } : {}) } } } }).catch(() => null);
+      const res = await create({ variables: { input: { ...input, name: name.trim(), projectId, provider, config: { permissionMode, ...(model ? { model } : {}) } } } }).catch(() => null);
       if (res?.data) {
-        onCreated?.(res.data.createScheduledSession);
+        onCreated?.(res.data.createSchedule);
         onClose();
       }
       return;
     }
-    if (permissionMode !== currentMode || model !== currentModel) {
-      const config = { ...(permissionMode !== currentMode ? { permissionMode } : {}), ...(model !== currentModel ? { model } : {}) };
-      const ok = await updateConfig({ variables: { id: session.id, config } }).catch((err: Error) => (showError(err), null));
-      if (!ok) return;
-    }
-    const res = await save({ variables: { id: session.id, input }, refetchQueries: ['SessionSchedules'] }).catch(() => null);
+    const res = await save({ variables: { id: existing.id, input } }).catch(() => null);
     if (res?.data) onClose();
+  };
+
+  const launch = async () => {
+    if (!existing) return;
+    const res = await runNow({ variables: { id: existing.id } }).catch((err: Error) => (showError(err), null));
+    const sessionId = res?.data?.runScheduleNow?.id;
+    if (sessionId) {
+      onClose();
+      navigate(`/sessions/${sessionId}`);
+    }
   };
 
   return (
@@ -161,14 +183,12 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
         <Modal.Header closeButton={!busy}>
           <Modal.Title className="h5 mb-0">
             <i className="bi bi-alarm me-2" />
-            {creating ? 'Nouvelle planification' : existing ? `Planification « ${existing.name} »` : `Planifier « ${session.name} »`}
+            {creating ? 'Nouvelle planification' : `Planification « ${existing.name} »`}
           </Modal.Title>
         </Modal.Header>
         <Modal.Body>
           <p className="text-secondary small">
-            {creating
-              ? "À chaque échéance, une nouvelle session est créée, dans son propre dossier de travail, et reçoit l'instruction. Une session porte les réglages de la planification (modèle, autorisations) ; l'historique des exécutions et leurs sessions restent consultables."
-              : "À chaque échéance, une nouvelle session est créée avec les réglages de celle-ci (modèle, autorisations, propriétaire) et reçoit l'instruction ci-dessous ; si l'exécution précédente n'est pas finie, l'échéance est ignorée."}
+            À chaque échéance, la planification lance une nouvelle session, dans son propre dossier de travail, avec les réglages ci-dessous (modèle, autorisations), et lui envoie l'instruction. Aucune session n'existe avant la première exécution ; si l'exécution précédente n'est pas finie, l'échéance est ignorée.
           </p>
           <div className="row g-2 mb-3">
             <div className={creating && projects.length > 1 ? 'col-sm-7' : 'col-12'}>
@@ -179,9 +199,9 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
                 maxLength={120}
                 required={creating}
                 autoFocus={creating}
-                placeholder={creating ? 'Revue quotidienne des utilisateurs' : session.name}
+                placeholder="Revue quotidienne des utilisateurs"
               />
-              {!creating && <Form.Text>C'est aussi le nom de la session : celui de la sidebar, des onglets et des notifications.</Form.Text>}
+              <Form.Text>Les sessions des exécutions s'appellent « {name.trim() || 'Nom'} · jj/mm hh:mm » et se rangent sous ce nom dans la sidebar.</Form.Text>
             </div>
             {creating && projects.length > 1 && (
               <div className="col-sm-5">
@@ -282,7 +302,7 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
             <Form.Group className="mb-3">
               <Form.Label className="mb-1">Modèle des exécutions</Form.Label>
               <Form.Select value={model} onChange={(e) => setModel(e.target.value)}>
-                <option value="">{creating ? (project?.defaultModel ? `Modèle du projet (${project.defaultModel})` : 'Mon modèle par défaut') : 'Modèle par défaut du propriétaire'}</option>
+                <option value="">{(project?.defaultModel ?? existing?.project.defaultModel) ? `Modèle du projet (${project?.defaultModel ?? existing?.project.defaultModel})` : 'Modèle par défaut du propriétaire'}</option>
                 {[...models, ...(model && !models.some((m) => m.value === model) ? [{ value: model, label: model }] : [])].map((m) => (
                   <option key={m.value} value={m.value}>
                     {m.label}
@@ -293,15 +313,7 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
             </Form.Group>
           )}
           <Form.Group className="mb-3">
-            <Form.Label className="mb-1">
-              Autorisations pendant les exécutions
-              {!creating && (
-                <span className="text-secondary fw-normal small">
-                  {' '}
-                  · mode actuel de la session : {permissionModeShortLabels[currentMode] ?? currentMode}
-                </span>
-              )}
-            </Form.Label>
+            <Form.Label className="mb-1">Autorisations pendant les exécutions</Form.Label>
             <Form.Select value={permissionMode} onChange={(e) => setPermissionMode(e.target.value)}>
               {[...new Set([...PERMISSION_MODES, permissionMode])].map((m) => (
                 <option key={m} value={m}>
@@ -309,19 +321,15 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
                 </option>
               ))}
             </Form.Select>
-            <Form.Text>
-              {permissionHint(permissionMode)}
-              {!creating && ' Réglage de la session, aussi appliqué quand vous lui écrivez (le changer sur la page de la session change aussi celui des exécutions).'}
-            </Form.Text>
+            <Form.Text>{permissionHint(permissionMode)}</Form.Text>
             {permissionMode === 'dontAsk' && (
               <Alert variant="warning" className="mt-2 mb-0 py-2 small">
                 <i className="bi bi-exclamation-triangle me-1" />
-                {currentMode === 'dontAsk' && !creating ? 'Cette session est en mode « Refuser sans demander » : ' : 'En mode « Refuser sans demander », '}
-                l’agent n’aura accès qu’à ce qui est autorisé d’avance ; tout le reste sera refusé pendant les exécutions.
+                En mode « Refuser sans demander », l’agent n’aura accès qu’à ce qui est autorisé d’avance ; tout le reste sera refusé pendant les exécutions.
               </Alert>
             )}
           </Form.Group>
-          <ScheduleTools value={allowedTools} onChange={setAllowedTools} projectId={session?.project.id ?? projectId} sessionId={existing ? session!.id : null} prompt={prompt} permissionMode={permissionMode} />
+          <ScheduleTools value={allowedTools} onChange={setAllowedTools} projectId={targetProjectId} scheduleId={existing?.id ?? null} prompt={prompt} permissionMode={permissionMode} />
           <Form.Group className="mb-3">
             <Form.Label className="mb-1">Archivage des sessions d'exécution</Form.Label>
             <div className="d-flex flex-wrap gap-2 align-items-center">
@@ -366,14 +374,14 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
                   size="sm"
                   variant="outline-secondary"
                   disabled={launching || busy}
-                  title="Exécute la planification maintenant, sans attendre l'échéance (la prochaine échéance est inchangée)"
-                  onClick={() => void runNow({ variables: { id: session!.id } }).catch(showError)}
+                  title="Lance une exécution maintenant, dans une nouvelle session (la prochaine échéance est inchangée)"
+                  onClick={() => void launch()}
                 >
                   <i className="bi bi-play-fill me-1" />
                   Exécuter maintenant
                 </Button>
               </div>
-              <RunHistory runs={runs.data?.session?.schedule?.runs ?? []} empty={existing.lastResult ? `Avant l'historique : ${existing.lastResult}` : 'Aucune exécution pour l’instant.'} />
+              <RunHistory runs={runs.data?.sessionSchedule?.runs ?? []} empty={existing.lastResult ? `Avant l'historique : ${existing.lastResult}` : 'Aucune exécution pour l’instant.'} />
             </div>
           )}
           {error && (
@@ -386,9 +394,9 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
           <div>
             {existing && (
               <Button variant="outline-danger" disabled={busy} onClick={async () => {
-                  if (await confirm({ title: 'Retirer la planification', message: `Plus aucune exécution de « ${existing.name} », et son historique est effacé. Cette session, celles des exécutions et leurs transcripts sont conservés.`, confirmLabel: 'Retirer', danger: true })) void clear({ variables: { id: session!.id } });
+                  if (await confirm({ title: 'Supprimer la planification', message: `Plus aucune exécution de « ${existing.name} », et son historique est effacé. Les sessions des exécutions passées et leurs transcripts sont conservés.`, confirmLabel: 'Supprimer', danger: true })) void remove({ variables: { id: existing.id } });
                 }}>
-                Retirer la planification
+                Supprimer la planification
               </Button>
             )}
           </div>
@@ -397,7 +405,7 @@ export default function ScheduleModal({ session, projects = [], onClose, onCreat
               Annuler
             </Button>
             <Button type="submit" disabled={busy || !canSubmit}>
-              {creating ? 'Créer la planification' : existing ? 'Enregistrer' : 'Planifier'}
+              {creating ? 'Créer la planification' : 'Enregistrer'}
             </Button>
           </div>
         </Modal.Footer>

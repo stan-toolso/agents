@@ -40,12 +40,20 @@ export interface SessionContextInfo {
   coldTurnUsd: number | null;
 }
 
+/** Planification : objet du projet, distinct des sessions ; chaque exécution lance une session indépendante. */
 export interface SessionSchedule {
-  sessionId: string;
-  /** Nom affiché : celui de la planification, sinon celui de la session. */
+  id: string;
+  /** Nom affiché : celui de la planification, sinon le début de l'instruction. */
   name: string;
-  /** Nom saisi pour la planification (null : celui de la session). */
+  /** Nom saisi pour la planification (null : déduit de l'instruction). */
   customName: string | null;
+  /** Provider des sessions d'exécution. */
+  provider: string;
+  /** Réglages copiés dans chaque session d'exécution (permissionMode, model…). */
+  config: Record<string, unknown>;
+  /** Propriétaire des exécutions (ses comptes, son budget). */
+  owner: { id: string; name: string } | null;
+  project: { id: string; name: string; myRole: 'ADMIN' | 'MEMBER' | 'VIEWER' | null; defaultPermissionMode: string; defaultModel?: string | null };
   cron: string;
   timezone: string;
   prompt: string;
@@ -80,14 +88,12 @@ export interface ScheduleRun {
   costUsd: number | null;
   message: string | null;
   answer: string | null;
-  /** Session créée pour cette exécution (null : exécution d'avant, jouée dans la session de la planification). */
-  session: { id: string; name: string; archivedAt: string | null } | null;
+  /** Session créée pour cette exécution (null : ignorée, manquée, ou session non créée). */
+  session: { id: string; name: string; archivedAt: string | null; status?: SessionStatus; activity?: SessionActivity | null; pendingRequestCount?: number } | null;
 }
 
-/** Planification telle que la liste la montre : avec sa session, son projet et ses dernières exécutions. */
+/** Planification telle que la liste la montre : avec ses dernières exécutions. */
 export interface ScheduleListItem extends SessionSchedule {
-  session: Session;
-  project: { id: string; name: string; myRole: 'ADMIN' | 'MEMBER' | 'VIEWER' | null; defaultPermissionMode: string };
   runs: ScheduleRun[];
 }
 
@@ -786,9 +792,22 @@ export const SESSION_FIELDS = gql`
       status
     }
     schedule {
-      sessionId
+      id
       name
       customName
+      provider
+      config
+      owner {
+        id
+        name
+      }
+      project {
+        id
+        name
+        myRole
+        defaultPermissionMode
+        defaultModel
+      }
       cron
       timezone
       prompt
@@ -1187,33 +1206,6 @@ export const DELETE_SESSION = gql`
   }
 `;
 
-export const SET_SESSION_SCHEDULE = gql`
-  ${SESSION_FIELDS}
-  mutation SetSessionSchedule($id: ID!, $input: SessionScheduleInput!) {
-    setSessionSchedule(id: $id, input: $input) {
-      ...SessionFields
-    }
-  }
-`;
-
-export const CLEAR_SESSION_SCHEDULE = gql`
-  ${SESSION_FIELDS}
-  mutation ClearSessionSchedule($id: ID!) {
-    clearSessionSchedule(id: $id) {
-      ...SessionFields
-    }
-  }
-`;
-
-export const RUN_SESSION_SCHEDULE_NOW = gql`
-  ${SESSION_FIELDS}
-  mutation RunSessionScheduleNow($id: ID!) {
-    runSessionScheduleNow(id: $id) {
-      ...SessionFields
-    }
-  }
-`;
-
 export const UPDATE_SESSION = gql`
   ${SESSION_FIELDS}
   mutation UpdateSession($id: ID!, $input: UpdateSessionInput!) {
@@ -1270,40 +1262,53 @@ export const SCHEDULE_RUN_FIELDS = gql`
       id
       name
       archivedAt
+      status
+      activity
+      pendingRequestCount
     }
+  }
+`;
+
+const SCHEDULE_FIELDS = gql`
+  fragment ScheduleFields on SessionSchedule {
+    id
+    name
+    customName
+    provider
+    config
+    owner {
+      id
+      name
+    }
+    project {
+      id
+      name
+      myRole
+      defaultPermissionMode
+      defaultModel
+    }
+    cron
+    timezone
+    prompt
+    enabled
+    endAfterRun
+    archivePolicy
+    archiveAfterMinutes
+    allowedTools
+    nextRunAt
+    lastRunAt
+    lastResult
+    updatedAt
   }
 `;
 
 /** Planifications d'un projet, ou de tous les projets accessibles (page Planifications). */
 export const SESSION_SCHEDULES = gql`
   ${SCHEDULE_RUN_FIELDS}
-  ${SESSION_FIELDS}
+  ${SCHEDULE_FIELDS}
   query SessionSchedules($projectId: ID, $runs: Int) {
     sessionSchedules(projectId: $projectId) {
-      sessionId
-      name
-      customName
-      cron
-      timezone
-      prompt
-      enabled
-      endAfterRun
-      archivePolicy
-      archiveAfterMinutes
-      allowedTools
-      nextRunAt
-      lastRunAt
-      lastResult
-      updatedAt
-      session {
-        ...SessionFields
-      }
-      project {
-        id
-        name
-        myRole
-        defaultPermissionMode
-      }
+      ...ScheduleFields
       runs(limit: $runs) {
         ...ScheduleRunFields
       }
@@ -1311,36 +1316,59 @@ export const SESSION_SCHEDULES = gql`
   }
 `;
 
-/** Historique des exécutions de la planification d'une session (modale). */
-export const SESSION_SCHEDULE_RUNS = gql`
+/** Une planification et ses dernières exécutions (modale). */
+export const SESSION_SCHEDULE = gql`
   ${SCHEDULE_RUN_FIELDS}
-  query SessionScheduleRuns($id: ID!, $limit: Int) {
-    session(id: $id) {
-      id
-      schedule {
-        sessionId
-        runs(limit: $limit) {
-          ...ScheduleRunFields
-        }
+  ${SCHEDULE_FIELDS}
+  query SessionSchedule($id: ID!, $limit: Int) {
+    sessionSchedule(id: $id) {
+      ...ScheduleFields
+      runs(limit: $limit) {
+        ...ScheduleRunFields
       }
     }
   }
 `;
 
-export const SET_SESSION_SCHEDULE_ENABLED = gql`
-  ${SESSION_FIELDS}
-  mutation SetSessionScheduleEnabled($id: ID!, $enabled: Boolean!) {
-    setSessionScheduleEnabled(id: $id, enabled: $enabled) {
-      ...SessionFields
+export const CREATE_SCHEDULE = gql`
+  ${SCHEDULE_FIELDS}
+  mutation CreateSchedule($input: CreateScheduleInput!) {
+    createSchedule(input: $input) {
+      ...ScheduleFields
     }
   }
 `;
 
-export const CREATE_SCHEDULED_SESSION = gql`
-  ${SESSION_FIELDS}
-  mutation CreateScheduledSession($input: CreateScheduledSessionInput!) {
-    createScheduledSession(input: $input) {
-      ...SessionFields
+export const UPDATE_SCHEDULE = gql`
+  ${SCHEDULE_FIELDS}
+  mutation UpdateSchedule($id: ID!, $input: SessionScheduleInput!) {
+    updateSchedule(id: $id, input: $input) {
+      ...ScheduleFields
+    }
+  }
+`;
+
+export const DELETE_SCHEDULE = gql`
+  mutation DeleteSchedule($id: ID!) {
+    deleteSchedule(id: $id)
+  }
+`;
+
+export const SET_SCHEDULE_ENABLED = gql`
+  ${SCHEDULE_FIELDS}
+  mutation SetScheduleEnabled($id: ID!, $enabled: Boolean!) {
+    setScheduleEnabled(id: $id, enabled: $enabled) {
+      ...ScheduleFields
+    }
+  }
+`;
+
+/** Exécute une planification tout de suite ; renvoie la session de l'exécution. */
+export const RUN_SCHEDULE_NOW = gql`
+  mutation RunScheduleNow($id: ID!) {
+    runScheduleNow(id: $id) {
+      id
+      name
     }
   }
 `;
@@ -1356,8 +1384,8 @@ export interface ScheduleToolSuggestion {
 
 /** Outils à pré-autoriser pour une planification (exécutions passées, éléments du coffre cités par l'instruction). */
 export const SCHEDULE_PERMISSION_SUGGESTIONS = gql`
-  query SchedulePermissionSuggestions($projectId: ID!, $sessionId: ID, $prompt: String) {
-    schedulePermissionSuggestions(projectId: $projectId, sessionId: $sessionId, prompt: $prompt) {
+  query SchedulePermissionSuggestions($projectId: ID!, $scheduleId: ID, $prompt: String) {
+    schedulePermissionSuggestions(projectId: $projectId, scheduleId: $scheduleId, prompt: $prompt) {
       rule
       source
       count
@@ -1591,7 +1619,7 @@ export const SIDEBAR = gql`
     name
     costUsd
     schedule {
-      sessionId
+      id
       name
       enabled
     }

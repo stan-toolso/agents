@@ -347,7 +347,7 @@ export default function SessionDetailPage() {
             await updateConfig({ variables: { id, config: { allowedTools: [...allowedTools, rule].join(',') } } }).catch((err) => void showError(err));
           },
         };
-  const scheduleNotice = schedule ? ` Cette session porte la planification « ${schedule.name} » : ses exécutions tourneront aussi dans ce mode.` : '';
+  const scheduleNotice = schedule ? ` Ce mode ne vaut que pour cette session : les prochaines exécutions de la planification « ${schedule.name} » gardent le leur.` : '';
   const changeSetting = async (field: ConfigField, value: string) => {
     if (field.key === 'permissionMode' && value === 'dontAsk') {
       // « Refuser sans demander » est souvent pris pour « ne plus me déranger » : dire ce qui sera refusé, et proposer
@@ -495,9 +495,8 @@ export default function SessionDetailPage() {
               <>
                 {' '}
                 ·{' '}
-                <button type="button" className="cc-link" title={`Planification « ${schedule.name} » : ${describeCron(schedule.cron)} (${schedule.timezone})${schedule.lastResult ? ` · dernière exécution : ${schedule.lastResult}` : ''}`} onClick={actions.openSchedule}>
-                  <i className="bi bi-alarm" /> {schedule.name !== session.name ? `« ${schedule.name} » · ` : ''}
-                  {schedule.enabled ? (schedule.nextRunAt ? `prochaine exécution ${timeUntil(schedule.nextRunAt)}` : 'planifiée') : 'en pause'}
+                <button type="button" className="cc-link" title={`Session lancée par la planification « ${schedule.name} » : ${describeCron(schedule.cron)} (${schedule.timezone}) · cliquer pour la modifier`} onClick={actions.openSchedule}>
+                  <i className="bi bi-alarm" /> « {schedule.name} » · {schedule.enabled ? (schedule.nextRunAt ? `prochaine exécution ${timeUntil(schedule.nextRunAt)}` : 'planifiée') : 'en pause'}
                 </button>
               </>
             )}
