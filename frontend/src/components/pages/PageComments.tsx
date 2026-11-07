@@ -5,6 +5,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { ADD_SHARED_PAGE_COMMENT, DELETE_SHARED_PAGE_COMMENT, REPLY_SHARED_PAGE_COMMENT, RESOLVE_SHARED_PAGE_COMMENT, SHARED_PAGE_COMMENTS, UPDATE_SHARED_PAGE_COMMENT, type SharedPage, type SharedPageAnchor, type SharedPageComment } from '../../graphql/misc';
 import { timeAgo } from '../../lib/humanize';
 import { usePollingQuery } from '../../lib/usePollingQuery';
+import DictationButton from '../DictationButton';
 import { useDialogs } from '../Dialogs';
 import { Avatar } from '../Thread';
 import './pageComments.css';
@@ -72,6 +73,8 @@ export default function PageComments({ page, version, frameRef, picking, setPick
   const [found, setFound] = useState<Set<string> | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const draftRef = useRef<HTMLTextAreaElement>(null);
+  // Saisie rapide (mobile) d'un commentaire sur le texte sélectionné ou l'élément choisi dans la page.
+  const [quick, setQuick] = useState<SharedPageAnchor | null>(null);
   const refetch = { refetchQueries: ['SharedPageComments', 'SharedPage'], onError: (e: Error) => void showError(e) };
   const [add, { loading: adding }] = useMutation(ADD_SHARED_PAGE_COMMENT, refetch);
   const [reply] = useMutation(REPLY_SHARED_PAGE_COMMENT, refetch);
@@ -115,8 +118,11 @@ export default function PageComments({ page, version, frameRef, picking, setPick
       else if (m.type === 'picked') {
         // Élément pointé, ou texte sélectionné puis « Commenter » (appui long sur mobile, clic droit sur ordinateur) :
         // le panneau s'ouvre sur le composeur, prêt à écrire.
+        // Sur mobile, hors mode « pointer », le panneau masquerait la page : saisie rapide en bas de l'écran.
         const a = cleanAnchor(m.anchor);
-        if (a) {
+        if (a && !open && !picking && isNarrow()) {
+          setQuick(a);
+        } else if (a) {
           setAnchor(a);
           onOpen();
           setTimeout(() => draftRef.current?.focus(), 60);
@@ -136,7 +142,7 @@ export default function PageComments({ page, version, frameRef, picking, setPick
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [frameRef, sendAnchors, setPicking, comments, visible, filter, onOpen]);
+  }, [frameRef, sendAnchors, setPicking, comments, visible, filter, onOpen, open, picking]);
 
   // Commentaire mis en avant (repère cliqué, lien de notification) : visible et à l'écran, une fois le panneau affiché
   // (caché, scrollIntoView ne ferait rien).
@@ -169,7 +175,16 @@ export default function PageComments({ page, version, frameRef, picking, setPick
     setFilter((f) => (f === 'resolved' ? 'open' : f));
   };
 
+  const sendQuick = async (body: string) => {
+    if (!quick || !body.trim()) return;
+    await add({ variables: { pageId: page.id, body: body.trim(), anchor: quick, version } });
+    setQuick(null);
+    setFilter((f) => (f === 'resolved' ? 'open' : f));
+  };
+
   return (
+    <>
+    {quick && <QuickComment anchor={quick} sending={adding} onSend={sendQuick} onCancel={() => setQuick(null)} />}
     <aside className={`pc-panel${open ? '' : ' hidden'}`} aria-label="Commentaires" aria-hidden={!open}>
       <div className="pc-head">
         <span className="pc-title">
@@ -204,6 +219,7 @@ export default function PageComments({ page, version, frameRef, picking, setPick
             </button>
           </div>
         ) : null}
+        <div className="dictation-field">
         <Form.Control
           as="textarea"
           ref={draftRef}
@@ -216,6 +232,8 @@ export default function PageComments({ page, version, frameRef, picking, setPick
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void submit();
           }}
         />
+        <DictationButton value={draft} onChange={setDraft} className="dictation-float" />
+        </div>
         <div className="pc-compose-row">
           {!anchor && (
             <button type="button" className={`cc-btn${picking ? ' accent' : ''}`} onClick={() => setPicking(!picking)} title="Commenter un endroit précis de la page">
@@ -267,6 +285,7 @@ export default function PageComments({ page, version, frameRef, picking, setPick
         ))}
       </div>
     </aside>
+    </>
   );
 }
 
@@ -437,6 +456,61 @@ function Message({ comment: c, reply = false, userId, canDelete, onEdit, onDelet
         ) : (
           <div className="pc-body">{c.body}</div>
         )}
+      </div>
+    </div>
+  );
+}
+
+const isNarrow = () => typeof window !== 'undefined' && window.matchMedia?.('(max-width: 767.98px)').matches;
+
+/**
+ * Saisie rapide en bas de l'écran (mobile) : le commentaire s'écrit, ou se dicte, directement sous la page, sans passer
+ * par le panneau qui la masquerait. Elle remonte au-dessus du clavier (visualViewport, pour iOS).
+ */
+function QuickComment({ anchor, sending, onSend, onCancel }: { anchor: SharedPageAnchor; sending: boolean; onSend: (body: string) => Promise<void>; onCancel: () => void }) {
+  const [body, setBody] = useState('');
+  const [lift, setLift] = useState(0);
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    ref.current?.focus();
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => setLift(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+    onResize();
+    vv.addEventListener('resize', onResize);
+    vv.addEventListener('scroll', onResize);
+    return () => {
+      vv.removeEventListener('resize', onResize);
+      vv.removeEventListener('scroll', onResize);
+    };
+  }, []);
+  const send = () => void onSend(body);
+  return (
+    <div className="pc-quick" style={{ bottom: lift }} role="dialog" aria-label="Nouveau commentaire">
+      <div className="pc-quick-anchor">
+        <i className="bi bi-geo-alt-fill" />
+        <span className="pc-anchor-text">{anchorLabel(anchor)}</span>
+        <button type="button" className="tt-icon-btn" title="Annuler" aria-label="Annuler le commentaire" onClick={onCancel}>
+          <i className="bi bi-x-lg" />
+        </button>
+      </div>
+      <div className="pc-quick-row">
+        <textarea
+          ref={ref}
+          className="form-control pc-quick-input"
+          rows={2}
+          placeholder="Votre commentaire…"
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send();
+            if (e.key === 'Escape') onCancel();
+          }}
+        />
+        <DictationButton value={body} onChange={setBody} className="pc-quick-btn" />
+        <button type="button" className="pc-quick-btn send" disabled={sending || !body.trim()} onClick={send} title="Envoyer le commentaire" aria-label="Envoyer le commentaire">
+          <i className="bi bi-send-fill" />
+        </button>
       </div>
     </div>
   );
