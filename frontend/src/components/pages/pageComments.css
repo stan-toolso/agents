@@ -45,6 +45,10 @@
 .pc-anchor-chip.picking { background: transparent; border-style: dashed; color: var(--cc-dim); }
 .pc-anchor-text { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Renvoi des commentaires à l'agent */
+.pc-agent-row { padding: 6px 10px; border-bottom: 1px solid var(--cc-border); display: flex; }
+.pc-agent-row .cc-btn { width: 100%; justify-content: center; }
+
 /* Liste */
 .pc-list { flex: 1; min-height: 0; overflow: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
 .pc-empty { color: var(--cc-dim); font-style: italic; padding: 10px 6px; }

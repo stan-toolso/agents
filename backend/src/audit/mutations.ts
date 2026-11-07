@@ -260,6 +260,8 @@ export const NOT_AUDITED = new Set([
   'addTaskComment', 'toggleTaskReaction', 'updateTaskComment', 'deleteTaskComment',
   // Commentaires des pages partagées : micro-conversations nominatives, comme les fils.
   'addSharedPageComment', 'replySharedPageComment', 'updateSharedPageComment', 'resolveSharedPageComment', 'deleteSharedPageComment',
+  // Instruction à la session qui a publié une page (le transcript la garde, comme sendSessionMessage).
+  'requestSharedPageUpdate',
   'postMessage', 'updateMessage', 'deleteMessage', 'toggleMessageReaction', 'markConversationRead',
   // Git sans effet durable, synchronisations et lectures.
   'gitStage', 'gitUnstage', 'gitFetch', 'backupHostedGit', 'syncPullRequests', 'watchPullRequests',

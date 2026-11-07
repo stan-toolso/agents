@@ -8,7 +8,7 @@ import PageLoading from '../components/PageLoading';
 import PopMenu, { type MenuItem } from '../components/PopMenu';
 import PageComments from '../components/pages/PageComments';
 import SharePageModal from '../components/pages/SharePageModal';
-import { DELETE_SHARED_PAGE, REMOVE_SHARED_PAGE_MEMBER, SHARED_PAGE, UPDATE_SHARED_PAGE, type SharedPage } from '../graphql/misc';
+import { DELETE_SHARED_PAGE, REMOVE_SHARED_PAGE_MEMBER, REQUEST_SHARED_PAGE_UPDATE, SHARED_PAGE, UPDATE_SHARED_PAGE, type SharedPage } from '../graphql/misc';
 import { useAuth } from '../auth/AuthContext';
 import { formatSize } from '../lib/files';
 import { usePollingQuery } from '../lib/usePollingQuery';
@@ -29,7 +29,7 @@ export default function SharedPagePage() {
   const [search, setSearch] = useSearchParams();
   const focusComment = search.get('comment');
   const { user } = useAuth();
-  const { confirm, prompt, showError } = useDialogs();
+  const { confirm, prompt, alert, showError } = useDialogs();
   const { data, loading, error } = usePollingQuery<{ sharedPage: SharedPage | null }>(SHARED_PAGE, { variables: { id }, pollInterval: 15_000 });
   const page = data?.sharedPage;
   useTabTitle(page?.title ?? 'Page');
@@ -49,6 +49,7 @@ export default function SharedPagePage() {
   const [update] = useMutation(UPDATE_SHARED_PAGE, { refetchQueries: ['SharedPage', 'SharedPages'], onError: (e) => void showError(e) });
   const [remove] = useMutation(DELETE_SHARED_PAGE, { refetchQueries: ['SharedPages'], onError: (e) => void showError(e) });
   const [leave] = useMutation(REMOVE_SHARED_PAGE_MEMBER, { refetchQueries: ['SharedPages'], onError: (e) => void showError(e) });
+  const [requestUpdate] = useMutation<{ requestSharedPageUpdate: { id: string; name: string } }>(REQUEST_SHARED_PAGE_UPDATE, { onError: (e) => void showError(e) });
 
   if (loading && !data) return <PageLoading />;
   if (error) return <Alert variant="danger" className="m-3">Erreur : {error.message}</Alert>;
@@ -61,6 +62,36 @@ export default function SharedPagePage() {
   const shared = page.linkAccess || page.members.length > 0;
   const openComments = page.openComments;
   const link = `${window.location.origin}/shared/${page.id}`;
+  // Renvoi à la session qui a publié la page (propriétaire) : les commentaires à traiter, et/ou une demande libre.
+  const canSendToAgent = owner && Boolean(page.session);
+  const sendToAgent = async (instruction: string | null) => {
+    const res = await requestUpdate({ variables: { id: page.id, instruction, withComments: true } });
+    const session = res.data?.requestSharedPageUpdate;
+    if (!session) return;
+    await alert({
+      title: "Instruction envoyée à l'agent",
+      message: (
+        <>
+          La session <Link to={`/sessions/${session.id}`}>{session.name}</Link> met la page à jour : elle publiera une nouvelle version et marquera les commentaires pris en compte comme traités. Cette page se rafraîchit toute seule.
+        </>
+      ),
+      closeLabel: 'Fermer',
+    });
+  };
+  const askUpdate = async () => {
+    const instruction = await prompt({
+      title: "Demander une mise à jour à l'agent",
+      message: openComments > 0 ? `Les ${openComments} commentaire${openComments > 1 ? 's' : ''} à traiter ser${openComments > 1 ? 'ont' : 'a'} joint${openComments > 1 ? 's' : ''} à la demande. Précisez ce qu'il faut changer (facultatif).` : 'Que faut-il changer dans la page ?',
+      placeholder: 'Ex. « mets les chiffres de novembre à jour », « ajoute un graphique par client »…',
+      confirmLabel: 'Envoyer',
+      required: openComments === 0,
+    });
+    if (instruction === null) return;
+    await sendToAgent(instruction || null);
+  };
+  const sendComments = async () => {
+    if (await confirm({ title: "Transmettre les commentaires à l'agent", message: `Envoyer les ${openComments} commentaire${openComments > 1 ? 's' : ''} à traiter à la session « ${page.session?.name} » ? L'agent mettra la page à jour, publiera une nouvelle version et marquera les commentaires traités.`, confirmLabel: 'Envoyer' })) await sendToAgent(null);
+  };
   const menu: MenuItem[] = [
     {
       label: copied ? 'Lien copié' : 'Copier le lien',
@@ -73,6 +104,7 @@ export default function SharedPagePage() {
     },
     { label: 'Ouvrir dans un onglet', icon: 'bi-box-arrow-up-right', onClick: () => void window.open(viewUrl, '_blank', 'noopener') },
     { label: 'Télécharger le HTML', icon: 'bi-download', onClick: () => void window.open(sharedPageUrl(page.id, version, true), '_self') },
+    ...(canSendToAgent ? [{ label: "Demander une mise à jour à l'agent", icon: 'bi-robot', separatorBefore: true, onClick: () => void askUpdate() }] : []),
     ...(owner
       ? [
           {
@@ -213,6 +245,7 @@ export default function SharedPagePage() {
           initialFocus={focusComment}
           open={commentsOpen}
           onOpen={openComments_}
+          onSendToAgent={canSendToAgent ? sendComments : undefined}
           onClose={() => {
             setCommentsOpen(false);
             setPicking(false);

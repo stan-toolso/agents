@@ -270,6 +270,15 @@ export const RESOLVE_SHARED_PAGE_COMMENT = gql`
   }
 `;
 
+export const REQUEST_SHARED_PAGE_UPDATE = gql`
+  mutation RequestSharedPageUpdate($id: ID!, $instruction: String, $withComments: Boolean) {
+    requestSharedPageUpdate(id: $id, instruction: $instruction, withComments: $withComments) {
+      id
+      name
+    }
+  }
+`;
+
 export const DELETE_SHARED_PAGE_COMMENT = gql`
   mutation DeleteSharedPageComment($id: ID!) {
     deleteSharedPageComment(id: $id)

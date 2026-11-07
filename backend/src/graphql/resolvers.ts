@@ -20,6 +20,7 @@ import { smtpService, type SmtpInput } from '../notifications/smtp.js';
 import { searchService, type SearchKind } from '../search/service.js';
 import { sharedPageCommentService } from '../sharedPages/commentService.js';
 import { sharedPageService } from '../sharedPages/service.js';
+import { sharedPageUpdateService } from '../sharedPages/updateRequest.js';
 import { envFileService } from '../envFiles/service.js';
 import type { EnvFile } from '../envFiles/types.js';
 import type { SharedPage, SharedPageComment, SharedPageMember, SharedPageVersion } from '../sharedPages/types.js';
@@ -2194,6 +2195,12 @@ export const resolvers = {
     updateSharedPageComment: (_: unknown, args: { id: string; body: string }, ctx: Ctx) => sharedPageCommentService.update({ user: requireUser(ctx) }, args.id, args.body),
     resolveSharedPageComment: (_: unknown, args: { id: string; resolved: boolean }, ctx: Ctx) => sharedPageCommentService.resolve({ user: requireUser(ctx) }, args.id, args.resolved),
     deleteSharedPageComment: (_: unknown, args: { id: string }, ctx: Ctx) => sharedPageCommentService.delete({ user: requireUser(ctx) }, args.id),
+    requestSharedPageUpdate: async (_: unknown, args: { id: string; instruction?: string | null; withComments?: boolean | null }, ctx: Ctx) => {
+      const user = requireUser(ctx);
+      const page = await sharedPageService.getOwned(user.id, args.id);
+      if (page.sessionId) await guardSession(ctx, page.sessionId, 'member');
+      return (await sharedPageUpdateService.request(user, args.id, { instruction: args.instruction, withComments: args.withComments })).session;
+    },
     subscribePush: async (_: unknown, args: { input: PushSubscriptionInput }, ctx: Ctx) => {
       await pushService.subscribe(requireUser(ctx).id, args.input);
       return true;

@@ -51,6 +51,8 @@ interface Props {
   open: boolean;
   onOpen: () => void;
   onClose: () => void;
+  /** Propriétaire d'une page publiée par une session : envoie les commentaires à traiter à cette session. */
+  onSendToAgent?: () => Promise<void>;
 }
 
 /**
@@ -58,7 +60,7 @@ interface Props {
  * cliquant dedans), chacun une micro-conversation avec ses réponses et un état « traité ». Dialogue avec le script
  * injecté dans la page par postMessage : repères numérotés, choix d'un élément, mise en avant.
  */
-export default function PageComments({ page, version, frameRef, picking, setPicking, initialFocus, open, onOpen, onClose }: Props) {
+export default function PageComments({ page, version, frameRef, picking, setPicking, initialFocus, open, onOpen, onClose, onSendToAgent }: Props) {
   const { user } = useAuth();
   const { confirm, showError } = useDialogs();
   const { data } = usePollingQuery<{ sharedPage: { id: string; version: number; openComments: number; comments: SharedPageComment[] } | null }>(SHARED_PAGE_COMMENTS, { variables: { id: page.id }, pollInterval: 10_000 });
@@ -218,6 +220,13 @@ export default function PageComments({ page, version, frameRef, picking, setPick
         </div>
       </div>
 
+      {onSendToAgent && openCount > 0 && (
+        <div className="pc-agent-row">
+          <button type="button" className="cc-btn" onClick={() => void onSendToAgent()} title="L'agent qui a publié la page prend en compte les commentaires à traiter, publie une nouvelle version et les marque traités">
+            <i className="bi bi-robot" /> Transmettre à l'agent ({openCount})
+          </button>
+        </div>
+      )}
       <div className="pc-list" ref={listRef}>
         {!data && <div className="pc-empty">Chargement…</div>}
         {data && visible.length === 0 && (

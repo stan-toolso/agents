@@ -3358,6 +3358,12 @@ type Mutation {
   resolveSharedPageComment(id: ID!, resolved: Boolean!): SharedPageComment!
   "Auteur ou propriétaire de la page ; un commentaire part avec ses réponses."
   deleteSharedPageComment(id: ID!): Boolean!
+  """
+  Demande à la session qui a publié la page de la mettre à jour (propriétaire seulement) : l'instruction reprend la
+  demande donnée et, sauf withComments: false, les commentaires à traiter ; l'agent republie puis marque les
+  commentaires traités. La session est relancée (ou restaurée) si besoin.
+  """
+  requestSharedPageUpdate(id: ID!, instruction: String, withComments: Boolean): Session!
   "Abonne cet appareil aux notifications push (notifications système, même application fermée)."
   subscribePush(input: PushSubscriptionInput!): Boolean!
   unsubscribePush(endpoint: String!): Boolean!
