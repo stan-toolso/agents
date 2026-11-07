@@ -13,7 +13,7 @@
   if (window.__skipperComments || window.parent === window) return;
   window.__skipperComments = true;
 
-  var state = { picking: false, hovered: null, anchors: [], flash: null, flashUntil: 0 };
+  var state = { picking: false, hovered: null, anchors: [], flash: null, flashUntil: 0, menu: null, pointer: 'mouse', menuPress: false };
 
   /* ---------- Sélecteurs (mêmes règles que les annotations des aperçus) ---------- */
   function esc(s) {
@@ -80,6 +80,11 @@
     '.pin span{transform:rotate(45deg)}' +
     '.pin.done{background:#8b949e}.pin.on{background:#2f81f7;color:#fff}' +
     '.pin:hover{filter:brightness(1.1)}' +
+    '.menu{position:fixed;pointer-events:auto;background:#fff;color:#1f2328;border:1px solid #d0d7de;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.25);padding:4px;min-width:180px;max-width:calc(100vw - 16px);user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}' +
+    '.menu.touch{display:flex;min-width:0;padding:3px;border-radius:999px;background:#d97757;border-color:#d97757;color:#141414}' +
+    '.item{display:flex;align-items:center;gap:8px;width:100%;border:0;background:none;color:inherit;font-size:13px;text-align:left;padding:7px 10px;border-radius:5px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+    '.item:hover{background:#f3f4f6}.menu.touch .item{font-size:14px;font-weight:600;padding:8px 14px;border-radius:999px}.menu.touch .item:hover{background:rgba(0,0,0,.08)}' +
+    '.sep{height:1px;background:#d0d7de;margin:4px 2px}' +
     '.banner{position:fixed;left:50%;transform:translateX(-50%);top:14px;pointer-events:none;background:#d97757;color:#141414;border-radius:999px;padding:6px 14px;font-size:13px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,.3);max-width:calc(100vw - 20px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
     '</style><div class="ov"></div>';
   var ov = root.querySelector('.ov');
@@ -118,6 +123,7 @@
       var fr = state.flash.getBoundingClientRect();
       ov.appendChild(el('div', { class: 'box flash', style: 'left:' + fr.left + 'px;top:' + fr.top + 'px;width:' + fr.width + 'px;height:' + fr.height + 'px' }));
     }
+    if (state.menu) drawMenu();
     if (state.picking) {
       if (state.hovered && state.hovered.isConnected) {
         var hr = state.hovered.getBoundingClientRect();
@@ -127,6 +133,102 @@
       ov.appendChild(el('div', { class: 'banner', text: 'Cliquez sur l’élément à commenter · Échap pour annuler' }));
     }
   }
+  /* ---------- Menu « Commenter » : texte sélectionné (appui long sur mobile) ou clic droit ---------- */
+  function cleanText(t) {
+    t = String(t || '').replace(/\s+/g, ' ').trim();
+    return t.length > 200 ? t.slice(0, 200) + '…' : t;
+  }
+  function elementOf(node) {
+    var e = node && node.nodeType === 1 ? node : node && node.parentElement;
+    return e && e !== document.documentElement && e !== document.body ? e : null;
+  }
+  /* Sélection de texte courante dans la page (hors calque), ou null. */
+  function currentSelection() {
+    var sel = window.getSelection && window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+    var text = cleanText(sel.toString());
+    if (!text) return null;
+    var range = sel.getRangeAt(0);
+    var target = elementOf(range.commonAncestorContainer);
+    if (!target || host.contains(target)) return null;
+    return { range: range.cloneRange(), text: text, el: target };
+  }
+  /* Ancre d'une sélection : l'élément qui la contient, avec le texte sélectionné comme extrait. */
+  function selectionAnchor(s) {
+    var a = describe(s.el);
+    a.text = s.text;
+    return a;
+  }
+  function closeMenu() {
+    if (!state.menu) return;
+    state.menu = null;
+    schedule();
+  }
+  function choose(anchor, target) {
+    state.menu = null;
+    state.flash = target;
+    state.flashUntil = Date.now() + 1800;
+    try {
+      window.getSelection().removeAllRanges();
+    } catch (e) {}
+    schedule();
+    send({ type: 'picked', anchor: anchor });
+  }
+  function drawMenu() {
+    var m = state.menu;
+    var box = el('div', { class: 'menu' + (m.touch ? ' touch' : ''), role: 'menu' });
+    function item(label, fn) {
+      var b = el('button', { class: 'item', type: 'button', role: 'menuitem', text: label });
+      b.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        state.menuPress = false;
+        fn();
+      });
+      box.appendChild(b);
+    }
+    if (m.selection) item(m.touch ? '\uD83D\uDCAC Commenter' : '\uD83D\uDCAC Commenter la s\u00e9lection', function () { choose(selectionAnchor(m.selection), m.selection.el); });
+    if (m.target && !m.touch) item('\uD83D\uDCCD Commenter cet \u00e9l\u00e9ment <' + m.target.tagName.toLowerCase() + '>', function () { choose(describe(m.target), m.target); });
+    if (m.target && m.touch && !m.selection) item('\uD83D\uDCAC Commenter cet \u00e9l\u00e9ment', function () { choose(describe(m.target), m.target); });
+    if (m.selection && !m.touch) {
+      box.appendChild(el('div', { class: 'sep' }));
+      item('Copier', function () {
+        var text = m.selection.range.toString();
+        closeMenu();
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(function () {});
+          else document.execCommand('copy');
+        } catch (e) {}
+      });
+    }
+    ['pointerdown', 'mousedown', 'touchstart'].forEach(function (t) {
+      box.addEventListener(t, function (e) {
+        state.menuPress = true;
+        // Garder la sélection : un appui dans le menu ne doit pas la défaire avant le clic (souris seulement ; pas de
+        // preventDefault au toucher, il annulerait le clic).
+        if (t === 'mousedown') e.preventDefault();
+      });
+    });
+    ov.appendChild(box);
+    // Position : au pointeur (clic droit), ou sous la sélection (mobile : la barre du navigateur est au-dessus).
+    var w = box.offsetWidth, h = box.offsetHeight, x, y;
+    if (m.touch && m.selection) {
+      var rects = m.selection.range.getClientRects();
+      var r = rects.length ? rects[rects.length - 1] : m.selection.range.getBoundingClientRect();
+      var first = rects.length ? rects[0] : r;
+      x = (first.left + r.right) / 2 - w / 2;
+      y = r.bottom + 14;
+      if (y + h > innerHeight - 8) y = first.top - h - 56;
+    } else {
+      x = m.x;
+      y = m.y;
+      if (x + w > innerWidth - 8) x = m.x - w;
+      if (y + h > innerHeight - 8) y = m.y - h;
+    }
+    box.style.left = Math.max(8, Math.min(x, innerWidth - w - 8)) + 'px';
+    box.style.top = Math.max(8, Math.min(y, innerHeight - h - 8)) + 'px';
+  }
+
   function schedule() {
     if (!raf) raf = requestAnimationFrame(overlay);
   }
@@ -156,6 +258,7 @@
       reportFound();
     } else if (m.type === 'pick') {
       state.picking = true;
+      state.menu = null;
       state.hovered = null;
       schedule();
     } else if (m.type === 'cancel') {
@@ -225,6 +328,65 @@
     schedule();
     send({ type: 'cancelled' });
   }, true);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && state.menu) closeMenu();
+  }, true);
+
+  document.addEventListener('pointerdown', function (e) {
+    if (ours(e)) return;
+    state.pointer = e.pointerType || 'mouse';
+    state.menuPress = false;
+    if (state.menu && !state.menu.touch) closeMenu();
+  }, true);
+  document.addEventListener('touchstart', function (e) {
+    if (!ours(e)) state.pointer = 'touch';
+  }, { capture: true, passive: true });
+
+  /* Clic droit (ordinateur) : notre menu à la place de celui du navigateur ; Maj + clic droit garde le sien.
+     Appui long (mobile) : on laisse le navigateur sélectionner le texte, le menu suit la sélection. */
+  document.addEventListener('contextmenu', function (e) {
+    if (state.picking || ours(e) || e.shiftKey) return;
+    var target = targetAt(e.clientX, e.clientY);
+    if (state.pointer === 'touch') {
+      // Appui long sur une image ou un bloc sans texte : pas de sélection, on propose l'élément.
+      var x = e.clientX, y = e.clientY;
+      setTimeout(function () {
+        if (currentSelection() || !target) return;
+        state.menu = { touch: true, x: x - 70, y: y + 24, target: target, selection: null };
+        schedule();
+      }, 450);
+      return;
+    }
+    if (!target && !currentSelection()) return;
+    e.preventDefault();
+    var s = currentSelection();
+    // La sélection ne compte que si le clic droit tombe dessus (ou à côté, dans le même bloc).
+    if (s && target && !s.el.contains(target) && !target.contains(s.el)) s = null;
+    state.menu = { touch: false, x: e.clientX, y: e.clientY, target: target, selection: s };
+    schedule();
+  }, true);
+
+  /* Sélection au toucher : bouton « Commenter » sous le texte sélectionné, mis à jour quand on étend la sélection. */
+  var selTimer = 0;
+  document.addEventListener('selectionchange', function () {
+    if (state.picking) return;
+    clearTimeout(selTimer);
+    selTimer = setTimeout(function () {
+      var s = currentSelection();
+      if (s && state.pointer === 'touch') {
+        state.menu = { touch: true, target: null, selection: s };
+        schedule();
+      } else if (!s && state.menu && state.menu.selection && !state.menuPress) {
+        closeMenu();
+      }
+    }, 200);
+  });
+  addEventListener('scroll', function () {
+    if (state.menu && !state.menu.touch) closeMenu();
+  }, true);
+  addEventListener('blur', function () {
+    if (state.menu && !state.menu.touch) closeMenu();
+  });
   addEventListener('scroll', schedule, true);
   addEventListener('resize', schedule);
 
