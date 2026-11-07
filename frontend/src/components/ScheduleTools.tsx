@@ -22,7 +22,7 @@ function fateOf(mode: string): string {
  * outils proposés d'après les exécutions passées et l'instruction, et l'avertissement quand le mode
  * d'autorisation de la session bloquera une exécution.
  */
-export default function ScheduleTools({ value, onChange, projectId, sessionId, prompt, permissionMode }: { value: string[]; onChange: (rules: string[]) => void; projectId: string; sessionId: string | null; prompt: string; permissionMode: string }) {
+export default function ScheduleTools({ value, onChange, projectId, scheduleId, prompt, permissionMode }: { value: string[]; onChange: (rules: string[]) => void; projectId: string; scheduleId: string | null; prompt: string; permissionMode: string }) {
   const [draft, setDraft] = useState('');
   const [debouncedPrompt, setDebouncedPrompt] = useState(prompt);
   useEffect(() => {
@@ -30,7 +30,7 @@ export default function ScheduleTools({ value, onChange, projectId, sessionId, p
     return () => clearTimeout(handle);
   }, [prompt]);
   const { data } = useQuery<{ schedulePermissionSuggestions: ScheduleToolSuggestion[] }>(SCHEDULE_PERMISSION_SUGGESTIONS, {
-    variables: { projectId, sessionId, prompt: debouncedPrompt },
+    variables: { projectId, scheduleId, prompt: debouncedPrompt },
     skip: !projectId,
     fetchPolicy: 'cache-and-network',
   });
@@ -90,7 +90,7 @@ export default function ScheduleTools({ value, onChange, projectId, sessionId, p
         <Alert variant={warn ? 'warning' : 'secondary'} className="mt-2 mb-0 py-2 small">
           <div className="d-flex align-items-start justify-content-between gap-2 mb-1">
             <span>
-              {sessionId ? 'Outils soumis à autorisation lors des exécutions passées ou cités par l’instruction' : 'Éléments du coffre cités par l’instruction'}
+              {scheduleId ? 'Outils soumis à autorisation lors des exécutions passées ou cités par l’instruction' : 'Éléments du coffre cités par l’instruction'}
               {warn ? <> : sans pré-autorisation, {fateOf(permissionMode)}.</> : ' :'}
             </span>
             {missing.length > 1 && (

@@ -3437,21 +3437,29 @@ enum ScheduleArchivePolicy {
   NEVER
 }
 
-"Planification portée par une session : à chaque échéance de l'expression cron, une nouvelle session (mêmes projet, propriétaire, provider et réglages) est créée et reçoit l'instruction."
+"Planification : objet rattaché à un projet, distinct des sessions. À chaque échéance de l'expression cron, elle lance une nouvelle session indépendante (son propre dossier de travail) avec ses réglages, qui reçoit l'instruction."
 type SessionSchedule {
-  "Identifiant de la session de la planification (une planification par session au plus) : elle porte les réglages des exécutions."
-  sessionId: ID!
-  "Nom affiché de la planification : le sien, sinon celui de la session."
+  id: ID!
+  "Nom affiché de la planification : le sien, sinon le début de l'instruction."
   name: String!
-  "Nom saisi pour la planification (null : celui de la session)."
+  "Nom saisi pour la planification (null : déduit de l'instruction)."
   customName: String
-  session: Session!
   project: Project!
+  "Propriétaire des sessions d'exécution (personne ou agent) : ses comptes et son budget."
+  owner: User
+  "Agent de projet propriétaire, le cas échéant."
+  agent: Agent
+  "Personne qui a créé la planification pour un agent."
+  requestedBy: User
+  "Provider des sessions d'exécution (claude, opencode…)."
+  provider: String!
+  "Réglages du provider copiés dans chaque session d'exécution (mode d'autorisation, modèle…)."
+  config: JSON!
   "Cinq champs : minute heure jour mois jour-de-semaine, ou alias (@hourly, @daily, @weekly, @monthly)."
   cron: String!
   "Fuseau IANA dans lequel l'expression est interprétée (ex. Europe/Paris)."
   timezone: String!
-  "Instruction envoyée à la session à chaque exécution."
+  "Instruction envoyée à la session de chaque exécution."
   prompt: String!
   enabled: Boolean!
   "Terminer la session d'une exécution à la fin de son tour (défaut) ; sinon elle reste ouverte aux instructions."
@@ -3468,6 +3476,8 @@ type SessionSchedule {
   lastResult: String
   "Historique des exécutions, les plus récentes d'abord."
   runs(limit: Int = 20): [ScheduleRun!]!
+  "Sessions d'exécution encore actives (non archivées), les plus récentes d'abord."
+  activeSessions: [Session!]!
   createdAt: DateTime!
   updatedAt: DateTime!
 }
@@ -3507,7 +3517,7 @@ type ScheduleRun {
   message: String
   "Début de la dernière réponse de l'agent."
   answer: String
-  "Session créée pour cette exécution (null : exécution d'avant, jouée dans la session de la planification, ignorée ou manquée)."
+  "Session créée pour cette exécution (null : ignorée, manquée, ou session non créée)."
   session: Session
 }
 
@@ -3527,17 +3537,17 @@ input SessionScheduleInput {
   archiveAfterMinutes: Int
   "Outils pré-autorisés pour les exécutions (absent : inchangés ; liste vide : aucun)."
   allowedTools: [String!]
-  "Réglage de nettoyage de la session, enregistré en même temps que la planification (absent : inchangé). Proposé par défaut : « fresh »."
-  cleanup: SessionCleanupInput
+  "Réglages du provider (mode d'autorisation, modèle…), fusionnés à ceux de la planification ; valeur vide : retirée (défaut du projet ou du propriétaire). Absent : inchangés."
+  config: JSON
 }
 
 extend type Session {
-  "Planification de la session (null si elle n'est pas planifiée)."
+  "Planification qui a lancé cette session (session d'une exécution) ; null sinon."
   schedule: SessionSchedule
 }
 
-"Nouvelle planification portée par une session créée pour elle (dans son propre dossier de travail, sans démarrer)."
-input CreateScheduledSessionInput {
+"Nouvelle planification d'un projet. Aucune session n'est créée avant la première exécution."
+input CreateScheduleInput {
   projectId: ID!
   name: String!
   cron: String!
@@ -3548,14 +3558,13 @@ input CreateScheduledSessionInput {
   archivePolicy: ScheduleArchivePolicy
   archiveAfterMinutes: Int
   allowedTools: [String!]
-  cleanup: SessionCleanupInput
-  "Provider de la session (défaut : claude)."
+  "Provider des sessions d'exécution (défaut : claude)."
   provider: String
-  "Réglages du provider (mode d'autorisation, modèle…) ; absent : ceux du projet."
+  "Réglages du provider (mode d'autorisation, modèle…) ; absent : ceux du projet et du propriétaire."
   config: JSON
   "Lance une première exécution tout de suite."
   runNow: Boolean
-  "Agent de projet propriétaire de la session planifiée (ses comptes, son budget)."
+  "Agent de projet propriétaire des exécutions (ses comptes, son budget)."
   agentId: ID
 }
 
@@ -3579,24 +3588,26 @@ type ScheduleToolSuggestion {
 }
 
 extend type Query {
-  "Outils à pré-autoriser pour une planification : refusés ou demandés pendant ses dernières exécutions, et éléments du coffre avec approbation cités par l'instruction (sans session : seulement l'instruction)."
-  schedulePermissionSuggestions(projectId: ID!, sessionId: ID, prompt: String): [ScheduleToolSuggestion!]!
-  "Planifications des sessions non archivées, d'un projet ou de tous les projets accessibles."
+  "Outils à pré-autoriser pour une planification : refusés ou demandés pendant ses dernières exécutions, et éléments du coffre avec approbation cités par l'instruction (sans planification : seulement l'instruction)."
+  schedulePermissionSuggestions(projectId: ID!, scheduleId: ID, prompt: String): [ScheduleToolSuggestion!]!
+  "Planifications d'un projet, ou de tous les projets accessibles."
   sessionSchedules(projectId: ID): [SessionSchedule!]!
+  sessionSchedule(id: ID!): SessionSchedule
   "Prochaines échéances d'une expression cron (aperçu) ; erreur si l'expression ou le fuseau est invalide."
   scheduleNextRuns(cron: String!, timezone: String, count: Int = 5): [DateTime!]!
 }
 
 extend type Mutation {
-  "Crée ou remplace la planification de la session."
-  setSessionSchedule(id: ID!, input: SessionScheduleInput!): Session!
-  clearSessionSchedule(id: ID!): Session!
+  "Crée une planification (aucune session avant sa première exécution)."
+  createSchedule(input: CreateScheduleInput!): SessionSchedule!
+  "Modifie une planification ; l'échéance est recalculée depuis maintenant."
+  updateSchedule(id: ID!, input: SessionScheduleInput!): SessionSchedule!
+  "Supprime la planification et son historique ; les sessions de ses exécutions restent."
+  deleteSchedule(id: ID!): Boolean!
   "Met en pause (false) ou réactive (true) la planification ; l'échéance est recalculée depuis maintenant."
-  setSessionScheduleEnabled(id: ID!, enabled: Boolean!): Session!
-  "Crée une session dédiée et sa planification ; renvoie la session."
-  createScheduledSession(input: CreateScheduledSessionInput!): Session!
-  "Exécute la planification maintenant, sans attendre l'échéance."
-  runSessionScheduleNow(id: ID!): Session!
+  setScheduleEnabled(id: ID!, enabled: Boolean!): SessionSchedule!
+  "Exécute la planification maintenant, sans attendre l'échéance ; renvoie la session de l'exécution."
+  runScheduleNow(id: ID!): Session
 }
 
 # ---- Réglages et nettoyage des sessions -----------------------------------------------------------
@@ -3884,8 +3895,8 @@ type AgentAction {
   "Expression cron à cinq champs (null : à la demande seulement)."
   cron: String
   timezone: String
-  "Session planifiée qui porte l'action quand elle a un cron."
-  scheduleSession: Session
+  "Planification de l'action quand elle a un cron."
+  schedule: SessionSchedule
 }
 
 type AgentManager {

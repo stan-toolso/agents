@@ -229,11 +229,11 @@ export default function ProjectDetailPage() {
             </h2>
             <ul className="dash-list">
               {d.schedules.filter((s) => s.enabled && s.nextRunAt).slice(0, 4).map((s) => (
-                <li key={s.sessionId}>
+                <li key={s.id}>
                   <i className="bi bi-alarm icon" />
                   <div className="main">
-                    <Link to={`/sessions/${s.session.id}`} className="title">{s.name}</Link>
-                    <div className="meta">{s.session.owner?.name ?? 'planification'}{s.lastResult && ` · dernière exécution : ${s.lastResult}`}</div>
+                    <Link to={`/projects/${project.id}/schedules?edit=${s.id}`} className="title">{s.name}</Link>
+                    <div className="meta">{s.owner?.name ?? 'planification'}{s.lastResult && ` · dernière exécution : ${s.lastResult}`}</div>
                   </div>
                   <div className="side">{s.nextRunAt && new Date(s.nextRunAt).toLocaleString('fr-FR', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}</div>
                 </li>

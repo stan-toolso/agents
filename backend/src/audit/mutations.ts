@@ -88,16 +88,16 @@ export const AUDITED: Record<string, MutationAudit> = {
   takeOverSession: session('session.take_over'),
   handBackSession: session('session.hand_back'),
   // Planifications.
-  createScheduledSession: {
+  createSchedule: {
     action: 'schedule.create',
     project: 'input.projectId',
     label: (a) => a.input?.name,
     details: (a) => ({ cron: a.input?.cron, timezone: a.input?.timezone, enabled: a.input?.enabled, agentId: a.input?.agentId }),
   },
-  setSessionSchedule: { action: 'schedule.set', lookup: ['session', 'id'], details: (a) => ({ input: a.input }) },
-  clearSessionSchedule: { action: 'schedule.clear', lookup: ['session', 'id'] },
-  setSessionScheduleEnabled: { action: 'schedule.enable', lookup: ['session', 'id'], details: (a) => ({ enabled: a.enabled }) },
-  runSessionScheduleNow: { action: 'schedule.run', lookup: ['session', 'id'] },
+  updateSchedule: { action: 'schedule.set', lookup: ['schedule', 'id'], details: (a) => ({ input: a.input }) },
+  deleteSchedule: { action: 'schedule.clear', lookup: ['schedule', 'id'] },
+  setScheduleEnabled: { action: 'schedule.enable', lookup: ['schedule', 'id'], details: (a) => ({ enabled: a.enabled }) },
+  runScheduleNow: { action: 'schedule.run', lookup: ['schedule', 'id'] },
   // Demandes : qui a autorisé quoi.
   answerRequest: { action: 'request.answer', lookup: ['request', 'id'], details: (a, r) => ({ type: r?.type, sessionId: r?.sessionId, ...requestAnswerDetails(a.response) }) },
   cancelRequest: { action: 'request.cancel', lookup: ['request', 'id'], details: (_a, r) => ({ type: r?.type, sessionId: r?.sessionId }) },

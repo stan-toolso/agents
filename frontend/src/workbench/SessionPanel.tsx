@@ -188,13 +188,13 @@ export default function SessionPanel({ sessionId }: { sessionId: string }) {
           <dt>Planification</dt>
           <dd>
             {schedule ? (
-              <button type="button" className="cc-link text-start" title={`${schedule.cron} (${schedule.timezone})${schedule.lastResult ? ` · dernière exécution : ${schedule.lastResult}` : ''}`} onClick={actions.openSchedule}>
+              <button type="button" className="cc-link text-start" title={`Session lancée par cette planification · ${schedule.cron} (${schedule.timezone}) · cliquer pour la modifier`} onClick={actions.openSchedule}>
                 <i className="bi bi-alarm me-1" />
-                {schedule.name} · {describeCron(schedule.cron).toLowerCase()} · {schedule.enabled ? (schedule.nextRunAt ? `prochaine le ${new Date(schedule.nextRunAt).toLocaleString()}` : 'planifiée') : 'en pause'}
+                lancée par « {schedule.name} » · {describeCron(schedule.cron).toLowerCase()} · {schedule.enabled ? (schedule.nextRunAt ? `prochaine le ${new Date(schedule.nextRunAt).toLocaleString()}` : 'planifiée') : 'en pause'}
               </button>
             ) : (
               <button type="button" className="cc-link" onClick={actions.openSchedule}>
-                aucune · planifier
+                aucune · en créer une
               </button>
             )}
           </dd>

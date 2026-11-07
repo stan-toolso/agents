@@ -1,14 +1,14 @@
 import { useMutation, useQuery } from '@apollo/client';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Badge, Button, ButtonGroup, Form } from 'react-bootstrap';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useDialogs } from '../components/Dialogs';
 import PageLoading from '../components/PageLoading';
 import ProjectHeader from '../components/ProjectHeader';
 import ScheduleModal from '../components/ScheduleModal';
 import { RunDots, RunHistory, RunStatus } from '../components/ScheduleRuns';
 import '../components/schedules.css';
-import { PROJECTS, RUN_SESSION_SCHEDULE_NOW, SESSION_SCHEDULES, SET_SESSION_SCHEDULE_ENABLED, type Project, type ScheduleListItem } from '../graphql/operations';
+import { PROJECTS, RUN_SCHEDULE_NOW, SESSION_SCHEDULES, SET_SCHEDULE_ENABLED, type Project, type ScheduleListItem } from '../graphql/operations';
 import { browserTimeZone, describeCron } from '../lib/cron';
 import { timeAgo } from '../lib/humanize';
 import { isRunProblem, timeUntil } from '../lib/schedules';
@@ -29,33 +29,38 @@ const nextLabel = (iso: string) => `${new Date(iso).toLocaleString('fr-FR', { we
 /** Une planification : nom, fréquence en clair, prochaine échéance, dernières exécutions, actions directes. */
 function ScheduleCard({ item, showProject, onEdit }: { item: ScheduleListItem; showProject: boolean; onEdit: () => void }) {
   const { showError } = useDialogs();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [runNow, { loading: launching }] = useMutation(RUN_SESSION_SCHEDULE_NOW, { refetchQueries: ['SessionSchedules'] });
-  const [toggle, { loading: toggling }] = useMutation(SET_SESSION_SCHEDULE_ENABLED, { refetchQueries: ['SessionSchedules'] });
+  const [runNow, { loading: launching }] = useMutation<{ runScheduleNow: { id: string } | null }>(RUN_SCHEDULE_NOW, { refetchQueries: ['SessionSchedules', 'Sidebar'] });
+  const [toggle, { loading: toggling }] = useMutation(SET_SCHEDULE_ENABLED, { refetchQueries: ['SessionSchedules'] });
   const canWrite = item.project.myRole === 'ADMIN' || item.project.myRole === 'MEMBER';
   const last = item.runs[0] ?? null;
   const problem = Boolean(last && isRunProblem(last.status));
-  const working = item.session.status === 'RUNNING' && item.session.activity === 'BUSY';
-  const running = last?.status === 'RUNNING' || working;
+  const running = last?.status === 'RUNNING';
+  const pending = last?.session?.pendingRequestCount ?? 0;
   const tz = item.timezone !== browserTimeZone() ? ` (${item.timezone})` : '';
-  const sessionNamed = item.customName && item.customName !== item.session.name;
+  const launch = async () => {
+    const res = await runNow({ variables: { id: item.id } }).catch((err: Error) => (showError(err), null));
+    const sessionId = res?.data?.runScheduleNow?.id;
+    if (sessionId) navigate(`/sessions/${sessionId}`);
+  };
   return (
     <div className={`sch-card${item.enabled ? ' on' : ' paused'}${problem ? ' problem' : ''}`}>
       <div className="sch-card-head">
         <div className="sch-card-main">
           <div className="d-flex align-items-center gap-2 flex-wrap">
-            <Link to={`/sessions/${item.sessionId}`} className="sch-card-title" title="Ouvrir la session de cette planification (ses réglages valent pour chaque exécution, qui a sa propre session)">
+            <button type="button" className="sch-card-title sch-link-btn" title="Modifier la planification" onClick={onEdit}>
               <i className="bi bi-alarm me-1 text-secondary" />
               {item.name}
-            </Link>
+            </button>
             {!item.enabled && (
               <Badge bg="secondary" className="fw-normal">
                 en pause
               </Badge>
             )}
-            {item.session.pendingRequestCount > 0 && (
-              <Link to={`/sessions/${item.sessionId}`} className="badge bg-warning text-dark text-decoration-none fw-normal" title="L'agent attend une réponse">
-                {item.session.pendingRequestCount} demande{item.session.pendingRequestCount > 1 ? 's' : ''}
+            {pending > 0 && last?.session && (
+              <Link to={`/sessions/${last.session.id}`} className="badge bg-warning text-dark text-decoration-none fw-normal" title="L'agent de la dernière exécution attend une réponse">
+                {pending} demande{pending > 1 ? 's' : ''}
               </Link>
             )}
           </div>
@@ -77,13 +82,7 @@ function ScheduleCard({ item, showProject, onEdit }: { item: ScheduleListItem; s
                 {item.project.name}
               </Link>
             )}
-            {sessionNamed && (
-              <span title="Session qui porte cette planification">
-                <i className="bi bi-chat-dots me-1" />
-                {item.session.name}
-              </span>
-            )}
-            {item.session.owner && <span title="Les exécutions utilisent les comptes et le budget de cette personne">{item.session.owner.name}</span>}
+            {item.owner && <span title="Les exécutions utilisent les comptes et le budget de ce propriétaire">{item.owner.name}</span>}
           </div>
           <div className="sch-card-prompt" title={item.prompt}>
             {item.prompt}
@@ -93,11 +92,11 @@ function ScheduleCard({ item, showProject, onEdit }: { item: ScheduleListItem; s
           <div className="sch-card-actions">
             {canWrite && (
               <>
-                <Button size="sm" variant="outline-primary" disabled={launching || running} title={running ? "L'agent travaille déjà" : "Exécute la planification maintenant, sans attendre l'échéance"} onClick={() => void runNow({ variables: { id: item.sessionId } }).catch(showError)}>
+                <Button size="sm" variant="outline-primary" disabled={launching || running} title={running ? "L'exécution précédente n'est pas terminée" : "Lance une exécution maintenant, dans une nouvelle session"} onClick={() => void launch()}>
                   <i className="bi bi-play-fill me-1" />
                   Exécuter
                 </Button>
-                <Button size="sm" variant="outline-secondary" disabled={toggling} title={item.enabled ? 'Mettre en pause : plus aucune échéance jusqu’à la reprise' : 'Reprendre : la prochaine échéance est recalculée depuis maintenant'} onClick={() => void toggle({ variables: { id: item.sessionId, enabled: !item.enabled } }).catch(showError)}>
+                <Button size="sm" variant="outline-secondary" disabled={toggling} title={item.enabled ? 'Mettre en pause : plus aucune échéance jusqu’à la reprise' : 'Reprendre : la prochaine échéance est recalculée depuis maintenant'} onClick={() => void toggle({ variables: { id: item.id, enabled: !item.enabled } }).catch(showError)}>
                   <i className={`bi ${item.enabled ? 'bi-pause-fill' : 'bi-play-circle'} me-1`} />
                   {item.enabled ? 'Pause' : 'Reprendre'}
                 </Button>
@@ -159,7 +158,7 @@ export default function SchedulesPage() {
   const { data: projectsData } = useQuery<{ projects: Project[] }>(PROJECTS, { variables: { includePersonal: true } });
   const [searchParams, setSearchParams] = useSearchParams();
   // « ?new=1 » (menu du projet dans la sidebar) : ouvre tout de suite la création, puis s'efface de l'adresse.
-  // « ?edit=<session> » (notification d'une exécution bloquée) : ouvre la planification, où l'on pré-autorise ses outils.
+  // « ?edit=<planification> » (notification d'une exécution bloquée) : ouvre la planification, où l'on pré-autorise ses outils.
   const [creating, setCreating] = useState(searchParams.has('new'));
   const [editing, setEditing] = useState<string | null>(searchParams.get('edit'));
   useEffect(() => {
@@ -189,11 +188,11 @@ export default function SchedulesPage() {
       if (filter === 'active' && !s.enabled) return false;
       if (filter === 'paused' && s.enabled) return false;
       if (filter === 'attention' && !(s.runs[0] && isRunProblem(s.runs[0].status))) return false;
-      return !q || [s.name, s.prompt, s.session.name, s.project.name].some((v) => v.toLowerCase().includes(q));
+      return !q || [s.name, s.prompt, s.project.name, s.owner?.name ?? ''].some((v) => v.toLowerCase().includes(q));
     });
   }, [all, filter, search]);
   const soonest = all.filter((s) => s.enabled && s.nextRunAt).sort((a, b) => a.nextRunAt!.localeCompare(b.nextRunAt!))[0];
-  const editingItem = editing ? all.find((s) => s.sessionId === editing) : null;
+  const editingItem = editing ? all.find((s) => s.id === editing) : null;
 
   if (loading && !data) return <PageLoading />;
   if (error) return <Alert variant="danger">Erreur : {error.message}</Alert>;
@@ -255,12 +254,12 @@ export default function SchedulesPage() {
       ) : (
         <div className="sch-list">
           {shown.map((s) => (
-            <ScheduleCard key={s.sessionId} item={s} showProject={!routeProjectId} onEdit={() => setEditing(s.sessionId)} />
+            <ScheduleCard key={s.id} item={s} showProject={!routeProjectId} onEdit={() => setEditing(s.id)} />
           ))}
         </div>
       )}
       {creating && <ScheduleModal projects={writable.map((p) => ({ id: p.id, name: p.isPersonal ? 'Mon espace' : p.name, defaultPermissionMode: p.defaultPermissionMode, defaultModel: p.defaultModel }))} onClose={() => setCreating(false)} />}
-      {editingItem && <ScheduleModal session={editingItem.session} onClose={() => setEditing(null)} />}
+      {editingItem && <ScheduleModal key={editingItem.id} schedule={editingItem} onClose={() => setEditing(null)} />}
     </>
   );
 }

@@ -24,6 +24,8 @@ vi.mock('../sessions/repository.js', () => ({ sessionRepository: sessionRepo }))
 vi.mock('../tasks/service.js', () => ({ taskService: tasks }));
 vi.mock('../tasks/launch.js', () => launch);
 vi.mock('../schedules/service.js', () => ({ scheduleService: schedules }));
+const legacySchedules = { findByLegacySession: vi.fn(async (id: string) => (id === 'holder-old' ? { id: 'sched-legacy' } : null)) };
+vi.mock('../schedules/repository.js', () => ({ scheduleRepository: legacySchedules }));
 vi.mock('../projects/service.js', () => ({ projectService: projects }));
 vi.mock('../context/service.js', () => ({ contextService: context }));
 vi.mock('../conversations/service.js', () => ({ conversationService: conversations, channelRef: () => '#general', threadTitle: () => 'Quoi de neuf ?', describeMessages: () => [] }));
@@ -87,8 +89,8 @@ beforeEach(() => {
   launch.startTaskSession = vi.fn(async (_id: string, opts: Record<string, unknown>) => ({ id: 'task-session', ...opts }));
   launch.taskFiles = vi.fn(async () => ({ kept: [], leftOut: [] }));
   launch.composeTaskPrompt = vi.fn(() => 'prompt composé');
-  schedules.createWithSession = vi.fn(async () => ({ id: 'sched-1' }));
-  schedules.set = vi.fn(async () => ({}));
+  schedules.create = vi.fn(async () => ({ id: 'sched-1' }));
+  schedules.update = vi.fn(async () => ({}));
   schedules.remove = vi.fn(async () => ({}));
   sessions.archive = vi.fn(async () => ({}));
   sessions.unarchive = vi.fn(async (id: string) => ({ id, archivedAt: null, status: 'stopped' }));
@@ -136,17 +138,17 @@ describe('sessionConfig et providerOf', () => {
 });
 
 describe('prepareActions', () => {
-  it('dérive des clés uniques, garde la session planifiée d’une action de même clé, et valide', () => {
+  it('dérive des clés uniques, garde la planification d’une action de même clé, et valide', () => {
     const actions = agentService.prepareActions(
       [
         { label: 'Préparer une release', instruction: 'Prépare…', cron: '0 9 * * 5' },
         { label: 'Préparer une release', instruction: 'Encore' },
       ],
-      [{ key: 'preparer-une-release', label: 'x', instruction: 'y', cron: '0 9 * * 5', timezone: null, scheduleSessionId: 'sched-old' }],
+      [{ key: 'preparer-une-release', label: 'x', instruction: 'y', cron: '0 9 * * 5', timezone: null, scheduleId: 'sched-old' }],
     );
     expect(actions.map((a) => a.key)).toEqual(['preparer-une-release', 'preparer-une-release-2']);
-    expect(actions[0].scheduleSessionId).toBe('sched-old');
-    expect(actions[1].scheduleSessionId).toBeNull();
+    expect(actions[0].scheduleId).toBe('sched-old');
+    expect(actions[1].scheduleId).toBeNull();
     expect(() => agentService.prepareActions([{ label: '', instruction: 'x' }], [])).toThrow('libellé');
     expect(() => agentService.prepareActions([{ label: 'A', instruction: ' ' }], [])).toThrow("n'a pas d'instruction");
   });
@@ -229,20 +231,34 @@ describe('summon', () => {
 });
 
 describe('syncActionSchedules', () => {
-  it('crée une session planifiée par action à cron, la met à jour, et supprime celle d’une action retirée', async () => {
-    const a = agent({ actions: [{ key: 'release', label: 'Release', instruction: 'Prépare', cron: '0 9 * * 5', timezone: 'Europe/Paris', scheduleSessionId: null }] });
+  it('crée une planification par action à cron, la met à jour, et supprime celle d’une action retirée', async () => {
+    schedules.create = vi.fn(async () => ({ id: 'sched-1' }));
+    schedules.update = vi.fn(async () => ({ id: 'sched-1' }));
+    schedules.get = vi.fn(async (id: string) => (id === 'sched-1' || id === 'sched-legacy' ? { id } : null));
+    schedules.remove = vi.fn(async () => true);
+    const a = agent({ actions: [{ key: 'release', label: 'Release', instruction: 'Prépare', cron: '0 9 * * 5', timezone: 'Europe/Paris', scheduleId: null }] });
     await agentService.syncActionSchedules(a, []);
-    expect(schedules.createWithSession).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p1', name: 'Léa · Release', cron: '0 9 * * 5', prompt: 'Prépare', provider: 'claude' }), 'a1');
-    expect(repo.update).toHaveBeenCalledWith('a1', { actions: [expect.objectContaining({ key: 'release', scheduleSessionId: 'sched-1' })] });
+    expect(schedules.create).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p1', name: 'Léa · Release', cron: '0 9 * * 5', prompt: 'Prépare', provider: 'claude' }), { ownerId: 'a1' });
+    expect(repo.update).toHaveBeenCalledWith('a1', { actions: [expect.objectContaining({ key: 'release', scheduleId: 'sched-1' })] });
 
-    sessionRepo.findById = vi.fn(async () => ({ id: 'sched-1' }));
-    const b = agent({ actions: [{ key: 'release', label: 'Release', instruction: 'Prépare v2', cron: '0 9 * * 5', timezone: null, scheduleSessionId: 'sched-1' }] });
+    const b = agent({ actions: [{ key: 'release', label: 'Release', instruction: 'Prépare v2', cron: '0 9 * * 5', timezone: null, scheduleId: 'sched-1' }] });
     await agentService.syncActionSchedules(b, b.actions);
-    expect(schedules.set).toHaveBeenCalledWith('sched-1', expect.objectContaining({ prompt: 'Prépare v2', enabled: true }));
+    expect(schedules.update).toHaveBeenCalledWith('sched-1', expect.objectContaining({ prompt: 'Prépare v2', enabled: true }));
 
     await agentService.syncActionSchedules(agent({ actions: [] }), b.actions);
     expect(schedules.remove).toHaveBeenCalledWith('sched-1');
-    expect(sessions.archive).toHaveBeenCalledWith('sched-1');
+  });
+
+  it('reprend la planification d’une action enregistrée avant la refonte (session qui la portait)', async () => {
+    schedules.update = vi.fn(async () => ({ id: 'sched-legacy' }));
+    schedules.get = vi.fn(async (id: string) => ({ id }));
+    repo.update = vi.fn(async () => null);
+    const legacy = agent({ actions: [{ key: 'release', label: 'Release', instruction: 'Prépare', cron: '0 9 * * 5', timezone: null, scheduleId: null, scheduleSessionId: 'holder-old' }] });
+    await agentService.syncActionSchedules(legacy, legacy.actions);
+    expect(schedules.update).toHaveBeenCalledWith('sched-legacy', expect.objectContaining({ prompt: 'Prépare' }));
+    const saved = (repo.update as ReturnType<typeof vi.fn>).mock.calls[0][1].actions[0];
+    expect(saved.scheduleId).toBe('sched-legacy');
+    expect(saved).not.toHaveProperty('scheduleSessionId');
   });
 });
 

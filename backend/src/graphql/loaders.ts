@@ -86,8 +86,9 @@ export function createLoaders() {
     /** Coût attribué à une tâche (absente : aucun coût), voir `tasks/cost.ts`. */
     taskCost: createBatcher<string, TaskCost>((ids) => taskCosts(ids)),
     pendingRequestCount: createBatcher<string, number>((ids) => requestRepository.countPendingBySessions(ids)),
-    /** Planification d'une session (absente : la session n'est pas planifiée). */
-    sessionSchedule: createBatcher<string, SessionSchedule>((ids) => scheduleRepository.findBySessions(ids)),
+    /** Planification qui a lancé une session (absente : la session n'est pas celle d'une exécution planifiée). */
+    sessionSchedule: createBatcher<string, SessionSchedule>((ids) => scheduleRepository.findByRunSessions(ids)),
+    schedule: createBatcher<string, SessionSchedule>((ids) => scheduleRepository.findByIds(ids)),
     /** PR suivie d'une work session (en préparation comprise), voir `pullRequestRepository.findForWorksessions`. */
     trackedPullRequest: createBatcher<{ id: string; projectId: string; branch: string }, TrackedPullRequest>((keys) => pullRequestRepository.findForWorksessions(keys), (k) => k.id),
     taskForBranch: createBatcher<{ projectId: string; branch: string }, Task>((keys) => taskRepository.findForBranches(keys), branchKey),

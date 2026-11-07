@@ -8,7 +8,7 @@ import { sessionRepository } from '../sessions/repository.js';
 import { scheduledRuns } from '../sessions/scheduledRuns.js';
 import { serverSettings } from '../settings/server.js';
 import { sessionService } from '../sessions/service.js';
-import type { Session, SessionCleanup } from '../sessions/types.js';
+import type { Session } from '../sessions/types.js';
 import { claudeSettings } from '../settings/claude.js';
 import { projectBudget } from '../projects/budget.js';
 import { CronError, isValidTimeZone, nextRun, nextRuns, parseCron } from './cron.js';
@@ -18,7 +18,7 @@ import { runSessionName, validArchive } from './archive.js';
 import { MAX_SCHEDULE_RULES, normalizeRules, suggestionsFromPrompt, suggestionsFromRuns, type PastRun, type ToolSuggestion } from './permissions.js';
 import { vaultService } from '../vault/service.js';
 import { scheduleRepository } from './repository.js';
-import { type ScheduleRun, type ScheduleRunStatus, type SessionSchedule, type SessionScheduleInput } from './types.js';
+import { type CreateScheduleInput, type ScheduleRun, type ScheduleRunStatus, type SessionSchedule, type SessionScheduleInput } from './types.js';
 import { log } from '../log.js';
 import { systemAuthor } from '../sessions/instructionAuthor.js';
 
@@ -57,16 +57,12 @@ async function emit(sessionId: string, type: string, payload: Record<string, unk
   return event.id;
 }
 
-/**
- * Nom affiché d'une planification : le sien, sinon celui de la session, sinon (session au nom par défaut
- * « Session », cas des planifications d'avant les noms) le début de l'instruction.
- */
-export function scheduleLabel(schedule: Pick<SessionSchedule, 'name' | 'prompt'>, session: Pick<Session, 'name'>): string {
+/** Nom affiché d'une planification : le sien, sinon le début de l'instruction. */
+export function scheduleLabel(schedule: Pick<SessionSchedule, 'name' | 'prompt'>): string {
   const own = schedule.name?.trim();
   if (own) return own;
-  if (session.name.trim() && session.name.trim() !== 'Session') return session.name;
   const line = (schedule.prompt.split('\n').find((l) => l.trim()) ?? '').replace(/\s+/g, ' ').trim();
-  return line ? (line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line) : session.name;
+  return line ? (line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line) : 'Planification';
 }
 
 function parseOrThrow(cron: string) {
@@ -86,21 +82,27 @@ function notificationOf(status: ScheduleRunStatus, label: string): { type: strin
   return { type: 'schedule.run', title: `« ${label} » terminée` };
 }
 
-/**
- * Réglages du provider repris de la session de la planification pour la session d'une exécution : seulement les
- * champs déclarés par le provider (mode d'autorisation, modèle…), pas les drapeaux internes de la session.
- */
-async function runConfig(template: Session): Promise<Record<string, unknown>> {
-  let keys: string[] = [];
+/** Champs de configuration déclarés par un provider (mode d'autorisation, modèle…) ; lève AppError s'il est inconnu. */
+async function providerConfigKeys(provider: string): Promise<string[]> {
+  // Import tardif : le registre des providers tire tout le moteur des sessions (inutile aux modules qui n'exécutent rien).
+  const { getProvider } = await import('../sessions/providers/registry.js');
   try {
-    // Import tardif : le registre des providers tire tout le moteur des sessions (inutile aux modules qui n'exécutent rien).
-    const { getProvider } = await import('../sessions/providers/registry.js');
-    keys = getProvider(template.provider).describe().configFields.map((f) => f.key);
+    return getProvider(provider).describe().configFields.map((f) => f.key);
   } catch {
-    return {};
+    throw new AppError(`Provider inconnu : ${provider}`);
   }
+}
+
+/**
+ * Réglages du provider d'une planification, gardés seulement pour les champs qu'il déclare (pas de drapeau interne
+ * de session) ; une valeur vide retire le réglage (le défaut du projet ou du propriétaire s'applique).
+ */
+export function pickConfig(config: Record<string, unknown> | null | undefined, keys: string[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const k of keys) if (template.config?.[k] !== undefined && template.config[k] !== null && template.config[k] !== '') out[k] = template.config[k];
+  for (const k of keys) {
+    const v = config?.[k];
+    if (v !== undefined && v !== null && v !== '') out[k] = v;
+  }
   return out;
 }
 
@@ -126,7 +128,7 @@ function validRules(list: string[] | null | undefined): string[] | undefined {
   return rules;
 }
 
-/** Exécutions suivies par cette instance (identifiant d'exécution par session). */
+/** Exécutions suivies par cette instance (identifiant d'exécution par session d'exécution). */
 const localRuns = new Map<string, string>();
 
 /**
@@ -134,9 +136,9 @@ const localRuns = new Map<string, string>();
  * Ne fait rien si l'exécution était déjà close (une seule clôture, donc une seule notification).
  */
 async function finish(run: ScheduleRun, session: Session, schedule: SessionSchedule, opts: { stillBusy: boolean; startedAt: number; pendingRequest?: string | null }): Promise<ScheduleRun | null> {
-  // `session` : celle de l'exécution (sa propre session, ou celle de la planification pour une exécution d'avant).
+  // `session` : celle de l'exécution.
   const id = session.id;
-  const scheduleId = schedule.sessionId;
+  const scheduleId = schedule.id;
   const events = run.startEventId ? await sessionRepository.listEvents(id, { after: run.startEventId, limit: 2000 }) : [];
   const summary = summarizeEvents(events);
   const { status, message } = runOutcome(summary, { stillBusy: opts.stillBusy, pendingRequest: opts.pendingRequest ?? null });
@@ -148,7 +150,7 @@ async function finish(run: ScheduleRun, session: Session, schedule: SessionSched
   const details = [formatDuration(durationMs), cost].join(' · ');
   await scheduleRepository.setResult(scheduleId, `${RUN_STATUS_LABELS[status]}${message ? ` : ${message}` : ''} · ${details}`);
   await emit(id, 'schedule', { action: 'done', runId: run.id, status, outcome: RUN_STATUS_LABELS[status], message, cost: summary.cost, durationMs, name: schedule.name });
-  const label = scheduleLabel(schedule, session);
+  const label = scheduleLabel(schedule);
   const n = notificationOf(status, label);
   void notificationService.notify({
     ...n,
@@ -160,33 +162,40 @@ async function finish(run: ScheduleRun, session: Session, schedule: SessionSched
     payload: { runId: run.id, status, cost: summary.cost, durationMs, ...(status === 'blocked' ? { denied: summary.denied, sessionLink: `/sessions/${id}` } : {}) },
   });
   // « Dès la fin de l'exécution » : sauf demande encore en attente (on la laisse à portée de réponse).
-  if (schedule.archivePolicy === 'on_finish' && id !== scheduleId && !opts.pendingRequest && !opts.stillBusy) {
+  if (schedule.archivePolicy === 'on_finish' && !opts.pendingRequest && !opts.stillBusy) {
     await archiveRunSession(id, 'exécution terminée');
   }
   return closed;
 }
 
 export const scheduleService = {
-  get: (sessionId: string) => scheduleRepository.findBySession(sessionId),
-  findBySessions: (sessionIds: string[]) => scheduleRepository.findBySessions(sessionIds),
+  get: (id: string) => scheduleRepository.findById(id),
+  /** Planification qui a lancé chacune de ces sessions d'exécution. */
+  findByRunSessions: (sessionIds: string[]) => scheduleRepository.findByRunSessions(sessionIds),
   listForProjects: (projectIds: string[]) => scheduleRepository.listForProjects(projectIds),
-  listRuns: (sessionId: string, limit?: number) => scheduleRepository.listRuns(sessionId, limit),
-  listRecentRuns: (sessionIds: string[], perSession: number) => scheduleRepository.listRecentRuns(sessionIds, perSession),
+  listRuns: (scheduleId: string, limit?: number) => scheduleRepository.listRuns(scheduleId, limit),
+  listRecentRuns: (scheduleIds: string[], perSchedule: number) => scheduleRepository.listRecentRuns(scheduleIds, perSchedule),
+
+  /** Planification existante ; NotFoundError sinon. */
+  async require(id: string): Promise<SessionSchedule> {
+    const schedule = await scheduleRepository.findById(id);
+    if (!schedule) throw new NotFoundError('Planification introuvable');
+    return schedule;
+  },
 
   /**
    * Outils à pré-autoriser pour une planification : refusés ou demandés pendant ses dernières exécutions, et
-   * éléments du coffre « avec approbation » que cite l'instruction. Sans session (nouvelle planification) :
-   * seulement ceux de l'instruction.
+   * éléments du coffre « avec approbation » que cite l'instruction. Sans planification (nouvelle) : seulement ceux
+   * de l'instruction.
    */
-  async permissionSuggestions(opts: { sessionId?: string | null; projectId: string; ownerId: string | null; prompt?: string | null; runs?: number }): Promise<ToolSuggestion[]> {
+  async permissionSuggestions(opts: { scheduleId?: string | null; projectId: string; ownerId: string | null; prompt?: string | null; runs?: number }): Promise<ToolSuggestion[]> {
     const past: PastRun[] = [];
-    if (opts.sessionId) {
-      const runs = (await scheduleRepository.listRuns(opts.sessionId, opts.runs ?? 10)).filter((r) => r.startEventId);
+    if (opts.scheduleId) {
+      const runs = (await scheduleRepository.listRuns(opts.scheduleId, opts.runs ?? 10)).filter((r) => r.startEventId && r.runSessionId);
       for (const run of runs) {
-        const runSessionId = run.runSessionId ?? opts.sessionId;
         const [events, requests] = await Promise.all([
-          scheduleRepository.runResultEvents(runSessionId, run.startEventId!, run.finishedAt),
-          scheduleRepository.runPermissionRequests(runSessionId, run.startedAt, run.finishedAt),
+          scheduleRepository.runResultEvents(run.runSessionId!, run.startEventId!, run.finishedAt),
+          scheduleRepository.runPermissionRequests(run.runSessionId!, run.startedAt, run.finishedAt),
         ]);
         past.push({ startedAt: run.startedAt, events, requests });
       }
@@ -205,11 +214,8 @@ export const scheduleService = {
     return nextRuns(parseOrThrow(cron), new Date(), tz, Math.min(Math.max(count, 1), 20));
   },
 
-  /** Crée ou remplace la planification d'une session. L'échéance est calculée à partir de maintenant. */
-  async set(sessionId: string, input: SessionScheduleInput): Promise<SessionSchedule> {
-    const session = await sessionRepository.findById(sessionId);
-    if (!session) throw new NotFoundError('Session introuvable');
-    if (session.kind === 'chat') throw new AppError("Un chat ne se planifie pas : planifiez une session");
+  /** Champs communs à la création et à la mise à jour, validés. */
+  validate(input: SessionScheduleInput) {
     const prompt = input.prompt.trim();
     if (!prompt) throw new AppError("L'instruction à envoyer à chaque exécution est vide");
     const timezone = input.timezone?.trim() || DEFAULT_TIMEZONE;
@@ -217,131 +223,110 @@ export const scheduleService = {
     const spec = parseOrThrow(input.cron);
     const name = input.name === undefined ? undefined : input.name?.trim().slice(0, 120) || null;
     const enabled = input.enabled ?? true;
-    const allowedTools = validRules(input.allowedTools);
-    const archive = validArchive(input);
-    // Le nettoyage de la conversation accompagne la planification : sans lui, le contexte grossit à chaque exécution.
-    if (input.cleanup) await cleanupService.set(sessionId, input.cleanup);
-    const schedule = await scheduleRepository.upsert(sessionId, {
-      name,
-      cron: spec.source,
-      timezone,
-      prompt,
-      enabled,
+    return { prompt, timezone, spec, name, enabled, allowedTools: validRules(input.allowedTools), archive: validArchive(input) };
+  },
+
+  /**
+   * Nouvelle planification d'un projet. Elle ne crée aucune session : chaque exécution (échéance, « Exécuter
+   * maintenant », ou tout de suite si `runNow`) lance la sienne, avec ces réglages et ce propriétaire.
+   */
+  async create(input: CreateScheduleInput, owner: { ownerId: string; requestedById?: string | null }): Promise<SessionSchedule> {
+    if (!input.name?.trim()) throw new AppError('Donnez un nom à la planification');
+    const v = this.validate(input);
+    const provider = input.provider?.trim() || 'claude';
+    const config = pickConfig(input.config, await providerConfigKeys(provider));
+    const schedule = await scheduleRepository.create({
+      projectId: input.projectId,
+      ownerId: owner.ownerId,
+      requestedById: owner.requestedById ?? null,
+      provider,
+      config,
+      name: v.name ?? null,
+      cron: v.spec.source,
+      timezone: v.timezone,
+      prompt: v.prompt,
+      enabled: v.enabled,
       endAfterRun: input.endAfterRun ?? true,
-      nextRunAt: enabled ? nextRun(spec, new Date(), timezone) : null,
-      allowedTools,
-      archive,
+      nextRunAt: v.enabled ? nextRun(v.spec, new Date(), v.timezone) : null,
+      allowedTools: v.allowedTools,
+      archive: v.archive,
     });
-    forgetScheduleRules(sessionId);
-    await emit(sessionId, 'schedule', { action: enabled ? 'set' : 'disabled', cron: schedule.cron, timezone, nextRunAt: schedule.nextRunAt, name: schedule.name });
-    // Une session planifiée porte le nom de sa planification : c'est lui qu'on lit dans la sidebar et les onglets.
-    if (name && name !== session.name) await sessionService.rename(sessionId, name);
-    else pubSub.publish('sessionUpdated', session);
+    if (input.runNow) await this.run(schedule, { manual: true, userId: owner.requestedById ?? owner.ownerId });
+    return schedule;
+  },
+
+  /** Modifie une planification. L'échéance est recalculée à partir de maintenant. */
+  async update(id: string, input: SessionScheduleInput): Promise<SessionSchedule> {
+    const existing = await this.require(id);
+    const v = this.validate(input);
+    // Réglages du provider : fusionnés (une valeur vide retire le réglage).
+    const config = input.config ? pickConfig({ ...existing.config, ...input.config }, await providerConfigKeys(existing.provider)) : undefined;
+    const schedule = await scheduleRepository.update(id, {
+      name: v.name,
+      cron: v.spec.source,
+      timezone: v.timezone,
+      prompt: v.prompt,
+      enabled: v.enabled,
+      endAfterRun: input.endAfterRun ?? existing.endAfterRun,
+      nextRunAt: v.enabled ? nextRun(v.spec, new Date(), v.timezone) : null,
+      allowedTools: v.allowedTools,
+      archive: v.archive,
+      config,
+    });
+    if (!schedule) throw new NotFoundError('Planification introuvable');
+    forgetScheduleRules(null);
     return schedule;
   },
 
   /** Met en pause (plus aucune échéance) ou reprend (échéance recalculée depuis maintenant). */
-  async setEnabled(sessionId: string, enabled: boolean): Promise<Session> {
-    const session = await sessionRepository.findById(sessionId);
-    if (!session) throw new NotFoundError('Session introuvable');
-    const existing = await scheduleRepository.findBySession(sessionId);
-    if (!existing) throw new AppError("Cette session n'a pas de planification");
-    if (existing.enabled !== enabled) {
-      const next = enabled ? nextRun(parseOrThrow(existing.cron), new Date(), existing.timezone) : null;
-      await scheduleRepository.setEnabled(sessionId, enabled, next);
-      await emit(sessionId, 'schedule', { action: enabled ? 'resumed' : 'disabled', nextRunAt: next, name: existing.name });
-    }
-    pubSub.publish('sessionUpdated', session);
-    return session;
+  async setEnabled(id: string, enabled: boolean): Promise<SessionSchedule> {
+    const existing = await this.require(id);
+    if (existing.enabled === enabled) return existing;
+    const next = enabled ? nextRun(parseOrThrow(existing.cron), new Date(), existing.timezone) : null;
+    return (await scheduleRepository.setEnabled(id, enabled, next)) ?? existing;
+  },
+
+  /** Supprime la planification et son historique ; les sessions de ses exécutions restent. */
+  async remove(id: string): Promise<boolean> {
+    return scheduleRepository.delete(id);
+  },
+
+  /** Exécution immédiate, hors échéance (la prochaine échéance est inchangée). Renvoie la session de l'exécution. */
+  async runNow(id: string, userId: string | null = null): Promise<Session | null> {
+    const schedule = await this.require(id);
+    const rid = await this.run(schedule, { manual: true, userId });
+    return rid ? sessionRepository.findById(rid) : null;
   },
 
   /**
-   * Nouvelle planification avec sa session : la session est créée sans démarrer, dans son propre dossier de
-   * travail, et ne fait rien avant la première échéance (ou « Exécuter maintenant » si `runNow`).
-   */
-  async createWithSession(
-    input: SessionScheduleInput & { projectId: string; name: string; provider?: string | null; config?: Record<string, unknown> | null; runNow?: boolean | null },
-    ownerId: string,
-  ): Promise<Session> {
-    const name = input.name.trim();
-    if (!name) throw new AppError('Donnez un nom à la planification');
-    // Valide tout avant de créer quoi que ce soit (pas de session orpheline sur une expression invalide).
-    if (!input.prompt.trim()) throw new AppError("L'instruction à envoyer à chaque exécution est vide");
-    parseOrThrow(input.cron);
-    validRules(input.allowedTools);
-    validArchive(input);
-    if (input.timezone && !isValidTimeZone(input.timezone.trim())) throw new AppError(`Fuseau horaire inconnu : ${input.timezone}`);
-    const session = await sessionService.create({
-      projectId: input.projectId,
-      name: name.slice(0, 120),
-      provider: input.provider || 'claude',
-      config: input.config ?? null,
-      newWorksession: {},
-      ownerId,
-      autoStart: false,
-    });
-    const cleanup: SessionCleanup = input.cleanup ?? { retentionDays: null, contextAction: 'fresh', contextMaxTokens: null };
-    await this.set(session.id, { ...input, name, cleanup });
-    if (input.runNow) await this.runNow(session.id, ownerId);
-    return (await sessionRepository.findById(session.id)) ?? session;
-  },
-
-  async remove(sessionId: string): Promise<Session> {
-    const session = await sessionRepository.findById(sessionId);
-    if (!session) throw new NotFoundError('Session introuvable');
-    if (await scheduleRepository.delete(sessionId)) await emit(sessionId, 'schedule', { action: 'removed' });
-    pubSub.publish('sessionUpdated', session);
-    return session;
-  },
-
-  /** Exécution immédiate, hors échéance (la prochaine échéance est inchangée). */
-  async runNow(sessionId: string, userId: string | null = null): Promise<Session> {
-    const schedule = await scheduleRepository.findBySession(sessionId);
-    if (!schedule) throw new AppError("Cette session n'a pas de planification");
-    await this.run(schedule, { manual: true, userId });
-    const session = await sessionRepository.findById(sessionId);
-    if (!session) throw new NotFoundError('Session introuvable');
-    return session;
-  },
-
-  /**
-   * Exécute la planification : crée une nouvelle session (projet, propriétaire, provider et réglages de la session de
-   * la planification, dans son propre dossier de travail) et lui envoie l'instruction ; puis, en tâche de fond, attend
+   * Exécute la planification : crée une nouvelle session (projet, propriétaire, provider et réglages de la
+   * planification, dans son propre dossier de travail) et lui envoie l'instruction ; puis, en tâche de fond, attend
    * la fin du tour, termine la session si demandé, notifie avec le coût et applique l'archivage choisi.
-   * `manual` : lancée depuis l'interface, les erreurs sont renvoyées à l'appelant.
+   * `manual` : lancée depuis l'interface, les erreurs sont renvoyées à l'appelant. Renvoie la session de l'exécution.
    */
-  async run(schedule: SessionSchedule, opts: { manual?: boolean; userId?: string | null; scheduledFor?: Date | null } = {}): Promise<void> {
+  async run(schedule: SessionSchedule, opts: { manual?: boolean; userId?: string | null; scheduledFor?: Date | null } = {}): Promise<string | null> {
     const manual = Boolean(opts.manual);
-    const id = schedule.sessionId;
-    const template = await sessionRepository.findById(id);
-    if (!template) return;
-    const label = scheduleLabel(schedule, template);
-    const runBase = { sessionId: id, trigger: manual ? ('manual' as const) : ('schedule' as const), triggeredBy: opts.userId ?? null, scheduledFor: opts.scheduledFor ?? null };
-    const skip = async (reason: string) => {
+    const id = schedule.id;
+    const projectId = schedule.projectId;
+    const label = scheduleLabel(schedule);
+    const editLink = `/projects/${projectId}/schedules?edit=${id}`;
+    const runBase = { scheduleId: id, trigger: manual ? ('manual' as const) : ('schedule' as const), triggeredBy: opts.userId ?? null, scheduledFor: opts.scheduledFor ?? null };
+    const skip = async (reason: string): Promise<null> => {
       if (manual) throw new AppError(`Exécution impossible : ${reason}`);
       await scheduleRepository.createRun({ ...runBase, status: 'skipped', message: reason });
       await scheduleRepository.setResult(id, `Ignorée : ${reason}`);
-      await emit(id, 'schedule', { action: 'skipped', reason, name: schedule.name });
-      pubSub.publish('sessionUpdated', template);
-      void notificationService.notify({
-        type: 'schedule.skipped',
-        title: `« ${label} » ignorée`,
-        message: reason,
-        link: `/projects/${template.projectId}/schedules?edit=${id}`,
-        projectId: template.projectId,
-        sessionId: id,
-      });
+      void notificationService.notify({ type: 'schedule.skipped', title: `« ${label} » ignorée`, message: reason, link: editLink, projectId });
+      return null;
     };
 
-    if (template.archivedAt) return skip('la session de la planification est archivée');
     if (scheduledRuns.has(id) || (await scheduleRepository.hasRunning(id))) return skip("l'exécution précédente n'est pas terminée");
     if (serverSettings.maintenance) return skip('le serveur est en maintenance');
     // La session de l'exécution démarre avec les identifiants et le plafond du propriétaire de la planification.
     try {
-      const owner = await claudeSettings.forSession(template.ownerId);
+      const owner = await claudeSettings.forSession(schedule.ownerId);
       owner.assertCredentials();
       await owner.assertBudgetAvailable();
-      await projectBudget.assertAvailable(template.projectId);
+      await projectBudget.assertAvailable(projectId);
     } catch (err) {
       return skip((err as Error).message);
     }
@@ -352,13 +337,13 @@ export const scheduleService = {
     let runSession: Session;
     try {
       runSession = await sessionService.create({
-        projectId: template.projectId,
+        projectId,
         name: runSessionName(label, new Date(startedAt), schedule.timezone),
-        provider: template.provider,
-        config: await runConfig(template),
+        provider: schedule.provider,
+        config: pickConfig(schedule.config, await providerConfigKeys(schedule.provider)),
         newWorksession: {},
-        ownerId: template.ownerId,
-        requestedById: template.requestedById,
+        ownerId: schedule.ownerId,
+        requestedById: schedule.requestedById,
         autoStart: false,
       });
     } catch (err) {
@@ -367,12 +352,12 @@ export const scheduleService = {
       await scheduleRepository.finishRun(run.id, { status: 'failed', costUsd: 0, durationMs: Date.now() - startedAt, message });
       await scheduleRepository.setResult(id, `Erreur : ${message}`);
       if (manual) throw new AppError(message);
-      void notificationService.notify({ type: 'schedule.failed', title: `« ${label} » en erreur`, message, link: `/projects/${template.projectId}/schedules?edit=${id}`, projectId: template.projectId, sessionId: id });
-      return;
+      void notificationService.notify({ type: 'schedule.failed', title: `« ${label} » en erreur`, message, link: editLink, projectId });
+      return null;
     }
     const rid = runSession.id;
     await scheduleRepository.setRunSession(run.id, rid);
-    const eventId = await emit(rid, 'schedule', { action: 'run', runId: run.id, cron: schedule.cron, timezone: schedule.timezone, manual, name: schedule.name, scheduleSessionId: id });
+    const eventId = await emit(rid, 'schedule', { action: 'run', runId: run.id, cron: schedule.cron, timezone: schedule.timezone, manual, name: label, scheduleId: id });
     await scheduleRepository.setRunStartEvent(run.id, eventId);
     run = { ...run, runSessionId: rid, startEventId: eventId };
     if (manual) await scheduleRepository.markRun(id, new Date());
@@ -394,12 +379,9 @@ export const scheduleService = {
       await scheduleRepository.finishRun(run.id, { status: 'failed', costUsd: 0, durationMs: Date.now() - startedAt, message });
       await scheduleRepository.setResult(id, `Erreur : ${message}`);
       if (manual) throw err;
-      void notificationService.notify({ type: 'schedule.failed', title: `« ${label} » en erreur`, message, link: `/sessions/${rid}`, projectId: template.projectId, sessionId: rid });
-      return;
+      void notificationService.notify({ type: 'schedule.failed', title: `« ${label} » en erreur`, message, link: `/sessions/${rid}`, projectId, sessionId: rid });
+      return rid;
     }
-    // Jalon dans la session de la planification : où trouver cette exécution.
-    await emit(id, 'schedule', { action: 'spawned', runId: run.id, runSessionId: rid, manual, name: schedule.name }).catch(() => undefined);
-    pubSub.publish('sessionUpdated', template);
 
     // Suivi en tâche de fond : fin du tour (ou demande restée sans réponse), fin de session si demandé, compte rendu et notification.
     const tracked = run;
@@ -422,17 +404,17 @@ export const scheduleService = {
           current = await sessionService.waitForIdle(rid, 60_000);
         }
         const stillBusy = !pendingRequest && current.status === 'running' && current.activity !== 'idle';
-        await finish(tracked, current, schedule, { stillBusy, startedAt, pendingRequest });
+        // Réglages à jour (archivage modifié pendant l'exécution), sinon ceux du lancement.
+        await finish(tracked, current, (await scheduleRepository.findById(id)) ?? schedule, { stillBusy, startedAt, pendingRequest });
       } catch (err) {
         log.error("[schedules] suivi de l'exécution", err);
       } finally {
         scheduledRuns.delete(id);
         scheduledRuns.delete(rid);
         if (localRuns.get(rid) === tracked.id) localRuns.delete(rid);
-        const fresh = await sessionRepository.findById(id);
-        if (fresh) pubSub.publish('sessionUpdated', fresh);
       }
     })();
+    return rid;
   },
 
   /** Archivage « après X temps » : sessions d'exécutions terminées depuis plus que le délai de leur planification. */
@@ -453,10 +435,10 @@ export const scheduleService = {
   async reconcile(now = new Date()): Promise<number> {
     let closed = 0;
     for (const run of await scheduleRepository.listRunningBefore(new Date(now.getTime() - ORPHAN_AFTER_MS))) {
-      const runSessionId = run.runSessionId ?? run.sessionId;
-      if (localRuns.get(runSessionId) === run.id) continue;
-      const session = await sessionRepository.findById(runSessionId);
-      const schedule = await scheduleRepository.findBySession(run.sessionId);
+      const runSessionId = run.runSessionId;
+      if (runSessionId && localRuns.get(runSessionId) === run.id) continue;
+      const session = runSessionId ? await sessionRepository.findById(runSessionId) : null;
+      const schedule = await scheduleRepository.findById(run.scheduleId);
       const settled = !session || (session.status !== 'running' && session.status !== 'queued') || session.activity === 'idle';
       const tooOld = now.getTime() - run.startedAt.getTime() > RUN_TIMEOUT_MS + ORPHAN_AFTER_MS;
       if (!settled && !tooOld) continue;
@@ -488,13 +470,13 @@ export const scheduleService = {
         try {
           next = nextRun(parseCron(due.cron), now, due.timezone);
         } catch (err) {
-          log.error(`[schedules] expression invalide pour la session ${due.sessionId} : ${(err as Error).message}`);
+          log.error(`[schedules] expression invalide pour la planification ${due.id} : ${(err as Error).message}`);
         }
         // Réservation atomique : une seule instance du serveur exécute l'échéance.
-        const claimed = await scheduleRepository.claim(due.sessionId, due.nextRunAt, next, now);
+        const claimed = await scheduleRepository.claim(due.id, due.nextRunAt, next, now);
         if (!claimed) continue;
         if (now.getTime() - due.nextRunAt.getTime() > MISSED_GRACE_MS) {
-          await this.recordMissed(due.sessionId, due.nextRunAt);
+          await this.recordMissed(due.id, due.nextRunAt);
           continue;
         }
         await this.run(claimed, { scheduledFor: due.nextRunAt }).catch((err) => log.error('[schedules] exécution', err));
@@ -505,9 +487,9 @@ export const scheduleService = {
   },
 
   /** Échéance passée pendant un arrêt du serveur : notée « manquée » dans l'historique, non rattrapée. */
-  async recordMissed(sessionId: string, scheduledFor: Date): Promise<void> {
-    await scheduleRepository.createRun({ sessionId, trigger: 'schedule', status: 'missed', scheduledFor, message: 'Serveur arrêté à l’échéance, non rattrapée' });
-    await scheduleRepository.setResult(sessionId, `Échéance du ${scheduledFor.toISOString()} manquée (serveur arrêté), non rattrapée`);
+  async recordMissed(scheduleId: string, scheduledFor: Date): Promise<void> {
+    await scheduleRepository.createRun({ scheduleId, trigger: 'schedule', status: 'missed', scheduledFor, message: 'Serveur arrêté à l’échéance, non rattrapée' });
+    await scheduleRepository.setResult(scheduleId, `Échéance du ${scheduledFor.toISOString()} manquée (serveur arrêté), non rattrapée`);
   },
 
   /**
@@ -520,18 +502,40 @@ export const scheduleService = {
     for (const s of await scheduleRepository.listEnabled()) {
       if (s.nextRunAt && now.getTime() - s.nextRunAt.getTime() <= MISSED_GRACE_MS) continue;
       try {
-        await scheduleRepository.setNextRunAt(s.sessionId, nextRun(parseCron(s.cron), now, s.timezone));
+        await scheduleRepository.setNextRunAt(s.id, nextRun(parseCron(s.cron), now, s.timezone));
         if (s.nextRunAt) {
           skipped += 1;
-          await this.recordMissed(s.sessionId, s.nextRunAt);
+          await this.recordMissed(s.id, s.nextRunAt);
         }
       } catch (err) {
-        log.error(`[schedules] expression invalide pour la session ${s.sessionId} : ${(err as Error).message}`);
+        log.error(`[schedules] expression invalide pour la planification ${s.id} : ${(err as Error).message}`);
       }
     }
+    void this.archiveLegacyHolders().catch((err) => log.warn(`[schedules] rangement des sessions des anciennes planifications : ${(err as Error).message}`));
     timer = setInterval(() => void this.tick().catch((err) => log.error('[schedules] ordonnanceur', err)), TICK_MS);
     timer.unref?.();
     return skipped;
+  },
+
+  /**
+   * Sessions qui ne faisaient que porter les réglages d'une planification d'avant (jamais lancées, jamais session
+   * d'une exécution) : archivées, la planification porte désormais elle-même ses réglages.
+   */
+  async archiveLegacyHolders(): Promise<number> {
+    const ids = await scheduleRepository.legacyHolderSessions();
+    if (!ids.length) return 0;
+    const { archiveSessionCascade } = await import('../projects/cleanup.js');
+    let archived = 0;
+    for (const id of ids) {
+      try {
+        await archiveSessionCascade(id);
+        archived += 1;
+      } catch (err) {
+        log.warn(`[schedules] session ${id} d'une ancienne planification non archivée : ${(err as Error).message}`);
+      }
+    }
+    if (archived) log.info(`[schedules] ${archived} session(s) qui portaient une planification archivée(s)`);
+    return archived;
   },
 
   stop(): void {

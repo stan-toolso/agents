@@ -113,7 +113,8 @@ import type { AttachmentInput, CreateSessionInput, RelaunchInput, Session, Sessi
 import type { OpenItems, User } from '../users/types.js';
 import { permissionRuleService } from '../permissions/service.js';
 import { formatRule, type PermissionRule } from '../permissions/types.js';
-import type { ScheduleRun, SessionSchedule, SessionScheduleInput } from '../schedules/types.js';
+import type { CreateScheduleInput, ScheduleRun, SessionSchedule, SessionScheduleInput } from '../schedules/types.js';
+import { scheduleRepository } from '../schedules/repository.js';
 import { userService } from '../users/service.js';
 import { signInService } from '../auth/signInService.js';
 import type { ProjectMember, ProjectRole } from '../users/types.js';
@@ -687,15 +688,18 @@ export const resolvers = {
   },
 
   SessionSchedule: {
-    name: async (schedule: SessionSchedule, _: unknown, ctx: Ctx) => scheduleLabel(schedule, (await loadersOf(ctx).session(schedule.sessionId)) ?? { name: 'Planification' }),
+    name: (schedule: SessionSchedule) => scheduleLabel(schedule),
     customName: (schedule: SessionSchedule) => schedule.name,
     archivePolicy: (schedule: SessionSchedule) => schedule.archivePolicy.toUpperCase(),
-    session: (schedule: SessionSchedule, _: unknown, ctx: Ctx) => loadersOf(ctx).session(schedule.sessionId),
-    project: async (schedule: SessionSchedule, _: unknown, ctx: Ctx) => {
-      const session = await loadersOf(ctx).session(schedule.sessionId);
-      return session ? loadersOf(ctx).project(session.projectId) : null;
+    project: (schedule: SessionSchedule, _: unknown, ctx: Ctx) => loadersOf(ctx).project(schedule.projectId),
+    owner: (schedule: SessionSchedule, _: unknown, ctx: Ctx) => userOrNull(ctx, schedule.ownerId),
+    agent: async (schedule: SessionSchedule, _: unknown, ctx: Ctx) => (schedule.ownerId ? ((await loadersOf(ctx).agent(schedule.ownerId)) ?? null) : null),
+    requestedBy: (schedule: SessionSchedule, _: unknown, ctx: Ctx) => userOrNull(ctx, schedule.requestedById),
+    runs: (schedule: SessionSchedule, args: { limit?: number | null }) => scheduleService.listRuns(schedule.id, args.limit ?? 20),
+    activeSessions: async (schedule: SessionSchedule, _: unknown, ctx: Ctx) => {
+      const ids = await scheduleRepository.liveRunSessions(schedule.id);
+      return (await Promise.all(ids.map((id) => loadersOf(ctx).session(id)))).filter(Boolean);
     },
-    runs: (schedule: SessionSchedule, args: { limit?: number | null }) => scheduleService.listRuns(schedule.sessionId, args.limit ?? 20),
   },
   ScheduleRun: {
     trigger: (run: ScheduleRun) => run.trigger.toUpperCase(),
@@ -940,7 +944,7 @@ export const resolvers = {
     tasks: (a: Agent, args: { limit?: number | null }) => agentService.tasks(a.id, args.limit ?? 50),
   },
   AgentAction: {
-    scheduleSession: async (a: AgentAction, _: unknown, ctx: Ctx) => (a.scheduleSessionId ? ((await loadersOf(ctx).session(a.scheduleSessionId)) ?? null) : null),
+    schedule: async (a: AgentAction, _: unknown, ctx: Ctx) => (a.scheduleId ? ((await loadersOf(ctx).schedule(a.scheduleId)) ?? null) : null),
   },
   AgentManager: {
     user: (m: AgentManager, _: unknown, ctx: Ctx) => userOrNull(ctx, m.userId),
@@ -948,7 +952,7 @@ export const resolvers = {
   },
   AgentTemplate: {
     kind: (t: AgentTemplate) => t.kind.toUpperCase(),
-    actions: (t: AgentTemplate) => t.actions.map((a, i) => ({ key: a.key ?? slugify(a.label) ?? `action-${i + 1}`, label: a.label, instruction: a.instruction, cron: a.cron ?? null, timezone: a.timezone ?? null, scheduleSessionId: null })),
+    actions: (t: AgentTemplate) => t.actions.map((a, i) => ({ key: a.key ?? slugify(a.label) ?? `action-${i + 1}`, label: a.label, instruction: a.instruction, cron: a.cron ?? null, timezone: a.timezone ?? null, scheduleId: null })),
   },
   User: {
     kind: (u: User) => (u.kind ?? 'person').toUpperCase(),
@@ -1294,17 +1298,22 @@ export const resolvers = {
       }
       return scheduleService.listForProjects(await accessibleProjectIds(ctx));
     },
-    schedulePermissionSuggestions: async (_: unknown, args: { projectId: string; sessionId?: string | null; prompt?: string | null }, ctx: Ctx) => {
+    sessionSchedule: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      const schedule = await scheduleService.get(args.id);
+      if (!schedule) return null;
+      await requireProject(ctx, schedule.projectId);
+      return schedule;
+    },
+    schedulePermissionSuggestions: async (_: unknown, args: { projectId: string; scheduleId?: string | null; prompt?: string | null }, ctx: Ctx) => {
       const user = requireUser(ctx);
       await requireProject(ctx, args.projectId, 'member');
       let ownerId: string | null = user.id;
-      if (args.sessionId) {
-        await guardSession(ctx, args.sessionId, 'member');
-        const session = await sessionService.get(args.sessionId);
-        if (!session || session.projectId !== args.projectId) throw new AppError("La session n'appartient pas à ce projet");
-        ownerId = session.ownerId;
+      if (args.scheduleId) {
+        const schedule = await scheduleService.require(args.scheduleId);
+        if (schedule.projectId !== args.projectId) throw new AppError("La planification n'appartient pas à ce projet");
+        ownerId = schedule.ownerId;
       }
-      const list = await scheduleService.permissionSuggestions({ sessionId: args.sessionId ?? null, projectId: args.projectId, ownerId, prompt: args.prompt });
+      const list = await scheduleService.permissionSuggestions({ scheduleId: args.scheduleId ?? null, projectId: args.projectId, ownerId, prompt: args.prompt });
       return list.map((s) => ({ ...s, source: s.source.toUpperCase() }));
     },
     scheduleNextRuns: (_: unknown, args: { cron: string; timezone?: string | null; count?: number | null }, ctx: Ctx) => {
@@ -1891,7 +1900,6 @@ export const resolvers = {
     },
     archiveSession: async (_: unknown, args: { id: string }, ctx: Ctx) => {
       await guardSession(ctx, args.id, 'member');
-      await scheduleService.remove(args.id).catch(() => undefined);
       return archiveSessionCascade(args.id);
     },
     unarchiveSession: async (_: unknown, args: { id: string }, ctx: Ctx) => {
@@ -1936,27 +1944,26 @@ export const resolvers = {
       await guardSession(ctx, args.id, 'member');
       return sessionService.updateConfig(args.id, args.config ?? {});
     },
-    setSessionSchedule: async (_: unknown, args: { id: string; input: SessionScheduleInput }, ctx: Ctx) => {
-      await guardSession(ctx, args.id, 'member');
-      await scheduleService.set(args.id, args.input);
-      return sessionService.get(args.id);
-    },
-    clearSessionSchedule: async (_: unknown, args: { id: string }, ctx: Ctx) => {
-      await guardSession(ctx, args.id, 'member');
-      return scheduleService.remove(args.id);
-    },
-    setSessionScheduleEnabled: async (_: unknown, args: { id: string; enabled: boolean }, ctx: Ctx) => {
-      await guardSession(ctx, args.id, 'member');
-      return scheduleService.setEnabled(args.id, args.enabled);
-    },
-    createScheduledSession: async (_: unknown, args: { input: Parameters<typeof scheduleService.createWithSession>[0] & { agentId?: string | null } }, ctx: Ctx) => {
+    createSchedule: async (_: unknown, args: { input: CreateScheduleInput & { agentId?: string | null } }, ctx: Ctx) => {
       await requireProject(ctx, args.input.projectId, 'member');
       const { agentId, ...input } = args.input;
       const owner = await sessionOwnerFor(ctx, agentId, input.projectId);
-      return scheduleService.createWithSession(input, owner.ownerId);
+      return scheduleService.create(input, owner);
     },
-    runSessionScheduleNow: async (_: unknown, args: { id: string }, ctx: Ctx) => {
-      await guardSession(ctx, args.id, 'member');
+    updateSchedule: async (_: unknown, args: { id: string; input: SessionScheduleInput }, ctx: Ctx) => {
+      await requireProject(ctx, (await scheduleService.require(args.id)).projectId, 'member');
+      return scheduleService.update(args.id, args.input);
+    },
+    deleteSchedule: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      await requireProject(ctx, (await scheduleService.require(args.id)).projectId, 'member');
+      return scheduleService.remove(args.id);
+    },
+    setScheduleEnabled: async (_: unknown, args: { id: string; enabled: boolean }, ctx: Ctx) => {
+      await requireProject(ctx, (await scheduleService.require(args.id)).projectId, 'member');
+      return scheduleService.setEnabled(args.id, args.enabled);
+    },
+    runScheduleNow: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      await requireProject(ctx, (await scheduleService.require(args.id)).projectId, 'member');
       return scheduleService.runNow(args.id, requireUser(ctx).id);
     },
     updateSession: async (_: unknown, args: { id: string; input: { name?: string | null; cleanup?: SessionCleanup | null } }, ctx: Ctx) => {

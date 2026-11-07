@@ -18,7 +18,7 @@ import { conversationService } from '../conversations/service.js';
 import type { Conversation } from '../conversations/types.js';
 import { isPersonalProject } from '../projects/types.js';
 import { scheduleService } from '../schedules/service.js';
-import type { ScheduleWithSession } from '../schedules/types.js';
+import type { SessionSchedule } from '../schedules/types.js';
 import { taskRepository } from '../tasks/repository.js';
 import { userRepository } from '../users/repository.js';
 import type { User } from '../users/types.js';
@@ -109,7 +109,7 @@ export interface ProjectTeamMember {
 /** Tableau de bord d'un projet : la vue d'ensemble restreinte au projet, plus ce qui n'a de sens que pour lui. */
 export interface ProjectDashboard extends Omit<Dashboard, 'projects'> {
   mergedPullRequests: TrackedPullRequest[];
-  schedules: ScheduleWithSession[];
+  schedules: SessionSchedule[];
   general: Conversation | null;
   team: ProjectTeamMember[];
   tasks: Task[];

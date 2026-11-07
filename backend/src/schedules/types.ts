@@ -1,5 +1,3 @@
-import type { SessionCleanup } from '../sessions/types.js';
-
 /**
  * Archivage automatique des sessions d'exécution (chaque exécution a sa propre session) : dès la fin de
  * l'exécution, les précédentes au lancement d'une nouvelle (défaut), un délai après la fin, ou jamais.
@@ -9,13 +7,21 @@ export const SCHEDULE_ARCHIVE_POLICIES: ScheduleArchivePolicy[] = ['on_finish', 
 export const DEFAULT_ARCHIVE_POLICY: ScheduleArchivePolicy = 'previous_on_run';
 
 /**
- * Planification portée par une session : à chaque échéance de l'expression cron, une nouvelle session est créée
- * (mêmes projet, propriétaire, provider et réglages que la session de la planification) et reçoit l'instruction.
+ * Planification : objet à part entière, rattaché à un projet. À chaque échéance de l'expression cron, elle lance une
+ * nouvelle session indépendante (son propre dossier de travail) avec ses réglages, qui reçoit l'instruction.
  */
 export interface SessionSchedule {
-  /** Session de la planification : elle porte les réglages des exécutions, et n'exécute rien elle-même. */
-  sessionId: string;
-  /** Nom de la planification (« Revue quotidienne Curso ») ; null : celui de la session. */
+  id: string;
+  projectId: string;
+  /** Propriétaire des sessions d'exécution (personne ou agent de projet) : ses comptes, son budget. */
+  ownerId: string | null;
+  /** Personne qui a demandé la planification quand le propriétaire est un agent. */
+  requestedById: string | null;
+  /** Provider des sessions d'exécution (claude, opencode…). */
+  provider: string;
+  /** Réglages du provider copiés dans chaque session d'exécution (mode d'autorisation, modèle…). */
+  config: Record<string, unknown>;
+  /** Nom de la planification (« Revue quotidienne Curso ») ; null : déduit de l'instruction. */
   name: string | null;
   /** Cinq champs : minute heure jour mois jour-de-semaine (ou alias @daily, @hourly...). */
   cron: string;
@@ -57,8 +63,17 @@ export interface SessionScheduleInput {
   archiveAfterMinutes?: number | null;
   /** Outils pré-autorisés pour les exécutions (absent ou null : inchangés). */
   allowedTools?: string[] | null;
-  /** Réglage de nettoyage de la session, enregistré en même temps (null ou absent : inchangé). */
-  cleanup?: SessionCleanup | null;
+  /** Réglages du provider fusionnés à ceux de la planification (mode d'autorisation, modèle ; valeur vide : retirée). Absent : inchangés. */
+  config?: Record<string, unknown> | null;
+}
+
+/** Nouvelle planification : son projet, son provider et ses réglages. */
+export interface CreateScheduleInput extends SessionScheduleInput {
+  projectId: string;
+  name: string;
+  provider?: string | null;
+  /** Lance une première exécution tout de suite. */
+  runNow?: boolean | null;
 }
 
 /** Ce qui a déclenché une exécution : l'échéance, ou « Exécuter maintenant ». */
@@ -73,9 +88,8 @@ export type ScheduleRunStatus = 'running' | 'done' | 'blocked' | 'failed' | 'tim
 
 export interface ScheduleRun {
   id: string;
-  /** Session de la planification. */
-  sessionId: string;
-  /** Session créée pour cette exécution (null : exécution d'avant, jouée dans la session de la planification, ou ignorée). */
+  scheduleId: string;
+  /** Session créée pour cette exécution (null : ignorée, manquée, ou session non créée). */
   runSessionId: string | null;
   trigger: ScheduleRunTrigger;
   triggeredBy: string | null;
@@ -89,9 +103,4 @@ export interface ScheduleRun {
   /** Début de la dernière réponse de l'agent pendant l'exécution. */
   answer: string | null;
   startEventId: string | null;
-}
-
-/** Planification et session, pour la liste des planifications. */
-export interface ScheduleWithSession extends SessionSchedule {
-  projectId: string;
 }

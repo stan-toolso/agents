@@ -25,6 +25,7 @@ const QUERIES = {
   context_folder: 'SELECT project_id, name AS label FROM context_folders WHERE id = $1',
   context_instruction: 'SELECT project_id, name AS label FROM context_instructions WHERE id = $1',
   workflow: 'SELECT project_id, name AS label FROM workflows WHERE id = $1',
+  schedule: "SELECT project_id, COALESCE(NULLIF(name, ''), left(prompt, 60)) AS label FROM session_schedules WHERE id = $1",
   workflow_run: 'SELECT r.project_id, w.name AS label FROM workflow_runs r JOIN workflows w ON w.id = r.workflow_id WHERE r.id = $1',
   conversation: 'SELECT project_id, name AS label FROM conversations WHERE id = $1',
   shared_page: 'SELECT project_id, title AS label FROM shared_pages WHERE id = $1',

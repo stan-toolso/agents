@@ -285,7 +285,7 @@ export function dontAskConsequences(opts: { approvalConnections?: string[]; sche
     out.push(`les connexions avec approbation (${connections.map((c) => `« ${c} »`).join(', ')}) vous seront toujours soumises : sans réponse, l'agent reste bloqué.`);
   }
   if (opts.scheduleName) {
-    out.push(`cette session porte la planification « ${opts.scheduleName} » : ses exécutions tourneront aussi dans ce mode, et chaque outil refusé les notera « Bloquée ».`);
+    out.push(`cette session a été lancée par la planification « ${opts.scheduleName} » : ce mode ne vaut que pour elle, les prochaines exécutions gardent celui de la planification.`);
   }
   return out;
 }

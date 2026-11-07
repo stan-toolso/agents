@@ -107,7 +107,7 @@ const agent = (id, u, p, kind, emoji, color, description) => {
     __typename: 'Agent', id, user: u, name: u.name, project: p, kind, avatar: { __typename: 'AgentAvatar', emoji, color }, description,
     instructions: description, taskFolder: true, defaults: {}, contextFolder: null, enabled: true, archivedAt: null, canManage: true,
     triggers: { __typename: 'AgentTriggers', taskCreated: kind === 'PRODUCT_MANAGER', taskCreatedTag: null, threadFollowed: true, prMerged: false, taskReady: kind === 'DEVELOPER', taskReadyTag: null },
-    actions: kind === 'PRODUCT_MANAGER' ? [{ __typename: 'AgentAction', key: 'release', label: 'Préparer une release', instruction: 'Prépare une release.', cron: null, timezone: null, scheduleSession: null }] : [], managers: [],
+    actions: kind === 'PRODUCT_MANAGER' ? [{ __typename: 'AgentAction', key: 'release', label: 'Préparer une release', instruction: 'Prépare une release.', cron: null, timezone: null, schedule: null }] : [], managers: [],
     stats: () => ({ __typename: 'AgentStats', activeSessions: sessions.filter((s) => s.owner === u && !s.archivedAt).length, sessions: 14, tasks: 9, monthCostUsd: 18.4, totalCostUsd: 61.2, lastActivityAt: ago(12) }),
     sessions: () => sessions.filter((s) => s.owner === u),
     tasks: () => tasks.filter((t) => t.assignee?.email === u.email),
@@ -206,12 +206,35 @@ const S = {
   relances: session('s-relances-impayes', P.api, 'Relances automatiques des impayés', { status: 'INTERRUPTED', age: 60 * 30, updated: 60 * 20, cost: 0.95 }),
   push: session('s-notifs-camps', P.mobile, 'Notifications push des camps', { owner: U.lea, status: 'FAILED', age: 60 * 6, updated: 60 * 2, cost: 0.58, error: 'npm run test : 2 tests en échec (CampReminder.test.ts)' }),
   revue: session('s-max-cotisations', P.mobile, 'Paiement des cotisations en trois fois', { owner: U.max, requestedBy: U.lea, takenOverBy: U.lea, activity: 'BUSY', age: 35, updated: 0, cost: 0.66 }),
-  hebdo: session('s-rapport-hebdo', P.data, 'Rapport hebdo des inscriptions', { owner: U.hugo, model: 'claude-sonnet-5-5', age: 60 * 24 * 6, updated: 60 * 9, cost: 2.1, branch: null }),
+  hebdo: session('s-rapport-hebdo', P.data, 'Rapport du lundi · 03/11 08:00', { owner: U.hugo, model: 'claude-sonnet-5-5', status: 'COMPLETED', age: 60 * 24 * 4, updated: 60 * 24 * 4 - 12, cost: 2.1 }),
+  revueBases: session('s-revue-bases-0711', P.site, 'Revue des bases · 07/11 12:35', { activity: 'BUSY', age: 12, updated: 0, cost: 0.31, model: 'claude-sonnet-5-5' }),
+  revueBasesHier: session('s-revue-bases-0611', P.site, 'Revue des bases · 06/11 12:35', { status: 'COMPLETED', age: 60 * 24, updated: 60 * 24 - 9, cost: 0.27, model: 'claude-sonnet-5-5' }),
   chat1: session('c-idees-blog', P.perso, 'Idées d’articles pour le blog', { kind: 'CHAT', age: 60 * 2, updated: 50, cost: 0.08 }),
   chat2: session('c-compte-rendu', P.perso, 'Résumé du comité de pilotage', { kind: 'CHAT', age: 60 * 26, updated: 60 * 25, cost: 0.05 }),
   chat3: session('c-mail-client', P.perso, 'Réponse à un client mécontent', { kind: 'CHAT', age: 60 * 50, updated: 60 * 49, cost: 0.03 }),
 };
-S.hebdo.schedule = { __typename: 'SessionSchedule', sessionId: S.hebdo.id, name: 'Rapport du lundi', customName: 'Rapport du lundi', session: S.hebdo, project: P.data, cron: '0 8 * * 1', timezone: 'Europe/Paris', prompt: 'Prépare le rapport hebdomadaire des inscriptions et publie-le.', enabled: true, endAfterRun: false, archivePolicy: 'PREVIOUS_ON_RUN', archiveAfterMinutes: null, allowedTools: ['Bash(npm run report *)'], nextRunAt: inDays(5), lastRunAt: ago(60 * 9), cleanup: null };
+// Planifications : objets du projet ; chaque exécution lance sa propre session (rangées sous la planification dans la sidebar).
+const schedule = (id, p, name, owner, over = {}) => ({
+  __typename: 'SessionSchedule', id, name, customName: name, project: p, owner, agent: null, requestedBy: null, provider: 'claude',
+  config: { permissionMode: 'bypassPermissions', model: 'claude-sonnet-5-5' }, cron: '0 8 * * 1', timezone: 'Europe/Paris',
+  prompt: 'Prépare le rapport hebdomadaire des inscriptions et publie-le.', enabled: true, endAfterRun: true, archivePolicy: 'PREVIOUS_ON_RUN',
+  archiveAfterMinutes: null, allowedTools: [], nextRunAt: inDays(5), lastRunAt: ago(60 * 9), lastResult: null, createdAt: ago(60 * 24 * 30), updatedAt: ago(60 * 24), runs: [], activeSessions: [], ...over,
+});
+const scheduleRun = (id, s, status, startedMin, over = {}) => ({
+  __typename: 'ScheduleRun', id, trigger: 'SCHEDULE', triggeredBy: null, status, scheduledFor: ago(startedMin), startedAt: ago(startedMin),
+  finishedAt: status === 'RUNNING' ? null : ago(startedMin - 9), durationMs: status === 'RUNNING' ? null : 9 * 60_000, costUsd: s ? s.costUsd : null,
+  message: null, answer: status === 'DONE' ? 'Aucune anomalie : 12 tables vérifiées, index à jour.' : null, session: s, ...over,
+});
+export const schedules = [
+  schedule('sch-rapport-lundi', P.data, 'Rapport du lundi', U.hugo, { allowedTools: ['Bash(npm run report *)'], lastRunAt: ago(60 * 24 * 4) }),
+  schedule('sch-revue-bases', P.site, 'Revue des bases', U.me, { cron: '35 12 * * *', prompt: 'Passe en revue les bases de production : tailles, index inutilisés, requêtes lentes. Signale ce qui mérite une action.', nextRunAt: inDays(1), lastRunAt: ago(12) }),
+];
+schedules[0].runs = [scheduleRun('run-lundi-1', S.hebdo, 'DONE', 60 * 24 * 4)];
+schedules[1].runs = [scheduleRun('run-bases-2', S.revueBases, 'RUNNING', 12), scheduleRun('run-bases-1', S.revueBasesHier, 'DONE', 60 * 24)];
+for (const sc of schedules) {
+  sc.activeSessions = sc.runs.map((r) => r.session).filter(Boolean);
+  for (const s of sc.activeSessions) s.schedule = sc;
+}
 const chats = sessions.filter((s) => s.kind === 'CHAT');
 // Lien public de lecture de la session « page tarifs » (/share/<DEMO_SHARE_TOKEN>, servi par le mock).
 export const DEMO_SHARE_TOKEN = 'demo-partage-page-tarifs-0123456789abcdefgh';
@@ -678,7 +701,7 @@ const projectDashboard = (id) => {
     pullRequests: pullRequests.filter((x) => x.project === p && x.stage !== 'MERGED'),
     mergedPullRequests: pullRequests.filter((x) => x.project === p && x.stage === 'MERGED'),
     staleTasks: stalledTasks().filter((t) => t.project === p),
-    schedules: sessions.filter((s) => s.schedule && s.project === p).map((s) => s.schedule),
+    schedules: schedules.filter((sc) => sc.project === p),
     general: conversations.find((c) => c.project === p && c.slug === 'general') ?? null,
     team: members.map((m) => {
       const ms = ps.filter((s) => s.status === 'RUNNING' && s.owner === m.user);
@@ -809,10 +832,11 @@ export const demoRoot = {
   contextInstruction: (a) => byId(contextInstructions, a.id),
   searchContext: (a) => contextInstructions.filter((i) => i.projectId === a.projectId && `${i.name} ${i.content}`.toLowerCase().includes(a.query.toLowerCase())),
   schedulePermissionSuggestions: (a = {}) => [
-    ...(a.sessionId ? [{ __typename: 'ScheduleToolSuggestion', rule: 'mcp__vault__sql_query(production)', source: 'DENIED', count: 2, lastSeenAt: ago(60 * 9) }, { __typename: 'ScheduleToolSuggestion', rule: 'Bash(git log *)', source: 'ASKED', count: 1, lastSeenAt: ago(60 * 24 * 7) }] : []),
+    ...(a.scheduleId ? [{ __typename: 'ScheduleToolSuggestion', rule: 'mcp__vault__sql_query(production)', source: 'DENIED', count: 2, lastSeenAt: ago(60 * 9) }, { __typename: 'ScheduleToolSuggestion', rule: 'Bash(git log *)', source: 'ASKED', count: 1, lastSeenAt: ago(60 * 24 * 7) }] : []),
     ...(/production/i.test(a.prompt ?? '') ? [{ __typename: 'ScheduleToolSuggestion', rule: 'mcp__vault__sql_query(production)', source: 'PROMPT', count: 0, lastSeenAt: null }] : []),
   ].filter((x, i, all) => all.findIndex((y) => y.rule === x.rule) === i),
-  sessionSchedules: (a = {}) => sessions.filter((s) => s.schedule && (!a.projectId || s.project.id === a.projectId)).map((s) => s.schedule),
+  sessionSchedules: (a = {}) => schedules.filter((sc) => !a.projectId || sc.project.id === a.projectId),
+  sessionSchedule: (a) => byId(schedules, a.id),
   providers,
   myAgents: agents,
   agent: (a) => byId(agents, a.id),

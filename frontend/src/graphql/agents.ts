@@ -26,7 +26,7 @@ export interface AgentAction {
   instruction: string;
   cron: string | null;
   timezone: string | null;
-  scheduleSession: { id: string; name: string } | null;
+  schedule: { id: string; name: string; project: { id: string } } | null;
 }
 
 export interface AgentManager {
@@ -174,9 +174,12 @@ export const AGENT_FIELDS = gql`
       instruction
       cron
       timezone
-      scheduleSession {
+      schedule {
         id
         name
+        project {
+          id
+        }
       }
     }
     enabled

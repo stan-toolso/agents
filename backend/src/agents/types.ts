@@ -35,7 +35,7 @@ export interface AgentTriggers {
 
 export const DEFAULT_TRIGGERS: AgentTriggers = { taskCreated: false, taskCreatedTag: null, threadFollowed: true, prMerged: false, taskReady: false, taskReadyTag: null };
 
-/** Action nommée : une instruction jouée par l'agent, à la demande ou à heures fixes (session planifiée dédiée). */
+/** Action nommée : une instruction jouée par l'agent, à la demande ou à heures fixes (planification dédiée). */
 export interface AgentAction {
   key: string;
   label: string;
@@ -43,8 +43,10 @@ export interface AgentAction {
   /** Expression cron à cinq champs (null : à la demande seulement). */
   cron: string | null;
   timezone: string | null;
-  /** Session planifiée qui porte l'action quand elle a un `cron` (créée et tenue à jour par le service). */
-  scheduleSessionId: string | null;
+  /** Planification de l'action quand elle a un `cron` (créée et tenue à jour par le service). */
+  scheduleId: string | null;
+  /** Avant la refonte des planifications : session qui portait la planification (lue une fois, puis remplacée par `scheduleId`). */
+  scheduleSessionId?: string | null;
 }
 
 export interface AgentProfile {
