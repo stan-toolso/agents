@@ -13,7 +13,7 @@ const day = (offset) => new Date(NOW + offset * 86_400_000).toISOString().slice(
 
 // ---- Personnes et agents ------------------------------------------------------------------------------------------
 
-const user = (id, name, email, extra = {}) => ({ __typename: 'User', id, name, email, avatarUrl: null, isAdmin: false, isSuperAdmin: false, isGuest: false, kind: 'PERSON', agent: null, createdAt: ago(60 * 24 * 120), lastLoginAt: ago(30), ...extra });
+const user = (id, name, email, extra = {}) => ({ __typename: 'User', id, name, email, avatarUrl: null, isAdmin: false, isSuperAdmin: false, isCto: false, isGuest: false, kind: 'PERSON', agent: null, createdAt: ago(60 * 24 * 120), lastLoginAt: ago(30), ...extra });
 const U = {
   me: user('u-camille', 'Camille Laurent', 'camille.laurent@toolso.io', { isAdmin: true, lastLoginAt: ago(2) }),
   hugo: user('u-hugo', 'Hugo Bernard', 'hugo.bernard@toolso.io', { lastLoginAt: ago(45) }),
@@ -899,7 +899,7 @@ export const demoRoot = {
 // ---- Valeurs générées pour les champs absents ---------------------------------------------------------------------
 
 const WORDS = ['Préparation', 'Synthèse', 'Vérification', 'Mise à jour', 'Revue', 'Suivi'];
-const FALSE_FLAGS = /^(isPersonal|isSuperAdmin|isGuest|overThreshold|maintenance|foreignRepo|isDraft|isUsingOverage|pending|browserActive|outdated|advanced|isError|conflicted|truncated|binary)$/;
+const FALSE_FLAGS = /^(isPersonal|isSuperAdmin|isCto|isGuest|overThreshold|maintenance|foreignRepo|isDraft|isUsingOverage|pending|browserActive|outdated|advanced|isError|conflicted|truncated|binary)$/;
 
 /** Valeur courte et plausible d'un scalaire absent des données ; undefined : laisser le générateur de l'audit. */
 export function demoScalar(type, field, parentType, n) {

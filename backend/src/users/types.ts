@@ -18,6 +18,11 @@ export interface User {
   /** Super administrateur : administrateur de l'application qui administre aussi tous les projets, membre ou non. */
   isSuperAdmin: boolean;
   /**
+   * CTO (Toolso) : ses interventions sur les sessions et les conversations sont comptées par tranches de 10 minutes,
+   * puis consolidées chaque jour en temps CTO facturé (billing/ctoTime.ts). Accordé par un super administrateur.
+   */
+  isCto: boolean;
+  /**
    * Invité des pages partagées : invité depuis le partage d'une page, sans projet ni autre droit ; il ne voit que les
    * pages partagées avec lui (garde graphql/security.ts). Une invitation sur un projet ou dans l'application l'efface.
    */

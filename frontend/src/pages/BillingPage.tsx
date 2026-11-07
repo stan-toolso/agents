@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from '@apollo/client';
 import { useEffect, useState } from 'react';
-import { Alert, Button, Col, Form, Row, Table } from 'react-bootstrap';
+import { Alert, Badge, Button, Col, Form, Row, Table } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { useDialogs } from '../components/Dialogs';
@@ -314,22 +314,29 @@ function CtoSection({ s, month, isOperator }: { s: BillingStatement; month: stri
       </h2>
       {isOperator && <CtoForm month={month} />}
       <ul className="dash-list">
-        {s.cto.entries.length === 0 && <li className="empty">Aucun temps saisi ce mois-ci.</li>}
+        {s.cto.entries.length === 0 && <li className="empty">Aucun temps CTO ce mois-ci.</li>}
         {s.cto.entries.map((e) => (
           <li key={e.id}>
             <span className="icon">
-              <i className="bi bi-clock" />
+              <i className={e.source === 'MANUAL' ? 'bi bi-clock' : 'bi bi-stopwatch'} />
             </span>
             <div className="main">
-              <span className="title">{e.description || 'Accompagnement'}</span>
+              <span className="title">
+                {e.description || 'Accompagnement'}
+                {e.source === 'PENDING' && (
+                  <Badge bg="secondary" className="ms-1" title="Tranches du jour, comptées dans le total : consolidées en fin de journée">
+                    en cours
+                  </Badge>
+                )}
+              </span>
               <div className="meta">
                 {dayLabel(e.day)}
                 {e.projectName && <> · {e.projectId ? <Link to={`/projects/${e.projectId}`}>{e.projectName}</Link> : e.projectName}</>}
-                {e.createdByName && <> · {e.createdByName}</>}
+                {e.source === 'MANUAL' ? e.createdByName && <> · {e.createdByName}</> : e.userName && <> · {e.userName}</>}
               </div>
             </div>
             <div className="side">{num(e.hours, 2)} h</div>
-            {isOperator && (
+            {isOperator && e.source !== 'PENDING' && (
               <Button
                 size="sm"
                 variant="link"

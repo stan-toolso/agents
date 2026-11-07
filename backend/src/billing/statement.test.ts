@@ -29,8 +29,8 @@ const inputs = (over: Partial<BillingInputs> = {}): BillingInputs => ({
   // 10 USD par jour sur les 7 derniers jours.
   recentUsd: 70,
   ctoEntries: [
-    { id: '1', day: '2026-11-03', hours: 4, projectId: null, projectName: null, description: '', createdByName: null, createdAt: new Date() },
-    { id: '2', day: '2026-11-05', hours: 8, projectId: 'a', projectName: 'A', description: '', createdByName: null, createdAt: new Date() },
+    { id: '1', day: '2026-11-03', hours: 4, projectId: null, projectName: null, description: '', createdByName: null, createdAt: new Date(), source: 'manual', userName: null, slots: null },
+    { id: '2', day: '2026-11-05', hours: 8, projectId: 'a', projectName: 'A', description: '', createdByName: null, createdAt: new Date(), source: 'manual', userName: null, slots: null },
   ],
   ...over,
 });

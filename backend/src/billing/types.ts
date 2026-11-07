@@ -3,7 +3,8 @@
  * - l'abonnement : forfait de la taille de la cellule, N projets inclus, puis un prix par projet supplémentaire ;
  * - l'usage des agents, exprimé en crédits (et en équivalent jours-homme) : le client ne voit jamais le coût
  *   des modèles (usage_ledger, en USD au tarif API) ni le taux de conversion, réservés au super administrateur ;
- * - le temps passé par un CTO Toolso, saisi par un super administrateur et facturé au tarif journalier.
+ * - le temps passé par un CTO Toolso, saisi par un super administrateur ou suivi automatiquement (billing/ctoTime.ts),
+ *   facturé au tarif journalier.
  */
 export interface BillingSettings {
   /** Nom de l'offre affiché au client (ex. « Cellule M »). */
@@ -51,7 +52,18 @@ export interface CtoTimeEntry {
   description: string;
   createdByName: string | null;
   createdAt: Date;
+  /**
+   * `manual` : saisie d'un super administrateur ; `auto` : consolidation de fin de journée du suivi des CTO ;
+   * `pending` : tranches du suivi pas encore consolidées (jour en cours), comptées mais provisoires.
+   */
+  source: CtoTimeSource;
+  /** CTO dont le temps a été suivi (saisies `auto` et `pending`). */
+  userName: string | null;
+  /** Tranches de 10 minutes comptées (saisies `auto` et `pending`). */
+  slots: number | null;
 }
+
+export type CtoTimeSource = 'manual' | 'auto' | 'pending';
 
 export interface CtoTimeEntryInput {
   day: string;

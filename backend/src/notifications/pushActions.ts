@@ -6,6 +6,7 @@ import { pool } from '../db/pool.js';
 import { log } from '../log.js';
 import { requestService } from '../requests/service.js';
 import { loadMasterKey } from '../settings/crypto.js';
+import { ctoTimeService } from '../billing/ctoTime.js';
 import { userRepository } from '../users/repository.js';
 import { userService } from '../users/service.js';
 import { ROLE_RANK } from '../users/types.js';
@@ -107,6 +108,7 @@ export async function handlePushActionRoute(req: IncomingMessage, res: ServerRes
       return true;
     }
     await requestService.answer(claims.requestId, { decision: action }, user.id);
+    void ctoTimeService.record(user, { action: 'pushAnswerRequest', targetType: 'request', targetId: claims.requestId });
     await auditService.record({
       projectId: request.project_id,
       actor: { userId: user.id, label: user.name || user.email },

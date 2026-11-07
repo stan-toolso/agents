@@ -116,6 +116,8 @@ export interface User {
   avatarUrl: string | null;
   isAdmin: boolean;
   isSuperAdmin: boolean;
+  /** CTO : interventions sur les sessions et conversations comptées par tranches de 10 min et facturées. */
+  isCto?: boolean;
   /** Invité des pages partagées : ne voit que les pages partagées avec lui (aucun projet, aucun menu). */
   isGuest?: boolean;
   createdAt: string;
@@ -613,6 +615,7 @@ export const USER_FIELDS = gql`
     avatarUrl
     isAdmin
     isSuperAdmin
+    isCto
     isGuest
     createdAt
     lastLoginAt

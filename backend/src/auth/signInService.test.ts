@@ -62,7 +62,7 @@ const { signInService } = await import('./signInService.js');
 const { hashPassword, loginThrottle } = await import('./password.js');
 
 const person = (id: string, email: string, extra: Partial<User> = {}): User => ({
-  id, email, name: id, kind: 'person', avatarUrl: null, googleSub: null, isAdmin: false, isSuperAdmin: false, isGuest: false, createdAt: new Date(), lastLoginAt: null, passwordSetAt: null, ...extra,
+  id, email, name: id, kind: 'person', avatarUrl: null, googleSub: null, isAdmin: false, isSuperAdmin: false, isCto: false, isGuest: false, createdAt: new Date(), lastLoginAt: null, passwordSetAt: null, ...extra,
 });
 const github = (extra: Partial<ExternalIdentity> = {}): ExternalIdentity => ({ provider: 'github', subject: '42', verifiedEmails: ['alice@example.com'], email: 'alice@example.com', name: 'Alice', avatarUrl: null, ...extra });
 

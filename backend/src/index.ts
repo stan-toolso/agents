@@ -59,6 +59,7 @@ import { browserUpgradeHandler } from './browser/ws.js';
 import { attachWebSockets } from './websockets.js';
 import { instanceRegistry } from './instances/registry.js';
 import { instanceBus } from './instances/bus.js';
+import { ctoTimeService } from './billing/ctoTime.js';
 import { leadership, type LeaderJob } from './instances/leadership.js';
 import { handleInternalRoute } from './instances/internalRoute.js';
 import { handlePreviewOpenRoute, handlePreviewRoute, previewUpgrade } from './previews/proxy.js';
@@ -201,6 +202,7 @@ async function main() {
     { name: 'rapports de relecture', start: () => void (stopReviewWatcher = reviewService.startWatcher()), stop: () => { stopReviewWatcher?.(); stopReviewWatcher = null; } },
     { name: 'sauvegardes git', start: () => gitServer.startBackgroundBackups(), stop: () => gitServer.stopBackgroundBackups() },
     { name: 'reprise des sessions orphelines', start: () => orphanSweep.start(), stop: () => orphanSweep.stop() },
+    { name: 'consolidation du temps CTO', start: () => ctoTimeService.start(), stop: () => ctoTimeService.stop() },
   ];
 
   // Origines autorisées à appeler l'API avec le cookie de session : voir origin.ts (aussi appliqué aux WebSockets).

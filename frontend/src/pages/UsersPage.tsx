@@ -5,7 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import { useDialogs } from '../components/Dialogs';
 import PageLoading from '../components/PageLoading';
 import { CREATE_PASSWORD_LINK } from '../graphql/login';
-import { DELETE_USER, INVITE_USER, SET_USER_ADMIN, SET_USER_SUPER_ADMIN, USERS } from '../graphql/misc';
+import { DELETE_USER, INVITE_USER, SET_USER_ADMIN, SET_USER_CTO, SET_USER_SUPER_ADMIN, USERS } from '../graphql/misc';
 import type { User } from '../graphql/operations';
 import { timeAgo } from '../lib/humanize';
 import { usePollingQuery } from '../lib/usePollingQuery';
@@ -26,6 +26,7 @@ export default function UsersPage() {
   const [invite, { loading: inviting, error: inviteError }] = useMutation(INVITE_USER, { ...refetch, onCompleted: () => setEmail('') });
   const [setAdmin] = useMutation(SET_USER_ADMIN, { ...refetch, onError: (e) => void showError(e) });
   const [setSuperAdmin] = useMutation(SET_USER_SUPER_ADMIN, { ...refetch, onError: (e) => void showError(e) });
+  const [setCto] = useMutation(SET_USER_CTO, { ...refetch, onError: (e) => void showError(e) });
   const [deleteUser] = useMutation(DELETE_USER, { ...refetch, onError: (e) => void showError(e) });
   const [createPasswordLink] = useMutation<{ createPasswordLink: { url: string; expiresAt: string; emailed: boolean } }>(CREATE_PASSWORD_LINK);
 
@@ -76,7 +77,8 @@ export default function UsersPage() {
       <h1 className="h3">Utilisateurs</h1>
       <p className="text-secondary small">
         Personne ne s'inscrit seul : un compte existe parce qu'il a été invité ici ou sur un projet. Un administrateur accède aux paramètres généraux et à cette page ; un super administrateur est un administrateur qui administre aussi
-        tous les projets, membre ou non : ils apparaissent tous sur sa page Projets et dans sa recherche. Seul un super administrateur accorde ou retire ce rôle.
+        tous les projets, membre ou non : ils apparaissent tous sur sa page Projets et dans sa recherche. Seul un super administrateur accorde ou retire ce rôle. Le profil CTO, lui aussi accordé par
+        un super administrateur, compte le temps de la personne : chaque intervention sur une session ou une conversation inscrit sa tranche de 10 minutes, consolidée chaque soir en temps CTO facturé (page Consommation).
       </p>
       <Form
         className="d-flex gap-2 align-items-center mb-3 flex-wrap"
@@ -97,6 +99,7 @@ export default function UsersPage() {
           <tr>
             <th>Utilisateur</th>
             <th>Rôle</th>
+            <th title="Temps suivi par tranches de 10 minutes et facturé">CTO</th>
             <th className="d-none d-md-table-cell">Invité</th>
             <th className="d-none d-md-table-cell">Dernière connexion</th>
             <th />
@@ -131,6 +134,21 @@ export default function UsersPage() {
                       super administrateur
                     </option>
                   </Form.Select>
+                </td>
+                <td>
+                  <Form.Check
+                    type="switch"
+                    id={`cto-${u.id}`}
+                    aria-label="Profil CTO (temps suivi et facturé)"
+                    title={me?.isSuperAdmin ? 'Profil CTO : interventions comptées par tranches de 10 minutes et facturées' : 'Seul un super administrateur accorde le profil CTO'}
+                    checked={Boolean(u.isCto)}
+                    disabled={!me?.isSuperAdmin || u.isGuest || u.kind === 'AGENT'}
+                    onChange={async (e) => {
+                      const isCto = e.currentTarget.checked;
+                      if (isCto && !(await confirm({ title: 'Profil CTO', message: `Le temps de ${u.name} sera suivi : chaque intervention sur une session ou une conversation compte sa tranche de 10 minutes, facturée en temps CTO.`, confirmLabel: 'Activer' }))) return;
+                      void setCto({ variables: { userId: u.id, isCto } });
+                    }}
+                  />
                 </td>
                 <td className="d-none d-md-table-cell" title={new Date(u.createdAt).toLocaleString()}>{timeAgo(u.createdAt)}</td>
                 <td className="d-none d-md-table-cell">{u.lastLoginAt ? timeAgo(u.lastLoginAt) : <Badge bg="secondary">en attente</Badge>}</td>
