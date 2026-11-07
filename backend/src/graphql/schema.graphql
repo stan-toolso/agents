@@ -65,6 +65,8 @@ type User {
   isAdmin: Boolean!
   "Super administrateur : administrateur de l'application qui administre aussi tous les projets, membre ou non."
   isSuperAdmin: Boolean!
+  "CTO : ses interventions sur les sessions et les conversations sont comptées par tranches de 10 minutes et facturées en temps CTO."
+  isCto: Boolean!
   """
   Invité des pages partagées : invité depuis le partage d'une page, sans projet ni autre droit ; il ne voit que les
   pages partagées avec lui. Une invitation sur un projet ou dans l'application en fait une personne ordinaire.
@@ -3191,6 +3193,8 @@ type Mutation {
   setUserAdmin(userId: ID!, isAdmin: Boolean!): User!
   "Super administrateurs seulement."
   setUserSuperAdmin(userId: ID!, isSuperAdmin: Boolean!): User!
+  "Accorde ou retire le profil CTO (temps suivi et facturé). Super administrateurs."
+  setUserCto(userId: ID!, isCto: Boolean!): User!
   deleteUser(userId: ID!): Boolean!
   "Invite un e-mail sur le projet (l'utilisateur est créé s'il n'existe pas) ou change son rôle. Réservé aux administrateurs du projet."
   inviteProjectMember(projectId: ID!, email: String!, role: ProjectRole = MEMBER): ProjectMember!
@@ -3786,7 +3790,17 @@ type BillingUsage {
   byDay: [BillingUsageDay!]!
 }
 
-"Temps passé par un CTO Toolso, saisi par un super administrateur."
+"Origine d'une saisie de temps CTO."
+enum CtoTimeSource {
+  "Saisie d'un super administrateur."
+  MANUAL
+  "Consolidation de fin de journée du suivi automatique (tranches de 10 minutes)."
+  AUTO
+  "Tranches du suivi pas encore consolidées (jour en cours) : comptées, provisoires."
+  PENDING
+}
+
+"Temps passé par un CTO Toolso, saisi par un super administrateur ou suivi automatiquement."
 type CtoTimeEntry {
   id: ID!
   "AAAA-MM-JJ."
@@ -3797,6 +3811,11 @@ type CtoTimeEntry {
   description: String!
   createdByName: String
   createdAt: DateTime!
+  source: CtoTimeSource!
+  "CTO suivi (saisies AUTO et PENDING)."
+  userName: String
+  "Tranches de 10 minutes comptées (saisies AUTO et PENDING)."
+  slots: Int
 }
 
 input CtoTimeEntryInput {

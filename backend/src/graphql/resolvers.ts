@@ -1,4 +1,5 @@
 import { withAudit } from '../audit/mutations.js';
+import { withCtoTime } from '../billing/ctoTime.js';
 import { auditService } from '../audit/service.js';
 import { actionLabel, targetTypeLabel } from '../audit/labels.js';
 import { parseAuditFilter, type AuditEntry, type RawAuditFilter } from '../audit/types.js';
@@ -31,7 +32,7 @@ import { awsService } from '../vault/awsService.js';
 import type { ApiSettings, AwsSettings, LangfuseSettings, LitellmSettings, PostgresSettings, ProjectVaultRow, ScalewaySettings, SecretSettings, SshSettings, TokenSettings, VaultAuditEvent, VaultItem, VaultItemInput, VaultItemKind, VaultLink, VaultLinkScope, VaultPermission, VaultShare, WebsiteSettings } from '../vault/types.js';
 import { variableName } from '../vault/website.js';
 import { billingService } from '../billing/service.js';
-import type { BillingSettings, CtoTimeEntryInput } from '../billing/types.js';
+import type { BillingSettings, CtoTimeEntry, CtoTimeEntryInput } from '../billing/types.js';
 import { applyCostConversion, costDisplay, costRate, toStoredUsd } from '../billing/display.js';
 import { dashboardService } from '../dashboard/service.js';
 import { projectBudget } from '../projects/budget.js';
@@ -412,6 +413,9 @@ export const resolvers = {
   DateTime: DateTimeResolver,
   // Champ obsolète gardé pour les frontends encore ouverts sur une ancienne version (bleu/vert).
   InboxCounts: { idleSessions: () => 0 },
+  CtoTimeEntry: {
+    source: (e: CtoTimeEntry) => e.source.toUpperCase(),
+  },
   DashboardUsage: {
     rateLimits: () => rateLimitView(),
   },
@@ -1417,7 +1421,7 @@ export const resolvers = {
     },
   },
 
-  Mutation: withAudit({
+  Mutation: withCtoTime(withAudit({
     createAgent: async (_: unknown, args: { projectId: string; input: GqlAgentInput }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId, 'member');
       return agentService.create(args.projectId, fromGqlAgentInput(args.input), requireUser(ctx));
@@ -1771,6 +1775,10 @@ export const resolvers = {
     setUserSuperAdmin: (_: unknown, args: { userId: string; isSuperAdmin: boolean }, ctx: Ctx) => {
       requireSuperAdmin(ctx);
       return userService.setSuperAdmin(args.userId, args.isSuperAdmin);
+    },
+    setUserCto: (_: unknown, args: { userId: string; isCto: boolean }, ctx: Ctx) => {
+      requireSuperAdmin(ctx);
+      return userService.setCto(args.userId, args.isCto);
     },
     deleteUser: (_: unknown, args: { userId: string }, ctx: Ctx) => userService.delete(args.userId, requireAdmin(ctx)),
     setMyPassword: (_: unknown, args: { currentPassword?: string | null; newPassword: string }, ctx: Ctx) => signInService.setPassword(requireUser(ctx), args.currentPassword, args.newPassword, ctx.sessionTokenHash ?? null),
@@ -2326,7 +2334,7 @@ export const resolvers = {
       await guardInstruction(ctx, args.id, 'member');
       return contextService.restoreVersion(args.id, args.version, HUMAN);
     },
-  }),
+  })),
 
   Subscription: {
     sessionEvents: {

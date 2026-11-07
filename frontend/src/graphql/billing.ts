@@ -9,6 +9,10 @@ export interface CtoTimeEntry {
   description: string;
   createdByName: string | null;
   createdAt: string;
+  /** MANUAL : saisie ; AUTO : suivi consolidé en fin de journée ; PENDING : suivi du jour, pas encore consolidé. */
+  source: 'MANUAL' | 'AUTO' | 'PENDING';
+  userName: string | null;
+  slots: number | null;
 }
 
 export interface BillingPlan {
@@ -108,6 +112,9 @@ export const BILLING_STATEMENT = gql`
           projectName
           description
           createdByName
+          source
+          userName
+          slots
           createdAt
         }
       }

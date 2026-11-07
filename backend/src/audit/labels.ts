@@ -165,6 +165,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'user.invite': 'a invité dans l’application',
   'user.admin': 'a changé les droits d’administration de',
   'user.super_admin': 'a changé les droits de super administration de',
+  'user.cto': 'a changé le profil CTO (temps facturé) de',
   'user.delete': 'a supprimé l’utilisateur',
   'user.password_link': 'a créé un lien de mot de passe pour',
   'app.maintenance': 'a changé le mode maintenance',

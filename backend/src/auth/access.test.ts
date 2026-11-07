@@ -21,6 +21,7 @@ const makeUser = (overrides: Partial<User> = {}): User => ({
   googleSub: null,
   isAdmin: false,
   isSuperAdmin: false,
+  isCto: false,
   isGuest: false,
   kind: 'person',
   createdAt: new Date('2026-01-01'),

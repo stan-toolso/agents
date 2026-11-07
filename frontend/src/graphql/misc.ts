@@ -63,6 +63,15 @@ export const SET_USER_SUPER_ADMIN = gql`
   }
 `;
 
+export const SET_USER_CTO = gql`
+  ${USER_FIELDS}
+  mutation SetUserCto($userId: ID!, $isCto: Boolean!) {
+    setUserCto(userId: $userId, isCto: $isCto) {
+      ...UserFields
+    }
+  }
+`;
+
 export const DELETE_USER = gql`
   mutation DeleteUser($userId: ID!) {
     deleteUser(userId: $userId)

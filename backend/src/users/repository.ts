@@ -10,6 +10,7 @@ interface UserRow {
   google_sub: string | null;
   is_admin: boolean;
   is_super_admin: boolean;
+  is_cto?: boolean | null;
   guest?: boolean | null;
   created_at: Date;
   last_login_at: Date | null;
@@ -47,6 +48,7 @@ const toUser = (r: UserRow): User => ({
   googleSub: r.google_sub,
   isAdmin: r.is_admin,
   isSuperAdmin: Boolean(r.is_super_admin),
+  isCto: Boolean(r.is_cto),
   isGuest: Boolean(r.guest),
   createdAt: r.created_at,
   lastLoginAt: r.last_login_at,
@@ -109,6 +111,12 @@ export const userRepository = {
   /** Un super administrateur est toujours administrateur. */
   async setSuperAdmin(id: string, isSuperAdmin: boolean): Promise<User | null> {
     const { rows } = await pool.query<UserRow>('UPDATE users SET is_super_admin = $2, is_admin = CASE WHEN $2 THEN true ELSE is_admin END WHERE id = $1 RETURNING *', [id, isSuperAdmin]);
+    return rows[0] ? toUser(rows[0]) : null;
+  },
+
+  /** Profil CTO : interventions comptées en temps facturé (billing/ctoTime.ts). */
+  async setCto(id: string, isCto: boolean): Promise<User | null> {
+    const { rows } = await pool.query<UserRow>('UPDATE users SET is_cto = $2 WHERE id = $1 RETURNING *', [id, isCto]);
     return rows[0] ? toUser(rows[0]) : null;
   },
 

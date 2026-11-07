@@ -219,6 +219,7 @@ export const AUDITED: Record<string, MutationAudit> = {
   inviteUser: { action: 'user.invite', app: true, targetId: (_a, r) => r?.id, label: (a) => a.email, details: (a) => ({ isAdmin: a.isAdmin }) },
   setUserAdmin: { action: 'user.admin', app: true, lookup: ['user', 'userId'], details: (a) => ({ isAdmin: a.isAdmin }) },
   setUserSuperAdmin: { action: 'user.super_admin', app: true, lookup: ['user', 'userId'], details: (a) => ({ isSuperAdmin: a.isSuperAdmin }) },
+  setUserCto: { action: 'user.cto', app: true, lookup: ['user', 'userId'], details: (a) => ({ isCto: a.isCto }) },
   deleteUser: { action: 'user.delete', app: true, lookup: ['user', 'userId'] },
   // Jamais le lien lui-même (il ouvre le compte).
   createPasswordLink: { action: 'user.password_link', app: true, lookup: ['user', 'userId'], details: (a, r) => ({ emailed: Boolean(r?.emailed) }) },

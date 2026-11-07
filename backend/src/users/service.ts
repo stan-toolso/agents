@@ -69,6 +69,14 @@ export const userService = {
     return (await userRepository.setSuperAdmin(userId, isSuperAdmin)) ?? user;
   },
 
+  /** Profil CTO (temps suivi et facturé) : une personne seulement, jamais un agent ni un invité des pages. */
+  async setCto(userId: string, isCto: boolean): Promise<User> {
+    const user = await this.get(userId);
+    if (isCto && user.kind === 'agent') throw new AppError("Un agent ne peut pas être CTO : seul le temps d'une personne est facturé");
+    if (isCto && user.isGuest) throw new AppError("Un invité des pages ne peut pas être CTO : invitez-le d'abord sur un projet");
+    return (await userRepository.setCto(userId, isCto)) ?? user;
+  },
+
   /** Supprime un utilisateur (ses appartenances suivent) ; jamais soi-même ni le dernier administrateur. */
   async delete(userId: string, actor: User): Promise<boolean> {
     if (userId === actor.id) throw new AppError('Vous ne pouvez pas supprimer votre propre compte');
