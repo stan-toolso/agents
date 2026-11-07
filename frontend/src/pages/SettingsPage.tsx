@@ -10,6 +10,7 @@ import GitlabSection from '../components/GitlabSection';
 import PageLoading from '../components/PageLoading';
 import RateLimitGauges from '../components/RateLimitGauges';
 import ServerHealthCard from '../components/ServerHealthCard';
+import LoginMethodsSection from '../components/settings/LoginMethodsSection';
 import NotificationsSection from '../components/settings/NotificationsSection';
 import SmtpCard from '../components/settings/SmtpCard';
 import OpencodeSection from '../components/settings/OpencodeSection';
@@ -676,7 +677,7 @@ function ServerSection({ server }: { server: ServerState }) {
   );
 }
 
-type SettingsSection = 'claude' | 'opencode' | 'github' | 'gitlab' | 'server' | 'usage' | 'notifications' | 'appearance';
+type SettingsSection = 'claude' | 'opencode' | 'github' | 'gitlab' | 'server' | 'usage' | 'login' | 'notifications' | 'appearance';
 
 /** Thème clair / sombre / système, mémorisé dans ce navigateur seulement. */
 function AppearanceSection() {
@@ -699,7 +700,7 @@ function AppearanceSection() {
   );
 }
 
-/** Paramètres de la personne connectée : Claude (identifiants, modèles, budgets), OpenCode, GitHub, GitLab, notifications, apparence ; serveur pour les administrateurs. */
+/** Paramètres de la personne connectée : Claude (identifiants, modèles, budgets), OpenCode, GitHub, GitLab, connexion (comptes reliés, mot de passe), notifications, apparence ; serveur pour les administrateurs. */
 /**
  * Comptes d'un agent de projet (fiche de l'agent, onglet Comptes) : les mêmes sections que Paramètres (Claude, OpenCode,
  * GitHub, GitLab), rendues sous un client GraphQL qui agit pour le compte de l'agent (voir `createActAsClient`).
@@ -833,6 +834,11 @@ export default function SettingsPage() {
           </Nav.Item>
         )}
         <Nav.Item>
+          <Nav.Link eventKey="login">
+            <i className="bi bi-shield-lock me-1" /> Connexion
+          </Nav.Link>
+        </Nav.Item>
+        <Nav.Item>
           <Nav.Link eventKey="notifications">
             <i className="bi bi-bell me-1" /> Notifications
           </Nav.Link>
@@ -857,6 +863,7 @@ export default function SettingsPage() {
         {section === 'gitlab' && <GitlabSection />}
         {section === 'server' && s.server && <ServerSection server={s.server} />}
         {section === 'usage' && isAdmin && <UsageSection />}
+        {section === 'login' && <LoginMethodsSection />}
         {section === 'notifications' && <NotificationsSection />}
         {section === 'appearance' && <AppearanceSection />}
       </div>

@@ -4,6 +4,7 @@ import { Alert, Badge, Button, Form, Table } from 'react-bootstrap';
 import { useAuth } from '../auth/AuthContext';
 import { useDialogs } from '../components/Dialogs';
 import PageLoading from '../components/PageLoading';
+import { CREATE_PASSWORD_LINK } from '../graphql/login';
 import { DELETE_USER, INVITE_USER, SET_USER_ADMIN, SET_USER_SUPER_ADMIN, USERS } from '../graphql/misc';
 import type { User } from '../graphql/operations';
 import { timeAgo } from '../lib/humanize';
@@ -16,7 +17,7 @@ const roleOf = (u: User): Role => (u.isSuperAdmin ? 'super' : u.isAdmin ? 'admin
 /** Utilisateurs de l'application (administrateurs) : invitations, rôles, suppression. */
 export default function UsersPage() {
   const { user: me } = useAuth();
-  const { confirm, showError } = useDialogs();
+  const { confirm, choose, alert, showError } = useDialogs();
   const { data, loading, error } = usePollingQuery<{ users: User[] }>(USERS, { pollInterval: 15_000 });
   useTabTitle('Utilisateurs');
   const [email, setEmail] = useState('');
@@ -26,6 +27,37 @@ export default function UsersPage() {
   const [setAdmin] = useMutation(SET_USER_ADMIN, { ...refetch, onError: (e) => void showError(e) });
   const [setSuperAdmin] = useMutation(SET_USER_SUPER_ADMIN, { ...refetch, onError: (e) => void showError(e) });
   const [deleteUser] = useMutation(DELETE_USER, { ...refetch, onError: (e) => void showError(e) });
+  const [createPasswordLink] = useMutation<{ createPasswordLink: { url: string; expiresAt: string; emailed: boolean } }>(CREATE_PASSWORD_LINK);
+
+  /** Lien pour choisir son mot de passe (7 jours) : envoyé par e-mail ou à copier. */
+  const passwordLink = async (u: User) => {
+    const how = await choose({
+      title: 'Lien de mot de passe',
+      message: `Un lien à usage unique, valable 7 jours, permet à ${u.name} (${u.email}) de ${u.hasPassword ? 'réinitialiser' : 'choisir'} son mot de passe puis de se connecter. Les liens précédents restent valables jusqu'à leur utilisation.`,
+      choices: [
+        { value: 'copy', label: 'Créer et copier' },
+        { value: 'email', label: 'Envoyer par e-mail', primary: true },
+      ],
+    });
+    if (!how) return;
+    try {
+      const { data } = await createPasswordLink({ variables: { userId: u.id, sendEmail: how === 'email' } });
+      const link = data!.createPasswordLink;
+      let copied = false;
+      if (how === 'copy') copied = await navigator.clipboard?.writeText(link.url).then(() => true, () => false);
+      await alert({
+        title: link.emailed ? 'Lien envoyé' : 'Lien créé',
+        message: (
+          <>
+            <p className="small">{link.emailed ? `Envoyé à ${u.email}.` : copied ? 'Copié dans le presse-papiers. ' : ''}Valable jusqu’au {new Date(link.expiresAt).toLocaleString()}.</p>
+            <Form.Control size="sm" readOnly value={link.url} onFocus={(e) => e.currentTarget.select()} />
+          </>
+        ),
+      });
+    } catch (e) {
+      void showError(e as Error);
+    }
+  };
 
   const changeRole = async (u: User, role: Role) => {
     const current = roleOf(u);
@@ -102,7 +134,15 @@ export default function UsersPage() {
                 </td>
                 <td className="d-none d-md-table-cell" title={new Date(u.createdAt).toLocaleString()}>{timeAgo(u.createdAt)}</td>
                 <td className="d-none d-md-table-cell">{u.lastLoginAt ? timeAgo(u.lastLoginAt) : <Badge bg="secondary">en attente</Badge>}</td>
-                <td className="text-end">
+                <td className="text-end text-nowrap">
+                  {u.hasPassword && (
+                    <Badge bg="secondary" className="me-2 d-none d-md-inline" title="Peut se connecter par e-mail et mot de passe">
+                      <i className="bi bi-key" />
+                    </Badge>
+                  )}
+                  <Button size="sm" variant="link" className="p-0 px-1" title="Lien pour choisir son mot de passe" onClick={() => void passwordLink(u)}>
+                    <i className="bi bi-link-45deg" />
+                  </Button>
                   <Button
                     size="sm"
                     variant="link"

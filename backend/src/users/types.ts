@@ -24,6 +24,30 @@ export interface User {
   isGuest: boolean;
   createdAt: Date;
   lastLoginAt: Date | null;
+  /** Date du mot de passe en cours ; null : pas de mot de passe (l'empreinte n'est jamais chargée avec l'utilisateur). */
+  passwordSetAt: Date | null;
+}
+
+/** Compte externe (Microsoft, GitHub) relié à une personne pour la connexion. */
+export interface UserIdentity {
+  provider: string;
+  subject: string;
+  userId: string;
+  email: string | null;
+  createdAt: Date;
+  lastUsedAt: Date | null;
+}
+
+/** Compte externe tel que le décrit le fournisseur après connexion. */
+export interface ExternalIdentity {
+  provider: 'microsoft' | 'github';
+  subject: string;
+  /** Adresses dont le fournisseur garantit la propriété (minuscules) ; seules elles retrouvent une invitation. */
+  verifiedEmails: string[];
+  /** Adresse à afficher (vérifiée ou non). */
+  email: string | null;
+  name: string | null;
+  avatarUrl: string | null;
 }
 
 export interface ProjectMember {

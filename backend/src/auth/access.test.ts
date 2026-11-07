@@ -25,6 +25,7 @@ const makeUser = (overrides: Partial<User> = {}): User => ({
   kind: 'person',
   createdAt: new Date('2026-01-01'),
   lastLoginAt: null,
+  passwordSetAt: null,
   ...overrides,
 });
 

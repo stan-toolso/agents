@@ -31,6 +31,7 @@ export const USERS = gql`
   query Users {
     users {
       ...UserFields
+      hasPassword
     }
   }
 `;

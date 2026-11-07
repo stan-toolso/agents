@@ -817,6 +817,21 @@ export const demoRoot = {
   myAgents: agents,
   agent: (a) => byId(agents, a.id),
   costDisplay: { __typename: 'CostDisplay', unit: 'USD', creditPriceEur: null },
+  // Paramètres › Connexion : Google relié, GitHub relié, Microsoft configuré mais pas relié, pas de mot de passe.
+  myLoginMethods: {
+    __typename: 'MyLoginMethods',
+    email: U.me.email,
+    hasPassword: false,
+    passwordSetAt: null,
+    passwordLoginEnabled: true,
+    googleLinked: true,
+    identities: [{ __typename: 'LoginIdentity', provider: 'github', email: U.me.email, createdAt: ago(60 * 24 * 12), lastUsedAt: ago(60 * 26) }],
+    providers: [
+      { __typename: 'LoginProviderInfo', id: 'google', label: 'Google', configured: true },
+      { __typename: 'LoginProviderInfo', id: 'microsoft', label: 'Microsoft', configured: true },
+      { __typename: 'LoginProviderInfo', id: 'github', label: 'GitHub', configured: true },
+    ],
+  },
   workflows: [],
   workflowRuns: [],
   sharedPages: [],

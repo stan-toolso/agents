@@ -56,6 +56,22 @@ export const config = {
   /** Identifiants OAuth Google (console Google Cloud, type « application Web »). */
   googleClientId: process.env.GOOGLE_CLIENT_ID ?? '',
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
+  /**
+   * Connexion Microsoft (Entra ID, inscription d'application « Web », URI de redirection `${API_URL}/auth/microsoft/callback`).
+   * `MICROSOFT_TENANT` : `common` (comptes personnels et professionnels, défaut), `organizations`, `consumers` ou
+   * l'identifiant d'un annuaire précis (seuls ses comptes peuvent alors se connecter).
+   */
+  microsoftClientId: process.env.MICROSOFT_CLIENT_ID ?? '',
+  microsoftClientSecret: process.env.MICROSOFT_CLIENT_SECRET ?? '',
+  microsoftTenant: (process.env.MICROSOFT_TENANT || 'common').trim(),
+  /**
+   * Connexion GitHub (OAuth App distincte de celle de la connexion par code `GITHUB_CLIENT_ID`, callback
+   * `${API_URL}/auth/github/callback`).
+   */
+  githubLoginClientId: process.env.GITHUB_LOGIN_CLIENT_ID ?? '',
+  githubLoginClientSecret: process.env.GITHUB_LOGIN_CLIENT_SECRET ?? '',
+  /** Connexion par e-mail et mot de passe : active sauf `PASSWORD_LOGIN=off`. */
+  passwordLogin: !/^(off|false|0|no)$/i.test((process.env.PASSWORD_LOGIN ?? '').trim()),
   /** Nom de l'instance dans le registre (couleur du déploiement bleu/vert), pour les journaux et le diagnostic. */
   instanceLabel: process.env.SKIPPER_INSTANCE || '',
   /** Drainage (SIGUSR2) : délai maximal d'attente de la fin des sessions et terminaux avant l'arrêt, en minutes. */

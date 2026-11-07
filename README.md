@@ -6,7 +6,7 @@ comme second exemple).
 
 Trois notions :
 
-- **Utilisateur** : connexion uniquement avec un compte Google. Personne ne s'inscrit seul : un
+- **Utilisateur** : connexion avec un compte Google, Microsoft ou GitHub, ou par e-mail et mot de passe. Personne ne s'inscrit seul : un
   utilisateur existe parce qu'il a été **invité sur un projet** (par e-mail), avec un rôle propre à
   ce projet (administrateur, membre, lecteur). Il ne voit que les projets dont il est membre.
 - **Projet** : prompt système, dépôt git optionnel, et un dossier de travail (workspace) dédié dans
@@ -85,7 +85,7 @@ Trois notions :
 
 ## Stack
 
-- **Backend** : Node.js 20, TypeScript, GraphQL ([graphql-yoga](https://the-guild.dev/graphql/yoga-server)), PostgreSQL (`pg`, migrations SQL), [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk), Google OAuth (sans dépendance)
+- **Backend** : Node.js 20, TypeScript, GraphQL ([graphql-yoga](https://the-guild.dev/graphql/yoga-server)), PostgreSQL (`pg`, migrations SQL), [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk), Google, Microsoft et GitHub OAuth, mots de passe scrypt (sans dépendance)
 - **Frontend** : React 18, Vite, Bootstrap 5 (react-bootstrap), Apollo Client, React Router
 - **Infra locale** : Docker Compose (PostgreSQL 16)
 
@@ -102,7 +102,7 @@ limites de l'abonnement), **Notifications** (familles reçues en push) et **Appa
 utilisent ses propres comptes.
 
 ```bash
-cp .env.example .env        # renseigner GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET (voir « Utilisateurs »)
+cp .env.example .env        # renseigner au moins un mode de connexion : Google, Microsoft, GitHub, ou rien (mot de passe, voir « Utilisateurs »)
 npm install
 npm run db:up               # lance PostgreSQL dans Docker
 npm run dev                 # backend (http://localhost:4000/graphql) + frontend (http://localhost:5173)
@@ -167,8 +167,11 @@ backend/
     pubsub.ts                  # canaux temps réel (subscriptions)
     db/                        # pool pg, runner de migrations, migrations SQL
     auth/
-      routes.ts                # /auth/google, /auth/google/callback, /auth/logout
+      routes.ts                # /auth/google, /auth/microsoft, /auth/github (+ /link, /callback), /auth/password/*, /auth/methods, /auth/logout
       google.ts                # flux OAuth Google (URL d'autorisation, échange du code, profil)
+      providers.ts             # flux OAuth Microsoft (Entra ID) et GitHub, adresses garanties ou non
+      password.ts              # empreinte scrypt, force du mot de passe, freinage des essais
+      signInService.ts         # connexion Microsoft / GitHub / mot de passe, liens de mot de passe, comptes reliés
       session.ts               # sessions de connexion : jeton dans un cookie HttpOnly, hachage en base
       access.ts                # contexte GraphQL et gardes : requireUser, requireAdmin, requireProject(role)
     users/
@@ -315,15 +318,35 @@ frontend/
 
 ## Utilisateurs et droits
 
-- **Connexion** : Google uniquement (`GET /auth/google` redirige vers Google, le retour ouvre une
-  session de 30 jours dans un cookie `skipper_session` HttpOnly, `POST /auth/logout` la ferme).
-  Configuration : `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (console Google Cloud, identifiant
-  OAuth « application Web », URI de redirection `API_URL/auth/google/callback`), `APP_URL` (front,
-  cible des redirections et origine autorisée en CORS) et `API_URL`. Un compte Google dont l'adresse
-  ne correspond à aucun utilisateur est refusé (`Aucune invitation pour …`) : il n'y a pas
-  d'inscription libre.
+- **Connexion** : quatre modes, chacun actif dès qu'il est configuré ; tous ouvrent la même session de 30 jours
+  (cookie `skipper_session` HttpOnly, `POST /auth/logout` la ferme) et tous ne laissent entrer qu'une **personne
+  invitée** (`users.kind = 'person'` : un agent de projet ne se connecte jamais). `GET /auth/methods` dit à la page de
+  connexion lesquels proposer.
+  - **Google** (`GET /auth/google`) : `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (console Google Cloud, identifiant
+    OAuth « application Web », URI de redirection `API_URL/auth/google/callback`). Le compte est relié (`googleSub`) à la
+    première connexion d'une adresse vérifiée invitée.
+  - **Microsoft** (`GET /auth/microsoft`) : `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `MICROSOFT_TENANT`
+    (`common` par défaut). Une adresse n'est **garantie** que pour un compte personnel (outlook.com…), un compte de
+    l'annuaire imposé par `MICROSOFT_TENANT`, ou un annuaire qui a prouvé son domaine (`xms_edov`) : ailleurs,
+    l'administrateur d'un annuaire choisit l'adresse de ses comptes (attaque « nOAuth »), et le compte doit être relié
+    depuis Paramètres › Connexion par une personne déjà connectée.
+  - **GitHub** (`GET /auth/github`) : `GITHUB_LOGIN_CLIENT_ID`, `GITHUB_LOGIN_CLIENT_SECRET` (OAuth App distincte de
+    `GITHUB_CLIENT_ID`, qui sert à la connexion des comptes git par code). Seules les adresses vérifiées du compte
+    retrouvent une invitation.
+  - **E-mail et mot de passe** (`POST /auth/password/login`, JSON) : actif sauf `PASSWORD_LOGIN=off`. Empreinte scrypt
+    (`auth/password.ts`), freinage des essais par adresse et par IP, même message que l'adresse soit inconnue ou le mot
+    de passe faux. Une personne choisit son mot de passe dans Paramètres › Connexion (après s'être connectée autrement)
+    ou par un **lien à usage unique** `/reset-password?token=…` : « Mot de passe oublié » sur la page de connexion
+    (valable une heure, envoyé seulement si un serveur SMTP est configuré, Paramètres › Serveur), ou lien créé par un
+    administrateur depuis la page Utilisateurs (valable 7 jours, copié ou envoyé par e-mail) — c'est ainsi qu'on invite
+    une personne sans compte Google. Choisir un mot de passe par un lien ferme les autres sessions ; le changer depuis
+    les paramètres ferme les autres sessions sauf la sienne.
+  Comptes Microsoft et GitHub reliés : table `user_identities` (un par fournisseur et par personne, un compte n'est
+  relié qu'à une personne). `APP_URL` (front, cible des redirections et origine autorisée en CORS) et `API_URL`.
+  Une adresse qui ne correspond à aucun utilisateur est refusée (`Aucune invitation pour …`) : il n'y a pas
+  d'inscription libre. Les routes JSON exigent `content-type: application/json` et refusent une origine étrangère.
 - **User** : `email` (unique, minuscules), `name`, `avatarUrl`, `googleSub` (relié à la première
-  connexion), `isAdmin` (administrateur de l'application : page Paramètres, liste des
+  connexion Google), `passwordSetAt` (null : pas de mot de passe ; l'empreinte n'est jamais chargée avec l'utilisateur), `isAdmin` (administrateur de l'application : page Paramètres, liste des
   utilisateurs ; n'ouvre aucun projet), `lastLoginAt` (null = invité jamais connecté).
 - **ProjectMember** : `(projectId, userId)`, `role` et qui a invité. Rôles, du plus au moins
   puissant :
@@ -1955,7 +1978,9 @@ La session est relancée, ou restaurée si elle était archivée ; l'agent modif
 
 **Invités des pages** (`users.guest`, `User.isGuest`) : partager une page avec une adresse qui n'a pas de compte
 Skipper propose de l'**inviter** (« Inviter et partager », `addSharedPageMember(invite: true)` ; sans `invite`,
-l'erreur `NO_ACCOUNT`). Un compte d'invité est créé : la personne se connecte avec le compte Google de cette adresse
+l'erreur `NO_ACCOUNT`). Un compte d'invité est créé : la personne se connecte avec cette adresse, par n'importe quel mode
+de connexion (compte Google, Microsoft ou GitHub de cette adresse, ou mot de passe choisi par « Mot de passe oublié »
+ou par un lien créé depuis la page Utilisateurs ; « Paramètres › Connexion » lui reste fermé, comme tous les réglages)
 et ne voit **que les pages où elle a été ajoutée** (pas celles ouvertes « à toute personne avec le lien »), qu'elle lit
 et commente. Ni projet, ni espace personnel, ni chat, ni coffre, ni réglage : le serveur n'exécute pour elle que les
 champs racines de la liste blanche `GUEST_ROOT_FIELDS` (`backend/src/graphql/security.ts`, plugin `guestGuardPlugin`

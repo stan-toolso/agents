@@ -48,8 +48,8 @@ export default function SharePageModal({ page, onClose }: { page: SharedPage; on
       if (invite)
         setInvitedNote(
           mail?.emailNotificationsAvailable
-            ? `${address} est invité : un e-mail lui donne le lien de la page. Il se connectera avec le compte Google de cette adresse et ne verra que les pages partagées avec lui.`
-            : `${address} est invité. Envoyez-lui le lien de la page (« Copier le lien ») : il se connectera avec le compte Google de cette adresse et ne verra que les pages partagées avec lui.`,
+            ? `${address} est invité : un e-mail lui donne le lien de la page. Il se connectera avec cette adresse et ne verra que les pages partagées avec lui.`
+            : `${address} est invité. Envoyez-lui le lien de la page (« Copier le lien ») : il se connectera avec cette adresse et ne verra que les pages partagées avec lui.`,
         );
     });
   return (
@@ -126,7 +126,7 @@ export default function SharePageModal({ page, onClose }: { page: SharedPage; on
         {noAccount && (
           <Alert variant="info" className="mt-3 mb-0 py-2 small">
             <div className="mb-2">
-              <strong>{noAccount}</strong> n'a pas encore de compte Skipper. Vous pouvez l'inviter : il se connectera avec le compte Google de cette adresse et ne verra que les pages partagées avec lui (aucun projet, aucun menu).
+              <strong>{noAccount}</strong> n'a pas encore de compte Skipper. Vous pouvez l'inviter : il se connectera avec cette adresse et ne verra que les pages partagées avec lui (aucun projet, aucun menu).
             </div>
             <div className="d-flex gap-2 flex-wrap">
               <Button size="sm" disabled={adding} onClick={() => void addEmail(noAccount, true)}>

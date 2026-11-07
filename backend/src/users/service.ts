@@ -88,7 +88,7 @@ export const userService = {
     if (!profile.emailVerified) throw new AppError('Adresse e-mail Google non vérifiée', 'EMAIL_NOT_VERIFIED');
     const email = profile.email.toLowerCase();
     const user = (await userRepository.findByGoogleSub(profile.sub)) ?? (await userRepository.findByEmail(email));
-    if (!user) throw new AppError(`Aucune invitation pour ${email}`, 'NOT_INVITED');
+    if (!user || user.kind !== 'person') throw new AppError(`Aucune invitation pour ${email}`, 'NOT_INVITED');
     if (user.googleSub && user.googleSub !== profile.sub) throw new AppError('Ce compte est déjà relié à un autre compte Google', 'ACCOUNT_MISMATCH');
     return userRepository.recordLogin(user.id, { googleSub: profile.sub, name: profile.name, avatarUrl: profile.picture });
   },

@@ -165,6 +165,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'user.admin': 'a changé les droits d’administration de',
   'user.super_admin': 'a changé les droits de super administration de',
   'user.delete': 'a supprimé l’utilisateur',
+  'user.password_link': 'a créé un lien de mot de passe pour',
   'app.maintenance': 'a changé le mode maintenance',
   'app.settings': 'a modifié les réglages du serveur',
   'app.billing': 'a modifié les réglages de facturation',

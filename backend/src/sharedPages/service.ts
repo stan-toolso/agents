@@ -35,11 +35,11 @@ export function invitationEmail(actor: Pick<User, 'name' | 'email'>, page: Pick<
     '',
     `Ouvrez-la ici : ${link}`,
     '',
-    `Connectez-vous avec le compte Google de l'adresse ${to}. Vous ne verrez que les pages partagées avec vous, et pourrez y laisser des commentaires.`,
+    `Connectez-vous avec l'adresse ${to} (compte Google, Microsoft ou GitHub de cette adresse, ou mot de passe, selon ce que propose la page de connexion). Vous ne verrez que les pages partagées avec vous, et pourrez y laisser des commentaires.`,
   ].join('\n');
   const html = `<p>${escapeHtml(actor.name)} (${escapeHtml(actor.email)}) a partagé une page avec vous sur Skipper : <strong>${escapeHtml(page.title)}</strong>.</p>
 <p><a href="${escapeHtml(link)}">Ouvrir la page</a></p>
-<p style="color:#666">Connectez-vous avec le compte Google de l'adresse ${escapeHtml(to)}. Vous ne verrez que les pages partagées avec vous, et pourrez y laisser des commentaires.</p>`;
+<p style="color:#666">Connectez-vous avec l'adresse ${escapeHtml(to)} (compte Google, Microsoft ou GitHub de cette adresse, ou mot de passe, selon ce que propose la page de connexion). Vous ne verrez que les pages partagées avec vous, et pourrez y laisser des commentaires.</p>`;
   return { subject, text, html };
 }
 
