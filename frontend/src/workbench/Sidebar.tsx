@@ -641,6 +641,7 @@ function UserBlock() {
     ...(installable ? [{ label: "Installer l'application", icon: 'bi-phone', onClick: install }] : []),
     ...(user.isAdmin ? [{ label: 'Utilisateurs', icon: 'bi-people', to: '/users' }] : []),
     ...(user.isAdmin ? [{ label: 'Consommation', icon: 'bi-receipt', to: '/billing' }] : []),
+    { label: 'Premiers pas', icon: 'bi-compass', to: '/welcome' },
     { label: 'Paramètres', icon: 'bi-gear', to: '/settings' },
     { label: 'Se déconnecter', icon: 'bi-box-arrow-right', separatorBefore: true, onClick: () => void logout() },
   ];

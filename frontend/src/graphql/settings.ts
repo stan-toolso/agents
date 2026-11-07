@@ -40,6 +40,27 @@ export interface ClaudeAuthStatus {
   apiKeyItemId: string | null;
   apiKeyItemName: string | null;
   verification: ClaudeVerification | null;
+  /** Un compte Claude de la cellule (« crédits Skipper ») sert de repli à qui n'a pas d'identifiants à lui. */
+  cellAccountAvailable: boolean;
+  /** Sans identifiant à elle, la personne utilise le compte de la cellule. */
+  usesCellAccount: boolean;
+}
+
+/** Compte Claude de la cellule (Paramètres › Serveur, administrateurs). */
+export interface CellClaudeAccount {
+  itemId: string;
+  itemName: string | null;
+  service: 'claude' | 'anthropic' | null;
+  serviceLabel: string | null;
+  configuredBy: { id: string; name: string } | null;
+  configuredAt: string;
+  usable: boolean;
+}
+
+/** Avancement de l'assistant de premiers pas. */
+export interface OnboardingState {
+  dismissedAt: string | null;
+  completedAt: string | null;
 }
 
 export interface ClaudeSettings {
@@ -160,6 +181,7 @@ export interface ServerState {
   idleSessionTimeoutMinutes: number;
   /** 0 : jamais. */
   memoryAlertThresholdMb: number;
+  cellClaudeAccount: CellClaudeAccount | null;
 }
 
 /** Santé du serveur (query serverHealth). */
@@ -338,6 +360,7 @@ export interface AppSettings {
   opencode: OpencodeSettings;
   rateLimits: ClaudeRateLimits | null;
   server: ServerState | null;
+  onboarding: OnboardingState;
 }
 
 export interface ClaudeLogin {
@@ -432,6 +455,8 @@ export const APP_SETTINGS_FIELDS = gql`
       oauthItemName
       apiKeyItemId
       apiKeyItemName
+      cellAccountAvailable
+      usesCellAccount
       verification {
         verifiedAt
         authMode
@@ -529,6 +554,22 @@ export const APP_SETTINGS_FIELDS = gql`
       queuedSessions
       idleSessionTimeoutMinutes
       memoryAlertThresholdMb
+      cellClaudeAccount {
+        itemId
+        itemName
+        service
+        serviceLabel
+        configuredBy {
+          id
+          name
+        }
+        configuredAt
+        usable
+      }
+    }
+    onboarding {
+      dismissedAt
+      completedAt
     }
   }
 `;
@@ -708,6 +749,24 @@ export const SET_MAINTENANCE_MODE = gql`
   ${APP_SETTINGS_FIELDS}
   mutation SetMaintenanceMode($enabled: Boolean!, $message: String) {
     setMaintenanceMode(enabled: $enabled, message: $message) {
+      ...AppSettingsFields
+    }
+  }
+`;
+
+export const SET_CELL_CLAUDE_ACCOUNT = gql`
+  ${APP_SETTINGS_FIELDS}
+  mutation SetCellClaudeAccount($itemId: ID) {
+    setCellClaudeAccount(itemId: $itemId) {
+      ...AppSettingsFields
+    }
+  }
+`;
+
+export const UPDATE_ONBOARDING = gql`
+  ${APP_SETTINGS_FIELDS}
+  mutation UpdateOnboarding($dismissed: Boolean, $completed: Boolean) {
+    updateOnboarding(dismissed: $dismissed, completed: $completed) {
       ...AppSettingsFields
     }
   }

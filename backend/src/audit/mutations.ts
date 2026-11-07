@@ -224,6 +224,7 @@ export const AUDITED: Record<string, MutationAudit> = {
   createPasswordLink: { action: 'user.password_link', app: true, lookup: ['user', 'userId'], details: (a, r) => ({ emailed: Boolean(r?.emailed) }) },
   setMaintenanceMode: { action: 'app.maintenance', app: true, targetId: () => null, details: (a) => ({ enabled: a.enabled, message: a.message }) },
   updateServerSettings: { action: 'app.settings', app: true, targetId: () => null, details: (a) => a },
+  setCellClaudeAccount: { action: 'app.claude_cell', app: true, targetId: () => null, details: (a) => ({ itemId: a.itemId ?? null }) },
   // Jamais le mot de passe dans les détails.
   updateSmtpSettings: { action: 'app.smtp', app: true, targetId: () => null, details: (a) => ({ host: a.input?.host, port: a.input?.port, secure: a.input?.secure, user: a.input?.user, from: a.input?.from, password: a.input?.password == null ? 'inchangé' : 'modifié' }) },
   clearSmtpSettings: { action: 'app.smtp', app: true, targetId: () => null, details: () => ({ cleared: true }) },
@@ -246,6 +247,7 @@ export const NOT_AUDITED = new Set([
   // Contrôle sans effet : lance le navigateur headless du conteneur et rend son état.
   'testProjectBrowser',
   // Réglages et comptes personnels.
+  'updateOnboarding',
   'updateClaudeSettings', 'setClaudeApiKeyItem', 'setClaudeOauthItem', 'clearClaudeOauthToken', 'startClaudeLogin', 'completeClaudeLogin', 'cancelClaudeLogin', 'verifyClaudeAuth',
   'updateOpencodeSettings', 'setOpencodeKeyItem', 'refreshOpencodeModels',
   'startGithubDeviceLogin', 'pollGithubDeviceLogin', 'connectGithubFromVault', 'setDefaultGithubAccount', 'disconnectGithub',

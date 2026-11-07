@@ -2143,6 +2143,28 @@ l'application sont repris au démarrage dans le coffre et les réglages du premi
   modèle) ; le plafond atteint bloque le démarrage des sessions et l'envoi d'instructions
   (`BUDGET_EXCEEDED`). Ce coût est une estimation au tarif API : avec un abonnement il n'est pas facturé.
 
+- **Compte Claude de la cellule (« crédits Skipper »)** (`settings/cellClaude.ts`, Paramètres › Serveur) : un
+  administrateur choisit un jeton de **son** coffre (abonnement `claude` ou clé `anthropic`), rangé dans `app_settings`
+  (clé `claude.cell`, relue à chaque usage : rien à invalider entre instances bleu/vert). Il sert de **repli** à toute
+  personne ou tout agent sans identifiant pour son mode actif (`UserClaudeSettings.usesCellAccount`) : `credentialEnv` le lit
+  avec les droits de l'administrateur qui l'a choisi (`useToken(configuredById, …)`), l'usage étant journalisé au nom de
+  la personne servie. Dès qu'une personne connecte son abonnement ou sa clé, ses sessions l'utilisent à la place. La
+  vérification par le repli masque l'adresse et l'organisation du compte de la cellule. Sans compte de la cellule, rien ne
+  change : chacun doit connecter le sien. `ClaudeAuthStatus.cellAccountAvailable` / `usesCellAccount` alimentent
+  l'interface (badge « crédits Skipper »). La facturation de la cellule ne distingue pas encore les tours servis par le
+  compte de la cellule de ceux servis par le compte d'une personne.
+
+**Premiers pas** (`/welcome`, `pages/OnboardingPage.tsx`, `settings/onboarding.ts`) : assistant en cinq étapes —
+bienvenue, Claude (crédits Skipper, abonnement ou clé API, avec la carte d'authentification de Paramètres), GitHub /
+GitLab (sections de Paramètres), coffre (cas d'usage par type : Google, SSH, PostgreSQL, API, site web, AWS / Scaleway,
+chacun ouvrant l'éditeur du coffre sur ce type), récapitulatif. Chaque cas d'usage est expliqué en deux lignes. L'état
+des étapes se lit dans les réglages eux-mêmes ; seul l'avancement est gardé (`user_settings`, clé `onboarding` :
+`dismissedAt`, `completedAt` ; mutation `updateOnboarding`). Ouverture d'office (`lib/onboarding.ts`) : sur le tableau
+de bord, une fois par chargement, pour qui ne l'a ni passé ni terminé et n'a encore aucun compte à soi (ni Claude, ni
+GitHub, ni GitLab) ; les personnes déjà installées ne le voient pas surgir. On le rouvre depuis le menu du compte
+(« Premiers pas »), la palette de recherche ou la carte du tableau de bord (`OnboardingBanner`) ; `?step=claude|git|vault`
+ouvre une étape.
+
 **GitHub** (`settings/github.ts`, `settings/githubDevice.ts`) : une personne connecte **un ou plusieurs
 comptes** (table `user_github_accounts`), par **connexion par code** (device flow de l'OAuth App
 `GITHUB_CLIENT_ID`, sinon l'identifiant public du CLI GitHub ; `GITHUB_CLIENT_ID=none` la désactive) ou
@@ -2188,7 +2210,7 @@ et la clé de chaque fournisseur de modèles (OpenAI, Anthropic, Google, OpenRou
 Mistral, DeepSeek, xAI, Groq) choisie parmi les jetons applicatifs du coffre ; « Actualiser la liste
 des modèles » exécute `opencode models` dans l'image Docker avec ces clés (`settings/opencodeCheck.ts`).
 
-**Serveur** (administrateurs) : santé, sessions simultanées, mode maintenance, reprise des sessions
+**Serveur** (administrateurs) : santé, compte Claude de la cellule, sessions simultanées, mode maintenance, reprise des sessions
 interrompues, limites d'utilisation de l'abonnement (voir « Modèle d'exécution »).
 
 ## OpenCode

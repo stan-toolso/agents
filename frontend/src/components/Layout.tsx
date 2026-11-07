@@ -13,6 +13,7 @@ import { SearchPaletteProvider } from './SearchPalette';
 import { ShortcutsHelpProvider } from './ShortcutsHelp';
 import StatusBanners from './StatusBanners';
 import { useShortcut } from '../lib/useShortcut';
+import { useOnboardingAutoOpen } from '../lib/onboarding';
 import '../workbench/workbench.css';
 
 const SIDEBAR_COLLAPSED_KEY = 'skipper.workbench.sidebarCollapsed';
@@ -101,6 +102,7 @@ function CopyUrlToast() {
 /** Workbench : sidebar (menus + explorateur), panneau principal à onglets, panneau git / tâche à droite. */
 export default function Layout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
+  useOnboardingAutoOpen(pathname);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => read(SIDEBAR_COLLAPSED_KEY) === '1');
   useEffect(() => setSidebarOpen(false), [pathname]);

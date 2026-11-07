@@ -455,7 +455,7 @@ export class ClaudeProvider implements SessionProvider {
 
     await ctx.emit('system', {
       message: `Lancement via Claude Agent SDK${options.resume ? ` (reprise de ${options.resume})` : ''}`,
-      options: { cwd: options.cwd, project: ctx.project.slug, chat, personalScope: Boolean(scope), systemPromptLength: fullSystemPrompt.length, contextPlugin: pluginDir, browser: browserEnabled, vaultItems: vaultItems.map((i) => i.name), googleAccounts: googleAccounts.map((a) => a.email), model: options.model, fallbackModel: options.fallbackModel, authMode: general.authMode, permissionMode: options.permissionMode, maxTurns: options.maxTurns, maxBudgetUsd: options.maxBudgetUsd, allowedTools: options.allowedTools, owner: ownerId },
+      options: { cwd: options.cwd, project: ctx.project.slug, chat, personalScope: Boolean(scope), systemPromptLength: fullSystemPrompt.length, contextPlugin: pluginDir, browser: browserEnabled, vaultItems: vaultItems.map((i) => i.name), googleAccounts: googleAccounts.map((a) => a.email), model: options.model, fallbackModel: options.fallbackModel, authMode: general.authMode, cellAccount: owner.usesCellAccount(), permissionMode: options.permissionMode, maxTurns: options.maxTurns, maxBudgetUsd: options.maxBudgetUsd, allowedTools: options.allowedTools, owner: ownerId },
     });
 
     const queue = new MessageQueue();

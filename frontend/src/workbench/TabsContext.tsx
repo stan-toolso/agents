@@ -32,6 +32,7 @@ export type TabKind =
   | 'audit'
   | 'env'
   | 'settings'
+  | 'welcome'
   | 'users'
   | 'billing'
   | 'usage'
@@ -135,6 +136,7 @@ export function describeRoute(pathname: string): { title: string; kind: TabKind 
   if (pathname === '/requests') return { title: 'Demandes', kind: 'requests' };
   if (pathname === '/inbox') return { title: 'À traiter', kind: 'inbox' };
   if (pathname === '/settings') return { title: 'Paramètres', kind: 'settings' };
+  if (pathname === '/welcome') return { title: 'Premiers pas', kind: 'welcome' };
   const files = pathname.match(/^\/(?:projects|sessions)\/[^/]+\/files(?:\/(.*))?$/);
   if (files) {
     if (!files[1]) return { title: 'Fichiers', kind: 'files' };

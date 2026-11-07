@@ -46,6 +46,7 @@ const icons: Record<TabKind, string> = {
   history: 'bi-clock-history',
   audit: 'bi-list-check',
   settings: 'bi-gear',
+  welcome: 'bi-compass',
   users: 'bi-people',
   billing: 'bi-receipt',
   usage: 'bi-bar-chart-line',
