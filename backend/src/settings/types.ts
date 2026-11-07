@@ -89,6 +89,10 @@ export interface ClaudeAuthStatus {
   apiKeyItemId: string | null;
   apiKeyItemName: string | null;
   verification: ClaudeVerification | null;
+  /** Un compte Claude de la cellule (« crédits Skipper ») est configuré et utilisable. */
+  cellAccountAvailable: boolean;
+  /** Sans identifiant à elle, la personne utilise le compte de la cellule. */
+  usesCellAccount: boolean;
 }
 
 export interface UsageSummary {

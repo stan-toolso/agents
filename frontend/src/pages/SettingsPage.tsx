@@ -20,6 +20,7 @@ import {
   CLEAR_CLAUDE_OAUTH_TOKEN,
   COMPLETE_CLAUDE_LOGIN,
   SET_CLAUDE_API_KEY_ITEM,
+  SET_CELL_CLAUDE_ACCOUNT,
   SET_CLAUDE_OAUTH_ITEM,
   SET_MAINTENANCE_MODE,
   SETTINGS,
@@ -126,7 +127,10 @@ function ClaudeLoginFlow({ label, onDone }: { label: string; onDone: () => void 
 }
 
 /** Mode actif, jeton d'abonnement (connexion ou élément du coffre), clé API du coffre, vérification. */
-function AuthCard({ settings }: { settings: AppSettings }) {
+/** Prêt à lancer des sessions : identifiants à soi pour le mode actif, ou compte de la cellule en repli. */
+export const claudeReadyOf = (s: AppSettings): boolean => (s.claudeAuth.mode === 'oauth' ? s.claudeAuth.hasOauthToken : s.claudeAuth.hasApiKey) || s.claudeAuth.usesCellAccount;
+
+export function AuthCard({ settings }: { settings: AppSettings }) {
   const auth = settings.claudeAuth;
   const [update, { loading: updating, error: updateError }] = useMutation(UPDATE_CLAUDE_SETTINGS);
   const [verify, { loading: verifying, error: verifyError }] = useMutation(VERIFY_CLAUDE_AUTH);
@@ -145,6 +149,14 @@ function AuthCard({ settings }: { settings: AppSettings }) {
         <p className="text-secondary small mb-3">
           Vos sessions lancent Claude Code avec vos propres identifiants, rangés dans votre coffre comme jetons applicatifs : ils ne sont jamais montrés aux agents ni renvoyés à l'interface.
         </p>
+        {auth.cellAccountAvailable && (
+          <Alert variant={auth.usesCellAccount ? 'info' : 'secondary'} className="small py-2">
+            <i className="bi bi-coin me-1" />
+            {auth.usesCellAccount
+              ? "Vous n'avez pas encore d'identifiants à vous : vos sessions utilisent le compte Claude de la cellule (crédits Skipper), compté dans la consommation de la cellule. Connectez votre abonnement ou une clé API pour l'utiliser à la place."
+              : 'Vos sessions utilisent vos propres identifiants. Sans eux, elles utiliseraient le compte Claude de la cellule (crédits Skipper).'}
+          </Alert>
+        )}
 
         <Form.Group className="mb-3">
           <Form.Label className="mb-1">Mode actif</Form.Label>
@@ -232,13 +244,13 @@ function AuthCard({ settings }: { settings: AppSettings }) {
                 Dernière vérification ({modeLabels[v.authMode].title.toLowerCase()}) le {fmtDate(v.verifiedAt)}
               </span>
             )}
-            {!available[auth.mode] && <span className="small text-secondary">Aucun identifiant pour le mode actif : vos sessions ne pourront pas démarrer.</span>}
+            {!available[auth.mode] && <span className="small text-secondary">{auth.usesCellAccount ? 'Aucun identifiant à vous pour le mode actif : vos sessions utilisent les crédits Skipper.' : 'Aucun identifiant pour le mode actif : vos sessions ne pourront pas démarrer.'}</span>}
           </div>
           {v && (
             <div className="mt-2">
               {v.ok && v.account ? (
                 <Alert variant="success" className="py-2 mb-0">
-                  <i className="bi bi-check-circle me-1" /> Connecté{v.account.email ? ` en tant que ${v.account.email}` : ''}
+                  <i className="bi bi-check-circle me-1" /> {auth.usesCellAccount && !available[v.authMode] ? 'Compte de la cellule opérationnel' : 'Connecté'}{v.account.email ? ` en tant que ${v.account.email}` : ''}
                   {v.account.subscriptionType ? ` · ${v.account.subscriptionType}` : ''}
                   {v.account.organization ? ` · ${v.account.organization}` : ''}
                   {v.account.apiProvider && v.account.apiProvider !== 'firstParty' ? ` · via ${v.account.apiProvider}` : ''}
@@ -599,6 +611,48 @@ function SessionLimitsCard({ server }: { server: ServerState }) {
 }
 
 /** Serveur (administrateurs) : santé, sessions simultanées, mode maintenance avant un redémarrage, reprise automatique des sessions interrompues. */
+/**
+ * Compte Claude de la cellule (« crédits Skipper ») : un jeton du coffre de l'administrateur (abonnement ou clé API) qui sert
+ * aux personnes et aux agents sans identifiants Claude à eux. Qui connecte son propre compte l'utilise à la place.
+ */
+function CellClaudeCard({ server }: { server: ServerState }) {
+  const [setCell, { loading, error }] = useMutation(SET_CELL_CLAUDE_ACCOUNT);
+  const cell = server.cellClaudeAccount;
+  return (
+    <Card className="mb-4">
+      <Card.Header>
+        Compte Claude de la cellule (crédits Skipper)
+        {cell ? cell.usable ? <Badge bg="success" className="ms-2">actif</Badge> : <Badge bg="danger" className="ms-2">inaccessible</Badge> : <Badge bg="secondary" className="ms-2">aucun</Badge>}
+      </Card.Header>
+      <Card.Body>
+        <p className="text-secondary small">
+          Les personnes et les agents qui n’ont pas connecté leur propre compte Claude lancent leurs sessions avec ce compte : leur travail
+          est compté dans la consommation de la cellule. Dès qu’une personne connecte son abonnement ou sa clé API, ses sessions l’utilisent
+          à la place. Sans compte de la cellule, chacun doit connecter le sien pour lancer une session.
+        </p>
+        {cell && (
+          <div className="small text-secondary mb-2">
+            {cell.usable ? `${cell.serviceLabel ?? 'Jeton'} « ${cell.itemName ?? '?'} »` : 'L’élément choisi n’est plus accessible à la personne qui l’a choisi : choisissez-en un autre.'}
+            {cell.configuredBy ? `, choisi par ${cell.configuredBy.name}` : ''} le {fmtDate(cell.configuredAt)}.
+          </div>
+        )}
+        <div style={{ maxWidth: 480 }}>
+          <VaultTokenPicker
+            service={['claude', 'anthropic']}
+            size="sm"
+            label="Jeton de votre coffre (abonnement Claude ou clé API Anthropic)"
+            noneLabel="Aucun : chacun connecte son compte"
+            value={cell?.itemId ?? null}
+            disabled={loading}
+            onChange={(itemId) => void setCell({ variables: { itemId } }).catch(() => undefined)}
+          />
+        </div>
+        <ErrorLine error={error} />
+      </Card.Body>
+    </Card>
+  );
+}
+
 function ServerSection({ server }: { server: ServerState }) {
   const [message, setMessage] = useState(server.maintenanceMessage ?? '');
   const [setMaintenance, { loading: switching, error: maintenanceError }] = useMutation(SET_MAINTENANCE_MODE);
@@ -609,6 +663,7 @@ function ServerSection({ server }: { server: ServerState }) {
   return (
     <>
       <ServerHealthCard memoryAlertThresholdMb={server.memoryAlertThresholdMb} />
+      <CellClaudeCard server={server} />
       <SessionLimitsCard server={server} />
       <SmtpCard />
       <Card className="mb-4">
@@ -712,14 +767,14 @@ export function AgentAccountSettings({ agentName }: { agentName: string }) {
   if (error) return <Alert variant="danger">Erreur : {error.message}</Alert>;
   if (!data) return null;
   const s = data.settings;
-  const claudeReady = s.claudeAuth.mode === 'oauth' ? s.claudeAuth.hasOauthToken : s.claudeAuth.hasApiKey;
+  const claudeReady = claudeReadyOf(s);
   return (
     <>
       <Nav variant="tabs" activeKey={section} onSelect={(k) => setSection((k as typeof section) ?? 'claude')} className="mb-3">
         <Nav.Item>
           <Nav.Link eventKey="claude">
             <i className="bi bi-stars me-1" /> Claude
-            {!claudeReady ? <Badge bg="secondary" className="ms-2">à configurer</Badge> : s.claudeAuth.verification?.ok === false && <Badge bg="danger" className="ms-2">à vérifier</Badge>}
+            {!claudeReady ? <Badge bg="secondary" className="ms-2">à configurer</Badge> : s.claudeAuth.usesCellAccount ? <Badge bg="info" className="ms-2">crédits Skipper</Badge> : s.claudeAuth.verification?.ok === false && <Badge bg="danger" className="ms-2">à vérifier</Badge>}
           </Nav.Link>
         </Nav.Item>
         <Nav.Item>
@@ -789,7 +844,7 @@ export default function SettingsPage() {
   if (error) return <Alert variant="danger">Erreur : {error.message}</Alert>;
   if (!data) return null;
   const s = data.settings;
-  const claudeReady = s.claudeAuth.mode === 'oauth' ? s.claudeAuth.hasOauthToken : s.claudeAuth.hasApiKey;
+  const claudeReady = claudeReadyOf(s);
   return (
     <>
       <h1 className="h3 mb-3">Paramètres</h1>
@@ -797,7 +852,7 @@ export default function SettingsPage() {
         <Nav.Item>
           <Nav.Link eventKey="claude">
             <i className="bi bi-stars me-1" /> Claude
-            {!claudeReady ? <Badge bg="secondary" className="ms-2">à configurer</Badge> : s.claudeAuth.verification?.ok === false && <Badge bg="danger" className="ms-2">à vérifier</Badge>}
+            {!claudeReady ? <Badge bg="secondary" className="ms-2">à configurer</Badge> : s.claudeAuth.usesCellAccount ? <Badge bg="info" className="ms-2">crédits Skipper</Badge> : s.claudeAuth.verification?.ok === false && <Badge bg="danger" className="ms-2">à vérifier</Badge>}
           </Nav.Link>
         </Nav.Item>
         <Nav.Item>

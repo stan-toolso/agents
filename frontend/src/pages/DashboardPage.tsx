@@ -10,6 +10,7 @@ import { useTabTitle } from '../workbench/TabsContext';
 import { useSessionLauncher } from '../components/SessionLauncher';
 import { useAuth } from '../auth/AuthContext';
 import ChatComposer from '../components/ChatComposer';
+import OnboardingBanner from '../components/OnboardingBanner';
 import TaskModal from '../components/TaskModal';
 import { PullRequestRow, RequestRow, SessionRow, TaskRow, UsageTile, isRecent, plural, shorten, stalledHint, statusIcon } from '../components/DashboardRows';
 import './dashboard.css';
@@ -44,6 +45,7 @@ export default function DashboardPage() {
     return (
       <>
         <ChatComposer withGreeting />
+        <OnboardingBanner />
         <EmptyState />
       </>
     );
@@ -78,6 +80,7 @@ export default function DashboardPage() {
         </div>
       </div>
       {error && <Alert variant="warning" className="py-2 small">Dernier rafraîchissement en échec : {error.message}</Alert>}
+      <OnboardingBanner />
 
       <ChatComposer withGreeting />
 

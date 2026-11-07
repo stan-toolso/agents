@@ -1857,6 +1857,10 @@ type ClaudeAuthStatus {
   apiKeyItemId: ID
   apiKeyItemName: String
   verification: ClaudeVerification
+  "Un compte Claude de la cellule (« crédits Skipper ») est configuré : il sert à qui n'a pas d'identifiants à lui."
+  cellAccountAvailable: Boolean!
+  "Sans identifiant à elle, la personne utilise le compte Claude de la cellule (son travail est compté en crédits)."
+  usesCellAccount: Boolean!
 }
 
 type ClaudeSettings {
@@ -2130,6 +2134,29 @@ type AppSettings {
   rateLimits: ClaudeRateLimits
   "État du serveur : mode maintenance, sessions actives, reprise automatique (administrateurs seulement ; null sinon)."
   server: ServerState
+  "Assistant de premiers pas de la personne (comptes Claude, git, coffre)."
+  onboarding: OnboardingState!
+}
+
+"Avancement de l'assistant de premiers pas : ouvert d'office à la première connexion tant qu'il n'est ni passé ni terminé."
+type OnboardingState {
+  "La personne l'a fermé sans le terminer (il reste accessible depuis le menu du compte et le tableau de bord)."
+  dismissedAt: DateTime
+  "La personne est allée jusqu'à la dernière étape."
+  completedAt: DateTime
+}
+
+"Compte Claude de la cellule (« crédits Skipper ») : jeton du coffre d'un administrateur, repli des personnes et agents sans identifiants Claude."
+type CellClaudeAccount {
+  itemId: ID!
+  "Nom de l'élément du coffre (null : plus utilisable par l'administrateur qui l'a choisi)."
+  itemName: String
+  "claude (abonnement) ou anthropic (clé API) ; null si l'élément n'est plus utilisable."
+  service: String
+  serviceLabel: String
+  configuredBy: User
+  configuredAt: DateTime!
+  usable: Boolean!
 }
 
 # ---- File « À traiter » -------------------------------------------------------------------------
@@ -2304,6 +2331,8 @@ type ServerState {
   idleSessionTimeoutMinutes: Int!
   "Seuil de mémoire disponible (Mo) sous lequel les administrateurs sont notifiés (0 : jamais)."
   memoryAlertThresholdMb: Int!
+  "Compte Claude de la cellule (« crédits Skipper »), null s'il n'y en a pas."
+  cellClaudeAccount: CellClaudeAccount
 }
 
 "Mémoire du serveur (Mo)."
@@ -3100,6 +3129,10 @@ type Mutation {
   setMaintenanceMode(enabled: Boolean!, message: String): AppSettings!
   "Réglages du serveur : reprise automatique des sessions interrompues."
   updateServerSettings(autoResumeInterrupted: Boolean, maxConcurrentSessions: Int, idleSessionTimeoutMinutes: Int, memoryAlertThresholdMb: Int): AppSettings!
+  "Administrateurs : choisit le compte Claude de la cellule (« crédits Skipper ») parmi ses jetons du coffre (abonnement Claude ou clé API Anthropic) ; null le retire."
+  setCellClaudeAccount(itemId: ID): AppSettings!
+  "Assistant de premiers pas : dismissed le ferme (il ne s'ouvre plus de lui-même), completed le marque terminé ; false efface."
+  updateOnboarding(dismissed: Boolean, completed: Boolean): AppSettings!
   "Met à jour les réglages Claude de la personne connectée (les champs absents sont inchangés ; null efface)."
   updateClaudeSettings(input: ClaudeSettingsInput!): AppSettings!
   "Choisit la clé API Anthropic : un jeton applicatif du coffre (service anthropic) que la personne peut utiliser ; null retire le choix."

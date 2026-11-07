@@ -84,6 +84,8 @@ import { githubDeviceAvailable, githubDeviceService } from '../settings/githubDe
 import { gitlabService } from '../settings/gitlab.js';
 import { gitlabDevice, gitlabDeviceService } from '../settings/gitlabDevice.js';
 import { claudeSettings, type ClaudeSettingsPatch } from '../settings/claude.js';
+import { cellClaude } from '../settings/cellClaude.js';
+import { onboardingService } from '../settings/onboarding.js';
 import { opencodeProviders, opencodeSettings, type OpencodeSettingsPatch } from '../settings/opencode.js';
 import { workflowService } from '../workflows/service.js';
 import { workflowVariables } from '../workflows/graph.js';
@@ -388,8 +390,13 @@ const appSettings = (ctx: Ctx) => {
       queuedSessions: (await sessionRepository.listQueued()).length,
       idleSessionTimeoutMinutes: serverSettings.current.idleSessionTimeoutMinutes,
       memoryAlertThresholdMb: serverSettings.current.memoryAlertThresholdMb,
+      cellClaudeAccount: async () => {
+        const view = await cellClaude.view();
+        return view ? { ...view, configuredBy: () => userService.get(view.configuredById).catch(() => null) } : null;
+      },
     };
     },
+    onboarding: () => onboardingService.get(user.id),
   };
 };
 
@@ -1645,6 +1652,14 @@ export const resolvers = {
       });
       // Limite relevée : des places se libèrent peut-être pour la file d'attente.
       void sessionService.drainQueue();
+      return appSettings(ctx);
+    },
+    setCellClaudeAccount: async (_: unknown, args: { itemId?: string | null }, ctx: Ctx) => {
+      await cellClaude.set(requireAdmin(ctx).id, args.itemId ?? null);
+      return appSettings(ctx);
+    },
+    updateOnboarding: async (_: unknown, args: { dismissed?: boolean | null; completed?: boolean | null }, ctx: Ctx) => {
+      await onboardingService.update(settingsUser(ctx).id, { dismissed: args.dismissed ?? undefined, completed: args.completed ?? undefined });
       return appSettings(ctx);
     },
     updateClaudeSettings: async (_: unknown, { input }: { input: ClaudeSettingsPatch }, ctx: Ctx) => {

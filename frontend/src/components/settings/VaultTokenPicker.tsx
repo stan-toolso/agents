@@ -4,8 +4,8 @@ import { Link } from 'react-router-dom';
 import { VAULT_ITEMS, type VaultItem } from '../../graphql/vault';
 
 interface Props {
-  /** Service du jeton applicatif attendu (claude, anthropic, github, openai…). */
-  service: string;
+  /** Service(s) du jeton applicatif attendu (claude, anthropic, github, openai…). */
+  service: string | string[];
   value: string | null;
   onChange: (itemId: string | null) => void;
   /** Propose « Aucun » (défaut : oui). */
@@ -20,7 +20,8 @@ interface Props {
 /** Choix d'un jeton applicatif du coffre pour un service donné ; les valeurs des jetons ne quittent jamais le coffre. */
 export default function VaultTokenPicker({ service, value, onChange, allowNone = true, label, disabled, size, noneLabel = 'Aucun' }: Props) {
   const { data, loading } = useQuery<{ vaultItems: VaultItem[] }>(VAULT_ITEMS, { variables: { kind: 'token' }, fetchPolicy: 'cache-and-network' });
-  const items = (data?.vaultItems ?? []).filter((i) => i.token?.service === service);
+  const services = Array.isArray(service) ? service : [service];
+  const items = (data?.vaultItems ?? []).filter((i) => Boolean(i.token?.service && services.includes(i.token.service)));
   // Un élément référencé mais absent de la liste (plus utilisable) reste visible pour pouvoir le remplacer.
   const orphan = value && !items.some((i) => i.id === value);
   return (

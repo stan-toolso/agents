@@ -5,6 +5,7 @@ import { AppError } from '../errors.js';
 import { vaultService } from '../vault/service.js';
 import type { VaultActor } from '../vault/types.js';
 import { claudeAuthModes, defaultClaudeSettings, type ClaudeAccount, type ClaudeAuthMode, type ClaudeAuthStatus, type ClaudeModel, type ClaudeSettings, type ClaudeVerification } from './types.js';
+import { cellClaude } from './cellClaude.js';
 import { usageService } from './usage.js';
 import { userSettingsStore } from './userStore.js';
 import { log } from '../log.js';
@@ -32,7 +33,7 @@ export const builtinModels: ClaudeModel[] = [
   { value: 'haiku', resolvedModel: null, displayName: 'Haiku', description: 'Le plus rapide pour les réponses courtes.' },
 ];
 
-const NO_CREDENTIALS = 'Aucun identifiant Claude : connectez votre abonnement ou choisissez une clé API du coffre dans Paramètres → Claude.';
+const NO_CREDENTIALS = "Aucun identifiant Claude : connectez votre abonnement ou choisissez une clé API du coffre dans Paramètres → Claude (ou demandez à un administrateur de choisir le compte Claude de la cellule).";
 
 const authErrorLabels: Record<string, string> = {
   authentication_failed: 'Identifiants refusés par Anthropic (clé ou jeton invalide, révoqué ou expiré).',
@@ -132,13 +133,20 @@ export async function checkClaudeCredentials(credentials: Record<string, string>
 export class UserClaudeSettings {
   settings: ClaudeSettings = { ...defaultClaudeSettings };
   verification: ClaudeVerification | null = null;
+  /** Compte Claude de la cellule (« crédits Skipper », settings/cellClaude.ts), repli quand la personne n'a pas d'identifiants. */
+  cell: Awaited<ReturnType<typeof cellClaude.resolve>> = null;
 
   constructor(readonly userId: string) {}
 
   async load(): Promise<this> {
-    const [settings, verification] = await Promise.all([userSettingsStore.get<Partial<ClaudeSettings>>(this.userId, KEY_SETTINGS), userSettingsStore.get<ClaudeVerification>(this.userId, KEY_VERIFICATION)]);
+    const [settings, verification, cell] = await Promise.all([
+      userSettingsStore.get<Partial<ClaudeSettings>>(this.userId, KEY_SETTINGS),
+      userSettingsStore.get<ClaudeVerification>(this.userId, KEY_VERIFICATION),
+      cellClaude.resolve(),
+    ]);
     this.settings = { ...defaultClaudeSettings, ...(settings ?? {}) };
     this.verification = verification;
+    this.cell = cell;
     return this;
   }
 
@@ -159,10 +167,20 @@ export class UserClaudeSettings {
     return known;
   }
 
-  /** La personne a-t-elle des identifiants pour son mode d'authentification ? */
+  /** La personne a-t-elle ses propres identifiants pour ce mode d'authentification ? */
+  hasOwnCredentials(mode: ClaudeAuthMode = this.settings.authMode): boolean {
+    const { oauthItemId, apiKeyItemId } = this.settings;
+    return mode === 'oauth' ? Boolean(oauthItemId) : Boolean(apiKeyItemId);
+  }
+
+  /** Ses sessions tournent-elles avec le compte de la cellule (aucun identifiant à elle, repli disponible) ? */
+  usesCellAccount(mode: ClaudeAuthMode = this.settings.authMode): boolean {
+    return !this.hasOwnCredentials(mode) && Boolean(this.cell);
+  }
+
+  /** La personne a-t-elle des identifiants utilisables : les siens pour son mode, sinon le compte de la cellule ? */
   hasCredentials(): boolean {
-    const { authMode, oauthItemId, apiKeyItemId } = this.settings;
-    return authMode === 'oauth' ? Boolean(oauthItemId) : Boolean(apiKeyItemId);
+    return this.hasOwnCredentials() || Boolean(this.cell);
   }
 
   /** Lève si la personne n'a pas d'identifiants Claude pour son mode d'authentification. */
@@ -311,15 +329,25 @@ export class UserClaudeSettings {
       apiKeyItemId: apiKey?.id ?? null,
       apiKeyItemName: apiKey?.name ?? null,
       verification: this.verification,
+      cellAccountAvailable: Boolean(this.cell),
+      usesCellAccount: this.usesCellAccount(),
     };
   }
 
   /**
    * Variable d'identification du processus Claude Code pour le mode donné, lue dans le coffre (la personne
    * doit encore pouvoir utiliser l'élément ; un usage par une session est journalisé). Ajoutée à un
-   * environnement sans les secrets du serveur : le compte du serveur n'est jamais utilisé.
+   * environnement sans les secrets du serveur : le compte du serveur n'est jamais utilisé (le compte de la cellule est
+   * un élément du coffre choisi par un administrateur, pas les identifiants du CLI du serveur).
    */
   async credentialEnv(mode: ClaudeAuthMode = this.settings.authMode, actor: Omit<VaultActor, 'userId'> = {}): Promise<Record<string, string>> {
+    // Sans identifiant à elle pour ce mode : le compte de la cellule, lu avec les droits de l'administrateur qui l'a
+    // choisi, l'usage étant journalisé au nom de la personne servie.
+    if (this.usesCellAccount(mode) && this.cell) {
+      const { account, service } = this.cell;
+      const { secrets } = await vaultService.useToken(account.configuredById, account.itemId, [service], { ...actor, userId: this.userId, purpose: 'Session Claude Code (compte de la cellule)' });
+      return service === 'claude' ? { CLAUDE_CODE_OAUTH_TOKEN: secrets.token } : { ANTHROPIC_API_KEY: secrets.token };
+    }
     if (mode === 'oauth') {
       if (!this.settings.oauthItemId) throw new AppError(`Mode abonnement (OAuth) choisi mais aucun jeton. ${NO_CREDENTIALS}`, 'CLAUDE_AUTH');
       const { secrets } = await vaultService.useToken(this.userId, this.settings.oauthItemId, ['claude'], { ...actor, userId: this.userId, purpose: 'Session Claude Code (abonnement)' });
@@ -342,6 +370,8 @@ export class UserClaudeSettings {
     try {
       const credentials = await this.credentialEnv(mode);
       result = await checkClaudeCredentials(credentials, mode, this.verification?.models ?? []);
+      // Compte de la cellule : ni l'adresse ni l'organisation de son titulaire ne sont montrées à la personne servie.
+      if (this.usesCellAccount(mode) && result.account) result = { ...result, account: { ...result.account, email: null, organization: null } };
     } catch (err) {
       result = { verifiedAt: new Date().toISOString(), authMode: mode, ok: false, error: (err as Error).message, account: null, models: this.verification?.models ?? [] };
     }

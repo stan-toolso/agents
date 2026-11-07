@@ -34,6 +34,8 @@ interface Props {
   owners: VaultOwnerChoice[];
   /** Propriétaire imposé (page projet) ; sinon le premier de `owners`. */
   initialOwner?: string | null;
+  /** Type proposé pour un nouvel élément (assistant de premiers pas) ; sinon serveur SSH. */
+  initialKind?: VaultItemKind;
   tunnels: TunnelCandidate[];
   googleAvailable: boolean;
   onClose: () => void;
@@ -60,10 +62,10 @@ const emptyFields = (kind: VaultItemKind): FieldRow[] =>
 /** Types dont les valeurs peuvent servir aux fichiers d'environnement (backend : ENV_EXPORT_KINDS). */
 const ENV_EXPORT_KINDS: VaultItemKind[] = ['secret', 'website', 'postgres', 'api', 'ssh', 'aws', 'scaleway'];
 
-export default function VaultItemEditor({ item, owners, initialOwner, tunnels, googleAvailable, onClose, onSaved }: Props) {
+export default function VaultItemEditor({ item, owners, initialOwner, initialKind, tunnels, googleAvailable, onClose, onSaved }: Props) {
   const editing = Boolean(item);
   const [ownerKey, setOwnerKey] = useState<string>(initialOwner ?? owners[0]?.projectId ?? '');
-  const [kind, setKind] = useState<VaultItemKind>(item?.kind ?? 'ssh');
+  const [kind, setKind] = useState<VaultItemKind>(item?.kind ?? initialKind ?? 'ssh');
   const [name, setName] = useState(item?.name ?? '');
   const [description, setDescription] = useState(item?.description ?? '');
   const [host, setHost] = useState(item?.host ?? '');
@@ -84,7 +86,7 @@ export default function VaultItemEditor({ item, owners, initialOwner, tunnels, g
   const [authScheme, setAuthScheme] = useState<VaultApiAuth>(item?.authScheme ?? 'bearer');
   const [authName, setAuthName] = useState(item?.authName ?? '');
   const [token, setToken] = useState('');
-  const [fields, setFields] = useState<FieldRow[]>(() => (item ? item.fields.map((f) => ({ key: f.key, label: f.label, value: f.value ?? '', secret: f.secret, stored: f.secret })) : emptyFields('ssh')));
+  const [fields, setFields] = useState<FieldRow[]>(() => (item ? item.fields.map((f) => ({ key: f.key, label: f.label, value: f.value ?? '', secret: f.secret, stored: f.secret })) : emptyFields(initialKind ?? 'ssh')));
   const [expiresAt, setExpiresAt] = useState(item?.expiresAt ? item.expiresAt.slice(0, 10) : '');
   const [service, setService] = useState(item?.token?.service ?? '');
   const [publicKey, setPublicKey] = useState(item?.langfusePublicKey ?? '');
