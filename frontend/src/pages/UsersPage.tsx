@@ -78,7 +78,7 @@ export default function UsersPage() {
       <p className="text-secondary small">
         Personne ne s'inscrit seul : un compte existe parce qu'il a été invité ici ou sur un projet. Un administrateur accède aux paramètres généraux et à cette page ; un super administrateur est un administrateur qui administre aussi
         tous les projets, membre ou non : ils apparaissent tous sur sa page Projets et dans sa recherche. Seul un super administrateur accorde ou retire ce rôle. Le profil CTO, lui aussi accordé par
-        un super administrateur, compte le temps de la personne : chaque intervention sur une session ou une conversation inscrit sa tranche de 10 minutes, consolidée chaque soir en temps CTO facturé (page Consommation).
+        un super administrateur, compte le temps de la personne : chaque intervention sur une session ou une conversation inscrit sa tranche de 10 minutes, consolidée chaque soir en temps CTO facturé (page Consommation). Ses sessions sont aussi comptées en crédits même sur son propre compte Claude, alors que celles des autres personnes sur leur propre compte ne consomment pas de crédits.
       </p>
       <Form
         className="d-flex gap-2 align-items-center mb-3 flex-wrap"
