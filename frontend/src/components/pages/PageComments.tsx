@@ -44,6 +44,12 @@ interface Props {
   setPicking: (on: boolean) => void;
   /** Commentaire à mettre en avant à l'ouverture (lien d'une notification `?comment=`). */
   initialFocus?: string | null;
+  /**
+   * Panneau visible. Fermé, le composant reste monté (caché) : les repères restent dessinés dans la page et un clic
+   * sur l'un d'eux rouvre le panneau directement sur le commentaire (`onOpen`).
+   */
+  open: boolean;
+  onOpen: () => void;
   onClose: () => void;
 }
 
@@ -52,7 +58,7 @@ interface Props {
  * cliquant dedans), chacun une micro-conversation avec ses réponses et un état « traité ». Dialogue avec le script
  * injecté dans la page par postMessage : repères numérotés, choix d'un élément, mise en avant.
  */
-export default function PageComments({ page, version, frameRef, picking, setPicking, initialFocus, onClose }: Props) {
+export default function PageComments({ page, version, frameRef, picking, setPicking, initialFocus, open, onOpen, onClose }: Props) {
   const { user } = useAuth();
   const { confirm, showError } = useDialogs();
   const { data } = usePollingQuery<{ sharedPage: { id: string; version: number; openComments: number; comments: SharedPageComment[] } | null }>(SHARED_PAGE_COMMENTS, { variables: { id: page.id }, pollInterval: 10_000 });
@@ -109,26 +115,37 @@ export default function PageComments({ page, version, frameRef, picking, setPick
         setPicking(false);
       } else if (m.type === 'cancelled') setPicking(false);
       else if (m.type === 'pin') {
+        // Clic sur un repère dans la page : droit au commentaire (panneau ouvert s'il ne l'était pas).
         const id = str(m.id, 80);
         if (comments.some((c) => c.id === id)) {
           setFocused(id);
+          setFlash(id);
           if (filter !== 'all' && !visible.some((c) => c.id === id)) setFilter('all');
+          onOpen();
         }
       } else if (m.type === 'found') setFound(new Set(Array.isArray(m.ids) ? m.ids.filter((x): x is string => typeof x === 'string') : []));
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [frameRef, sendAnchors, setPicking, comments, visible, filter]);
+  }, [frameRef, sendAnchors, setPicking, comments, visible, filter, onOpen]);
 
-  // Commentaire mis en avant (repère cliqué, lien de notification) : visible et à l'écran.
+  // Commentaire mis en avant (repère cliqué, lien de notification) : visible et à l'écran, une fois le panneau affiché
+  // (caché, scrollIntoView ne ferait rien).
   useEffect(() => {
-    if (!focused) return;
+    if (!focused || !open) return;
     const c = comments.find((x) => x.id === focused);
     if (!c) return;
     if (filter === 'open' && c.resolved) setFilter('all');
     const node = listRef.current?.querySelector<HTMLElement>(`[data-comment="${focused}"]`);
-    node?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }, [focused, comments, filter]);
+    node?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [focused, open, comments, filter]);
+  // Éclair sur la carte visée par un clic de repère, retiré ensuite pour pouvoir rejouer l'animation.
+  const [flash, setFlash] = useState<string | null>(null);
+  useEffect(() => {
+    if (!flash) return;
+    const t = setTimeout(() => setFlash(null), 2600);
+    return () => clearTimeout(t);
+  }, [flash]);
 
   const focus = (c: SharedPageComment) => {
     setFocused(c.id);
@@ -144,7 +161,7 @@ export default function PageComments({ page, version, frameRef, picking, setPick
   };
 
   return (
-    <aside className="pc-panel" aria-label="Commentaires">
+    <aside className={`pc-panel${open ? '' : ' hidden'}`} aria-label="Commentaires" aria-hidden={!open}>
       <div className="pc-head">
         <span className="pc-title">
           Commentaires {openCount > 0 && <span className="pc-count">{openCount}</span>}
@@ -216,6 +233,7 @@ export default function PageComments({ page, version, frameRef, picking, setPick
             pageVersion={version}
             missing={Boolean(c.anchor) && found !== null && !found.has(c.id)}
             focused={c.id === focused}
+            flash={c.id === flash}
             canDelete={user?.id === c.author.id || page.viewerAccess.owner}
             userId={user?.id ?? null}
             onFocus={() => focus(c)}
@@ -242,6 +260,8 @@ interface CardProps {
   /** Ancré, mais l'élément n'est pas retrouvé dans la version affichée. */
   missing: boolean;
   focused: boolean;
+  /** Animation d'arrivée (clic sur un repère). */
+  flash: boolean;
   canDelete: boolean;
   userId: string | null;
   onFocus: () => void;
@@ -252,7 +272,7 @@ interface CardProps {
 }
 
 /** Un commentaire racine : ancre, auteur, texte, réponses, saisie d'une réponse, traité / rouvert. */
-function CommentCard({ comment: c, number, pageVersion, missing, focused, canDelete, userId, onFocus, onReply, onEdit, onResolve, onDelete }: CardProps) {
+function CommentCard({ comment: c, number, pageVersion, missing, focused, flash, canDelete, userId, onFocus, onReply, onEdit, onResolve, onDelete }: CardProps) {
   const [replying, setReplying] = useState(false);
   const [replyText, setReplyText] = useState('');
   const [sending, setSending] = useState(false);
@@ -268,7 +288,7 @@ function CommentCard({ comment: c, number, pageVersion, missing, focused, canDel
     }
   };
   return (
-    <div className={`pc-card${c.resolved ? ' resolved' : ''}${focused ? ' focused' : ''}`} data-comment={c.id} onClick={onFocus}>
+    <div className={`pc-card${c.resolved ? ' resolved' : ''}${focused ? ' focused' : ''}${flash ? ' pc-flash' : ''}`} data-comment={c.id} onClick={onFocus}>
       {c.anchor ? (
         <div className={`pc-anchor${missing ? ' missing' : ''}`} title={missing ? `Élément introuvable dans la version ${pageVersion} : ${c.anchor.selector}` : c.anchor.selector}>
           {number != null && <span className={`pc-pin${c.resolved ? ' done' : ''}`}>{number}</span>}

@@ -1,5 +1,5 @@
 import { useMutation } from '@apollo/client';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Form } from 'react-bootstrap';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { sharedPageUrl } from '../apollo';
@@ -41,6 +41,7 @@ export default function SharedPagePage() {
   const [details, setDetails] = useState(false);
   const [menuAt, setMenuAt] = useState<{ top: number; right: number } | null>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
+  const openComments_ = useCallback(() => setCommentsOpen(true), []);
   // Le lien d'une notification (?comment=) ouvre le panneau sur le commentaire ; le paramètre est ensuite retiré.
   useEffect(() => {
     if (focusComment) setCommentsOpen(true);
@@ -203,21 +204,21 @@ export default function SharedPagePage() {
       )}
       <div className={`sp-body${commentsOpen ? ' with-comments' : ''}${picking ? ' picking' : ''}`}>
         <iframe ref={frameRef} key={`${page.id}:${shown}`} className="preview-frame" title={page.title} src={viewUrl} sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads" allow="clipboard-write" />
-        {commentsOpen && (
-          <PageComments
-            page={page}
-            version={shown}
-            frameRef={frameRef}
-            picking={picking}
-            setPicking={setPicking}
-            initialFocus={focusComment}
-            onClose={() => {
-              setCommentsOpen(false);
-              setPicking(false);
-              if (focusComment) setSearch({}, { replace: true });
-            }}
-          />
-        )}
+        <PageComments
+          page={page}
+          version={shown}
+          frameRef={frameRef}
+          picking={picking}
+          setPicking={setPicking}
+          initialFocus={focusComment}
+          open={commentsOpen}
+          onOpen={openComments_}
+          onClose={() => {
+            setCommentsOpen(false);
+            setPicking(false);
+            if (focusComment) setSearch({}, { replace: true });
+          }}
+        />
       </div>
       {sharing && <SharePageModal page={page} onClose={() => setSharing(false)} />}
     </div>

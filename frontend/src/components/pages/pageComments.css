@@ -51,6 +51,8 @@
 .pc-card { border: 1px solid var(--cc-border); border-radius: 8px; background: var(--cc-bg); padding: 8px; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
 .pc-card:hover { border-color: color-mix(in srgb, var(--cc-accent) 50%, var(--cc-border)); }
 .pc-card.focused { border-color: var(--cc-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--cc-accent) 30%, transparent); }
+.pc-card.pc-flash { animation: pc-flash 2.5s ease-out; }
+@keyframes pc-flash { 0%, 30% { background: color-mix(in srgb, var(--cc-accent) 22%, var(--cc-bg)); } 100% { background: var(--cc-bg); } }
 .pc-card.resolved { opacity: 0.75; }
 .pc-card.resolved:hover, .pc-card.resolved.focused { opacity: 1; }
 .pc-anchor { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--cc-dim); margin-bottom: 6px; min-width: 0; }
@@ -83,3 +85,6 @@
   .sp-body.with-comments:not(.picking) .pc-panel { flex: 1 1 auto; width: 100%; border-left: 0; }
   .sp-body.picking .pc-panel { display: none; }
 }
+
+/* Panneau fermé : monté mais caché (les repères restent dans la page), à toutes les largeurs. */
+.pc-panel.hidden { display: none !important; }
