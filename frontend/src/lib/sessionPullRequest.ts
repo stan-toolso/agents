@@ -55,3 +55,55 @@ export function pullRequestInstruction(action: SessionPullRequestAction, pr: Pr,
     }
   }
 }
+
+/** Libellé du bouton pendant que l'agent réalise l'action demandée. */
+export const ACTION_PENDING_LABELS: Record<SessionPullRequestAction, string> = {
+  merge: 'Fusion en cours…',
+  resolveConflicts: 'Résolution en cours…',
+  fixCi: 'Correction en cours…',
+  close: 'Fermeture en cours…',
+};
+
+/** Action demandée depuis la carte, en attente de son exécution par l'agent. */
+export type PendingCardAction = {
+  prId: string;
+  action: SessionPullRequestAction;
+  at: number;
+  sawBusy: boolean;
+  /** La session travaillait déjà au clic : l'instruction attend la fin de ce tour, qui ne compte donc pas. */
+  queued?: boolean;
+};
+
+/** Délai au-delà duquel une action dont l'agent ne s'est jamais saisi n'est plus montrée comme en cours. */
+export const PENDING_START_TIMEOUT_MS = 60_000;
+/** Durée maximale d'affichage « en cours », même si l'agent travaille encore (il peut être passé à autre chose). */
+export const PENDING_MAX_MS = 15 * 60_000;
+
+/**
+ * Suit une action en cours d'après l'activité de la session : elle commence quand la session se met au travail et se
+ * termine quand son tour s'achève sans demande d'accord en suspens (la PR fusionnée ou fermée fait disparaître la carte ;
+ * sinon l'agent a expliqué dans la conversation ce qui bloquait). `null` : plus rien en cours.
+ */
+export function advancePendingAction(p: PendingCardAction | null, s: { busy: boolean; awaitingApproval: boolean; now: number }): PendingCardAction | null {
+  if (!p) return null;
+  if (s.now - p.at > PENDING_MAX_MS) return null;
+  if (p.queued) return s.busy || s.awaitingApproval ? p : { ...p, queued: false, at: s.now };
+  if (s.busy || s.awaitingApproval) return p.sawBusy ? p : { ...p, sawBusy: true };
+  if (p.sawBusy) return null;
+  return s.now - p.at > PENDING_START_TIMEOUT_MS ? null : p;
+}
+
+/** Ligne d'état de la carte pendant une action en cours. */
+export function pendingActionStatus(action: SessionPullRequestAction, awaitingApproval: boolean): string {
+  if (awaitingApproval) return 'en attente de votre accord, ci-dessus';
+  switch (action) {
+    case 'merge':
+      return "l'agent vérifie et fusionne la PR…";
+    case 'resolveConflicts':
+      return "l'agent résout les conflits…";
+    case 'fixCi':
+      return "l'agent corrige la CI…";
+    case 'close':
+      return "l'agent ferme la PR…";
+  }
+}
