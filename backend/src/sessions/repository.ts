@@ -29,6 +29,7 @@ interface SessionRow {
   context_tokens: number | null;
   resume_digest: string | null;
   cost_usd: string | number | null;
+  billed_cost_usd?: string | number | null;
   base_commit: string | null;
   queued_at: Date | null;
   queued_start: QueuedStart | null;
@@ -75,7 +76,8 @@ function toSession(row: SessionRow): Session {
     cleanup: row.cleanup ?? {},
     contextTokens: row.context_tokens,
     resumeDigest: row.resume_digest ?? null,
-    costUsd: Number(row.cost_usd ?? 0),
+    // Coût affiché : les seuls tours comptés (billing/billable.ts) ; cost_usd reste le total du SDK, base des deltas.
+    costUsd: Number(row.billed_cost_usd ?? row.cost_usd ?? 0),
     baseCommit: row.base_commit ?? null,
     queuedAt: row.queued_at ?? null,
     queuedStart: row.queued_start ?? null,

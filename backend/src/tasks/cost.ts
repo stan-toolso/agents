@@ -53,7 +53,7 @@ export async function taskCosts(taskIds: string[]): Promise<Map<string, TaskCost
   if (!sessionIds.length) return new Map();
   // Les liaisons de toutes ces sessions (y compris à d'autres tâches) : elles partagent le coût de chaque tour.
   const [{ rows: ledger }, { rows: links }] = await Promise.all([
-    pool.query<{ session_id: string; recorded_at: Date; cost_usd: string }>('SELECT session_id, recorded_at, cost_usd FROM usage_ledger WHERE session_id = ANY($1::uuid[])', [sessionIds]),
+    pool.query<{ session_id: string; recorded_at: Date; cost_usd: string }>('SELECT session_id, recorded_at, cost_usd FROM usage_ledger WHERE billable AND session_id = ANY($1::uuid[])', [sessionIds]),
     pool.query<{ task_id: string; session_id: string; linked_at: Date }>('SELECT task_id, session_id, linked_at FROM task_sessions WHERE session_id = ANY($1::uuid[])', [sessionIds]),
   ]);
   const all = attributeCosts(

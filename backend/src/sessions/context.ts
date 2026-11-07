@@ -98,10 +98,19 @@ const ALIASES = new Set(['default', 'opus', 'sonnet', 'haiku']);
  * complet), sinon le modèle de sa configuration (alias du CLI), sinon null.
  */
 export async function contextModel(session: Session): Promise<string | null> {
-  const { rows } = await pool.query<{ models: Record<string, number> }>('SELECT models FROM usage_ledger WHERE session_id = $1 ORDER BY recorded_at DESC LIMIT 1', [session.id]);
+  return (await contextLedger(session)).model;
+}
+
+/**
+ * Modèle de l'estimation (voir `contextModel`) et facturation du dernier tour : un tour non compté (propre compte
+ * Claude dans une cellule en crédits, billing/billable.ts) ne doit pas faire afficher de coût estimé.
+ */
+export async function contextLedger(session: Session): Promise<{ model: string | null; billable: boolean }> {
+  const { rows } = await pool.query<{ models: Record<string, number>; billable: boolean | null }>('SELECT models, billable FROM usage_ledger WHERE session_id = $1 ORDER BY recorded_at DESC LIMIT 1', [session.id]);
+  const billable = rows[0]?.billable !== false;
   const billed = Object.entries(rows[0]?.models ?? {})
     .filter(([name]) => !ALIASES.has(name))
     .sort((a, b) => b[1] - a[1])[0]?.[0];
-  if (billed) return billed;
-  return typeof session.config.model === 'string' && session.config.model ? session.config.model : null;
+  if (billed) return { model: billed, billable };
+  return { model: typeof session.config.model === 'string' && session.config.model ? session.config.model : null, billable };
 }

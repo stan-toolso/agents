@@ -107,7 +107,7 @@ export async function usageReport(projectIds: string[] | null, days = 30, now = 
   const from = periodStart(span, now);
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   // Filtre commun : $1 période, $2 projets (null = tous).
-  const scope = 'l.recorded_at >= $1 AND ($2::uuid[] IS NULL OR l.project_id = ANY($2::uuid[]))';
+  const scope = 'l.billable AND l.recorded_at >= $1 AND ($2::uuid[] IS NULL OR l.project_id = ANY($2::uuid[]))';
   const params = [from, projectIds];
   const [totals, byDay, byProject, byModel, top, budgeted] = await Promise.all([
     pool.query<{ usd: string; turns: string; sessions: string }>(`SELECT COALESCE(sum(l.cost_usd), 0)::text AS usd, count(*)::text AS turns, count(DISTINCT l.session_id)::text AS sessions FROM usage_ledger l WHERE ${scope}`, params),

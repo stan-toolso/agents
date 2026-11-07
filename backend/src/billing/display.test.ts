@@ -38,6 +38,13 @@ describe('conversion des coûts', () => {
     expect(convertEventPayload('assistant', { text: 'x' }, 3)).toEqual({ text: 'x' });
   });
 
+  it('retire les montants du résultat d’un tour non compté, dans toutes les unités', () => {
+    const payload = { type: 'result', skipperUnbilled: true, total_cost_usd: 0.5, num_turns: 3, modelUsage: { opus: { costUSD: 0.5, inputTokens: 10 } } };
+    for (const rate of [null, 4]) {
+      expect(convertEventPayload('claude.result', payload, rate)).toEqual({ type: 'result', skipperUnbilled: true, num_turns: 3, modelUsage: { opus: { inputTokens: 10 } } });
+    }
+  });
+
   it('reconvertit en USD les budgets saisis en crédits', () => {
     expect(toStoredUsd(100, 4)).toBe(25);
     expect(toStoredUsd(null, 4)).toBeNull();

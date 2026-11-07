@@ -10,6 +10,10 @@ export function currentMonthStart(now = new Date()): Date {
  * Relevé de consommation : le SDK rapporte un coût cumulé par session (`total_cost_usd`) ; on
  * enregistre à chaque tour le delta par rapport au dernier total connu, avec sa ventilation par
  * modèle, attribué au propriétaire de la session (plafond mensuel par personne).
+ *
+ * `billable` (billing/billable.ts) : le tour compte-t-il dans la consommation ? Un tour non compté (propre compte Claude
+ * d'une personne dans une cellule facturée en crédits) est inscrit pour mémoire mais ignoré de toutes les lectures
+ * (`WHERE billable`), et n'augmente pas le coût affiché de la session (`sessions.billed_cost_usd`).
  */
 export const usageService = {
   /** Dernier total connu pour la session (survit aux redémarrages). */
@@ -23,7 +27,7 @@ export const usageService = {
    * (`modelUsage` du SDK), utilisé pour ventiler le delta ; à défaut le delta est attribué à `fallbackModel`.
    * Renvoie le delta enregistré (0 si rien à enregistrer).
    */
-  async recordTotal(sessionId: string, projectId: string, userId: string | null, total: number, modelTotals: Record<string, number>, previousModelTotals: Record<string, number>, fallbackModel: string): Promise<number> {
+  async recordTotal(sessionId: string, projectId: string, userId: string | null, total: number, modelTotals: Record<string, number>, previousModelTotals: Record<string, number>, fallbackModel: string, billable = true): Promise<number> {
     const known = await this.knownTotal(sessionId);
     if (!(total > known)) {
       // Total inférieur (ex. /clear) : on réaligne sans compter de delta négatif.
@@ -46,8 +50,8 @@ export const usageService = {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query('UPDATE sessions SET cost_usd = $2 WHERE id = $1', [sessionId, total]);
-      await client.query('INSERT INTO usage_ledger (session_id, project_id, user_id, models, cost_usd) VALUES ($1, $2, $3, $4::jsonb, $5)', [sessionId, projectId, userId, JSON.stringify(models), delta.toFixed(6)]);
+      await client.query('UPDATE sessions SET cost_usd = $2, billed_cost_usd = billed_cost_usd + $3 WHERE id = $1', [sessionId, total, billable ? delta.toFixed(6) : 0]);
+      await client.query('INSERT INTO usage_ledger (session_id, project_id, user_id, models, cost_usd, billable) VALUES ($1, $2, $3, $4::jsonb, $5, $6)', [sessionId, projectId, userId, JSON.stringify(models), delta.toFixed(6), billable]);
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
@@ -60,7 +64,7 @@ export const usageService = {
 
   /** Dépense du mois des sessions d'une personne (son plafond mensuel s'y compare). */
   async monthTotal(userId: string, now = new Date()): Promise<number> {
-    const { rows } = await pool.query<{ total: string }>('SELECT COALESCE(SUM(cost_usd), 0) AS total FROM usage_ledger WHERE user_id = $1 AND recorded_at >= $2', [userId, currentMonthStart(now)]);
+    const { rows } = await pool.query<{ total: string }>('SELECT COALESCE(SUM(cost_usd), 0) AS total FROM usage_ledger WHERE user_id = $1 AND billable AND recorded_at >= $2', [userId, currentMonthStart(now)]);
     return Number(rows[0].total);
   },
 
@@ -69,11 +73,11 @@ export const usageService = {
     const monthStart = currentMonthStart(now);
     const [month, total, byModel, bySession] = await Promise.all([
       this.monthTotal(userId, now),
-      pool.query<{ total: string }>('SELECT COALESCE(SUM(cost_usd), 0) AS total FROM usage_ledger WHERE user_id = $1', [userId]),
+      pool.query<{ total: string }>('SELECT COALESCE(SUM(cost_usd), 0) AS total FROM usage_ledger WHERE user_id = $1 AND billable', [userId]),
       pool.query<{ model: string; usd: string }>(
         `SELECT m.key AS model, SUM((m.value)::numeric) AS usd
            FROM usage_ledger l, jsonb_each_text(l.models) AS m
-          WHERE l.user_id = $1 AND l.recorded_at >= $2
+          WHERE l.user_id = $1 AND l.billable AND l.recorded_at >= $2
           GROUP BY m.key ORDER BY usd DESC`,
         [userId, monthStart],
       ),
@@ -82,7 +86,7 @@ export const usageService = {
            FROM usage_ledger l
            LEFT JOIN sessions s ON s.id = l.session_id
            LEFT JOIN projects p ON p.id = COALESCE(l.project_id, s.project_id)
-          WHERE l.user_id = $1 AND l.recorded_at >= $2
+          WHERE l.user_id = $1 AND l.billable AND l.recorded_at >= $2
           GROUP BY l.session_id, s.name, p.name ORDER BY usd DESC LIMIT 10`,
         [userId, monthStart],
       ),

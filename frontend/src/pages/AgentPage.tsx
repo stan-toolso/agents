@@ -531,7 +531,7 @@ function ActivitySection({ agent }: { agent: Agent }) {
                           {x.tasks.length > 0 && <div className="small text-secondary">{x.tasks.map((t) => t.title).join(' · ')}</div>}
                         </td>
                         <td className="small text-nowrap">{sessionStatusLabels[x.status] ?? x.status}</td>
-                        <td className="small text-end text-nowrap">{formatCost(x.costUsd)}</td>
+                        <td className="small text-end text-nowrap">{x.costUsd > 0 ? formatCost(x.costUsd) : null}</td>
                         <td className="small text-secondary text-nowrap" title={new Date(x.updatedAt).toLocaleString('fr-FR')}>
                           {timeAgo(x.updatedAt)}
                         </td>

@@ -149,17 +149,17 @@ export const billingService = {
            FROM usage_ledger l
            LEFT JOIN sessions s ON s.id = l.session_id
            LEFT JOIN projects p ON p.id = COALESCE(l.project_id, s.project_id)
-          WHERE l.recorded_at >= $1 AND l.recorded_at < $2
+          WHERE l.billable AND l.recorded_at >= $1 AND l.recorded_at < $2
           GROUP BY p.id, p.name`,
         [monthStart, monthEnd],
       ),
       pool.query<{ day: string; usd: string }>(
         `SELECT to_char(recorded_at AT TIME ZONE $3, 'YYYY-MM-DD') AS day, sum(cost_usd)::text AS usd
-           FROM usage_ledger WHERE recorded_at >= $1 AND recorded_at < $2
+           FROM usage_ledger WHERE billable AND recorded_at >= $1 AND recorded_at < $2
           GROUP BY 1`,
         [monthStart, monthEnd, timeZone],
       ),
-      pool.query<{ usd: string }>('SELECT COALESCE(sum(cost_usd), 0)::text AS usd FROM usage_ledger WHERE recorded_at > $1 AND recorded_at <= $2', [new Date(now.getTime() - RECENT_DAYS * 86_400_000), now]),
+      pool.query<{ usd: string }>('SELECT COALESCE(sum(cost_usd), 0)::text AS usd FROM usage_ledger WHERE billable AND recorded_at > $1 AND recorded_at <= $2', [new Date(now.getTime() - RECENT_DAYS * 86_400_000), now]),
       pool.query<CtoRow>(`${ENTRY_SELECT} WHERE e.day >= $1::date AND e.day < $2::date ORDER BY e.day DESC, e.created_at DESC`, [`${monthKey(monthStart)}-01`, `${monthKey(monthEnd)}-01`]),
       pendingCtoEntries(monthStart, monthEnd, timeZone),
     ]);

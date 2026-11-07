@@ -8,6 +8,8 @@ const settings = vi.hoisted(() => ({ autoTitle: true, hasCredentials: true }));
 vi.mock('./repository.js', () => ({ sessionRepository: repo }));
 vi.mock('../db/pool.js', () => ({ pool: db }));
 vi.mock('../pubsub.js', () => ({ pubSub: { publish: vi.fn() } }));
+const billing = vi.hoisted(() => ({ sessionBillable: vi.fn(async () => true) }));
+vi.mock('../billing/billable.js', () => billing);
 vi.mock('../agents/service.js', () => ({ agentService: { accountsForSession: vi.fn(async (s: Session) => ({ claudeUserId: s.ownerId })) } }));
 vi.mock('../settings/claude.js', () => ({
   cliEnv: (c: Record<string, string>) => c,
@@ -15,6 +17,7 @@ vi.mock('../settings/claude.js', () => ({
     forUser: vi.fn(async () => ({
       settings: { autoTitle: settings.autoTitle },
       hasCredentials: () => settings.hasCredentials,
+      usesCellAccount: () => false,
       credentialEnv: async () => ({ ANTHROPIC_API_KEY: 'k' }),
     })),
   },
@@ -79,7 +82,17 @@ describe('autoTitleService.afterTurn', () => {
     expect(repo.update).toHaveBeenCalledWith('s1', { config: { permissionMode: 'default' }, name: 'Agents restants sur l’ancien serveur' });
     expect(publish).toHaveBeenCalledOnce();
     const ledger = db.query.mock.calls.find((c) => String(c[0]).includes('usage_ledger'))!;
-    expect(ledger[1]).toEqual(['s1', 'p1', 'u1', JSON.stringify({ [TITLE_MODEL]: 0.0012 }), '0.001200']);
+    expect(ledger[1]).toEqual(['s1', 'p1', 'u1', JSON.stringify({ [TITLE_MODEL]: 0.0012 }), '0.001200', true]);
+  });
+
+  it('inscrit le coût comme non compté quand la session ne consomme pas de crédits (propre compte Claude)', async () => {
+    billing.sessionBillable.mockResolvedValueOnce(false);
+    repo.findById.mockResolvedValue(makeSession());
+    generator.mockResolvedValue({ text: 'Titre', costUsd: 0.001, models: {} });
+    await autoTitleService.afterTurn('s1', vi.fn(async () => undefined));
+    expect(billing.sessionBillable).toHaveBeenCalledWith('u1', false);
+    const ledger = db.query.mock.calls.find((c) => String(c[0]).includes('usage_ledger'))!;
+    expect(ledger[1].at(-1)).toBe(false);
   });
 
   it('ne fait rien sans le drapeau (tâche, planification, nom explicite)', async () => {

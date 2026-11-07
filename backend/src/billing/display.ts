@@ -74,11 +74,15 @@ export const COST_FIELDS: Record<string, string[]> = {
 /**
  * Coûts contenus dans les événements du transcript : résultat d'un tour du SDK (`total_cost_usd`,
  * `modelUsage.*.costUSD`), relevé de consommation (`usage` : `deltaUsd`, `totalUsd`) et fin d'une exécution planifiée
- * (`schedule` : `cost`).
+ * (`schedule` : `cost`). Un résultat marqué `skipperUnbilled` (tour non compté) perd ses montants, quelle que soit l'unité.
  */
 export function convertEventPayload(type: string, payload: unknown, rate: number | null): unknown {
-  if (rate === null || !payload || typeof payload !== 'object') return payload;
+  if (!payload || typeof payload !== 'object') return payload;
   const p = payload as Record<string, unknown>;
+  // Tour non compté dans la consommation (propre compte Claude, cellule en crédits : billing/billable.ts) : aucun coût
+  // n'est montré, dans aucune unité.
+  if (p.skipperUnbilled === true) return withoutCosts(p);
+  if (rate === null) return payload;
   if (type === 'usage') return { ...p, deltaUsd: convert(p.deltaUsd, rate), totalUsd: convert(p.totalUsd, rate) };
   if (type === 'schedule') return 'cost' in p ? { ...p, cost: convert(p.cost, rate) } : payload;
   if (!('total_cost_usd' in p) && !('modelUsage' in p)) return payload;
@@ -86,6 +90,21 @@ export function convertEventPayload(type: string, payload: unknown, rate: number
   if (p.modelUsage && typeof p.modelUsage === 'object') {
     out.modelUsage = Object.fromEntries(
       Object.entries(p.modelUsage as Record<string, unknown>).map(([model, u]) => [model, u && typeof u === 'object' ? { ...(u as object), costUSD: convert((u as { costUSD?: unknown }).costUSD, rate) } : u]),
+    );
+  }
+  return out;
+}
+
+/** Résultat d'un tour sans ses montants (`total_cost_usd`, `modelUsage.*.costUSD`). */
+function withoutCosts(p: Record<string, unknown>): Record<string, unknown> {
+  const { total_cost_usd: _total, ...out } = p;
+  if (p.modelUsage && typeof p.modelUsage === 'object') {
+    out.modelUsage = Object.fromEntries(
+      Object.entries(p.modelUsage as Record<string, unknown>).map(([model, u]) => {
+        if (!u || typeof u !== 'object') return [model, u];
+        const { costUSD: _cost, ...rest } = u as Record<string, unknown>;
+        return [model, rest];
+      }),
     );
   }
   return out;
