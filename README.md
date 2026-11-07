@@ -1947,6 +1947,12 @@ commentaire ou réponse : notification `page.commented` au propriétaire et aux 
 `/shared/<id>?comment=<id>` qui ouvre le panneau dessus). Les agents lisent et répondent avec `pages.comments`,
 `pages.reply` et `pages.resolve` (outils libres), par exemple pour corriger une page et marquer les retours traités.
 
+**Mise à jour par l'agent** (mutation `requestSharedPageUpdate`, `sharedPages/updateRequest.ts`) : le propriétaire
+d'une page publiée par une session lui renvoie, en une instruction, les commentaires à traiter (« Transmettre à
+l'agent » dans le panneau) et/ou une demande libre (« Demander une mise à jour à l'agent » dans le menu de la page).
+La session est relancée, ou restaurée si elle était archivée ; l'agent modifie le fichier HTML, republie avec
+`pages.publish` (`page_id`) puis marque les commentaires traités avec `pages.resolve`.
+
 ## Notifications
 
 Chaque notification vise soit tous les membres d'un projet, soit une personne (`notifications.user_id`).
