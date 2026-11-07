@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Form, Spinner } from 'react-bootstrap';
+import AuthShell from '../components/AuthShell';
 import { authPost, fetchPasswordToken, forgetCachedUser } from '../apollo';
 
 /**
@@ -36,11 +37,8 @@ export default function ResetPasswordPage() {
   };
 
   return (
-    <div className="d-flex align-items-center justify-content-center py-4" style={{ minHeight: '100vh' }}>
-      <div style={{ width: 380, maxWidth: 'calc(100vw - 32px)' }}>
-        <div className="mb-4 text-center" style={{ fontSize: 28, fontWeight: 600, color: 'var(--cc-accent)' }}>
-          ✻ Skipper
-        </div>
+    <AuthShell showcase={false}>
+      <div>
         {!info && (
           <div className="text-center text-secondary">
             <Spinner animation="border" size="sm" />
@@ -56,7 +54,7 @@ export default function ResetPasswordPage() {
         )}
         {info?.valid && (
           <Form onSubmit={submit}>
-            <h1 className="h5 mb-1">{info.hasPassword ? 'Nouveau mot de passe' : 'Choisissez votre mot de passe'}</h1>
+            <h2 className="auth-card-title">{info.hasPassword ? 'Nouveau mot de passe' : 'Choisissez votre mot de passe'}</h2>
             <p className="text-secondary small mb-3">
               Pour {info.name ? `${info.name}, ` : ''}
               <strong>{info.email}</strong>. Au moins 10 caractères ; une phrase de quelques mots convient très bien.
@@ -79,6 +77,6 @@ export default function ResetPasswordPage() {
           </Form>
         )}
       </div>
-    </div>
+    </AuthShell>
   );
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Form, Spinner } from 'react-bootstrap';
 import { useLocation } from 'react-router-dom';
+import AuthShell from '../components/AuthShell';
 import { authPost, fetchAuthMethods, googleLoginUrl, providerLoginUrl, type AuthMethods } from '../apollo';
 
 const errorMessages: Record<string, string> = {
@@ -85,12 +86,14 @@ export default function LoginPage() {
   const nothing = methods && !oauth && !methods.password;
 
   return (
-    <div className="d-flex align-items-center justify-content-center py-4" style={{ minHeight: '100vh' }}>
-      <div style={{ width: 380, maxWidth: 'calc(100vw - 32px)' }}>
-        <div className="mb-4 text-center" style={{ fontSize: 28, fontWeight: 600, color: 'var(--cc-accent)' }}>
-          ✻ Skipper
-        </div>
-        <p className="text-secondary mb-4 text-center">Pilotage de sessions d'agents. Connectez-vous avec le compte invité sur vos projets, ou celui de l'adresse avec laquelle on vous a partagé une page.</p>
+    <AuthShell>
+      <div>
+        <h2 className="auth-card-title">{mode === 'login' ? 'Connexion' : 'Choisir un mot de passe'}</h2>
+        <p className="auth-card-sub">
+          {mode === 'login'
+            ? 'Utilisez le compte invité sur vos projets, ou l’adresse avec laquelle on vous a partagé une page.'
+            : 'Recevez par e-mail un lien pour choisir ou réinitialiser votre mot de passe.'}
+        </p>
         {shownError && (
           <Alert variant="warning" className="text-start py-2 small">
             {shownError}
@@ -154,7 +157,7 @@ export default function LoginPage() {
                 <div className="text-center mt-2 small">
                   {methods.passwordReset ? (
                     <Button variant="link" size="sm" className="p-0" onClick={() => (setMode('forgot'), setFormError(null))}>
-                      Mot de passe oublié, ou pas encore de mot de passe ?
+                      Mot de passe oublié, ou pas encore de mot de passe&nbsp;?
                     </Button>
                   ) : (
                     <span className="text-secondary">Pas encore de mot de passe ? Demandez un lien à un administrateur, ou choisissez-le dans Paramètres › Connexion après vous être connecté autrement.</span>
@@ -164,7 +167,7 @@ export default function LoginPage() {
             )}
             {mode === 'forgot' && (
               <Form onSubmit={submitForgot}>
-                <p className="small text-secondary mb-2">Saisissez l'adresse invitée : vous recevrez un lien, valable une heure, pour choisir votre mot de passe.</p>
+                <p className="small text-secondary mb-2">Saisissez l'adresse invitée : le lien est valable une heure.</p>
                 <Form.Control type="email" autoComplete="username" className="mb-2" placeholder="adresse@exemple.fr" value={email} onChange={(e) => setEmail(e.target.value)} required />
                 {formError && <div className="text-danger small mb-2">{formError}</div>}
                 <Button type="submit" className="w-100" disabled={busy || !email}>
@@ -190,6 +193,6 @@ export default function LoginPage() {
           </>
         )}
       </div>
-    </div>
+    </AuthShell>
   );
 }
