@@ -252,10 +252,11 @@ export default function SessionDetailPage() {
   };
   // Instruction d'une action de la carte de PR : envoyée comme si la personne l'avait écrite, sans toucher au brouillon.
   const sendAction = async (value: string) => {
-    if (sending || encoding || folderGone) return;
-    await deliver(value, [], false);
+    if (sending || encoding || folderGone) return false;
+    return deliver(value, [], false);
   };
-  const deliver = async (value: string, items: typeof attachments.items, fromInput = true) => {
+  /** Envoie l'instruction ; `false` quand le serveur l'a refusée (l'erreur est affichée par sendError). */
+  const deliver = async (value: string, items: typeof attachments.items, fromInput = true): Promise<boolean> => {
     // Le message apparaît dans le transcript et la zone de saisie se vide avant tout échange avec le serveur.
     const pending = newPendingInstruction(
       value,
@@ -275,6 +276,7 @@ export default function SessionDetailPage() {
       await sendMessage({ variables: { id, text: value, attachments: files }, refetchQueries: archived ? ['Sidebar'] : [] });
       // Le serveur a journalisé l'instruction : on la relève tout de suite plutôt qu'au prochain tour de sondage.
       refreshEvents();
+      return true;
     } catch {
       // L'erreur est affichée par sendError ; le message revient dans la zone de saisie pour être renvoyé.
       dropPending([pending]);
@@ -282,6 +284,7 @@ export default function SessionDetailPage() {
         setText(value);
         requestAnimationFrame(() => inputRef.current?.focus());
       }
+      return false;
     } finally {
       setEncoding(false);
     }
@@ -542,7 +545,15 @@ export default function SessionDetailPage() {
       )}
 
       {!chat && !readOnly && !folderGone && (
-        <SessionPullRequestCard projectId={session.project.id} pr={session.worksession?.trackedPullRequest} disabled={sending || encoding} onInstruction={sendAction} />
+        <SessionPullRequestCard
+          sessionId={session.id}
+          projectId={session.project.id}
+          pr={session.worksession?.trackedPullRequest}
+          disabled={sending || encoding}
+          busy={Boolean(busy)}
+          awaitingApproval={pending.length > 0}
+          onInstruction={sendAction}
+        />
       )}
 
       <div className="cc-status">

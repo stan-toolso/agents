@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pullRequestCardActions, pullRequestCardStatus, pullRequestInstruction, showsPullRequestCard } from './sessionPullRequest';
+import { advancePendingAction, pendingActionStatus, PENDING_START_TIMEOUT_MS, pullRequestCardActions, pullRequestCardStatus, pullRequestInstruction, showsPullRequestCard } from './sessionPullRequest';
 
 const pr = (over: Record<string, unknown> = {}) =>
   ({ number: 42, repo: 'o/r', foreignRepo: false, headBranch: 'feat/x', baseBranch: 'main', title: 'Ma PR', stage: 'TO_MERGE', mergeable: 'MERGEABLE', checksState: 'SUCCESS', url: 'https://github.com/o/r/pull/42', ...over }) as Parameters<typeof pullRequestCardActions>[0];
@@ -27,5 +27,26 @@ describe('carte de PR de la session', () => {
     expect(pullRequestInstruction('close', pr())).not.toContain('commentaire');
     expect(pullRequestInstruction('resolveConflicts', pr())).toMatch(/^La pull request #42.*origin\/main dans feat\/x/);
     expect(pullRequestInstruction('fixCi', pr({ foreignRepo: true }))).toContain('o/r#42');
+  });
+
+  it('suit une action en cours d’après l’activité de la session', () => {
+    const start = { prId: 'p', action: 'merge' as const, at: 0, sawBusy: false };
+    const idle = { busy: false, awaitingApproval: false };
+    // Pas encore prise par l'agent : reste en cours, puis abandonnée passé le délai.
+    expect(advancePendingAction(start, { ...idle, now: 1000 })).toEqual(start);
+    expect(advancePendingAction(start, { ...idle, now: PENDING_START_TIMEOUT_MS + 1 })).toBeNull();
+    // L'agent travaille, puis demande l'accord : toujours en cours.
+    const working = advancePendingAction(start, { busy: true, awaitingApproval: false, now: 2000 });
+    expect(working?.sawBusy).toBe(true);
+    expect(advancePendingAction(working, { busy: false, awaitingApproval: true, now: 3000 })).toEqual(working);
+    // Fin du tour sans demande en suspens : terminée.
+    expect(advancePendingAction(working, { ...idle, now: 4000 })).toBeNull();
+    // Envoyée pendant un tour déjà en cours : la fin de ce tour ne la termine pas.
+    const queued = { ...start, queued: true };
+    expect(advancePendingAction(queued, { busy: true, awaitingApproval: false, now: 1000 })).toEqual(queued);
+    const afterQueue = advancePendingAction(queued, { ...idle, now: 5000 });
+    expect(afterQueue).toMatchObject({ queued: false, sawBusy: false, at: 5000 });
+    expect(pendingActionStatus('merge', true)).toContain('accord');
+    expect(pendingActionStatus('merge', false)).toContain('fusionne');
   });
 });

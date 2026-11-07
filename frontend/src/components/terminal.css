@@ -267,8 +267,28 @@ div.cc-chat-text:not(.cc-md) { white-space: pre-wrap; overflow-wrap: anywhere; }
 .cc-pr-card:has(.cc-pr-card-status.bad) { border-left-color: var(--cc-red); }
 .cc-pr-card:has(.cc-pr-card-status.bad) .cc-pr-card-icon { color: var(--cc-red); }
 .cc-pr-card-branches { color: var(--cc-dimmer); }
-.cc-pr-card-close { border: 0; background: transparent; color: var(--cc-dimmer); padding: 0 2px; cursor: pointer; font-size: 12px; }
-.cc-pr-card-close:hover { color: var(--cc-fg); }
+.cc-pr-card { position: relative; overflow: hidden; }
+.cc-pr-card-tools { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+.cc-pr-card-tool { border: 0; background: transparent; color: var(--cc-dimmer); padding: 2px 5px; cursor: pointer; font-size: 12px; border-radius: 4px; }
+.cc-pr-card-tool:hover { color: var(--cc-fg); background: var(--cc-bg-hover); }
+/* Réduite : une seule ligne (#n, titre, état), un clic la déplie. */
+.cc-pr-card.collapsed { padding-top: 6px; padding-bottom: 6px; }
+.cc-pr-card-line { align-items: center; }
+.cc-pr-card-line .cc-pr-card-icon { font-size: 14px; }
+.cc-pr-card-line-main { display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; overflow: hidden; white-space: nowrap; }
+.cc-pr-card-line-ref { font-weight: 600; color: var(--cc-dim); flex: 0 0 auto; }
+.cc-pr-card-line-title { color: var(--cc-fg); overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+.cc-pr-card-line-main .cc-pr-card-status { flex: 0 0 auto; }
+/* Action en cours : bouton animé, ligne d'état, barre de progression indéterminée en bas de la carte. */
+.cc-pr-card-spin { width: 10px; height: 10px; border-width: 2px; color: var(--cc-accent); }
+.cc-pr-card-status.pending.dim { color: var(--cc-accent); }
+.cc-pr-card-actions .cc-btn.is-pending { opacity: 1; cursor: progress; }
+.cc-pr-card-actions .cc-btn .spinner-border-sm { width: 12px; height: 12px; border-width: 2px; }
+.cc-pr-card-reset { font-size: 12px; align-self: center; }
+.cc-pr-card-progress { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; overflow: hidden; background: transparent; }
+.cc-pr-card-progress::after { content: ''; position: absolute; top: 0; bottom: 0; width: 30%; background: var(--cc-accent); animation: cc-pr-card-progress 1.4s ease-in-out infinite; }
+@keyframes cc-pr-card-progress { 0% { left: -30%; } 100% { left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .cc-pr-card-progress::after { animation: none; left: 0; width: 100%; opacity: .5; } }
 .cc-pr-card-actions { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 28px; }
 .cc-pr-card-actions .cc-btn { font-size: 12px; padding: 3px 10px; display: inline-flex; align-items: center; gap: 5px; }
 .cc-pr-card-actions .cc-btn.primary { background: var(--cc-accent); border-color: var(--cc-accent); color: var(--cc-accent-contrast); }
@@ -430,6 +450,9 @@ div.cc-chat-text:not(.cc-md) { white-space: pre-wrap; overflow-wrap: anywhere; }
   .cc-pr-card-actions { padding-left: 0; }
   .cc-pr-card-actions .cc-btn { flex: 1 1 auto; justify-content: center; padding: 5px 8px; }
   .cc-pr-card-actions .cc-btn.danger { margin-left: 0; }
+  .cc-pr-card.collapsed { padding: 5px 8px; }
+  .cc-pr-card-line-main .cc-pr-card-status { max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+  .cc-pr-card-tool { padding: 4px 7px; font-size: 14px; }
   .cc-prompt { margin: 10px 8px; padding: 8px 10px; }
   .cc-result { margin-left: 8px; }
 }
