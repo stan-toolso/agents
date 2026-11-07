@@ -71,6 +71,7 @@ export default function PageComments({ page, version, frameRef, picking, setPick
   const [focused, setFocused] = useState<string | null>(initialFocus ?? null);
   const [found, setFound] = useState<Set<string> | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const draftRef = useRef<HTMLTextAreaElement>(null);
   const refetch = { refetchQueries: ['SharedPageComments', 'SharedPage'], onError: (e: Error) => void showError(e) };
   const [add, { loading: adding }] = useMutation(ADD_SHARED_PAGE_COMMENT, refetch);
   const [reply] = useMutation(REPLY_SHARED_PAGE_COMMENT, refetch);
@@ -112,8 +113,14 @@ export default function PageComments({ page, version, frameRef, picking, setPick
       if (!m || typeof m !== 'object' || m.skipperComments !== 1) return;
       if (m.type === 'ready') sendAnchors();
       else if (m.type === 'picked') {
+        // Élément pointé, ou texte sélectionné puis « Commenter » (appui long sur mobile, clic droit sur ordinateur) :
+        // le panneau s'ouvre sur le composeur, prêt à écrire.
         const a = cleanAnchor(m.anchor);
-        if (a) setAnchor(a);
+        if (a) {
+          setAnchor(a);
+          onOpen();
+          setTimeout(() => draftRef.current?.focus(), 60);
+        }
         setPicking(false);
       } else if (m.type === 'cancelled') setPicking(false);
       else if (m.type === 'pin') {
@@ -199,6 +206,7 @@ export default function PageComments({ page, version, frameRef, picking, setPick
         ) : null}
         <Form.Control
           as="textarea"
+          ref={draftRef}
           rows={2}
           size="sm"
           placeholder={anchor ? 'Votre commentaire sur cet élément…' : 'Commentaire général sur la page…'}
