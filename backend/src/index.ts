@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createSchema, createYoga } from 'graphql-yoga';
 import { createAuthContext } from './auth/access.js';
 import { googleAuth } from './auth/google.js';
+import { signInService } from './auth/signInService.js';
 import { handleAuthRoute } from './auth/routes.js';
 import { handleAttachmentRoute } from './sessions/attachmentRoute.js';
 import { handleTaskAttachmentRoute } from './tasks/attachmentRoute.js';
@@ -171,7 +172,12 @@ async function main() {
   const purged = await authSession.purgeExpired();
   if (purged) log.info(`[auth] ${purged} session(s) de connexion expirée(s) supprimée(s)`);
   await previewRepository.purgeExpired().catch((err) => log.warn(`[previews] purge des accès expirés : ${(err as Error).message}`));
-  log.info(googleAuth.configured ? `[auth] connexion Google active (callback ${googleAuth.redirectUri})` : '[auth] GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET absents : la connexion est impossible');
+  await signInService.purgeExpiredTokens().catch((err) => log.warn(`[auth] purge des liens de mot de passe : ${(err as Error).message}`));
+  {
+    const methods = await signInService.availableMethods();
+    const active = [methods.google && 'Google', methods.microsoft && 'Microsoft', methods.github && 'GitHub', methods.password && `mot de passe${methods.passwordReset ? '' : ' (sans SMTP : liens créés par un administrateur)'}`].filter(Boolean);
+    log.info(active.length ? `[auth] connexion : ${active.join(', ')}${googleAuth.configured ? ` (callback Google ${googleAuth.redirectUri})` : ''}` : '[auth] aucun mode de connexion actif : personne ne peut se connecter');
+  }
 
   // Guetteur des sessions de relecture (publication de leur rapport), tâche de l'instance meneuse.
   let stopReviewWatcher: (() => void) | null = null;
@@ -213,10 +219,11 @@ async function main() {
     },
     // Utilisateur connecté, lu dans le cookie de session ; les résolveurs vérifient ses droits.
     context: async ({ request }) => {
-      const user = await authSession.resolve(readCookie(request.headers.get('cookie'), SESSION_COOKIE));
+      const token = readCookie(request.headers.get('cookie'), SESSION_COOKIE);
+      const user = await authSession.resolve(token);
       // Page d'un agent : la personne règle les comptes de l'agent (`?actAs=<id>`, réservé à ses gestionnaires).
       const actAs = new URL(request.url).searchParams.get('actAs');
-      return createAuthContext(user, user && actAs ? await agentService.actAsFor(user, actAs) : null);
+      return createAuthContext(user, user && actAs ? await agentService.actAsFor(user, actAs) : null, user && token ? authSession.tokenHash(token) : null);
     },
     // Les erreurs métier (AppError) sont renvoyées au client avec leur message et leur code, les autres masquées.
     maskedErrors: { maskError: maskGraphQLError },

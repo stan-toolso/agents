@@ -220,6 +220,8 @@ export const AUDITED: Record<string, MutationAudit> = {
   setUserAdmin: { action: 'user.admin', app: true, lookup: ['user', 'userId'], details: (a) => ({ isAdmin: a.isAdmin }) },
   setUserSuperAdmin: { action: 'user.super_admin', app: true, lookup: ['user', 'userId'], details: (a) => ({ isSuperAdmin: a.isSuperAdmin }) },
   deleteUser: { action: 'user.delete', app: true, lookup: ['user', 'userId'] },
+  // Jamais le lien lui-même (il ouvre le compte).
+  createPasswordLink: { action: 'user.password_link', app: true, lookup: ['user', 'userId'], details: (a, r) => ({ emailed: Boolean(r?.emailed) }) },
   setMaintenanceMode: { action: 'app.maintenance', app: true, targetId: () => null, details: (a) => ({ enabled: a.enabled, message: a.message }) },
   updateServerSettings: { action: 'app.settings', app: true, targetId: () => null, details: (a) => a },
   // Jamais le mot de passe dans les détails.
@@ -249,6 +251,8 @@ export const NOT_AUDITED = new Set([
   'startGithubDeviceLogin', 'pollGithubDeviceLogin', 'connectGithubFromVault', 'setDefaultGithubAccount', 'disconnectGithub',
   'startGitlabDeviceLogin', 'pollGitlabDeviceLogin', 'connectGitlabFromVault', 'setDefaultGitlabAccount', 'disconnectGitlab',
   'startAwsLogin', 'pollAwsLogin', 'testVaultItem',
+  // Modes de connexion de la personne elle-même (journal du serveur).
+  'setMyPassword', 'removeMyPassword', 'unlinkMyLoginIdentity',
   // Contrôle du navigateur headless d'un projet : lecture d'état, rien n'est modifié.
   'testProjectBrowser',
   'subscribePush', 'unsubscribePush', 'sendTestPush', 'setPushPreference', 'markNotificationRead', 'markAllNotificationsRead',

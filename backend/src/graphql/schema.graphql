@@ -68,6 +68,8 @@ type User {
   createdAt: DateTime!
   "Null tant que l'utilisateur ne s'est jamais connecté."
   lastLoginAt: DateTime
+  "A un mot de passe (visible de la personne elle-même et des administrateurs de l'application ; null sinon)."
+  hasPassword: Boolean
 }
 
 "Appartenance d'un utilisateur à un projet."
@@ -4315,4 +4317,58 @@ extend type Query {
   "Journal d'audit du projet, du plus récent au plus ancien (lecteurs du projet). before : curseur (id de la dernière entrée reçue)."
   auditLog(projectId: ID!, filter: AuditFilterInput, limit: Int = 100, before: ID): [AuditEntry!]!
   auditFacets(projectId: ID!): AuditFacets!
+}
+
+# ---- Modes de connexion de la personne connectée -------------------------------------------------------------------
+
+"Compte Microsoft ou GitHub relié pour la connexion."
+type LoginIdentity {
+  "microsoft | github"
+  provider: String!
+  email: String
+  createdAt: DateTime!
+  lastUsedAt: DateTime
+}
+
+"Fournisseur de connexion et s'il est configuré sur le serveur."
+type LoginProviderInfo {
+  "google | microsoft | github"
+  id: String!
+  label: String!
+  configured: Boolean!
+}
+
+"Modes de connexion de la personne connectée (Paramètres › Connexion)."
+type MyLoginMethods {
+  email: String!
+  hasPassword: Boolean!
+  passwordSetAt: DateTime
+  "Connexion par mot de passe permise sur ce serveur (PASSWORD_LOGIN)."
+  passwordLoginEnabled: Boolean!
+  "Un compte Google est relié (sinon, le premier compte Google de la même adresse le sera)."
+  googleLinked: Boolean!
+  identities: [LoginIdentity!]!
+  providers: [LoginProviderInfo!]!
+}
+
+"Lien pour choisir son mot de passe, créé par un administrateur (valable 7 jours, à usage unique)."
+type PasswordLink {
+  url: String!
+  expiresAt: DateTime!
+  "Envoyé par e-mail à la personne."
+  emailed: Boolean!
+}
+
+extend type Query {
+  myLoginMethods: MyLoginMethods!
+}
+
+extend type Mutation {
+  "Choisit ou change son mot de passe ; currentPassword est exigé quand un mot de passe existe déjà. Les autres sessions de connexion sont fermées."
+  setMyPassword(currentPassword: String, newPassword: String!): MyLoginMethods!
+  removeMyPassword: MyLoginMethods!
+  "Retire un compte relié pour la connexion (google, microsoft, github)."
+  unlinkMyLoginIdentity(provider: String!): MyLoginMethods!
+  "Lien pour qu'une personne choisisse son mot de passe (administrateurs) ; sendEmail : l'envoyer aussi par e-mail (SMTP requis)."
+  createPasswordLink(userId: ID!, sendEmail: Boolean = false): PasswordLink!
 }

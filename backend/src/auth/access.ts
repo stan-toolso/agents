@@ -14,9 +14,11 @@ export interface AuthContext {
    * personnel) le suivent (`settingsUser`) ; les droits sur les projets restent ceux de la personne connectée.
    */
   actAs?: User | null;
+  /** Empreinte du jeton de la session de connexion de la requête (garder cette session quand on change son mot de passe). */
+  sessionTokenHash?: string | null;
 }
 
-export const createAuthContext = (user: User | null, actAs: User | null = null): AuthContext => ({ user, roles: new Map(), actAs });
+export const createAuthContext = (user: User | null, actAs: User | null = null, sessionTokenHash: string | null = null): AuthContext => ({ user, roles: new Map(), actAs, sessionTokenHash });
 
 /** Personne dont on lit ou règle les comptes : l'agent pour le compte duquel on agit, sinon la personne connectée. */
 export function settingsUser(ctx: AuthContext): User {

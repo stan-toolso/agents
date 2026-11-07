@@ -6,7 +6,11 @@ import { googleAccountService, parseAccess } from '../google/service.js';
 import { userService } from '../users/service.js';
 import { vaultService } from '../vault/service.js';
 import { googleAuth } from './google.js';
+import { signInService } from './signInService.js';
+import { MAX_PASSWORD_LENGTH } from './password.js';
+import { isLoginProviderId, loginProviders, type LoginProviderId } from './providers.js';
 import { authSession, readCookie, SESSION_COOKIE } from './session.js';
+import { isAllowedOrigin } from '../origin.js';
 import { log } from '../log.js';
 
 const STATE_COOKIE = 'skipper_oauth';
@@ -30,7 +34,8 @@ function stateCookie(value: string | null): string {
 }
 
 const toApp = (path: string) => `${config.appUrl}${path}`;
-const loginError = (code: string) => toApp(`/?authError=${encodeURIComponent(code)}`);
+/** Retour à la page de connexion avec un code d'erreur (et le message du serveur, affiché quand le code n'est pas connu du front). */
+const loginError = (code: string, message?: string) => toApp(`/?authError=${encodeURIComponent(code)}${message ? `&authMessage=${encodeURIComponent(message.slice(0, 300))}` : ''}`);
 
 /**
  * Contenu du cookie d'état : connexion d'un utilisateur (`next`) ou rattachement d'un compte Google au coffre
@@ -41,6 +46,82 @@ interface OAuthState {
   next?: string;
   vault?: { projectId: string | null; userId: string; replaceId?: string };
 }
+/** Retour de Microsoft ou GitHub : connexion (`next`) ou liaison du compte à la personne connectée (`linkUserId`). */
+interface ProviderState {
+  state: string;
+  provider: LoginProviderId;
+  next?: string;
+  linkUserId?: string;
+}
+const loginSettings = (params: Record<string, string>) => toApp(`/settings?${new URLSearchParams({ section: 'login', ...params })}`);
+
+const encodeState = (payload: object) => Buffer.from(JSON.stringify(payload)).toString('base64url');
+function readState<T>(req: IncomingMessage): T | null {
+  try {
+    const raw = readCookie(req.headers.cookie, STATE_COOKIE);
+    return raw ? (JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Adresse du client : nginx (seul à joindre le backend en production) pose X-Real-IP / X-Forwarded-For. */
+function clientIp(req: IncomingMessage): string | null {
+  const real = req.headers['x-real-ip'];
+  if (typeof real === 'string' && real) return real;
+  const fwd = req.headers['x-forwarded-for'];
+  if (typeof fwd === 'string' && fwd) return fwd.split(',').pop()!.trim();
+  return req.socket.remoteAddress ?? null;
+}
+
+/** En-têtes CORS des routes JSON (développement : front sur un autre port que l'API). */
+function cors(req: IncomingMessage, res: ServerResponse): void {
+  const origin = req.headers.origin;
+  if (isAllowedOrigin(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Vary', 'Origin');
+  }
+}
+
+function sendJson(req: IncomingMessage, res: ServerResponse, status: number, body: unknown, cookies: string[] = []): void {
+  cors(req, res);
+  if (cookies.length) res.setHeader('Set-Cookie', cookies);
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+  res.end(JSON.stringify(body));
+}
+
+const sendError = (req: IncomingMessage, res: ServerResponse, err: unknown) => {
+  const app = err instanceof AppError;
+  const status = !app ? 500 : err.code === 'TOO_MANY_ATTEMPTS' ? 429 : err.code === 'INVALID_CREDENTIALS' ? 401 : err.code === 'FORBIDDEN' ? 403 : 400;
+  if (!app) log.error('[auth]', err);
+  sendJson(req, res, status, { error: app ? err.message : 'Erreur inattendue', code: app ? err.code : 'INTERNAL' });
+};
+
+/**
+ * Corps JSON d'une route d'authentification. Exige `content-type: application/json` (une page d'un autre site ne
+ * peut pas l'envoyer sans pré-vol CORS) et refuse une origine étrangère : pas de connexion forcée depuis un autre site.
+ */
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  if (!/^application\/json\b/i.test(req.headers['content-type'] ?? '')) throw new AppError('Corps JSON attendu');
+  const origin = req.headers.origin;
+  if (origin && !isAllowedOrigin(origin)) throw new AppError('Origine refusée', 'FORBIDDEN');
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > 8 * 1024) throw new AppError('Requête trop volumineuse');
+    chunks.push(chunk as Buffer);
+  }
+  try {
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+    return body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+  } catch {
+    throw new AppError('Corps JSON illisible');
+  }
+}
+const str = (v: unknown, max = MAX_PASSWORD_LENGTH + 64) => (typeof v === 'string' ? v.slice(0, max) : '');
+
 const vaultPage = (projectId: string | null, params: Record<string, string>) => toApp(`${projectId ? `/projects/${projectId}/vault` : '/vault'}?${new URLSearchParams(params)}`);
 
 /**
@@ -50,12 +131,144 @@ const vaultPage = (projectId: string | null, params: Record<string, string>) => 
  * - GET  /auth/google/connect?(projectId=…|personal=1)&gmail=read|write|none&drive=read|write|none[&itemId=…] :
  *   relie un compte Google au coffre du projet (administrateur) ou au coffre personnel, ou remplace l'élément
  *   `itemId` ; le retour passe par le même callback et ramène sur la page du coffre ;
+ * - GET  /auth/methods              : modes de connexion offerts (page de connexion) ;
+ * - POST /auth/password/login       : e-mail et mot de passe (JSON), ouvre la session ;
+ * - POST /auth/password/forgot      : envoie un lien pour choisir ou réinitialiser son mot de passe (si SMTP) ;
+ * - GET  /auth/password/token       : à qui appartient un lien de mot de passe ;
+ * - POST /auth/password/reset       : choisit le mot de passe avec un lien, ouvre la session ;
+ * - GET  /auth/microsoft|github[?next=…], …/link, …/callback : connexion ou liaison d'un compte Microsoft ou GitHub ;
  * - POST /auth/logout               : ferme la session.
  * Renvoie false si l'URL n'est pas une route d'authentification.
  */
 export async function handleAuthRoute(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const url = new URL(req.url ?? '/', config.apiUrl);
   if (!url.pathname.startsWith('/auth/')) return false;
+
+  if (req.method === 'OPTIONS') {
+    cors(req, res);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST');
+    res.setHeader('Access-Control-Allow-Headers', 'content-type');
+    res.setHeader('Access-Control-Max-Age', '600');
+    res.writeHead(204);
+    res.end();
+    return true;
+  }
+
+  // Modes de connexion offerts (page de connexion, sans session).
+  if (url.pathname === '/auth/methods' && req.method === 'GET') {
+    sendJson(req, res, 200, await signInService.availableMethods());
+    return true;
+  }
+
+  // E-mail et mot de passe : ouvre la session comme le retour de Google.
+  if (url.pathname === '/auth/password/login' && req.method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      const user = await signInService.loginWithPassword(str(body.email, 320), str(body.password), clientIp(req));
+      const token = await authSession.create(user);
+      log.info(`[auth] connexion de ${user.email} (mot de passe)`);
+      sendJson(req, res, 200, { ok: true }, [authSession.cookie(token)]);
+    } catch (err) {
+      if (err instanceof AppError) log.info(`[auth] connexion par mot de passe refusée (${err.code}) depuis ${clientIp(req) ?? '?'}`);
+      sendError(req, res, err);
+    }
+    return true;
+  }
+
+  // « Mot de passe oublié » : toujours 204, que l'adresse existe ou non.
+  if (url.pathname === '/auth/password/forgot' && req.method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      await signInService.requestPasswordReset(str(body.email, 320));
+      cors(req, res);
+      res.writeHead(204);
+      res.end();
+    } catch (err) {
+      sendError(req, res, err);
+    }
+    return true;
+  }
+
+  // Lien de mot de passe : à qui il appartient (page « Choisir un mot de passe »).
+  if (url.pathname === '/auth/password/token' && req.method === 'GET') {
+    const user = await signInService.userOfToken(url.searchParams.get('token') ?? '');
+    sendJson(req, res, 200, user && user.kind === 'person' ? { valid: true, email: user.email, name: user.name, hasPassword: Boolean(user.passwordSetAt) } : { valid: false });
+    return true;
+  }
+
+  if (url.pathname === '/auth/password/reset' && req.method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      const user = await signInService.resetPassword(str(body.token, 200), str(body.password));
+      const token = await authSession.create(user);
+      log.info(`[auth] mot de passe choisi par ${user.email}`);
+      sendJson(req, res, 200, { ok: true }, [authSession.cookie(token)]);
+    } catch (err) {
+      sendError(req, res, err);
+    }
+    return true;
+  }
+
+  // Microsoft, GitHub : /auth/<fournisseur>?next=… (connexion), /auth/<fournisseur>/link (relier à la personne connectée), /auth/<fournisseur>/callback.
+  const providerMatch = /^\/auth\/(microsoft|github)(\/link|\/callback)?$/.exec(url.pathname);
+  if (providerMatch && req.method === 'GET' && isLoginProviderId(providerMatch[1])) {
+    const provider = loginProviders[providerMatch[1]];
+    const step = providerMatch[2] ?? '';
+    if (step === '' || step === '/link') {
+      const linking = step === '/link';
+      if (!provider.configured) {
+        redirect(res, linking ? loginSettings({ loginError: `Connexion ${provider.label} non configurée sur le serveur` }) : loginError('not_configured'));
+        return true;
+      }
+      let linkUserId: string | undefined;
+      if (linking) {
+        const user = await authSession.resolve(readCookie(req.headers.cookie, SESSION_COOKIE));
+        if (!user) {
+          redirect(res, loginError('unauthenticated'));
+          return true;
+        }
+        linkUserId = user.id;
+      }
+      const state = randomBytes(16).toString('base64url');
+      const payload: ProviderState = { state, provider: provider.id, ...(linking ? { linkUserId } : { next: safeNext(url.searchParams.get('next')) }) };
+      redirect(res, provider.authorizationUrl(state), [stateCookie(encodeState(payload))]);
+      return true;
+    }
+    // Retour du fournisseur.
+    const expected = readState<ProviderState>(req);
+    const linking = Boolean(expected?.linkUserId);
+    const fail = (message: string, code: string) => redirect(res, linking ? loginSettings({ loginError: message }) : loginError(code, message), [stateCookie(null)]);
+    const code = url.searchParams.get('code');
+    if (url.searchParams.get('error') || !code) {
+      const error = url.searchParams.get('error') ?? 'cancelled';
+      fail(error === 'access_denied' ? `Autorisation refusée sur ${provider.label}` : `${provider.label} : ${url.searchParams.get('error_description') ?? error}`, error === 'access_denied' ? 'access_denied' : 'cancelled');
+      return true;
+    }
+    if (!expected || expected.provider !== provider.id || url.searchParams.get('state') !== expected.state) {
+      fail('État OAuth invalide, recommencez', 'invalid_state');
+      return true;
+    }
+    try {
+      const identity = await provider.fetchIdentity(code);
+      if (expected.linkUserId) {
+        const user = await authSession.resolve(readCookie(req.headers.cookie, SESSION_COOKIE));
+        if (!user || user.id !== expected.linkUserId) throw new AppError('Session expirée, reconnectez-vous puis recommencez', 'UNAUTHENTICATED');
+        await signInService.linkIdentity(user, identity);
+        log.info(`[auth] compte ${provider.label} ${identity.email ?? identity.subject} relié à ${user.email}`);
+        redirect(res, loginSettings({ linked: provider.id }), [stateCookie(null)]);
+        return true;
+      }
+      const user = await signInService.loginWithIdentity(identity);
+      const token = await authSession.create(user);
+      log.info(`[auth] connexion de ${user.email} (${provider.label})`);
+      redirect(res, toApp(expected.next ?? '/'), [stateCookie(null), authSession.cookie(token)]);
+    } catch (err) {
+      const errCode = err instanceof AppError ? err.code.toLowerCase() : 'provider_error';
+      log.error(`[auth] connexion ${provider.label} refusée :`, (err as Error).message);
+      fail((err as Error).message, errCode);
+    }
+    return true;
+  }
 
   if (url.pathname === '/auth/google' && req.method === 'GET') {
     if (!googleAuth.configured) {

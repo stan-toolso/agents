@@ -9,6 +9,7 @@ import ProjectsPage from './pages/ProjectsPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
 const ProjectSettingsPage = lazy(() => import('./pages/ProjectSettingsPage'));
 import LoginPage from './pages/LoginPage';
+const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'));
 import SessionsPage from './pages/SessionsPage';
 import SessionDetailPage from './pages/SessionDetailPage';
 import RequestsPage from './pages/RequestsPage';
@@ -145,6 +146,13 @@ function Gate() {
 export default function App() {
   // Lien public d'une session (/share/<token>) : lisible sans compte, hors de l'application (ni connexion, ni sidebar).
   const { pathname } = useLocation();
+  // Lien pour choisir son mot de passe : hors de l'application, connecté ou non.
+  if (pathname === '/reset-password')
+    return (
+      <Suspense fallback={<PageLoading />}>
+        <ResetPasswordPage />
+      </Suspense>
+    );
   if (pathname.startsWith('/share/'))
     return (
       <Suspense fallback={<PageLoading />}>

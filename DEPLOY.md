@@ -13,7 +13,7 @@ et tests à chaque push, le déploiement se lance à la main (`deploy.sh`).
 - **SSH** : `ssh ubuntu@51.158.36.16` (sudo sans mot de passe), puis `sudo -iu skipper` pour l'utilisateur
   applicatif. Depuis une session d'agent : élément `skipper-1` du coffre (voir la bibliothèque de contexte,
   `dev/deploiement` et `dev/cellule-skipper-1`).
-- **Web** : https://skipper.toolso.io, connexion par **Google OAuth** (voir « Connexion des utilisateurs »).
+- **Web** : https://skipper.toolso.io, connexion par **Google OAuth**, Microsoft, GitHub ou mot de passe (voir « Connexion des utilisateurs »).
 - **Base** : PostgreSQL 17 local, base et rôle `skipper`, `DATABASE_URL` dans `/etc/skipper/db.env` (lisible par
   `skipper` seulement). Interroger : `sudo -u postgres psql -d skipper`.
 - **DNS** : enregistrements A `skipper.toolso.io` et `*.apercu.skipper.toolso.io` vers `51.158.36.16` dans la zone
@@ -60,6 +60,28 @@ projet **Skipper** (`skipper-510112`, organisation toolso.io, compte de facturat
   développement (jamais versionné). Le reporter dans `~/skipper/.env` sur le serveur
   (`GOOGLE_CLIENT_ID=...`, `GOOGLE_CLIENT_SECRET=...`), puis `deploy.sh --force` (nouvelle instance).
   S'il est perdu : dans le client, « Add secret » en génère un nouveau.
+
+**Autres modes de connexion** (voir README, « Utilisateurs et droits ») :
+
+- **E-mail et mot de passe** : actif sans rien configurer (`PASSWORD_LOGIN=off` pour le couper). Le lien « Mot de
+  passe oublié » n'est envoyé que si un serveur SMTP est configuré (Paramètres › Serveur, ou `SMTP_URL`) ; sinon un
+  administrateur crée le lien depuis la page Utilisateurs (icône lien) et le transmet. nginx doit transmettre
+  `X-Real-IP` ou `X-Forwarded-For` (freinage des essais par IP).
+- **Microsoft** : portail Azure → Microsoft Entra ID → Inscriptions d'applications → Nouvelle inscription « Skipper »,
+  types de comptes « Comptes dans un annuaire organisationnel et comptes Microsoft personnels » (ou un seul annuaire),
+  URI de redirection plateforme **Web** `https://skipper.toolso.io/auth/microsoft/callback` (et
+  `http://localhost:4000/auth/microsoft/callback`). Certificats et secrets → nouveau secret client. Dans `.env` :
+  `MICROSOFT_CLIENT_ID` (ID d'application), `MICROSOFT_CLIENT_SECRET` (valeur du secret, à renouveler avant son
+  échéance), `MICROSOFT_TENANT` (`common`, ou l'ID de l'annuaire pour le réserver à ses comptes). Facultatif : dans
+  Configuration de jetons, ajouter la revendication facultative `xms_edov` (id_token) pour que les adresses des
+  annuaires au domaine vérifié soient reconnues sans liaison manuelle.
+- **GitHub** : Settings → Developer settings → OAuth Apps → New OAuth App (de préférence dans l'organisation),
+  Authorization callback URL `https://skipper.toolso.io/auth/github/callback` (une OAuth App n'a qu'un callback : une
+  seconde pour le développement). Dans `.env` : `GITHUB_LOGIN_CLIENT_ID`, `GITHUB_LOGIN_CLIENT_SECRET`. Ne pas
+  réutiliser `GITHUB_CLIENT_ID` (connexion par code des comptes git, souvent l'identifiant public du CLI GitHub).
+
+Après modification du `.env` : `deploy.sh --force` (nouvelle instance). Le démarrage journalise les modes actifs
+(`[auth] connexion : Google, Microsoft, …`).
 
 Seules les adresses invitées sur un projet peuvent se connecter. La migration `011_users.sql` crée
 `stan@toolso.io` administrateur de l'application et de tous les projets existants ; les autres

@@ -115,6 +115,7 @@ import { permissionRuleService } from '../permissions/service.js';
 import { formatRule, type PermissionRule } from '../permissions/types.js';
 import type { ScheduleRun, SessionSchedule, SessionScheduleInput } from '../schedules/types.js';
 import { userService } from '../users/service.js';
+import { signInService } from '../auth/signInService.js';
 import type { ProjectMember, ProjectRole } from '../users/types.js';
 import { log } from '../log.js';
 import { previewService } from '../previews/service.js';
@@ -952,6 +953,7 @@ export const resolvers = {
   User: {
     kind: (u: User) => (u.kind ?? 'person').toUpperCase(),
     agent: async (u: User, _: unknown, ctx: Ctx) => (u.kind === 'agent' ? ((await loadersOf(ctx).agent(u.id)) ?? null) : null),
+    hasPassword: (u: User, _: unknown, ctx: Ctx) => (ctx.user && (ctx.user.id === u.id || ctx.user.isAdmin) ? Boolean(u.passwordSetAt) : null),
   },
 
   Query: {
@@ -1099,6 +1101,7 @@ export const resolvers = {
     },
     gitlabRepositories: (_: unknown, args: { query?: string | null }, ctx: Ctx) => gitlabService.listRepositories(settingsUser(ctx).id, args.query),
     me: (_: unknown, __: unknown, ctx: Ctx) => ctx.user,
+    myLoginMethods: (_: unknown, __: unknown, ctx: Ctx) => signInService.methodsOf(requireUser(ctx).id),
     users: (_: unknown, __: unknown, ctx: Ctx) => {
       requireAdmin(ctx);
       return userService.list();
@@ -1746,6 +1749,13 @@ export const resolvers = {
       return userService.setSuperAdmin(args.userId, args.isSuperAdmin);
     },
     deleteUser: (_: unknown, args: { userId: string }, ctx: Ctx) => userService.delete(args.userId, requireAdmin(ctx)),
+    setMyPassword: (_: unknown, args: { currentPassword?: string | null; newPassword: string }, ctx: Ctx) => signInService.setPassword(requireUser(ctx), args.currentPassword, args.newPassword, ctx.sessionTokenHash ?? null),
+    removeMyPassword: (_: unknown, __: unknown, ctx: Ctx) => signInService.removePassword(requireUser(ctx)),
+    unlinkMyLoginIdentity: (_: unknown, args: { provider: string }, ctx: Ctx) => signInService.unlinkIdentity(requireUser(ctx), args.provider),
+    createPasswordLink: async (_: unknown, args: { userId: string; sendEmail?: boolean | null }, ctx: Ctx) => {
+      const admin = requireAdmin(ctx);
+      return signInService.createPasswordLink(await userService.get(args.userId), admin, Boolean(args.sendEmail));
+    },
     inviteProjectMember: async (_: unknown, args: { projectId: string; email: string; role?: GqlRole | null }, ctx: Ctx) => {
       const user = requireUser(ctx);
       await requireProject(ctx, args.projectId, 'admin');

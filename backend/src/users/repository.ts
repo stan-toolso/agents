@@ -1,5 +1,5 @@
 import { pool } from '../db/pool.js';
-import type { OpenItems, ProjectMember, ProjectRole, User, UserKind } from './types.js';
+import type { OpenItems, ProjectMember, ProjectRole, User, UserIdentity, UserKind } from './types.js';
 
 interface UserRow {
   id: string;
@@ -12,7 +12,19 @@ interface UserRow {
   is_super_admin: boolean;
   created_at: Date;
   last_login_at: Date | null;
+  password_set_at?: Date | null;
 }
+
+interface IdentityRow {
+  provider: string;
+  subject: string;
+  user_id: string;
+  email: string | null;
+  created_at: Date;
+  last_used_at: Date | null;
+}
+
+const toIdentity = (r: IdentityRow): UserIdentity => ({ provider: r.provider, subject: r.subject, userId: r.user_id, email: r.email, createdAt: r.created_at, lastUsedAt: r.last_used_at });
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const uuids = (ids: string[] | null | undefined) => [...new Set((ids ?? []).map((s) => s.toLowerCase()).filter((s) => UUID_RE.test(s)))];
@@ -36,6 +48,7 @@ const toUser = (r: UserRow): User => ({
   isSuperAdmin: Boolean(r.is_super_admin),
   createdAt: r.created_at,
   lastLoginAt: r.last_login_at,
+  passwordSetAt: r.password_set_at ?? null,
 });
 
 const toMember = (r: MemberRow): ProjectMember => ({
@@ -135,6 +148,116 @@ export const userRepository = {
       [id, input.googleSub, input.name || null, input.avatarUrl || null],
     );
     return toUser(rows[0]);
+  },
+
+  /** Connexion sans Google (mot de passe, Microsoft, GitHub) : date de connexion, et nom ou avatar s'ils manquaient. */
+  async touchLogin(id: string, input: { name?: string | null; avatarUrl?: string | null } = {}): Promise<User> {
+    const { rows } = await pool.query<UserRow>(
+      `UPDATE users SET name = CASE WHEN last_login_at IS NULL AND $2::text IS NOT NULL THEN $2 ELSE name END,
+         avatar_url = COALESCE(avatar_url, $3), last_login_at = now()
+       WHERE id = $1 RETURNING *`,
+      [id, input.name || null, input.avatarUrl || null],
+    );
+    return toUser(rows[0]);
+  },
+
+  // ---- Mot de passe --------------------------------------------------------------------------
+
+  async passwordHash(id: string): Promise<string | null> {
+    const { rows } = await pool.query<{ password_hash: string | null }>('SELECT password_hash FROM users WHERE id = $1', [id]);
+    return rows[0]?.password_hash ?? null;
+  },
+
+  /** Enregistre (ou retire, avec null) l'empreinte du mot de passe. */
+  async setPasswordHash(id: string, hash: string | null): Promise<User> {
+    const { rows } = await pool.query<UserRow>(
+      'UPDATE users SET password_hash = $2, password_set_at = CASE WHEN $2::text IS NULL THEN NULL ELSE now() END WHERE id = $1 RETURNING *',
+      [id, hash],
+    );
+    return toUser(rows[0]);
+  },
+
+  async createPasswordToken(tokenHash: string, userId: string, expiresAt: Date, createdById: string | null): Promise<void> {
+    await pool.query('INSERT INTO password_tokens (token_hash, user_id, expires_at, created_by) VALUES ($1, $2, $3, $4)', [tokenHash, userId, expiresAt, createdById]);
+  },
+
+  /** Utilisateur d'un lien valide (ni expiré ni utilisé), ou null. */
+  async findPasswordTokenUser(tokenHash: string): Promise<User | null> {
+    const { rows } = await pool.query<UserRow>(
+      `SELECT u.* FROM password_tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = $1 AND t.used_at IS NULL AND t.expires_at > now()`,
+      [tokenHash],
+    );
+    return rows[0] ? toUser(rows[0]) : null;
+  },
+
+  /** Marque le lien utilisé ; faux s'il ne l'était plus (déjà utilisé, expiré). */
+  async consumePasswordToken(tokenHash: string): Promise<boolean> {
+    const { rowCount } = await pool.query('UPDATE password_tokens SET used_at = now() WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()', [tokenHash]);
+    return (rowCount ?? 0) > 0;
+  },
+
+  /** Rend caducs tous les liens encore ouverts d'une personne. */
+  async revokePasswordTokens(userId: string): Promise<void> {
+    await pool.query('UPDATE password_tokens SET used_at = now() WHERE user_id = $1 AND used_at IS NULL', [userId]);
+  },
+
+  /** Date du dernier lien demandé par « mot de passe oublié » (anti-rafale). */
+  async lastSelfServiceTokenAt(userId: string): Promise<Date | null> {
+    const { rows } = await pool.query<{ at: Date | null }>('SELECT max(created_at) AS at FROM password_tokens WHERE user_id = $1 AND created_by IS NULL', [userId]);
+    return rows[0]?.at ?? null;
+  },
+
+  async deleteExpiredPasswordTokens(): Promise<number> {
+    const { rowCount } = await pool.query(`DELETE FROM password_tokens WHERE expires_at <= now() - interval '7 days'`);
+    return rowCount ?? 0;
+  },
+
+  // ---- Comptes externes (Microsoft, GitHub) ---------------------------------------------------
+
+  async findIdentity(provider: string, subject: string): Promise<UserIdentity | null> {
+    const { rows } = await pool.query<IdentityRow>('SELECT * FROM user_identities WHERE provider = $1 AND subject = $2', [provider, subject]);
+    return rows[0] ? toIdentity(rows[0]) : null;
+  },
+
+  async listIdentities(userId: string): Promise<UserIdentity[]> {
+    const { rows } = await pool.query<IdentityRow>('SELECT * FROM user_identities WHERE user_id = $1 ORDER BY provider, created_at', [userId]);
+    return rows.map(toIdentity);
+  },
+
+  /** Relie un compte externe à la personne ; un seul compte par fournisseur (le précédent est remplacé). */
+  async linkIdentity(input: { provider: string; subject: string; userId: string; email: string | null }): Promise<void> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM user_identities WHERE user_id = $1 AND provider = $2 AND subject <> $3', [input.userId, input.provider, input.subject]);
+      await client.query(
+        `INSERT INTO user_identities (provider, subject, user_id, email, last_used_at) VALUES ($1, $2, $3, $4, now())
+         ON CONFLICT (provider, subject) DO UPDATE SET email = COALESCE(EXCLUDED.email, user_identities.email), last_used_at = now()
+         WHERE user_identities.user_id = EXCLUDED.user_id`,
+        [input.provider, input.subject, input.userId, input.email],
+      );
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw err;
+    } finally {
+      client.release();
+    }
+  },
+
+  async unlinkIdentity(userId: string, provider: string): Promise<boolean> {
+    const { rowCount } = await pool.query('DELETE FROM user_identities WHERE user_id = $1 AND provider = $2', [userId, provider]);
+    return (rowCount ?? 0) > 0;
+  },
+
+  async unlinkGoogle(userId: string): Promise<User> {
+    const { rows } = await pool.query<UserRow>('UPDATE users SET google_sub = NULL WHERE id = $1 RETURNING *', [userId]);
+    return toUser(rows[0]);
+  },
+
+  /** Ferme toutes les sessions de connexion d'une personne, sauf éventuellement une. */
+  async deleteUserSessions(userId: string, exceptTokenHash: string | null = null): Promise<void> {
+    await pool.query('DELETE FROM user_sessions WHERE user_id = $1 AND ($2::text IS NULL OR token_hash <> $2)', [userId, exceptTokenHash]);
   },
 
   /** Personnes (les agents de projet ne sont pas des comptes à administrer). */

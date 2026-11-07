@@ -76,6 +76,50 @@ export function googleLoginUrl(next: string): string {
   return `${apiBaseUrl}/auth/google?next=${encodeURIComponent(next)}`;
 }
 
+/** Connexion par Microsoft ou GitHub ; `next` = chemin de l'application à rouvrir ensuite. */
+export function providerLoginUrl(provider: 'microsoft' | 'github', next: string): string {
+  return `${apiBaseUrl}/auth/${provider}?next=${encodeURIComponent(next)}`;
+}
+
+/** Relie un compte Microsoft ou GitHub à la personne connectée (retour sur Paramètres › Connexion). */
+export function providerLinkUrl(provider: 'microsoft' | 'github'): string {
+  return `${apiBaseUrl}/auth/${provider}/link`;
+}
+
+/** Relier un compte Google : se connecter avec lui le relie (premier compte Google de la même adresse). */
+export function googleLinkUrl(): string {
+  return googleLoginUrl('/settings?section=login');
+}
+
+/** Modes de connexion offerts par le serveur (page de connexion). */
+export interface AuthMethods {
+  google: boolean;
+  microsoft: boolean;
+  github: boolean;
+  password: boolean;
+  passwordReset: boolean;
+}
+
+export async function fetchAuthMethods(): Promise<AuthMethods> {
+  const res = await fetch(`${apiBaseUrl}/auth/methods`, { credentials: 'include' });
+  if (!res.ok) throw new Error(`Le serveur ne répond pas (${res.status})`);
+  return (await res.json()) as AuthMethods;
+}
+
+/** Appel JSON d'une route d'authentification ; lève l'erreur du serveur (message lisible). */
+export async function authPost<T = unknown>(path: string, body: Record<string, unknown>): Promise<T | null> {
+  const res = await fetch(`${apiBaseUrl}/auth/${path}`, { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  if (res.status === 204) return null;
+  const json = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) throw new Error(json.error ?? `Erreur ${res.status}`);
+  return json as T;
+}
+
+export async function fetchPasswordToken(token: string): Promise<{ valid: boolean; email?: string; name?: string; hasPassword?: boolean }> {
+  const res = await fetch(`${apiBaseUrl}/auth/password/token?${new URLSearchParams({ token })}`, { credentials: 'include' });
+  return res.ok ? res.json() : { valid: false };
+}
+
 /** Écran de consentement Google pour relier un compte (Gmail, Drive) au coffre d'un projet ou au coffre personnel ; le retour ramène sur la page du coffre. */
 export function googleConnectUrl(projectId: string | null, gmail: string, drive: string, itemId?: string | null): string {
   return `${apiBaseUrl}/auth/google/connect?${new URLSearchParams({ ...(projectId ? { projectId } : { personal: '1' }), gmail, drive, ...(itemId ? { itemId } : {}) })}`;

@@ -112,6 +112,8 @@ export interface User {
   isSuperAdmin: boolean;
   createdAt: string;
   lastLoginAt: string | null;
+  /** Lu seulement par la page Utilisateurs (administrateurs) et pour soi-même. */
+  hasPassword?: boolean | null;
 }
 
 export interface PermissionRule {

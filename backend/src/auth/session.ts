@@ -34,6 +34,9 @@ export const authSession = {
 
   purgeExpired: () => userRepository.deleteExpiredSessions(),
 
+  /** Empreinte stockée en base pour un jeton. */
+  tokenHash: hash,
+
   /** En-tête Set-Cookie de la session (ou de sa suppression avec `null`). */
   cookie(token: string | null): string {
     const attrs = ['Path=/', 'HttpOnly', 'SameSite=Lax'];
