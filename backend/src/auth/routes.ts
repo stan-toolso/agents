@@ -77,6 +77,8 @@ export async function handleAuthRoute(req: IncomingMessage, res: ServerResponse)
     const projectId = url.searchParams.get('projectId') || null;
     try {
       if (!googleAccountService.configured) throw new AppError('Connexion Google non configurée (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET)', 'NOT_CONFIGURED');
+      // Invité des pages partagées : pas de coffre.
+      if (user.isGuest) throw new AppError('Réservé aux membres des projets', 'FORBIDDEN');
       if (projectId && (await userService.roleFor(user.id, projectId)) !== 'admin') throw new AppError('Réservé aux administrateurs du projet', 'FORBIDDEN');
       const access = { gmail: parseAccess(url.searchParams.get('gmail'), 'messagerie'), drive: parseAccess(url.searchParams.get('drive'), 'Drive') };
       const replaceId = url.searchParams.get('itemId') || undefined;

@@ -39,7 +39,8 @@ export function isMachineRequest(uri: string, headers: IncomingMessage['headers'
 async function handleAuth(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const uri = String(req.headers['x-original-uri'] ?? '');
   const user = await authSession.resolve(readCookie(req.headers.cookie, SESSION_COOKIE));
-  if (user && forgejoConfigured()) {
+  // Invité des pages partagées : aucun compte sur la forge.
+  if (user && !user.isGuest && forgejoConfigured()) {
     try {
       const username = await forgejoAccounts.ensure(user);
       return plain(res, 200, '', { 'X-Forge-User': username });

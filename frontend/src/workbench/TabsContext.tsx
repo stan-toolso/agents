@@ -317,9 +317,12 @@ export function useTabs(): TabsState {
 
 /** Permet à une page de donner son vrai titre à son onglet (ex. nom de la session) une fois ses données chargées. */
 export function useTabTitle(title: string | null | undefined): void {
-  const { setTitle } = useTabs();
+  // Hors des onglets (interface d'un invité des pages partagées) : le titre va à la fenêtre.
+  const setTitle = useContext(TabsContext)?.setTitle;
   const { pathname } = useLocation();
   useEffect(() => {
-    if (title) setTitle(tabKey(pathname), title);
+    if (!title) return;
+    if (setTitle) setTitle(tabKey(pathname), title);
+    else document.title = `${title} · Skipper`;
   }, [title, pathname, setTitle]);
 }

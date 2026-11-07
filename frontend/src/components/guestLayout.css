@@ -1,0 +1,15 @@
+/* Interface d'un invité des pages partagées (GuestLayout.tsx). */
+.guest-app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; background: var(--cc-bg); color: var(--cc-fg); }
+.guest-bar { display: flex; align-items: center; gap: 12px; padding: 6px 12px; border-bottom: 1px solid var(--cc-border); background: var(--cc-bg-elevated); min-height: 44px; flex: 0 0 auto; }
+.guest-brand { font-weight: 600; color: var(--cc-accent); text-decoration: none; white-space: nowrap; }
+.guest-link { display: inline-flex; align-items: center; gap: 6px; color: var(--cc-fg); text-decoration: none; min-width: 0; }
+.guest-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.guest-link:hover { color: var(--cc-accent); }
+.guest-user { margin-left: auto; color: var(--cc-dim); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.guest-logout { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.guest-main { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.guest-list { padding: 16px; max-width: 1100px; margin: 0 auto; }
+@media (max-width: 575.98px) {
+  .guest-logout-label, .guest-user { display: none; }
+  .guest-logout { margin-left: auto; }
+}

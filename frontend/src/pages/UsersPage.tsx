@@ -82,6 +82,11 @@ export default function UsersPage() {
                     <span>
                       {u.name}
                       {self && <span className="text-secondary"> (vous)</span>}
+                      {u.isGuest && (
+                        <Badge bg="secondary" className="ms-1" title="Invité depuis le partage d'une page : ne voit que les pages partagées avec lui. L'inviter sur un projet, ou le passer administrateur, en fait un utilisateur ordinaire.">
+                          invité des pages
+                        </Badge>
+                      )}
                       <div className="small text-secondary">{u.email}</div>
                     </span>
                   </div>

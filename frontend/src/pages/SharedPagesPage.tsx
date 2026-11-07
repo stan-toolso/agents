@@ -19,6 +19,8 @@ export function accessLabel(page: SharedPage): { icon: string; text: string } {
 /** Pages partagées : publiées par un agent ou depuis l'explorateur de fichiers, privées jusqu'au partage. */
 export default function SharedPagesPage() {
   const { user } = useAuth();
+  // Invité des pages partagées : il ne publie rien, la page ne liste que ce qu'on lui a partagé.
+  const guest = Boolean(user?.isGuest);
   useTabTitle('Pages');
   const [filter, setFilter] = useState<Filter>('all');
   const { data, loading, error } = usePollingQuery<{ sharedPages: SharedPage[] }>(SHARED_PAGES, { pollInterval: 30_000 });
@@ -28,8 +30,8 @@ export default function SharedPagesPage() {
   return (
     <>
       <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
-        <h1 className="h3 mb-0">Pages</h1>
-        <ButtonGroup size="sm">
+        <h1 className="h3 mb-0">{guest ? 'Pages partagées avec vous' : 'Pages'}</h1>
+        {!guest && <ButtonGroup size="sm">
           {(
             [
               ['all', 'Toutes'],
@@ -41,9 +43,11 @@ export default function SharedPagesPage() {
               {label}
             </Button>
           ))}
-        </ButtonGroup>
+        </ButtonGroup>}
       </div>
-      <p className="text-secondary small">Un agent publie une page quand vous le lui demandez (« publie ce rapport comme page ») ; vous pouvez aussi publier un fichier HTML depuis l'explorateur de fichiers. Une page est privée jusqu'à ce que son propriétaire la partage.</p>
+      {guest ? (
+        <p className="text-secondary small">Les pages que l'on a partagées avec vous. Ouvrez-en une pour la lire et y laisser des commentaires, généraux ou sur un endroit précis.</p>
+      ) : <p className="text-secondary small">Un agent publie une page quand vous le lui demandez (« publie ce rapport comme page ») ; vous pouvez aussi publier un fichier HTML depuis l'explorateur de fichiers. Une page est privée jusqu'à ce que son propriétaire la partage.</p>}
       <Table size="sm" hover responsive>
         <thead>
           <tr>
@@ -58,7 +62,7 @@ export default function SharedPagesPage() {
           {pages.length === 0 && (
             <tr>
               <td colSpan={5} className="text-secondary fst-italic">
-                {filter === 'mine' ? "Vous n'avez pas encore publié de page." : filter === 'shared' ? 'Aucune page partagée avec vous.' : 'Aucune page pour le moment.'}
+                {guest ? 'Aucune page partagée avec vous pour le moment.' : filter === 'mine' ? "Vous n'avez pas encore publié de page." : filter === 'shared' ? 'Aucune page partagée avec vous.' : 'Aucune page pour le moment.'}
               </td>
             </tr>
           )}
