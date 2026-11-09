@@ -116,7 +116,9 @@ export interface SharedPage {
   project: { id: string; name: string } | null;
   session: { id: string; name: string } | null;
   sourcePath: string | null;
-  viewerAccess: { owner: boolean; member: boolean };
+  viewerAccess: { owner: boolean; member: boolean; admin: boolean };
+  /** Anciennes versions consultables ; false = `versions` ne contient que la dernière. */
+  historyEnabled: boolean;
   /** Commentaires non traités. */
   openComments: number;
   /** Renvoi des commentaires à la session d'origine (OFF sans session). */
@@ -161,6 +163,7 @@ export const SHARED_PAGE_FIELDS = gql`
     }
     linkAccess
     agentHandoff
+    historyEnabled
     version
     createdAt
     updatedAt
@@ -199,6 +202,7 @@ export const SHARED_PAGE_FIELDS = gql`
     viewerAccess {
       owner
       member
+      admin
     }
     openComments
   }
@@ -381,6 +385,21 @@ export const REMOVE_SHARED_PAGE_MEMBER = gql`
     removeSharedPageMember(id: $id, userId: $userId) {
       ...SharedPageFields
     }
+  }
+`;
+
+export const SET_SHARED_PAGE_HISTORY = gql`
+  ${SHARED_PAGE_FIELDS}
+  mutation SetSharedPageHistory($id: ID!, $enabled: Boolean!) {
+    setSharedPageHistory(id: $id, enabled: $enabled) {
+      ...SharedPageFields
+    }
+  }
+`;
+
+export const DELETE_ALL_SHARED_PAGE_COMMENTS = gql`
+  mutation DeleteAllSharedPageComments($id: ID!) {
+    deleteAllSharedPageComments(id: $id)
   }
 `;
 

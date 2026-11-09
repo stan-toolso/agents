@@ -107,7 +107,7 @@ export const sharedPageCommentService = {
   /** L'auteur, ou le propriétaire de la page, supprime un commentaire (avec ses réponses) ou une réponse. */
   async delete(actor: CommentActor, id: string): Promise<boolean> {
     const { comment, page } = await this.getFor(actor.user.id, id);
-    if (comment.authorId !== actor.user.id && page.ownerId !== actor.user.id) throw new AppError("Seuls l'auteur et le propriétaire de la page suppriment un commentaire", 'FORBIDDEN');
+    if (comment.authorId !== actor.user.id && !sharedPageService.canManage(page, actor.user)) throw new AppError("Seuls l'auteur, le propriétaire de la page et un administrateur suppriment un commentaire", 'FORBIDDEN');
     return sharedPageCommentRepository.delete(id);
   },
 

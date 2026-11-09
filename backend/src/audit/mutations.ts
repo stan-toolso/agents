@@ -213,6 +213,8 @@ export const AUDITED: Record<string, MutationAudit> = {
   addSharedPageMember: { action: 'page.share', lookup: ['shared_page', 'id'], details: (a) => ({ email: a.email, ...(a.invite ? { invite: true } : {}), ...(a.message ? { message: true } : {}), ...(a.notify === false ? { notify: false } : {}) }) },
   removeSharedPageMember: { action: 'page.unshare', lookup: ['shared_page', 'id'], details: (a) => ({ userId: a.userId }) },
   deleteSharedPage: { action: 'page.delete', lookup: ['shared_page', 'id'] },
+  setSharedPageHistory: { action: 'page.history', lookup: ['shared_page', 'id'], details: (a) => ({ enabled: a.enabled }) },
+  deleteAllSharedPageComments: { action: 'page.comments_purge', lookup: ['shared_page', 'id'] },
   // Livraisons : la configuration du déploiement (livrer, déployer et annuler sont inscrits par deliveries/service.ts).
   setDeployConfig: { action: 'delivery.config', project: 'projectId', targetId: () => null, details: (a) => ({ vaultItem: a.input?.vaultItem ?? null, command: a.input?.command ?? null, branch: a.input?.branch ?? null }) },
   // Application (hors projet).

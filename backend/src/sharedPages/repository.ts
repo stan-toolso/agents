@@ -12,6 +12,7 @@ interface Row {
   session_id: string | null;
   source_path: string | null;
   agent_handoff: AgentHandoff;
+  history_enabled: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -26,6 +27,7 @@ const toPage = (r: Row): SharedPage => ({
   sessionId: r.session_id,
   sourcePath: r.source_path,
   agentHandoff: r.agent_handoff ?? 'manual',
+  historyEnabled: r.history_enabled ?? true,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -115,13 +117,14 @@ export const sharedPageRepository = {
     }
   },
 
-  async update(id: string, patch: { title?: string; description?: string | null; linkAccess?: boolean; agentHandoff?: AgentHandoff }): Promise<SharedPage | null> {
+  async update(id: string, patch: { title?: string; description?: string | null; linkAccess?: boolean; agentHandoff?: AgentHandoff; historyEnabled?: boolean }): Promise<SharedPage | null> {
     const sets = ['updated_at = now()'];
     const params: unknown[] = [id];
     if (patch.title !== undefined) sets.push(`title = $${params.push(patch.title)}`);
     if (patch.description !== undefined) sets.push(`description = $${params.push(patch.description)}`);
     if (patch.linkAccess !== undefined) sets.push(`link_access = $${params.push(patch.linkAccess)}`);
     if (patch.agentHandoff !== undefined) sets.push(`agent_handoff = $${params.push(patch.agentHandoff)}`);
+    if (patch.historyEnabled !== undefined) sets.push(`history_enabled = $${params.push(patch.historyEnabled)}`);
     const { rows } = await pool.query<Row>(`UPDATE shared_pages SET ${sets.join(', ')} WHERE id = $1 RETURNING *`, params);
     return rows[0] ? toPage(rows[0]) : null;
   },

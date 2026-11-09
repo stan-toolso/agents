@@ -748,14 +748,15 @@ export const resolvers = {
       const members = await sharedPageService.members(p.id);
       return p.ownerId === user.id || members.some((m) => m.userId === user.id) ? members : [];
     },
-    versions: (p: SharedPage) => sharedPageService.versions(p.id),
+    versions: (p: SharedPage) => sharedPageService.visibleVersions(p),
+    historyEnabled: (p: SharedPage) => p.historyEnabled,
     project: (p: SharedPage, _: unknown, ctx: Ctx) => (p.ownerId === ctx.user?.id ? projectIfAccessible(ctx, p.projectId) : null),
     session: (p: SharedPage, _: unknown, ctx: Ctx) => (p.ownerId === ctx.user?.id && p.sessionId ? sessionService.get(p.sessionId) : null),
     sourcePath: (p: SharedPage, _: unknown, ctx: Ctx) => (p.ownerId === ctx.user?.id ? p.sourcePath : null),
     viewerAccess: async (p: SharedPage, _: unknown, ctx: Ctx) => {
       const user = requireUser(ctx);
       const members = await sharedPageService.members(p.id);
-      return { owner: p.ownerId === user.id, member: members.some((m) => m.userId === user.id) };
+      return { owner: p.ownerId === user.id, member: members.some((m) => m.userId === user.id), admin: sharedPageService.canManage(p, user) };
     },
     comments: (p: SharedPage) => sharedPageCommentService.roots(p.id),
     openComments: async (p: SharedPage, _: unknown, ctx: Ctx) => (await loadersOf(ctx).sharedPageOpenComments(p.id)) ?? 0,
@@ -2254,6 +2255,8 @@ export const resolvers = {
       sharedPageService.addMember(requireUser(ctx), args.id, args.email, { invite: Boolean(args.invite), message: args.message, notify: args.notify !== false }),
     removeSharedPageMember: (_: unknown, args: { id: string; userId: string }, ctx: Ctx) => sharedPageService.removeMember(requireUser(ctx), args.id, args.userId),
     deleteSharedPage: (_: unknown, args: { id: string }, ctx: Ctx) => sharedPageService.delete(requireUser(ctx).id, args.id),
+    setSharedPageHistory: (_: unknown, args: { id: string; enabled: boolean }, ctx: Ctx) => sharedPageService.setHistory(requireUser(ctx), args.id, args.enabled),
+    deleteAllSharedPageComments: (_: unknown, args: { id: string }, ctx: Ctx) => sharedPageService.deleteAllComments(requireUser(ctx), args.id),
     addSharedPageComment: (_: unknown, args: { pageId: string; body: string; anchor?: unknown; version?: number | null }, ctx: Ctx) =>
       sharedPageCommentService.add({ user: requireUser(ctx) }, args.pageId, { body: args.body, anchor: args.anchor, version: args.version }),
     replySharedPageComment: (_: unknown, args: { commentId: string; body: string }, ctx: Ctx) => sharedPageCommentService.reply({ user: requireUser(ctx) }, args.commentId, args.body),

@@ -163,6 +163,8 @@ export const ACTION_LABELS: Record<string, string> = {
   'page.share': 'a ouvert la page à',
   'page.unshare': 'a retiré un accès à la page',
   'page.delete': 'a supprimé la page',
+  'page.history': "a réglé l'historique de la page",
+  'page.comments_purge': 'a supprimé tous les commentaires de la page',
   'user.invite': 'a invité dans l’application',
   'user.admin': 'a changé les droits d’administration de',
   'user.super_admin': 'a changé les droits de super administration de',

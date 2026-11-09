@@ -2503,7 +2503,10 @@ type SharedPage {
   updatedAt: DateTime!
   "Propriétaire et personnes ajoutées seulement ; vide pour qui ne voit la page que par le lien."
   members: [SharedPageMember!]!
+  "Versions consultables, la plus récente d'abord : seulement la dernière quand l'historique est désactivé."
   versions: [SharedPageVersion!]!
+  "Anciennes versions consultables (réglé par le propriétaire ou un administrateur de Skipper)."
+  historyEnabled: Boolean!
   "Origine (propriétaire seulement)."
   project: Project
   session: Session
@@ -2583,6 +2586,8 @@ type SharedPageViewerAccess {
   owner: Boolean!
   "Personne ajoutée (hors propriétaire)."
   member: Boolean!
+  "Administre la page (propriétaire ou administrateur de Skipper) : historique, suppression de tous les commentaires."
+  admin: Boolean!
 }
 
 input SharedPageInput {
@@ -3410,6 +3415,10 @@ type Mutation {
   "Le propriétaire retire qui il veut ; une personne ajoutée peut se retirer elle-même."
   removeSharedPageMember(id: ID!, userId: ID!): SharedPage!
   deleteSharedPage(id: ID!): Boolean!
+  "Active ou désactive l'historique des versions (propriétaire ou administrateur de Skipper) : désactivé, seule la dernière version est listée et servie."
+  setSharedPageHistory(id: ID!, enabled: Boolean!): SharedPage!
+  "Supprime tous les commentaires de la page, réponses comprises (propriétaire ou administrateur de Skipper) ; renvoie le nombre de fils supprimés."
+  deleteAllSharedPageComments(id: ID!): Int!
   "Commentaire sur une page que l'on voit : général, ou ancré sur un élément (anchor). version : celle affichée (la dernière par défaut)."
   addSharedPageComment(pageId: ID!, body: String!, anchor: SharedPageAnchorInput, version: Int): SharedPageComment!
   replySharedPageComment(commentId: ID!, body: String!): SharedPageComment!

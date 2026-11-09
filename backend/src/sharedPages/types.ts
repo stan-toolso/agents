@@ -20,6 +20,8 @@ export interface SharedPage {
   sourcePath: string | null;
   /** Réglé par le propriétaire ; sans effet tant que la page n'a pas de session d'origine. */
   agentHandoff: AgentHandoff;
+  /** Anciennes versions consultables ; false = seule la dernière version est servie et listée. */
+  historyEnabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
