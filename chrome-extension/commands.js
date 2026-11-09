@@ -26,6 +26,19 @@ async function groupExists(id) {
   }
 }
 
+/**
+ * Range un onglet dans un groupe existant, ou dans un nouveau groupe créé dans SA fenêtre : sans windowId, Chrome crée
+ * le groupe dans la fenêtre courante, et une application installée (PWA, comme Skipper) ou une popup au premier plan le
+ * refuse (« Grouping is not supported by tabs in this window »). Un groupe d'une autre fenêtre : l'onglet y est déplacé.
+ */
+async function groupTab(tabId, groupId) {
+  const tab = await chrome.tabs.get(tabId);
+  const win = await chrome.windows.get(tab.windowId);
+  if (win.type !== 'normal') throw new Error("Cet onglet est dans une fenêtre d'application ou une popup, où Chrome ne permet pas les groupes : ouvrez la page dans une fenêtre Chrome ordinaire.");
+  if (groupId !== null) return chrome.tabs.group({ tabIds: [tabId], groupId });
+  return chrome.tabs.group({ tabIds: [tabId], createProperties: { windowId: tab.windowId } });
+}
+
 /** Groupe partagé « Skipper » (onglets confiés par la personne), s'il existe. */
 export async function sharedGroupId() {
   const groups = await groupsState();
@@ -41,7 +54,7 @@ export async function sharedGroupId() {
 /** Confie un onglet à Skipper (popup) : il rejoint le groupe « Skipper ». */
 export async function shareTab(tabId) {
   const existing = await sharedGroupId();
-  const groupId = await chrome.tabs.group({ tabIds: [tabId], ...(existing !== null ? { groupId: existing } : {}) });
+  const groupId = await groupTab(tabId, existing);
   if (existing === null) {
     await chrome.tabGroups.update(groupId, { title: SHARED_GROUP_TITLE, color: 'orange' });
     const groups = await groupsState();
@@ -58,12 +71,30 @@ async function sessionGroupId(session) {
 /** Range un onglet dans le groupe de la session (créé au besoin, au nom de la session). */
 async function addToSessionGroup(tabId, session) {
   const existing = await sessionGroupId(session);
-  const groupId = await chrome.tabs.group({ tabIds: [tabId], ...(existing !== null ? { groupId: existing } : {}) });
+  const groupId = await groupTab(tabId, existing);
   if (existing === null) {
     await chrome.tabGroups.update(groupId, { title: `${SESSION_GROUP_PREFIX}${String(session.name || 'session').slice(0, 30)}`, color: 'blue' });
     const groups = await groupsState();
     await chrome.storage.session.set({ groups: { ...groups, sessions: { ...(groups.sessions ?? {}), [session.id]: groupId } } });
   }
+}
+
+/**
+ * Fenêtre où ouvrir un onglet de la session : celle de son groupe, sinon la dernière fenêtre ordinaire utilisée, sinon
+ * une nouvelle. Jamais la fenêtre au premier plan si elle n'est pas « normal » : une application installée (PWA, comme
+ * Skipper lui-même) ou une popup refuse les groupes d'onglets (« Grouping is not supported by tabs in this window »).
+ */
+async function targetWindowId(session) {
+  const groupId = await sessionGroupId(session);
+  if (groupId !== null) {
+    const group = await chrome.tabGroups.get(groupId).catch(() => null);
+    if (group) return group.windowId;
+  }
+  const last = await chrome.windows.getLastFocused({ windowTypes: ['normal'] }).catch(() => null);
+  if (last && last.type === 'normal') return last.id;
+  const normal = (await chrome.windows.getAll({ windowTypes: ['normal'] }))[0];
+  if (normal) return normal.id;
+  return (await chrome.windows.create({ focused: true })).id;
 }
 
 /** Onglets auxquels la session a droit. */
@@ -224,7 +255,7 @@ export const commands = {
 
   async open(args, session) {
     const url = checkUrl(String(args.url ?? ''));
-    const tab = await chrome.tabs.create({ url, active: true });
+    const tab = await chrome.tabs.create({ url, active: true, windowId: await targetWindowId(session) });
     await addToSessionGroup(tab.id, session);
     const loaded = await waitForLoad(tab.id);
     return { text: `Onglet ${tab.id} ouvert : ${describeTab(loaded)}` };

@@ -81,9 +81,16 @@ const check = (label, ok, detail) => {
 let r = await command('tabs');
 check('tabs vide', r.ok && /Aucun onglet/.test(r.result.text), r);
 
+// Fenêtre au premier plan qui refuse les groupes (popup, application installée comme Skipper) : l'onglet doit
+// s'ouvrir dans une fenêtre ordinaire.
+await sw.evaluate(async () => {
+  await chrome.windows.create({ type: 'popup', url: 'about:blank', focused: true });
+});
 r = await command('open', { url: `${base}/` });
 const tabId = Number(r.result?.text.match(/Onglet (\d+)/)?.[1]);
-check('open', r.ok && tabId > 0, r);
+check('open (malgré une fenêtre popup au premier plan)', r.ok && tabId > 0, r);
+const winType = await sw.evaluate(async (id) => (await chrome.windows.get((await chrome.tabs.get(id)).windowId)).type, tabId);
+check('onglet ouvert dans une fenêtre ordinaire', winType === 'normal', winType);
 
 r = await command('tabs');
 check('tabs liste l’onglet', r.ok && r.result.text.includes(`[${tabId}]`) && r.result.text.includes('ouvert par cette session'), r);
