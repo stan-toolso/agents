@@ -1,8 +1,8 @@
 import { useSyncExternalStore } from 'react';
 
 /**
- * Thème clair / sombre / système, mémorisé dans ce navigateur seulement (`skipper.theme` : 'light' ou 'dark' ;
- * absent = système). Appliqué par l'attribut `data-bs-theme` de <html> (modes de couleur Bootstrap 5.3) ; un
+ * Thème clair / sombre / système, mémorisé dans ce navigateur seulement (`skipper.theme` : 'light', 'dark' ou
+ * 'system' ; absent = clair, le thème par défaut). Appliqué par l'attribut `data-bs-theme` de <html> (modes de couleur Bootstrap 5.3) ; un
  * script en tête de index.html l'applique avant le premier rendu pour éviter un flash.
  */
 
@@ -16,9 +16,9 @@ const META_COLORS: Record<Theme, string> = { dark: '#0f0f0f', light: '#eceef1' }
 export function themePreference(): ThemePreference {
   try {
     const v = localStorage.getItem(KEY);
-    return v === 'light' || v === 'dark' ? v : 'system';
+    return v === 'dark' || v === 'system' ? v : 'light';
   } catch {
-    return 'system';
+    return 'light';
   }
 }
 
@@ -27,11 +27,11 @@ export function resolveTheme(pref: ThemePreference = themePreference()): Theme {
   try {
     return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
   } catch {
-    return 'dark';
+    return 'light';
   }
 }
 
-let current: Theme = typeof document === 'undefined' ? 'dark' : resolveTheme();
+let current: Theme = typeof document === 'undefined' ? 'light' : resolveTheme();
 
 export function applyTheme(): void {
   current = resolveTheme();
@@ -43,7 +43,7 @@ export function applyTheme(): void {
 
 export function setThemePreference(pref: ThemePreference): void {
   try {
-    if (pref === 'system') localStorage.removeItem(KEY);
+    if (pref === 'light') localStorage.removeItem(KEY);
     else localStorage.setItem(KEY, pref);
   } catch {
     /* stockage indisponible : le choix vaut jusqu'au rechargement */
@@ -71,10 +71,10 @@ const subscribe = (l: () => void) => {
 
 /** Thème résolu (clair ou sombre), mis à jour en direct. */
 export function useTheme(): Theme {
-  return useSyncExternalStore(subscribe, () => current, () => 'dark');
+  return useSyncExternalStore(subscribe, () => current, () => 'light');
 }
 
 export function useThemePreference(): [ThemePreference, (pref: ThemePreference) => void] {
-  const pref = useSyncExternalStore(subscribe, themePreference, () => 'system' as ThemePreference);
+  const pref = useSyncExternalStore(subscribe, themePreference, () => 'light' as ThemePreference);
   return [pref, setThemePreference];
 }

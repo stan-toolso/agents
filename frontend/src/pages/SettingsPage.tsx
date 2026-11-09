@@ -739,9 +739,9 @@ type SettingsSection = 'claude' | 'opencode' | 'github' | 'gitlab' | 'server' | 
 function AppearanceSection() {
   const [pref, setPref] = useThemePreference();
   const options: { value: ThemePreference; label: string; hint: string }[] = [
+    { value: 'light', label: 'Clair', hint: 'Surfaces claires partout, y compris le fil des sessions et les terminaux. Le thème par défaut.' },
+    { value: 'dark', label: 'Sombre', hint: 'Surfaces sombres.' },
     { value: 'system', label: `Système (actuellement ${resolveTheme('system') === 'light' ? 'clair' : 'sombre'})`, hint: 'Suit le réglage du système ou du navigateur.' },
-    { value: 'light', label: 'Clair', hint: 'Surfaces claires partout, y compris le fil des sessions et les terminaux.' },
-    { value: 'dark', label: 'Sombre', hint: 'Surfaces sombres, le thème par défaut.' },
   ];
   return (
     <Card className="mb-4">
