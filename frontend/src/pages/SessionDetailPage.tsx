@@ -170,7 +170,7 @@ export default function SessionDetailPage() {
   const chat = session?.kind === 'CHAT';
   const archived = Boolean(session?.archivedAt);
   // Dossier de travail supprimé (à la fusion de sa PR, par exemple) : la session ne reprend plus, le serveur refuse
-  // toute instruction ; on la relance dans un nouveau dossier.
+  // toute instruction ; « Repartir à neuf » la continue dans un nouveau dossier.
   const folderGone = Boolean(session && !chat && !session.worksession && session.status !== 'RUNNING');
   // Interlocuteurs de la conversation (rendu sans détail technique) : la personne qui pilote la session (qui a pris
   // la main, qui l'a demandée à l'agent, ou sa propriétaire), sinon la session d'agent qui l'a lancée ; en face,
@@ -398,7 +398,7 @@ export default function SessionDetailPage() {
       : running
         ? "⏵ L'agent attend vos instructions"
         : folderGone
-          ? `■ Dossier de travail supprimé${session.formerWorksession ? ` (branche ${session.formerWorksession.branch})` : ''} — la session ne peut plus reprendre : relancez-la dans un nouveau dossier${archived ? '' : ', ou archivez-la'}`
+          ? `■ Dossier de travail supprimé${session.formerWorksession ? ` (branche ${session.formerWorksession.branch})` : ''} — la session ne peut plus reprendre : « Repartir à neuf » la continue dans un nouveau dossier${archived ? '' : ', ou archivez-la'}`
         : archived
           ? "■ Session archivée — écrivez un message pour la restaurer et reprendre la conversation"
           : session.status === 'QUEUED'

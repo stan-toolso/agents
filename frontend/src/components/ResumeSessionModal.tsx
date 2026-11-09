@@ -12,8 +12,8 @@ export const RESUME_SESSION_MESSAGE = "Continue là où tu t'étais arrêté.";
 /**
  * Reprise d'une session arrêtée (terminée, en échec, arrêtée, archivée) : un message, modifiable, envoyé dans sa
  * conversation comme depuis sa page — même session, même nom, même historique, même dossier. Archivée, elle est
- * d'abord restaurée avec son dossier (refusé si une autre session y travaille). « Relancer » reste là pour repartir
- * d'une nouvelle session.
+ * d'abord restaurée avec son dossier (refusé si une autre session y travaille). « Repartir à neuf » (RelaunchModal) démarre
+ * plutôt une nouvelle session avec une conversation neuve.
  */
 export default function ResumeSessionModal({ session, onRelaunch, onClose }: { session: { id: string; name: string; archivedAt?: string | null }; onRelaunch?: () => void; onClose: () => void }) {
   const navigate = useNavigate();
@@ -51,7 +51,7 @@ export default function ResumeSessionModal({ session, onRelaunch, onClose }: { s
           </Form.Group>
           {onRelaunch && (
             <button type="button" className="btn btn-link btn-sm p-0" disabled={loading} onClick={onRelaunch}>
-              Repartir plutôt d'une nouvelle session (Relancer)
+              Repartir plutôt à neuf, dans une nouvelle session avec une conversation neuve
             </button>
           )}
           {error && <Alert variant="danger" className="mt-2 mb-0 py-2">{error.message}</Alert>}

@@ -8,7 +8,7 @@ import { sessionDotClass } from '../workbench/WorkspaceTabs';
 import { useDeletions } from '../workbench/useDeletions';
 import { DeliverButton } from './Deliveries';
 import { useDialogs } from './Dialogs';
-import RelaunchModal from './RelaunchModal';
+import RelaunchModal, { RELAUNCH_LABEL, RELAUNCH_TITLE } from './RelaunchModal';
 import ResumeSessionModal from './ResumeSessionModal';
 import ScheduleModal from './ScheduleModal';
 import SessionSettingsModal from './SessionSettingsModal';
@@ -21,7 +21,7 @@ export type ControlledSession = Session & { childSessions: ChildSession[] };
 export const isReadOnlySession = (session: Pick<Session, 'project'> | null | undefined): boolean => session?.project.myRole === 'VIEWER';
 
 /**
- * Actions d'une session (réglages, planification, interrompre, terminer, arrêter, relancer, archiver…) et les
+ * Actions d'une session (réglages, planification, interrompre, terminer, arrêter, repartir à neuf, archiver…) et les
  * modales qu'elles ouvrent, partagées entre l'en-tête déplié de la page de session et l'onglet « Session » du
  * panneau de droite. Le hook accepte une session absente (page en cours de chargement) : il ne rend alors rien.
  */
@@ -142,12 +142,12 @@ export function useSessionActions(session: ControlledSession | null | undefined)
       <button type="button" className="cc-btn" title="Lien public de lecture du transcript, sans connexion, à durée limitée et révocable" onClick={() => setSharing(true)}>
         <i className="bi bi-share" /> Partager{session.shares?.length ? ` (${session.shares.length})` : ''}
       </button>
-      <button type="button" className="cc-btn" title="Repart d'une nouvelle session (nouveau nom) avec un résumé de celle-ci ; pour continuer la même conversation, utilisez « Reprendre » ou écrivez un message" onClick={() => setRelaunching(true)}>
-        <i className="bi bi-arrow-repeat" /> Relancer
+      <button type="button" className="cc-btn" title={RELAUNCH_TITLE} onClick={() => setRelaunching(true)}>
+        <i className="bi bi-stars" /> {RELAUNCH_LABEL}
       </button>
       {archived || chat ? (
         <>
-          {/* Dossier supprimé depuis : restaurée, elle ne pourrait pas reprendre (le serveur refuse) ; on la relance. */}
+          {/* Dossier supprimé depuis : restaurée, elle ne pourrait pas reprendre (le serveur refuse) ; on repart à neuf. */}
           {archived && (chat || session.worksession) && (
             <button type="button" className="cc-btn accent" title="Remet la session parmi les sessions actives" onClick={() => unarchiveSession({ variables: { id } })}>
               Restaurer
