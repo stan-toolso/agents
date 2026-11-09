@@ -4,7 +4,8 @@ import type { SharedPage, SharedPageComment } from './types.js';
 // Commentaires des pages partagées : droits (qui voit commente, l'auteur modifie, l'auteur ou le propriétaire
 // supprime), ancre nettoyée, réponses, état traité et destinataires des notifications. Base simulée en mémoire.
 const state = vi.hoisted(() => ({
-  pages: new Map<string, { id: string; ownerId: string; title: string; version: number; linkAccess: boolean; members: string[] }>(),
+  pages: new Map<string, { id: string; ownerId: string; title: string; version: number; linkAccess: boolean; members: string[]; sessionId?: string | null; agentHandoff?: SharedPage['agentHandoff'] }>(),
+  forwarded: [] as Array<{ pageId: string; rootId: string; actor: string; trigger: string }>,
   comments: [] as SharedPageComment[],
   notified: [] as Array<{ type: string; userId: string | null | undefined; title: string; link: string | null | undefined }>,
   seq: 0,
@@ -15,8 +16,13 @@ vi.mock('./service.js', () => ({
     async getFor(userId: string, id: string): Promise<SharedPage> {
       const p = state.pages.get(id);
       if (!p || !(p.ownerId === userId || p.linkAccess || p.members.includes(userId))) throw new Error('Page partagée introuvable, ou non partagée avec vous');
-      return { id: p.id, ownerId: p.ownerId, title: p.title, version: p.version, linkAccess: p.linkAccess, description: null, projectId: null, sessionId: null, sourcePath: null, createdAt: new Date(), updatedAt: new Date() };
+      return { id: p.id, ownerId: p.ownerId, title: p.title, version: p.version, linkAccess: p.linkAccess, description: null, projectId: null, sessionId: p.sessionId ?? null, sourcePath: null, agentHandoff: p.agentHandoff ?? 'manual', createdAt: new Date(), updatedAt: new Date() };
     },
+  },
+}));
+vi.mock('./updateRequest.js', () => ({
+  sharedPageUpdateService: {
+    forward: async (page: SharedPage, root: SharedPageComment, actor: { id: string }, trigger: string) => void state.forwarded.push({ pageId: page.id, rootId: root.id, actor: actor.id, trigger }),
   },
 }));
 vi.mock('./commentRepository.js', () => ({
@@ -64,7 +70,38 @@ beforeEach(() => {
   state.pages.set('p1', { id: 'p1', ownerId: 'owner', title: 'Rapport', version: 3, linkAccess: false, members: ['alice', 'bob'] });
   state.comments = [];
   state.notified = [];
+  state.forwarded = [];
   state.seq = 0;
+});
+
+describe("transmission automatique à l'agent", () => {
+  const flush = () => new Promise((r) => setTimeout(r, 20));
+
+  it('page en « auto » avec session : commentaire et réponse des personnes transmis, pas ceux des sessions', async () => {
+    state.pages.get('p1')!.sessionId = 's1';
+    state.pages.get('p1')!.agentHandoff = 'auto';
+    const c = await svc.add({ user: alice }, 'p1', { body: 'Trop petit' });
+    await svc.reply({ user: bob }, c.id, 'Je confirme');
+    await svc.reply({ user: owner, sessionId: 's1' }, c.id, 'Corrigé');
+    await svc.add({ user: owner, sessionId: 's1' }, 'p1', { body: 'Note de l’agent' });
+    await flush();
+    expect(state.forwarded).toEqual([
+      { pageId: 'p1', rootId: c.id, actor: 'alice', trigger: 'comment' },
+      { pageId: 'p1', rootId: c.id, actor: 'bob', trigger: 'reply' },
+    ]);
+  });
+
+  it('rien en « manual », en « off » ou sans session', async () => {
+    state.pages.get('p1')!.sessionId = 's1';
+    await svc.add({ user: alice }, 'p1', { body: 'a' });
+    state.pages.get('p1')!.agentHandoff = 'off';
+    await svc.add({ user: alice }, 'p1', { body: 'b' });
+    state.pages.get('p1')!.agentHandoff = 'auto';
+    state.pages.get('p1')!.sessionId = null;
+    await svc.add({ user: alice }, 'p1', { body: 'c' });
+    await flush();
+    expect(state.forwarded).toEqual([]);
+  });
 });
 
 describe('ancre', () => {

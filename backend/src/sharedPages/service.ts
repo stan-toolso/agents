@@ -7,7 +7,7 @@ import { userRepository } from '../users/repository.js';
 import { userService } from '../users/service.js';
 import type { User } from '../users/types.js';
 import { sharedPageRepository } from './repository.js';
-import type { PublishInput, SharedPage } from './types.js';
+import { AGENT_HANDOFF_MODES, type AgentHandoff, type PublishInput, type SharedPage } from './types.js';
 
 export const MAX_PAGE_BYTES = 10 * 1024 * 1024;
 
@@ -139,12 +139,16 @@ export const sharedPageService = {
     return { html, version: v };
   },
 
-  async update(userId: string, id: string, input: { title?: string | null; description?: string | null; linkAccess?: boolean | null }): Promise<SharedPage> {
+  async update(userId: string, id: string, input: { title?: string | null; description?: string | null; linkAccess?: boolean | null; agentHandoff?: string | null }): Promise<SharedPage> {
     await this.getOwned(userId, id);
-    const patch: { title?: string; description?: string | null; linkAccess?: boolean } = {};
+    const patch: { title?: string; description?: string | null; linkAccess?: boolean; agentHandoff?: AgentHandoff } = {};
     if (input.title != null) patch.title = cleanTitle(input.title);
     if (input.description !== undefined) patch.description = cleanDescription(input.description);
     if (input.linkAccess != null) patch.linkAccess = input.linkAccess;
+    if (input.agentHandoff != null) {
+      if (!AGENT_HANDOFF_MODES.includes(input.agentHandoff as AgentHandoff)) throw new AppError('Réglage de transmission à l’agent inconnu');
+      patch.agentHandoff = input.agentHandoff as AgentHandoff;
+    }
     return (await sharedPageRepository.update(id, patch)) ?? this.get(id);
   },
 

@@ -781,6 +781,22 @@ const auditLog = (a = {}) => {
   return auditEntries.filter((e) => (!f.actorKind || e.actorKind === f.actorKind) && (!f.actorUserId || e.actor?.id === f.actorUserId) && (!f.targetType || e.targetType === f.targetType) && (!f.action || e.action === f.action) && (!f.from || e.createdAt >= f.from) && (!f.to || e.createdAt < f.to) && (!a.before || Number(e.id) < Number(a.before)));
 };
 
+const sharedPageState = { agentHandoff: 'MANUAL' };
+const sharedPageDemo = (id) => ({
+  __typename: 'SharedPage',
+  id,
+  title: 'Maquette de la page tarifs',
+  description: null,
+  owner: U.me,
+  linkAccess: true,
+  members: [],
+  project: P.site,
+  session: S.tarifs,
+  sourcePath: 'maquette-tarifs.html',
+  viewerAccess: { __typename: 'SharedPageViewerAccess', owner: true, member: false },
+  agentHandoff: sharedPageState.agentHandoff,
+});
+
 export const demoRoot = {
   usageReport,
   auditLog,
@@ -859,6 +875,13 @@ export const demoRoot = {
   workflows: [],
   workflowRuns: [],
   sharedPages: [],
+  // Page partagée : à moi, publiée par la session « Refonte de la page tarifs » ; le réglage de la transmission
+  // des commentaires à l'agent (panneau Commentaires) se change et reste en mémoire.
+  sharedPage: (a) => sharedPageDemo(a.id),
+  updateSharedPage: (a) => {
+    if (a.input?.agentHandoff) sharedPageState.agentHandoff = a.input.agentHandoff;
+    return sharedPageDemo(a.id);
+  },
   githubPullRequests: [],
   gitStatus,
   gitLog: (a = {}) => (worksessionOf(a.worksessionId) ? commits : commits.slice(2)).slice(0, a.limit ?? 50),
