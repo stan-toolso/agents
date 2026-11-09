@@ -46,8 +46,11 @@
 .pc-anchor-text { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Renvoi des commentaires à l'agent */
-.pc-agent-row { padding: 6px 10px; border-bottom: 1px solid var(--cc-border); display: flex; }
+.pc-agent-row { padding: 6px 10px; border-bottom: 1px solid var(--cc-border); display: flex; flex-direction: column; gap: 6px; }
 .pc-agent-row .cc-btn { width: 100%; justify-content: center; }
+.pc-agent-mode { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--cc-dim); white-space: nowrap; }
+.pc-agent-mode .form-select { width: auto; margin-left: auto; }
+.pc-agent-note { color: var(--cc-dim); font-size: 12px; }
 
 /* Liste */
 .pc-list { flex: 1; min-height: 0; overflow: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }

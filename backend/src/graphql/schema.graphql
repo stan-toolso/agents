@@ -2513,6 +2513,18 @@ type SharedPage {
   comments: [SharedPageComment!]!
   "Nombre de commentaires non traités."
   openComments: Int!
+  "Renvoi des commentaires à la session d'origine, réglé par le propriétaire ; OFF pour une page sans session."
+  agentHandoff: SharedPageAgentHandoff!
+}
+
+"Renvoi des commentaires d'une page partagée à la session qui l'a publiée."
+enum SharedPageAgentHandoff {
+  "Désactivé : ni « Transmettre à l'agent » ni demande de mise à jour."
+  OFF
+  "Sur demande : le propriétaire transmet les commentaires à traiter (bouton « Transmettre à l'agent »)."
+  MANUAL
+  "Automatique : chaque commentaire ou réponse d'une personne est transmis aussitôt à la session."
+  AUTO
 }
 
 """
@@ -2575,6 +2587,7 @@ input SharedPageInput {
   title: String
   description: String
   linkAccess: Boolean
+  agentHandoff: SharedPageAgentHandoff
 }
 
 input PushSubscriptionInput {

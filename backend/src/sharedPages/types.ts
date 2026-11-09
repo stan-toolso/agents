@@ -1,3 +1,10 @@
+/**
+ * Renvoi des commentaires à la session qui a publié la page : désactivé, sur demande (bouton « Transmettre à
+ * l'agent »), ou automatique (chaque commentaire ou réponse d'une personne lui est transmis aussitôt).
+ */
+export type AgentHandoff = 'off' | 'manual' | 'auto';
+export const AGENT_HANDOFF_MODES: readonly AgentHandoff[] = ['off', 'manual', 'auto'];
+
 /** Page HTML publiée par une personne ou un agent, servie à /shared/<id>, privée par défaut. */
 export interface SharedPage {
   id: string;
@@ -11,6 +18,8 @@ export interface SharedPage {
   projectId: string | null;
   sessionId: string | null;
   sourcePath: string | null;
+  /** Réglé par le propriétaire ; sans effet tant que la page n'a pas de session d'origine. */
+  agentHandoff: AgentHandoff;
   createdAt: Date;
   updatedAt: Date;
 }
