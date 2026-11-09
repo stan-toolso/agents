@@ -138,3 +138,108 @@ export function focusedIsPassword() {
   const el = document.activeElement;
   return Boolean(el && el.tagName === 'INPUT' && el.type === 'password');
 }
+
+/**
+ * Indicateur « piloté par Skipper » : bandeau en haut de la page (shadow DOM fermé, hors de read_page et du texte de
+ * la page, transparent aux clics sauf sur ses boutons) et préfixe 🤖 du titre de l'onglet, rétabli si la page le change.
+ * Installé à chaque nouveau document (Page.addScriptToEvaluateOnNewDocument) tant que Skipper pilote l'onglet ;
+ * `info.busy` anime le bandeau pendant une action. Le bouton « Reprendre la main » appelle la liaison CDP
+ * `__skipperRelease` (l'extension retire alors l'onglet à Skipper).
+ */
+export function installIndicator(info) {
+  const PREFIX = '🤖 ';
+  const w = window;
+  if (w.__skipperIndicator) return w.__skipperIndicator.update(info);
+  // Au repos, le bandeau se réduit en languette (il ne cache plus l'en-tête du site) ; pendant une action, ou si la
+  // personne l'a déplié, il est complet.
+  const state = { info, host: null, root: null, observer: null, expanded: false };
+  const applyTitle = () => {
+    if (!document.title.startsWith(PREFIX)) document.title = PREFIX + document.title;
+  };
+  const render = () => {
+    if (!state.root) return;
+    const i = state.info;
+    const bar = state.root.getElementById('bar');
+    const collapsed = !i.busy && !state.expanded;
+    bar.className = `${i.busy ? 'busy' : ''} ${collapsed ? 'collapsed' : ''}`;
+    state.root.getElementById('toggle').textContent = collapsed ? '▾' : '▴';
+    state.root.getElementById('toggle').title = collapsed ? 'Afficher le bandeau' : 'Réduire le bandeau';
+    state.root.getElementById('label').textContent = i.busy ? 'Skipper agit dans cet onglet' : collapsed ? 'Skipper' : 'Onglet piloté par Skipper';
+    const link = state.root.getElementById('session');
+    link.textContent = i.sessionName ? `· ${i.sessionName}` : '';
+    if (i.sessionUrl) link.setAttribute('href', i.sessionUrl);
+    else link.removeAttribute('href');
+  };
+  const mount = () => {
+    if (state.host || !document.documentElement) return;
+    const host = document.createElement('skipper-indicator');
+    host.style.cssText = 'all: initial; position: fixed; top: 0; left: 0; right: 0; z-index: 2147483647; pointer-events: none;';
+    const root = host.attachShadow({ mode: 'closed' });
+    root.innerHTML = `
+      <style>
+        #bar { display: flex; align-items: center; gap: 8px; justify-content: center; height: 26px; padding: 0 10px;
+          font: 600 12px/26px system-ui, -apple-system, 'Segoe UI', sans-serif; color: #fff; background: #c2552d;
+          box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+        #bar.busy { background: linear-gradient(90deg, #c2552d, #e07a4f, #c2552d); background-size: 200% 100%; animation: move 1.2s linear infinite; }
+        #bar.collapsed { width: max-content; margin: 0 auto; border-radius: 0 0 10px 10px; padding: 0 10px; }
+        #bar.collapsed .full { display: none; }
+        #bar.collapsed #label { font-weight: 500; }
+        @keyframes move { from { background-position: 0 0; } to { background-position: 200% 0; } }
+        a { color: #fff; opacity: .9; text-decoration: underline; pointer-events: auto; }
+        a:not([href]) { text-decoration: none; }
+        button { pointer-events: auto; font: inherit; font-weight: 500; color: #c2552d; background: #fff; border: 0;
+          border-radius: 4px; padding: 0 8px; height: 18px; line-height: 18px; cursor: pointer; }
+        button.ghost { color: #fff; background: transparent; padding: 0 4px; }
+      </style>
+      <div id="bar" role="status">
+        <span>🤖</span><span id="label"></span><a id="session" class="full" target="_blank" rel="noopener"></a>
+        <button id="release" class="full" title="Retirer cet onglet à Skipper">Reprendre la main</button>
+        <button id="toggle" class="ghost" title="Réduire ou agrandir le bandeau">▴</button>
+      </div>`;
+    root.getElementById('release').addEventListener('click', () => {
+      if (typeof w.__skipperRelease === 'function') w.__skipperRelease('release');
+    });
+    root.getElementById('toggle').addEventListener('click', () => {
+      state.expanded = !state.expanded;
+      render();
+    });
+    state.host = host;
+    state.root = root;
+    document.documentElement.appendChild(host);
+    render();
+  };
+  const watchTitle = () => {
+    applyTitle();
+    state.observer = new MutationObserver(() => {
+      if (!document.documentElement.contains(state.host)) {
+        state.host = null;
+        mount();
+      }
+      applyTitle();
+    });
+    state.observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  };
+  const start = () => {
+    mount();
+    watchTitle();
+  };
+  if (document.documentElement) start();
+  else document.addEventListener('readystatechange', start, { once: true });
+  w.__skipperIndicator = {
+    update(next) {
+      state.info = { ...state.info, ...next };
+      render();
+    },
+    remove() {
+      state.observer?.disconnect();
+      state.host?.remove();
+      if (document.title.startsWith(PREFIX)) document.title = document.title.slice(PREFIX.length);
+      delete w.__skipperIndicator;
+    },
+  };
+}
+
+/** Retire l'indicateur (onglet rendu à la personne). */
+export function removeIndicator() {
+  if (window.__skipperIndicator) window.__skipperIndicator.remove();
+}

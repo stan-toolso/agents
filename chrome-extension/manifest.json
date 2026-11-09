@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Skipper pour Chrome",
   "short_name": "Skipper",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Laisse les sessions Skipper agir dans les onglets que vous leur confiez : lire, cliquer, saisir, capturer.",
   "minimum_chrome_version": "116",
   "permissions": ["debugger", "tabs", "tabGroups", "storage", "alarms"],
