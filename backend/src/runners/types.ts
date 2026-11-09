@@ -103,6 +103,11 @@ export interface Runner {
   putFile(project: Project, filePath: string, content: string): Promise<void>;
   /** Lit un fichier de l'environnement du projet. */
   getFile(project: Project, filePath: string): Promise<string>;
+  /**
+   * Dossier de l'hôte monté sur `~/.claude` du conteneur (conversations et journaux du CLI Claude Code) ; null si le
+   * runner n'en a pas. Le backend y relit le journal d'une conversation sans passer par le conteneur.
+   */
+  claudeConfigHostDir(project: Pick<Project, 'slug'>): string | null;
   /** Le chemin existe-t-il dans l'environnement du projet ? */
   pathExists(project: Project, filePath: string): Promise<boolean>;
   /** Supprime un fichier ou un dossier de l'environnement du projet. */
