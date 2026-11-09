@@ -64,7 +64,8 @@ projet **Skipper** (`skipper-510112`, organisation toolso.io, compte de facturat
 **Autres modes de connexion** (voir README, « Utilisateurs et droits ») :
 
 - **E-mail et mot de passe** : actif sans rien configurer (`PASSWORD_LOGIN=off` pour le couper). Le lien « Mot de
-  passe oublié » n'est envoyé que si un serveur SMTP est configuré (Paramètres › Serveur, ou `SMTP_URL`) ; sinon un
+  passe oublié » n'est envoyé que si l'envoi des e-mails par Brevo est configuré (clé d'API dans Paramètres › Serveur, ou
+  `BREVO_API_KEY` et `MAIL_FROM` dans `.env`, expéditeur validé dans Brevo) ; sinon un
   administrateur crée le lien depuis la page Utilisateurs (icône lien) et le transmet. nginx doit transmettre
   `X-Real-IP` ou `X-Forwarded-For` (freinage des essais par IP).
 - **Microsoft** : portail Azure → Microsoft Entra ID → Inscriptions d'applications → Nouvelle inscription « Skipper »,

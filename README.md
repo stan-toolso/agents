@@ -337,7 +337,7 @@ frontend/
     (`auth/password.ts`), freinage des essais par adresse et par IP, même message que l'adresse soit inconnue ou le mot
     de passe faux. Une personne choisit son mot de passe dans Paramètres › Connexion (après s'être connectée autrement)
     ou par un **lien à usage unique** `/reset-password?token=…` : « Mot de passe oublié » sur la page de connexion
-    (valable une heure, envoyé seulement si un serveur SMTP est configuré, Paramètres › Serveur), ou lien créé par un
+    (valable une heure, envoyé seulement si l'envoi des e-mails par Brevo est configuré, Paramètres › Serveur), ou lien créé par un
     administrateur depuis la page Utilisateurs (valable 7 jours, copié ou envoyé par e-mail) — c'est ainsi qu'on invite
     une personne sans compte Google. Choisir un mot de passe par un lien ferme les autres sessions ; le changer depuis
     les paramètres ferme les autres sessions sauf la sienne.
@@ -1986,7 +1986,7 @@ et commente. Ni projet, ni espace personnel, ni chat, ni coffre, ni réglage : l
 champs racines de la liste blanche `GUEST_ROOT_FIELDS` (`backend/src/graphql/security.ts`, plugin `guestGuardPlugin`
 ; un nouveau champ lui est fermé tant qu'on ne l'y ajoute pas), et les routes HTTP hors projet la refusent (compte
 Google du coffre, forge). Le frontend lui donne une interface réduite (`components/GuestLayout.tsx` : la liste
-« Pages partagées avec vous », la page ouverte, la déconnexion). Si un serveur SMTP est configuré, un e-mail
+« Pages partagées avec vous », la page ouverte, la déconnexion). Si l'envoi des e-mails est configuré, un e-mail
 d'invitation lui donne le lien ; sinon le propriétaire le lui envoie (« Copier le lien »). L'inviter sur un projet,
 dans l'application ou le passer administrateur en fait une personne ordinaire. La page Utilisateurs marque ces
 comptes « invité des pages ».
@@ -2028,10 +2028,12 @@ webhook est chiffrée et n'est jamais renvoyée (seuls l'hôte et ses quatre der
 (`APP_URL`) vers la demande ou la session. **Anti-rafale** (`notifications/batcher.ts`) : par canal, la première
 notification part aussitôt, les suivantes de la minute sont envoyées ensemble à la fin de la fenêtre ; une demande
 d'un agent part toujours aussitôt. La mémoire de l'anti-rafale est celle de l'instance, vidée à l'arrêt. L'e-mail
-passe par le serveur SMTP réglé dans Paramètres › Serveur (mot de passe chiffré, e-mail de test) ou par les variables
-`SMTP_URL` (ex. `smtps://user:mot-de-passe@smtp.exemple.fr:465`) et `SMTP_FROM`, qui l'emportent. API :
+part, comme tous les e-mails de Skipper, par l'API transactionnelle de **Brevo** (`notifications/mail.ts`,
+`POST https://api.brevo.com/v3/smtp/email`) : clé d'API réglée dans Paramètres › Serveur › « Envoi des e-mails
+(Brevo) » (chiffrée, vérifiée auprès de Brevo à l'enregistrement, e-mail de test) ou variables `BREVO_API_KEY` et
+`MAIL_FROM` (expéditeur, défaut `Skipper <skipper@toolso.io>`, à valider dans Brevo), qui l'emportent. API :
 `myNotificationChannels`, `projectNotificationChannels`, `create/update/delete/testNotificationChannel`,
-`smtpSettings`, `updateSmtpSettings`, `clearSmtpSettings`, `sendTestEmail`.
+`mailSettings`, `updateMailSettings`, `clearMailSettings`, `sendTestEmail`.
 
 ## Apparence
 
