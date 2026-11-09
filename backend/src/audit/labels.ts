@@ -36,6 +36,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'session.share': 'a partagé la session par lien public',
   'session.unshare': 'a révoqué un lien public de la session',
   'session.resume': 'a repris la session',
+  'session.restart': 'a redémarré la session',
   'session.archive': 'a archivé la session',
   'session.unarchive': 'a restauré la session',
   'session.delete': 'a supprimé la session',

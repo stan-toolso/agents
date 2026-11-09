@@ -1,7 +1,7 @@
 import { useMutation } from '@apollo/client';
 import { useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { END_SESSION, HAND_BACK_SESSION, INTERRUPT_SESSION, TAKE_OVER_SESSION, RESUME_SESSION, RUN_SCHEDULE_NOW, STOP_SESSION, type ChildSession, type Session } from '../graphql/operations';
+import { END_SESSION, HAND_BACK_SESSION, INTERRUPT_SESSION, TAKE_OVER_SESSION, RESTART_SESSION, RESUME_SESSION, RUN_SCHEDULE_NOW, STOP_SESSION, type ChildSession, type Session } from '../graphql/operations';
 import { UNARCHIVE_SESSION } from '../graphql/sessions';
 import { sessionStateHint, sessionStatusLabels } from '../lib/humanize';
 import { sessionDotClass } from '../workbench/WorkspaceTabs';
@@ -34,6 +34,7 @@ export function useSessionActions(session: ControlledSession | null | undefined)
   const [resumeSession, { loading: resuming }] = useMutation(RESUME_SESSION, { onError });
   const [endSession] = useMutation(END_SESSION, { onError });
   const [stopSession] = useMutation(STOP_SESSION, { onError });
+  const [restartSession, { loading: restarting }] = useMutation(RESTART_SESSION, { onError });
   const [runScheduleNow] = useMutation<{ runScheduleNow: { id: string } | null }>(RUN_SCHEDULE_NOW, { onError, refetchQueries: ['Sidebar'] });
   const navigate = useNavigate();
   const [unarchiveSession] = useMutation(UNARCHIVE_SESSION, { refetchQueries: ['Sidebar'], onError });
@@ -72,6 +73,18 @@ export function useSessionActions(session: ControlledSession | null | undefined)
       confirmLabel: 'Prendre la main',
     });
     if (ok) void takeOverSession({ variables: { id } });
+  };
+  // Redémarrer : même conversation, processus neuf (serveurs MCP, coffre, réglages relus). Un tour en cours est coupé.
+  const restart = async () => {
+    if (busy) {
+      const ok = await confirm({
+        title: 'Redémarrer la session',
+        message: "L'agent travaille : son tour est coupé, puis il le reprend aussitôt, dans la même conversation, avec ses outils (serveurs MCP), ses éléments du coffre et ses réglages à jour. Ce qu'il était en train de faire peut être refait en partie.",
+        confirmLabel: 'Redémarrer',
+      });
+      if (!ok) return;
+    }
+    void restartSession({ variables: { id } });
   };
   const buttons = (
     <>
@@ -132,6 +145,17 @@ export function useSessionActions(session: ControlledSession | null | undefined)
       {running && (
         <button type="button" className="cc-btn accent" title="L'agent finit ce qu'il fait, puis la session se termine" onClick={() => endSession({ variables: { id } })}>
           Terminer la session
+        </button>
+      )}
+      {running && (
+        <button
+          type="button"
+          className="cc-btn"
+          disabled={restarting}
+          title="Relance l'agent dans la même conversation (tout le contexte est gardé), pour prendre en compte les nouveaux outils (serveurs MCP), éléments du coffre, fichiers d'environnement et réglages. S'il travaillait, son tour est coupé puis repris."
+          onClick={() => void restart()}
+        >
+          <i className="bi bi-arrow-clockwise" /> Redémarrer
         </button>
       )}
       {running && (

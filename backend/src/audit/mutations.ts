@@ -72,6 +72,7 @@ export const AUDITED: Record<string, MutationAudit> = {
   endSession: session('session.end'),
   interruptSession: session('session.interrupt'),
   resumeSession: session('session.resume'),
+  restartSession: session('session.restart'),
   archiveSession: session('session.archive'),
   unarchiveSession: session('session.unarchive'),
   deleteSession: session('session.delete', (a) => ({ deleteBranch: a.deleteBranch })),

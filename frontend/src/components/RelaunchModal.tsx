@@ -9,7 +9,7 @@ import { canAutoFocus } from '../lib/device';
 export const RELAUNCH_LABEL = 'Repartir à neuf';
 /** Infobulle des boutons « Repartir à neuf », à opposer à « Reprendre ». */
 export const RELAUNCH_TITLE =
-  "Nouvelle session sur le même dossier et la même branche, avec une conversation neuve : l'agent ne reçoit que les derniers échanges de celle-ci, en lecture. Utile quand la conversation est devenue trop longue ou s'est égarée. Pour continuer la même conversation, utilisez « Reprendre » ou écrivez un message.";
+  "Nouvelle session sur le même dossier et la même branche, avec une conversation neuve : l'agent ne reçoit que les derniers échanges de celle-ci, en lecture. Utile quand la conversation est devenue trop longue ou s'est égarée. Pour continuer la même conversation, utilisez « Reprendre », « Redémarrer » ou écrivez un message.";
 
 /**
  * « Repartir à neuf » (mutation relaunchSession) : une nouvelle session démarre avec une conversation neuve, les
@@ -67,7 +67,8 @@ export default function RelaunchModal({
             </li>
           </ul>
           <p className="small text-secondary">
-            Pour continuer <strong>la même conversation</strong>, fermez cette fenêtre et écrivez simplement un message à la session (ou « Reprendre »).
+            Pour continuer <strong>la même conversation</strong>, fermez cette fenêtre et écrivez simplement un message à la session (ou « Reprendre ») ;
+            pour seulement recharger ses outils (serveurs MCP, coffre, réglages) en gardant tout son contexte, utilisez « Redémarrer ».
           </p>
           <Form.Group className="mb-3">
             <Form.Label>Nom de la nouvelle session</Form.Label>

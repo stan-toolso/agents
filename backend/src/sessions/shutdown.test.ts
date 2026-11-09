@@ -286,3 +286,46 @@ describe("recréation de l'environnement d'exécution (conteneur)", () => {
     expect(session(s.id).status).toBe('stopped');
   });
 });
+
+describe('redémarrage (bouton « Redémarrer »)', () => {
+  it("au travail : le processus est relancé sur la même conversation et reprend son tour, sans notification", async () => {
+    const { sessionService } = await load();
+    const fake = fakeProvider();
+    providers.current = fake.provider;
+    const s = await sessionService.create({ projectId: 'p', worksessionId: 'w1', name: 'r1', provider: 'fake', prompt: 'x' });
+    await repo.update(s.id, { externalId: 'conv-1' });
+    const first = fake.handles.get(s.id)!;
+    const { RESTART_RESUME_MESSAGE } = await import('./service.js');
+    const restarted = await sessionService.restart(s.id);
+    const second = fake.handles.get(s.id)!;
+    expect(second).not.toBe(first);
+    expect(second.ctx.initialMessage).toBe(RESTART_RESUME_MESSAGE);
+    expect(second.ctx.session.externalId).toBe('conv-1');
+    expect(restarted).toMatchObject({ status: 'running', activity: 'busy' });
+    expect(eventsOf(s.id).some((e) => e.type === 'status')).toBe(false);
+    expect(eventsOf(s.id).some((e) => e.payload.reason === 'restart')).toBe(true);
+    expect(notifications.notify).not.toHaveBeenCalled();
+  });
+
+  it("en attente d'instructions : pas de nouveau tour, le prochain message relancera l'agent", async () => {
+    const { sessionService } = await load();
+    const fake = fakeProvider();
+    providers.current = fake.provider;
+    const s = await sessionService.create({ projectId: 'p', worksessionId: 'w1', name: 'r2', provider: 'fake', prompt: 'x' });
+    await fake.handles.get(s.id)!.ctx.setActivity('idle');
+    const first = fake.handles.get(s.id)!;
+    const restarted = await sessionService.restart(s.id);
+    expect(fake.handles.get(s.id)).toBe(first);
+    expect(restarted).toMatchObject({ status: 'completed', activity: null, error: null });
+    expect(notifications.notify).not.toHaveBeenCalled();
+  });
+
+  it('refuse une session qui ne tourne pas', async () => {
+    const { sessionService } = await load();
+    providers.current = fakeProvider().provider;
+    const s = await sessionService.create({ projectId: 'p', worksessionId: 'w1', name: 'r3', provider: 'fake', prompt: 'x' });
+    await sessionService.stop(s.id);
+    await settle();
+    await expect(sessionService.restart(s.id)).rejects.toThrow(/ne tourne pas/);
+  });
+});
