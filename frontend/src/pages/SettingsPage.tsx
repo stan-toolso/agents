@@ -11,6 +11,7 @@ import PageLoading from '../components/PageLoading';
 import RateLimitGauges from '../components/RateLimitGauges';
 import ServerHealthCard from '../components/ServerHealthCard';
 import LoginMethodsSection from '../components/settings/LoginMethodsSection';
+import ChromeSection from '../components/settings/ChromeSection';
 import NotificationsSection from '../components/settings/NotificationsSection';
 import MailCard from '../components/settings/MailCard';
 import OpencodeSection from '../components/settings/OpencodeSection';
@@ -732,7 +733,7 @@ function ServerSection({ server }: { server: ServerState }) {
   );
 }
 
-type SettingsSection = 'claude' | 'opencode' | 'github' | 'gitlab' | 'server' | 'usage' | 'login' | 'notifications' | 'appearance';
+type SettingsSection = 'claude' | 'opencode' | 'github' | 'gitlab' | 'server' | 'usage' | 'login' | 'chrome' | 'notifications' | 'appearance';
 
 /** Thème clair / sombre / système, mémorisé dans ce navigateur seulement. */
 function AppearanceSection() {
@@ -889,6 +890,11 @@ export default function SettingsPage() {
           </Nav.Item>
         )}
         <Nav.Item>
+          <Nav.Link eventKey="chrome">
+            <i className="bi bi-browser-chrome me-1" /> Chrome
+          </Nav.Link>
+        </Nav.Item>
+        <Nav.Item>
           <Nav.Link eventKey="login">
             <i className="bi bi-shield-lock me-1" /> Connexion
           </Nav.Link>
@@ -919,6 +925,7 @@ export default function SettingsPage() {
         {section === 'server' && s.server && <ServerSection server={s.server} />}
         {section === 'usage' && isAdmin && <UsageSection />}
         {section === 'login' && <LoginMethodsSection />}
+        {section === 'chrome' && <ChromeSection />}
         {section === 'notifications' && <NotificationsSection />}
         {section === 'appearance' && <AppearanceSection />}
       </div>

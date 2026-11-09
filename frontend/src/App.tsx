@@ -31,6 +31,7 @@ const AuditPage = lazy(() => import('./pages/AuditPage'));
 const BrowserPage = lazy(() => import('./pages/BrowserPage'));
 const TerminalPage = lazy(() => import('./pages/TerminalPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const ChromeConnectPage = lazy(() => import('./pages/ChromeConnectPage'));
 const OnboardingPage = lazy(() => import('./pages/OnboardingPage'));
 const UsersPage = lazy(() => import('./pages/UsersPage'));
 const BillingPage = lazy(() => import('./pages/BillingPage'));
@@ -101,6 +102,7 @@ function PageRoutes({ location, isAdmin }: { location: Location; isAdmin: boolea
       <Route path="/requests" element={<RequestsPage />} />
       <Route path="/terminals/:id" element={<TerminalPage />} />
       <Route path="/settings" element={<SettingsPage />} />
+      <Route path="/chrome/connect" element={<ChromeConnectPage />} />
       <Route path="/welcome" element={<OnboardingPage />} />
       {isAdmin && <Route path="/users" element={<UsersPage />} />}
       {isAdmin && <Route path="/billing" element={<BillingPage />} />}

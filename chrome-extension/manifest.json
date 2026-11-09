@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Skipper pour Chrome",
+  "short_name": "Skipper",
+  "version": "0.1.0",
+  "description": "Laisse les sessions Skipper agir dans les onglets que vous leur confiez : lire, cliquer, saisir, capturer.",
+  "minimum_chrome_version": "116",
+  "permissions": ["debugger", "tabs", "tabGroups", "storage", "alarms"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": {
+    "default_title": "Skipper",
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icons/icon.png", "32": "icons/icon.png", "48": "icons/icon.png", "128": "icons/icon.png" }
+  },
+  "icons": { "16": "icons/icon.png", "32": "icons/icon.png", "48": "icons/icon.png", "128": "icons/icon.png" }
+}

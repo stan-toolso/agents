@@ -33,6 +33,8 @@ import { scheduleAllows, scheduleAllowsVault } from '../../schedules/permissions
 import { createSharedPagesMcpServer, sharedPagesPrompt } from '../../sharedPages/mcp.js';
 import { previewPrompt } from '../../previews/config.js';
 import { createPreviewMcpServer, previewMcpPrompt } from '../../previews/mcp.js';
+import { CHROME_FREE_TOOLS, chromePromptSummary, createChromeMcpServer } from '../../chrome/mcp.js';
+import { chromeBrowserService } from '../../chrome/service.js';
 import { previewsEnabled } from '../../previews/hosts.js';
 import { createVaultMcpServer, type VaultApproval } from '../../vault/mcp.js';
 import { vaultService } from '../../vault/service.js';
@@ -268,6 +270,11 @@ export class ClaudeProvider implements SessionProvider {
     const googleAccounts = review ? [] : await googleAccountService.accountsFor(ctx.project.id, rightsHolderId);
     // Aperçu en direct de la branche (serveur MCP `preview`) : sessions qui ont un dossier de travail, aperçus activés.
     const previewWorksession = !chat && !review && previewsEnabled() ? ctx.session.worksessionId : null;
+    // Navigateur Chrome de la personne qui pilote la session (extension « Skipper pour Chrome ») : proposé dès qu'elle a
+    // relié un navigateur ; chaque commande vérifie qu'il est connecté. Pour un agent : la personne qui a pris la main,
+    // sinon celle qui l'a convoqué.
+    const chromeUserId = review ? null : ctx.session.takenOverById ?? (agent ? ctx.session.requestedById ?? null : ownerId);
+    const chromeUser = chromeUserId && (await chromeBrowserService.hasAny(chromeUserId)) ? await userRepository.findById(chromeUserId) : null;
     // Prompt système : celui du projet, l'identité de la session, puis la bibliothèque de contexte, les tâches, le coffre et les comptes Google.
     const systemPrompt = (review
       ? [ctx.project.systemPrompt.trim(), sessionIdentityPrompt(ctx.session, ctx.project), await contextService.promptSummary(ctx.project.id), REVIEW_SYSTEM_PROMPT]
@@ -294,6 +301,7 @@ export class ClaudeProvider implements SessionProvider {
         chat ? '' : sharedPagesPrompt(),
         ctx.session.worksessionId && !chat ? previewPrompt(previewsEnabled(), ctx.session.worksessionId) : '',
         previewWorksession ? previewMcpPrompt() : '',
+        chromeUser ? chromePromptSummary(chromeUser.name) : '',
       ]
     )
       .filter(Boolean)
@@ -378,6 +386,7 @@ export class ClaudeProvider implements SessionProvider {
         // Un chat n'a pas de dossier de travail : rien à publier.
         ...(chat ? {} : { pages: createSharedPagesMcpServer({ project: ctx.project, session: ctx.session, cwd: ctx.cwd }) }),
         ...(previewWorksession ? { preview: createPreviewMcpServer({ worksessionId: previewWorksession, ownerId }) } : {}),
+        ...(chromeUser ? { chrome: createChromeMcpServer({ userId: chromeUser.id, sessionId: ctx.session.id, sessionName: ctx.session.name }) } : {}),
         ...(googleAccounts.length ? { google: createGoogleMcpServer({ project: ctx.project, accounts: googleAccounts, sessionId: ctx.session.id, cwd: ctx.cwd, emit: ctx.emit }) } : {}),
         // Le serveur hérite de l'environnement du CLI (dans le conteneur). La configuration MCP passe sur la ligne
         // de commande du CLI, visible de tout utilisateur du serveur (ps) : l'environnement du backend n'y figure jamais.
@@ -408,7 +417,7 @@ export class ClaudeProvider implements SessionProvider {
       // Fichiers d'environnement : libres (modèles du projet en base, écriture dans le seul dossier de travail ; une valeur
       // du coffre n'y arrive que si l'élément le permet, choix de qui le gère).
       // Aperçu : libre (le même bouton que l'onglet « Aperçu », dans le conteneur du projet, sans coût ni effet extérieur).
-      allowedTools: review ? REVIEW_ALLOWED_TOOLS : [...allowedTools, ...projectRules.map(formatRule), 'mcp__context', ...TASKS_FREE_TOOLS, ...CONVERSATIONS_FREE_TOOLS, 'mcp__vault', 'mcp__worksessions__list', 'mcp__worksessions__create', 'mcp__sessions__list', 'mcp__sessions__get', 'mcp__sessions__wait', 'mcp__sessions__end', 'mcp__sessions__archive', 'mcp__pages__list', 'mcp__pages__comments', 'mcp__pages__reply', 'mcp__pages__resolve', 'mcp__projects', ...AGENTS_FREE_TOOLS, ...(chat ? [] : ['mcp__env']), ...(previewWorksession ? ['mcp__preview'] : []), ...(browserServer ? browserReadTools : []), ...(googleAccounts.length ? googleReadTools(googleAccounts) : [])],
+      allowedTools: review ? REVIEW_ALLOWED_TOOLS : [...allowedTools, ...projectRules.map(formatRule), 'mcp__context', ...TASKS_FREE_TOOLS, ...CONVERSATIONS_FREE_TOOLS, 'mcp__vault', 'mcp__worksessions__list', 'mcp__worksessions__create', 'mcp__sessions__list', 'mcp__sessions__get', 'mcp__sessions__wait', 'mcp__sessions__end', 'mcp__sessions__archive', 'mcp__pages__list', 'mcp__pages__comments', 'mcp__pages__reply', 'mcp__pages__resolve', 'mcp__projects', ...AGENTS_FREE_TOOLS, ...(chat ? [] : ['mcp__env']), ...(previewWorksession ? ['mcp__preview'] : []), ...(chromeUser ? CHROME_FREE_TOOLS : []), ...(browserServer ? browserReadTools : []), ...(googleAccounts.length ? googleReadTools(googleAccounts) : [])],
       ...(review ? { disallowedTools: REVIEW_DISALLOWED_TOOLS } : {}),
       // Le coffre saisit des secrets dans le navigateur : les outils qui pourraient relire la valeur sont retirés à l'agent.
       ...(browserServer && vaultBrowser ? { disallowedTools: BROWSER_FIELD_READERS.map((t) => `mcp__playwright__${t}`) } : {}),

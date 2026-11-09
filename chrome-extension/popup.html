@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Skipper</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <img src="icons/icon.png" alt="" width="20" height="20" />
+      <strong>Skipper pour Chrome</strong>
+      <span id="status" class="pill">…</span>
+    </header>
+    <p id="message" class="muted"></p>
+
+    <section id="pair" hidden>
+      <label for="server">Adresse de Skipper</label>
+      <input id="server" type="url" placeholder="https://skipper.exemple.fr" />
+      <button id="pairBtn" class="primary">Connecter à Skipper</button>
+      <details>
+        <summary>Coller un jeton</summary>
+        <input id="token" type="password" placeholder="skc_…" />
+        <button id="tokenBtn">Utiliser ce jeton</button>
+      </details>
+    </section>
+
+    <section id="connected" hidden>
+      <div id="tabBox">
+        <div class="muted small">Onglet actif</div>
+        <div id="tabTitle" class="tab-title"></div>
+        <button id="shareBtn" class="primary">Confier cet onglet à Skipper</button>
+        <button id="unshareBtn" hidden>Reprendre cet onglet</button>
+      </div>
+      <p class="muted small">
+        Les sessions Skipper n'agissent que dans les onglets du groupe « Skipper » (ceux que vous confiez) et dans ceux qu'elles ouvrent (groupe « Skipper · nom de la session »).
+        Un bandeau de Chrome signale chaque onglet piloté.
+      </p>
+      <div class="row">
+        <button id="reconnectBtn">Reconnecter</button>
+        <button id="forgetBtn">Déconnecter</button>
+      </div>
+    </section>
+    <p id="error" class="error" hidden></p>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,107 @@
+:root {
+  color-scheme: light dark;
+  --fg: #1f2328;
+  --muted: #6b7280;
+  --bg: #ffffff;
+  --border: #d0d7de;
+  --accent: #0d6efd;
+  --ok: #198754;
+  --warn: #b45309;
+  --err: #dc3545;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #e6edf3;
+    --muted: #9ca3af;
+    --bg: #1b1f24;
+    --border: #3a414a;
+  }
+}
+body {
+  width: 320px;
+  margin: 0;
+  padding: 12px;
+  font: 13px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.pill {
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  color: #fff;
+  background: var(--muted);
+}
+.pill.connected {
+  background: var(--ok);
+}
+.pill.connecting {
+  background: var(--warn);
+}
+.pill.revoked,
+.pill.error {
+  background: var(--err);
+}
+.muted {
+  color: var(--muted);
+}
+.small {
+  font-size: 12px;
+}
+label {
+  display: block;
+  margin-bottom: 4px;
+}
+input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+}
+button {
+  width: 100%;
+  padding: 7px 10px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.row {
+  display: flex;
+  gap: 6px;
+}
+.tab-title {
+  margin: 2px 0 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+details {
+  margin-top: 6px;
+}
+summary {
+  cursor: pointer;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.error {
+  color: var(--err);
+}

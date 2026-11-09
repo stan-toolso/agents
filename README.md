@@ -278,6 +278,7 @@ backend/
       gmail.ts                 # client Gmail (recherche, lecture, pièce jointe, envoi / réponse, brouillons, corbeille, libellés)
       drive.ts                 # client Drive (recherche, lecture / export, téléchargement, dépôt, création de Docs)
       mcp.ts                   # serveur MCP `google` (outils selon les accès accordés)
+    chrome/                    # extension « Skipper pour Chrome » : navigateurs reliés (jetons skc_), WebSocket de l'extension, routage des commandes entre instances, MCP `chrome`, archive de l'extension
     previews/                  # aperçus des branches : configuration, lancement dans le conteneur, proxy par sous-domaine, instantanés des dépendances, MCP `preview`
     sharedPages/               # pages partagées : publication, versions, membres, route de lecture en bac à sable, MCP `pages`
     search/                    # recherche globale (projets, sessions, tâches, pages, coffre)
@@ -1804,6 +1805,49 @@ modification de l'agent apparaît d'elle-même.
 - **Mise en service** : `PREVIEW_URL` (`https://*.apercu.<domaine>` ; vide = aperçus désactivés), DNS et certificat
   génériques, bloc nginx `deploy/cellule/templates/nginx-previews.conf` et `frame-src` de la CSP : voir DEPLOY.md. En
   local : `PREVIEW_URL=http://*.localhost:4000` (`*.localhost` résout vers la machine dans Chrome et Firefox).
+
+## Navigateur Chrome de la personne (extension « Skipper pour Chrome »)
+
+Les sessions peuvent agir dans **le Chrome de la personne qui les pilote**, avec ses comptes connectés, comme
+l'extension Claude in Chrome avec Claude Code. On ne s'appuie pas sur l'extension d'Anthropic : elle passe par un relais
+non documenté (`bridge.claudeusercontent.com`) et n'accepte que la connexion `/login` complète du CLI, pas les jetons
+`setup-token` ni les clés d'API que Skipper donne aux sessions. Skipper a donc sa propre extension (`chrome-extension/`,
+Manifest V3, sans étape de build).
+
+- **Installation** : Paramètres › Chrome. L'archive `/api/chrome/extension.zip` est construite à la volée avec l'adresse
+  du serveur dans `config.json` (`chrome/routes.ts`, `chrome/zip.ts`). On la charge « non empaquetée » depuis
+  `chrome://extensions` (mode développeur) : l'extension n'est pas sur le Chrome Web Store pour l'instant.
+- **Appairage** : icône de l'extension › « Connecter à Skipper » ouvre `/chrome/connect?state=…` (`ChromeConnectPage`).
+  La personne confirme, `connectChromeBrowser` crée un jeton `skc_…` propre à ce navigateur (table `chrome_browsers`,
+  seul le hachage est gardé). La page le passe dans le fragment de l'adresse (`#state=…&token=…`, jamais envoyé au
+  serveur et effacé de l'historique) ; l'extension, qui surveille l'onglet, vérifie `state` et garde le jeton. En
+  secours, la popup accepte un jeton collé. `removeChromeBrowser` révoque le jeton et ferme la connexion.
+- **Connexion** : WebSocket `/api/chrome/connect` (sous `/api/`, déjà proxifié par nginx), authentifié par le premier
+  message `hello` avec le jeton. Comme l'origine est `chrome-extension://…`, le gestionnaire passe avant le contrôle
+  d'origine des WebSockets ; il n'utilise jamais le cookie. L'extension envoie un ping toutes les 20 s, ce qui garde son
+  service worker éveillé, et une alarme la reconnecte chaque minute si Chrome l'a arrêté.
+- **Bleu/vert** : n'importe quelle instance peut tenir la connexion. `chrome_browsers.instance_id` dit laquelle, et une
+  commande passe par l'appel interne `chrome.command` (résultat renvoyé tel quel) quand ce n'est pas l'instance de la
+  session. Au drainage, l'instance ferme les connexions (code 1012) : les extensions se reconnectent à l'instance
+  active.
+- **Outils des sessions** (serveur MCP `chrome`, `chrome/mcp.ts`) :
+  - Le serveur est proposé dès que la personne a relié un navigateur. Pour une session d'agent, c'est le navigateur de
+    la personne qui a pris la main, sinon de celle qui a convoqué l'agent ; une revue de code n'y a jamais accès.
+  - Libres : `tabs`, `read_page`, `screenshot`, `console`, `wait`, `scroll`.
+  - Soumises à l'autorisation : `open`, `navigate`, `click`, `type`, `press_key`, `close_tab`.
+  - Une commande échoue avec un message clair quand aucun navigateur n'est connecté.
+- **Portée dans le navigateur** (`chrome-extension/commands.js`) :
+  - Une session n'agit que sur les onglets de son groupe (« Skipper · nom de la session », ceux qu'elle ouvre) et sur
+    ceux que la personne a confiés à Skipper (groupe « Skipper », bouton de la popup).
+  - Elle ne ferme que ses propres onglets.
+  - Elle refuse de saisir dans un champ mot de passe, et la valeur d'un tel champ n'est jamais lue.
+  - Elle n'ouvre que des adresses http(s).
+  - Le pilotage passe par `chrome.debugger` (CDP) : Chrome affiche son bandeau « a commencé à déboguer ce navigateur »
+    pendant que Skipper est attaché.
+- **Tests** :
+  - `backend/src/chrome/*.test.ts` couvrent les jetons, le routage local ou entre instances, le WebSocket et l'archive.
+  - `chrome-extension/test/e2e.mjs` charge l'extension dans un vrai Chromium (Playwright, dans un dossier jetable) et
+    joue toutes les commandes contre un faux serveur.
 
 ## Fichiers d'environnement
 

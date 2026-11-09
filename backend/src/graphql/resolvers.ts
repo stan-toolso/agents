@@ -12,6 +12,7 @@ import { liveBrowserService } from '../browser/live.js';
 import { liveDraftService } from '../sessions/live.js';
 import { createLoaders, type Loaders } from './loaders.js';
 import { apiKeyService } from '../apiKeys/service.js';
+import { chromeBrowserService } from '../chrome/service.js';
 import { contextService, HUMAN } from '../context/service.js';
 import { accountOf, googleAccountService } from '../google/service.js';
 import { pushPreferencesService } from '../notifications/preferences.js';
@@ -1126,6 +1127,7 @@ export const resolvers = {
     gitlabRepositories: (_: unknown, args: { query?: string | null }, ctx: Ctx) => gitlabService.listRepositories(settingsUser(ctx).id, args.query),
     me: (_: unknown, __: unknown, ctx: Ctx) => ctx.user,
     myLoginMethods: (_: unknown, __: unknown, ctx: Ctx) => signInService.methodsOf(requireUser(ctx).id),
+    myChromeBrowsers: (_: unknown, __: unknown, ctx: Ctx) => chromeBrowserService.list(requireUser(ctx).id),
     users: (_: unknown, __: unknown, ctx: Ctx) => {
       requireAdmin(ctx);
       return userService.list();
@@ -1790,6 +1792,8 @@ export const resolvers = {
       return userService.setCto(args.userId, args.isCto);
     },
     deleteUser: (_: unknown, args: { userId: string }, ctx: Ctx) => userService.delete(args.userId, requireAdmin(ctx)),
+    connectChromeBrowser: (_: unknown, args: { name: string }, ctx: Ctx) => chromeBrowserService.create(requireUser(ctx).id, args.name),
+    removeChromeBrowser: (_: unknown, args: { id: string }, ctx: Ctx) => chromeBrowserService.delete(requireUser(ctx).id, args.id),
     setMyPassword: (_: unknown, args: { currentPassword?: string | null; newPassword: string }, ctx: Ctx) => signInService.setPassword(requireUser(ctx), args.currentPassword, args.newPassword, ctx.sessionTokenHash ?? null),
     removeMyPassword: (_: unknown, __: unknown, ctx: Ctx) => signInService.removePassword(requireUser(ctx)),
     unlinkMyLoginIdentity: (_: unknown, args: { provider: string }, ctx: Ctx) => signInService.unlinkIdentity(requireUser(ctx), args.provider),
