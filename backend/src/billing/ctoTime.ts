@@ -166,6 +166,7 @@ export const CTO_TRACKED: Record<string, { target: CtoTargetType; id: (args: Arg
   endSession: { target: 'session', id: (a) => a.id },
   interruptSession: { target: 'session', id: (a) => a.id },
   resumeSession: { target: 'session', id: (a) => a.id },
+  restartSession: { target: 'session', id: (a) => a.id },
   relaunchSession: { target: 'session', id: (a) => a.id },
   takeOverSession: { target: 'session', id: (a) => a.id },
   handBackSession: { target: 'session', id: (a) => a.id },

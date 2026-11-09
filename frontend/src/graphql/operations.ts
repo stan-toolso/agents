@@ -1174,6 +1174,15 @@ export const RESUME_SESSION = gql`
   }
 `;
 
+export const RESTART_SESSION = gql`
+  ${SESSION_FIELDS}
+  mutation RestartSession($id: ID!) {
+    restartSession(id: $id) {
+      ...SessionFields
+    }
+  }
+`;
+
 export const TAKE_OVER_SESSION = gql`
   ${SESSION_FIELDS}
   mutation TakeOverSession($id: ID!) {

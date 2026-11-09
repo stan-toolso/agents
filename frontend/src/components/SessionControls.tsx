@@ -1,14 +1,14 @@
 import { useMutation } from '@apollo/client';
 import { useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { END_SESSION, HAND_BACK_SESSION, INTERRUPT_SESSION, TAKE_OVER_SESSION, RESUME_SESSION, RUN_SCHEDULE_NOW, STOP_SESSION, type ChildSession, type Session } from '../graphql/operations';
+import { END_SESSION, HAND_BACK_SESSION, INTERRUPT_SESSION, TAKE_OVER_SESSION, RESTART_SESSION, RESUME_SESSION, RUN_SCHEDULE_NOW, STOP_SESSION, type ChildSession, type Session } from '../graphql/operations';
 import { UNARCHIVE_SESSION } from '../graphql/sessions';
 import { sessionStateHint, sessionStatusLabels } from '../lib/humanize';
 import { sessionDotClass } from '../workbench/WorkspaceTabs';
 import { useDeletions } from '../workbench/useDeletions';
 import { DeliverButton } from './Deliveries';
 import { useDialogs } from './Dialogs';
-import RelaunchModal from './RelaunchModal';
+import RelaunchModal, { RELAUNCH_LABEL, RELAUNCH_TITLE } from './RelaunchModal';
 import ResumeSessionModal from './ResumeSessionModal';
 import ScheduleModal from './ScheduleModal';
 import SessionSettingsModal from './SessionSettingsModal';
@@ -21,7 +21,7 @@ export type ControlledSession = Session & { childSessions: ChildSession[] };
 export const isReadOnlySession = (session: Pick<Session, 'project'> | null | undefined): boolean => session?.project.myRole === 'VIEWER';
 
 /**
- * Actions d'une session (réglages, planification, interrompre, terminer, arrêter, relancer, archiver…) et les
+ * Actions d'une session (réglages, planification, interrompre, terminer, arrêter, repartir à neuf, archiver…) et les
  * modales qu'elles ouvrent, partagées entre l'en-tête déplié de la page de session et l'onglet « Session » du
  * panneau de droite. Le hook accepte une session absente (page en cours de chargement) : il ne rend alors rien.
  */
@@ -34,6 +34,7 @@ export function useSessionActions(session: ControlledSession | null | undefined)
   const [resumeSession, { loading: resuming }] = useMutation(RESUME_SESSION, { onError });
   const [endSession] = useMutation(END_SESSION, { onError });
   const [stopSession] = useMutation(STOP_SESSION, { onError });
+  const [restartSession, { loading: restarting }] = useMutation(RESTART_SESSION, { onError });
   const [runScheduleNow] = useMutation<{ runScheduleNow: { id: string } | null }>(RUN_SCHEDULE_NOW, { onError, refetchQueries: ['Sidebar'] });
   const navigate = useNavigate();
   const [unarchiveSession] = useMutation(UNARCHIVE_SESSION, { refetchQueries: ['Sidebar'], onError });
@@ -72,6 +73,18 @@ export function useSessionActions(session: ControlledSession | null | undefined)
       confirmLabel: 'Prendre la main',
     });
     if (ok) void takeOverSession({ variables: { id } });
+  };
+  // Redémarrer : même conversation, processus neuf (serveurs MCP, coffre, réglages relus). Un tour en cours est coupé.
+  const restart = async () => {
+    if (busy) {
+      const ok = await confirm({
+        title: 'Redémarrer la session',
+        message: "L'agent travaille : son tour est coupé, puis il le reprend aussitôt, dans la même conversation, avec ses outils (serveurs MCP), ses éléments du coffre et ses réglages à jour. Ce qu'il était en train de faire peut être refait en partie.",
+        confirmLabel: 'Redémarrer',
+      });
+      if (!ok) return;
+    }
+    void restartSession({ variables: { id } });
   };
   const buttons = (
     <>
@@ -135,6 +148,17 @@ export function useSessionActions(session: ControlledSession | null | undefined)
         </button>
       )}
       {running && (
+        <button
+          type="button"
+          className="cc-btn"
+          disabled={restarting}
+          title="Relance l'agent dans la même conversation (tout le contexte est gardé), pour prendre en compte les nouveaux outils (serveurs MCP), éléments du coffre, fichiers d'environnement et réglages. S'il travaillait, son tour est coupé puis repris."
+          onClick={() => void restart()}
+        >
+          <i className="bi bi-arrow-clockwise" /> Redémarrer
+        </button>
+      )}
+      {running && (
         <button type="button" className="cc-btn danger" title="Arrêt immédiat, sans attendre" onClick={() => stopSession({ variables: { id } })}>
           Arrêter
         </button>
@@ -142,12 +166,12 @@ export function useSessionActions(session: ControlledSession | null | undefined)
       <button type="button" className="cc-btn" title="Lien public de lecture du transcript, sans connexion, à durée limitée et révocable" onClick={() => setSharing(true)}>
         <i className="bi bi-share" /> Partager{session.shares?.length ? ` (${session.shares.length})` : ''}
       </button>
-      <button type="button" className="cc-btn" title="Repart d'une nouvelle session (nouveau nom) avec un résumé de celle-ci ; pour continuer la même conversation, utilisez « Reprendre » ou écrivez un message" onClick={() => setRelaunching(true)}>
-        <i className="bi bi-arrow-repeat" /> Relancer
+      <button type="button" className="cc-btn" title={RELAUNCH_TITLE} onClick={() => setRelaunching(true)}>
+        <i className="bi bi-stars" /> {RELAUNCH_LABEL}
       </button>
       {archived || chat ? (
         <>
-          {/* Dossier supprimé depuis : restaurée, elle ne pourrait pas reprendre (le serveur refuse) ; on la relance. */}
+          {/* Dossier supprimé depuis : restaurée, elle ne pourrait pas reprendre (le serveur refuse) ; on repart à neuf. */}
           {archived && (chat || session.worksession) && (
             <button type="button" className="cc-btn accent" title="Remet la session parmi les sessions actives" onClick={() => unarchiveSession({ variables: { id } })}>
               Restaurer

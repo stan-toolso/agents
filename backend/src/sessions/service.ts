@@ -94,6 +94,16 @@ const parking = new Set<string>();
 const SHUTDOWN_TIMEOUT_MS = 1200;
 /** Après la recréation du conteneur : délai maximal d'attente de la fin de l'ancien processus d'une session avant de la relancer. */
 const RESUME_AFTER_RUNNER_TIMEOUT_MS = 10_000;
+/** Redémarrage (`sessionService.restart`) : attente maximale de la fin de l'ancien processus avant d'en lancer un neuf. */
+const RESTART_TIMEOUT_MS = 15_000;
+/**
+ * Sessions dont le processus est arrêté pour être redémarré (`sessionService.restart`) : leur fin n'est ni un arrêt ni
+ * une fin ordinaire (pas d'événement de statut, pas de notification). En mémoire, comme le processus.
+ */
+const restarting = new Set<string>();
+/** Instruction de reprise d'une session redémarrée au milieu d'un tour. */
+export const RESTART_RESUME_MESSAGE =
+  "La session vient d'être redémarrée pour recharger tes outils (serveurs MCP, coffre, réglages) : ta conversation est intacte, mais ton tour en cours a été coupé. Reprends le travail là où il s'est arrêté.";
 /**
  * Reprise automatique : sessions interrompues depuis moins d'une heure, toutes. La limite de sessions
  * simultanées s'applique comme à tout démarrage : celles qui la dépassent passent en file d'attente.
@@ -742,6 +752,7 @@ export const sessionService = {
       idleSince.delete(id);
       endAfterTurn.delete(id);
       const idleEnd = endedForIdle.delete(id);
+      const restart = restarting.delete(id);
       // La place libérée revient à la première session de la file d'attente.
       this.drainQueue();
       const current = await sessionRepository.findById(id);
@@ -757,6 +768,11 @@ export const sessionService = {
         return;
       }
       await requestService.cancelAllForSession(id);
+      // Redémarrage : la session attend sans processus ; `restart` en relance un neuf (ou le prochain message).
+      if (restart) {
+        await publishSession(await sessionRepository.update(id, { status: 'completed', activity: null, exitCode: result.exitCode, error: null, endedAt: new Date(), instanceId: null }));
+        return;
+      }
       // Si `stop()` a déjà posé le statut "stopped", on le conserve.
       const status: SessionStatus =
         current?.status === 'stopped' || result.closedByServer ? 'stopped' : result.error || result.exitCode !== 0 ? 'failed' : 'completed';
@@ -1222,6 +1238,55 @@ export const sessionService = {
     }
     await emitEvent(id, 'system', { message: reason.startsWith('runner_') ? "Reprise après la recréation de l'environnement d'exécution" : 'Reprise après le redémarrage du serveur', notice: true, reason: 'manual_resume', activity: session.activity });
     return this.start(id, resumeMessage(reason));
+  },
+
+  /**
+   * Redémarre la session (bouton « Redémarrer ») : son processus est arrêté puis relancé sur la même conversation,
+   * pour prendre en compte ce qui n'est lu qu'au lancement (serveurs MCP, éléments du coffre, fichiers d'environnement,
+   * réglages, prompt système). Si l'agent travaillait, son tour est coupé puis repris avec une instruction qui
+   * l'explique ; s'il attendait, aucun tour n'est lancé (rien n'est facturé) : la session attend sans processus et le
+   * prochain message en démarre un neuf. Une session interrompue est reprise ; une session sans processus (terminée,
+   * arrêtée, garée) n'a rien à redémarrer : sa prochaine instruction démarre déjà un processus neuf.
+   */
+  async restart(id: string, author: InstructionAuthor | null = null): Promise<Session> {
+    const session = await sessionRepository.findById(id);
+    if (!session) throw new NotFoundError('Session introuvable');
+    assertNotArchived(session);
+    if (session.status === 'interrupted') return this.resume(id);
+    if (!running.has(id)) {
+      const forwarded = await forwardToHolder(id, 'session.restart', { author });
+      if (forwarded) return forwarded;
+    }
+    const handle = running.get(id);
+    if (!handle) {
+      if (session.status === 'queued') throw new AppError("La session attend une place : elle démarrera avec ses outils à jour");
+      if (session.status === 'running' && session.parkedAt) {
+        await emitEvent(id, 'system', { message: 'Session redémarrée : sa prochaine instruction relance l\'agent sur la même conversation, avec ses outils à jour.', notice: true, reason: 'restart' });
+        return session;
+      }
+      throw new AppError("La session ne tourne pas : son prochain message la relancera, sur la même conversation et avec ses outils à jour");
+    }
+    if (restarting.has(id) || endedForIdle.has(id) || archiveWhenDone.has(id) || parking.has(id) || stopping) throw new AppError('La session est déjà en train de se terminer');
+    const busy = session.activity === 'busy';
+    restarting.add(id);
+    try {
+      await requestService.cancelAllForSession(id);
+      await handle.stop();
+      await awaitFinished([id], RESTART_TIMEOUT_MS);
+    } catch (err) {
+      restarting.delete(id);
+      throw err;
+    }
+    if (running.has(id)) throw new AppError("L'ancien processus de la session ne s'est pas arrêté à temps : réessayez dans quelques secondes");
+    await emitEvent(id, 'system', {
+      message: busy
+        ? "Session redémarrée (même conversation) : l'agent reprend son tour avec ses outils à jour."
+        : "Session redémarrée (même conversation) : votre prochain message relance l'agent avec ses outils à jour.",
+      notice: true,
+      reason: 'restart',
+    });
+    if (!busy) return publishSession(await sessionRepository.findById(id));
+    return this.start(id, RESTART_RESUME_MESSAGE, [], { author });
   },
 
   /**

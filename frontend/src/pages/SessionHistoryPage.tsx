@@ -4,7 +4,7 @@ import { Alert, Button, Form, Table } from 'react-bootstrap';
 import { Link, useParams } from 'react-router-dom';
 import { useDialogs } from '../components/Dialogs';
 import PageLoading from '../components/PageLoading';
-import RelaunchModal from '../components/RelaunchModal';
+import RelaunchModal, { RELAUNCH_LABEL, RELAUNCH_TITLE } from '../components/RelaunchModal';
 import ResumeSessionModal from '../components/ResumeSessionModal';
 import StatusBadge from '../components/StatusBadge';
 import { DELETE_SESSION, type Session } from '../graphql/operations';
@@ -113,10 +113,10 @@ export default function SessionHistoryPage() {
                     Reprendre
                   </Button>
                 )}
-                <Button size="sm" variant="link" className="p-0 px-1" title="Nouvelle session qui part d’un résumé de celle-ci" onClick={() => setRelaunch(s)}>
-                  Relancer
+                <Button size="sm" variant="link" className="p-0 px-1" title={RELAUNCH_TITLE} onClick={() => setRelaunch(s)}>
+                  {RELAUNCH_LABEL}
                 </Button>
-                {/* Dossier supprimé depuis : restaurée, elle ne pourrait pas reprendre (le serveur refuse) ; on la relance. */}
+                {/* Dossier supprimé depuis : restaurée, elle ne pourrait pas reprendre (le serveur refuse) ; on repart à neuf. */}
                 {(s.kind === 'CHAT' || s.worksession) && (
                   <Button size="sm" variant="link" className="p-0 px-1" title="Remet la session parmi les sessions actives, avec son dossier de travail" onClick={() => unarchive({ variables: { id: s.id } })}>
                     Restaurer

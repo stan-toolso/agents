@@ -21,6 +21,7 @@ const actions: Record<string, (body: Record<string, unknown>) => Promise<unknown
   'session.end': (b) => sessionService.end(String(b.id)),
   'session.endForTask': (b) => sessionService.endForTask(String(b.id), String(b.notice)),
   'session.stop': (b) => sessionService.stop(String(b.id)),
+  'session.restart': (b) => sessionService.restart(String(b.id), parseAuthor(b.author)),
   'session.config': (b) => sessionService.updateConfig(String(b.id), (b.patch as Record<string, unknown>) ?? {}),
   'terminal.close': (b) => terminalService.close(String(b.id)),
   // Extension Chrome dont cette instance tient la connexion (chrome/service.ts) : le résultat est renvoyé tel quel.

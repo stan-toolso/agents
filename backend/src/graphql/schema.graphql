@@ -3257,6 +3257,8 @@ type Mutation {
   endSession(id: ID!): Session!
   "Reprend une session interrompue par un redémarrage : l'agent reprend son tour s'il travaillait, sinon attend la suite."
   resumeSession(id: ID!): Session!
+  "Redémarre l'agent sur la même conversation, pour prendre en compte les outils (serveurs MCP), le coffre et les réglages du moment : un tour en cours est coupé puis repris ; sans tour, le prochain message relance l'agent."
+  restartSession(id: ID!): Session!
   "Interrompt le tour en cours ; la session reste ouverte aux instructions."
   interruptSession(id: ID!): Session!
   """

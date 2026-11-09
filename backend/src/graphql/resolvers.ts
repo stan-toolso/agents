@@ -1964,6 +1964,10 @@ export const resolvers = {
       await guardSession(ctx, args.id, 'member');
       return sessionService.resume(args.id);
     },
+    restartSession: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      await guardSession(ctx, args.id, 'member');
+      return sessionService.restart(args.id, personAuthor(requireUser(ctx)));
+    },
     createSessionShare: async (_: unknown, args: { sessionId: string; expiresInDays: number }, ctx: Ctx) => {
       await guardSession(ctx, args.sessionId, 'member');
       return sessionShareService.create(args.sessionId, requireUser(ctx).id, args.expiresInDays);
