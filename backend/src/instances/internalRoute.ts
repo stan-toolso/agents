@@ -8,6 +8,7 @@ import { terminalService } from '../terminals/service.js';
 import { INSTANCE_TOKEN_HEADER, INTERNAL_PREFIX } from './client.js';
 import { instanceRegistry } from './registry.js';
 import { parseAuthor } from '../sessions/instructionAuthor.js';
+import { chromeBridge, type ChromeCommand } from '../chrome/service.js';
 
 const MAX_BODY = 1_000_000;
 
@@ -22,7 +23,13 @@ const actions: Record<string, (body: Record<string, unknown>) => Promise<unknown
   'session.stop': (b) => sessionService.stop(String(b.id)),
   'session.config': (b) => sessionService.updateConfig(String(b.id), (b.patch as Record<string, unknown>) ?? {}),
   'terminal.close': (b) => terminalService.close(String(b.id)),
+  // Extension Chrome dont cette instance tient la connexion (chrome/service.ts) : le résultat est renvoyé tel quel.
+  'chrome.command': (b) => chromeBridge.local(String(b.browserId), b.command as ChromeCommand),
+  'chrome.disconnect': async (b) => chromeBridge.disconnect(String(b.browserId)),
 };
+
+/** Actions dont le résultat complet revient à l'appelant (les autres ne renvoient que l'identifiant de l'objet). */
+const RAW_RESULT = new Set(['chrome.command']);
 
 const isLocal = (req: IncomingMessage) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? '');
 
@@ -60,13 +67,15 @@ export async function handleInternalRoute(req: IncomingMessage, res: ServerRespo
     reply(res, 403, { error: 'Forbidden' });
     return true;
   }
-  const action = actions[url.slice(INTERNAL_PREFIX.length).split('?')[0]];
+  const name = url.slice(INTERNAL_PREFIX.length).split('?')[0];
+  const action = actions[name];
   if (!action) {
     reply(res, 404, { error: 'Action inconnue' });
     return true;
   }
   try {
     const result = await action(await readJson(req));
+    if (RAW_RESULT.has(name)) return reply(res, 200, { result }), true;
     reply(res, 200, { result: result && typeof result === 'object' && 'id' in result ? { id: (result as { id: string }).id } : null });
   } catch (err) {
     if (err instanceof AppError) return reply(res, 400, { error: err.message, code: err.code }), true;

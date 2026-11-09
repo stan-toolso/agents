@@ -4457,3 +4457,36 @@ extend type Mutation {
   "Lien pour qu'une personne choisisse son mot de passe (administrateurs) ; sendEmail : l'envoyer aussi par e-mail (envoi des e-mails configuré)."
   createPasswordLink(userId: ID!, sendEmail: Boolean = false): PasswordLink!
 }
+
+"Navigateur Chrome relié par la personne (extension « Skipper pour Chrome ») : ses sessions peuvent piloter les onglets qu'elle leur confie."
+type ChromeBrowser {
+  id: ID!
+  name: String!
+  "Début du jeton (skc_ + 8 caractères), pour le reconnaître."
+  prefix: String!
+  createdAt: DateTime!
+  lastUsedAt: DateTime
+  "L'extension est connectée en ce moment."
+  connected: Boolean!
+  connectedAt: DateTime
+  userAgent: String
+  extensionVersion: String
+}
+
+type ConnectedChromeBrowser {
+  browser: ChromeBrowser!
+  "Jeton de l'extension, montré une seule fois."
+  token: String!
+}
+
+extend type Query {
+  "Navigateurs Chrome reliés par la personne connectée."
+  myChromeBrowsers: [ChromeBrowser!]!
+}
+
+extend type Mutation {
+  "Relie un navigateur Chrome (extension « Skipper pour Chrome ») : renvoie son jeton, une seule fois."
+  connectChromeBrowser(name: String!): ConnectedChromeBrowser!
+  "Retire un navigateur relié : son jeton est révoqué et sa connexion fermée."
+  removeChromeBrowser(id: ID!): Boolean!
+}

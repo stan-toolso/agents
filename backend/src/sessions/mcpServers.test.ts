@@ -15,6 +15,7 @@ import { createEnvMcpServer } from '../envFiles/mcp.js';
 import { createGoogleMcpServer } from '../google/mcp.js';
 import { createProjectsMcpServer } from '../personal/mcp.js';
 import { createPreviewMcpServer } from '../previews/mcp.js';
+import { createChromeMcpServer } from '../chrome/mcp.js';
 import { createSharedPagesMcpServer } from '../sharedPages/mcp.js';
 import { createTasksMcpServer } from '../tasks/mcp.js';
 import { createVaultMcpServer } from '../vault/mcp.js';
@@ -46,6 +47,7 @@ const servers: Record<string, () => McpSdkServerConfigWithInstance> = {
   projects: () => createProjectsMcpServer(scope),
   pages: () => createSharedPagesMcpServer({ project, session: { id: 's', ownerId: 'u' }, cwd: '/tmp' }),
   preview: () => createPreviewMcpServer({ worksessionId: 'w', ownerId: 'u' }),
+  chrome: () => createChromeMcpServer({ userId: 'u', sessionId: 's', sessionName: 'Session' }),
   google: () => createGoogleMcpServer({ project, accounts: [googleAccount], sessionId: 's', cwd: '/tmp', emit: async () => undefined }),
 };
 

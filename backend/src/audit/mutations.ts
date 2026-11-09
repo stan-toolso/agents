@@ -249,6 +249,7 @@ export const NOT_AUDITED = new Set([
   'testProjectBrowser',
   // Réglages et comptes personnels.
   'updateOnboarding',
+  'connectChromeBrowser', 'removeChromeBrowser',
   'updateClaudeSettings', 'setClaudeApiKeyItem', 'setClaudeOauthItem', 'clearClaudeOauthToken', 'startClaudeLogin', 'completeClaudeLogin', 'cancelClaudeLogin', 'verifyClaudeAuth',
   'updateOpencodeSettings', 'setOpencodeKeyItem', 'refreshOpencodeModels',
   'startGithubDeviceLogin', 'pollGithubDeviceLogin', 'connectGithubFromVault', 'setDefaultGithubAccount', 'disconnectGithub',

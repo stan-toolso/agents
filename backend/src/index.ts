@@ -56,6 +56,9 @@ import { serverSettings } from './settings/server.js';
 import { terminalService } from './terminals/service.js';
 import { terminalUpgradeHandler } from './terminals/ws.js';
 import { browserUpgradeHandler } from './browser/ws.js';
+import { chromeUpgradeHandler } from './chrome/ws.js';
+import { chromeBridge } from './chrome/service.js';
+import { handleChromeRoute } from './chrome/routes.js';
 import { attachWebSockets } from './websockets.js';
 import { instanceRegistry } from './instances/registry.js';
 import { instanceBus } from './instances/bus.js';
@@ -246,6 +249,7 @@ async function main() {
       .then((handled) => handled || handleExportRoute(req, res))
       .then((handled) => handled || handleSessionShareRoute(req, res))
       .then((handled) => handled || handleGitHttpRoute(req, res))
+      .then((handled) => handled || handleChromeRoute(req, res))
       .then((handled) => handled || handleInternalRoute(req, res))
       .then((handled) => {
         if (!handled) return yoga(req, res);
@@ -256,7 +260,8 @@ async function main() {
         res.end();
       });
   });
-  attachWebSockets(server, [terminalUpgradeHandler(), browserUpgradeHandler()], [previewUpgrade]);
+  // Extension Chrome : authentifiée par son jeton (origine chrome-extension://), avant le contrôle d'origine.
+  attachWebSockets(server, [terminalUpgradeHandler(), browserUpgradeHandler()], [previewUpgrade, chromeUpgradeHandler()]);
   server.listen(config.port, () => {
     log.info(`[http] GraphQL prêt sur http://localhost:${config.port}/graphql`);
     // Sessions restées en file d'attente avant l'arrêt d'abord (elles attendaient), puis reprise automatique
@@ -313,6 +318,9 @@ async function main() {
     await instanceRegistry.setDraining().catch((err) => log.error('[instances] drainage', err));
     await leadership.release();
     sessionService.beginDrain();
+    // Les extensions Chrome se reconnectent aussitôt à l'instance active (nginx y envoie déjà le trafic) ; les
+    // sessions qui finissent leur tour ici leur parlent par l'appel interne chrome.command.
+    chromeBridge.closeAll('Mise à jour du serveur');
     let lastReport = Date.now();
     const timer = setInterval(() => {
       const sessions = sessionService.localCount();

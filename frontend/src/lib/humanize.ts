@@ -176,6 +176,30 @@ export function describeTool(rawName: string, input: Record<string, unknown> = {
         const [label, action] = verbs[op] ?? [`Aperçu : ${op}`, `utiliser l'aperçu (${op})`];
         return { label, action };
       }
+      if (name.startsWith('mcp__chrome__')) {
+        const op = name.slice('mcp__chrome__'.length);
+        const tab = input.tab !== undefined ? ` (onglet ${String(input.tab)})` : '';
+        const url = str(input, 'url') ?? '';
+        const text = str(input, 'text') ?? '';
+        const short = (t: string, n = 60) => (t.length > n ? `${t.slice(0, n - 3)}…` : t);
+        const target = str(input, 'ref') ? ` sur l'élément ${str(input, 'ref')}` : input.x !== undefined ? ` en ${String(input.x)}, ${String(input.y)}` : '';
+        const verbs: Record<string, [string, string]> = {
+          tabs: ['Liste des onglets Chrome confiés à Skipper', 'lister les onglets Chrome confiés à Skipper'],
+          open: [`Ouverture de ${url} dans votre Chrome`, `ouvrir ${url} dans votre Chrome`],
+          navigate: [['back', 'forward', 'reload'].includes(url) ? `Navigation (${url}) dans votre Chrome${tab}` : `Navigation vers ${url} dans votre Chrome${tab}`, `naviguer vers ${url} dans votre Chrome`],
+          read_page: [`Lecture de la page Chrome${tab}`, 'lire une page de votre Chrome'],
+          click: [`Clic${target} dans votre Chrome${tab}`, `cliquer${target} dans votre Chrome`],
+          type: [`Saisie de « ${short(text)} » dans votre Chrome${tab}`, `saisir « ${short(text)} » dans votre Chrome`],
+          press_key: [`Touche ${str(input, 'key') ?? ''} dans votre Chrome${tab}`, `appuyer sur ${str(input, 'key') ?? ''} dans votre Chrome`],
+          scroll: [`Défilement de la page Chrome${tab}`, 'faire défiler une page de votre Chrome'],
+          screenshot: [`Capture de l'onglet Chrome${tab}`, 'capturer un onglet de votre Chrome'],
+          console: [`Lecture de la console Chrome${tab}`, 'lire la console de votre Chrome'],
+          wait: [`Attente dans votre Chrome${tab}`, 'attendre dans votre Chrome'],
+          close_tab: [`Fermeture de l'onglet Chrome${tab}`, 'fermer un onglet de votre Chrome'],
+        };
+        const [label, action] = verbs[op] ?? [`Chrome : ${op}`, `utiliser votre Chrome (${op})`];
+        return { label, action };
+      }
       if (name.startsWith('mcp__connections__') || name.startsWith('mcp__vault__')) {
         const op = name.replace(/^mcp__(connections|vault)__/, '');
         const conn = str(input, 'connection') ?? str(input, 'item') ?? '';
