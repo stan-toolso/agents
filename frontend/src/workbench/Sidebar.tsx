@@ -408,7 +408,6 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
   const [menu, setMenu] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [prOpen, setPrOpen] = useState(false);
-  const [subsOpen, setSubsOpen] = useState<boolean | null>(null); // null : automatique (page courante ou demande en attente chez un sous-agent)
   const userId = user?.id ?? null;
   const current = location.pathname;
   const isCurrent = (path: string) => current === path || current === `${path}/browser`;
@@ -433,8 +432,6 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
   const session = ws.session;
   const self = groups.find((g) => g.root.session.id === session?.id) ?? null;
   const children = self?.children ?? [];
-  const childActive = children.some((c) => current.startsWith(`/sessions/${c.session.id}`));
-  const subsExpanded = subsOpen ?? (childActive || children.some((c) => c.session.pendingRequestCount > 0));
   const state = workspaceState([...ws.sessions, ...children.map((c) => c.session)]);
   const taskChip = ws.task ? taskChipOf(ws.task, session ?? null) : null;
   const pending = [...ws.sessions, ...children.map((c) => c.session)].reduce((n, s) => n + s.pendingRequestCount, 0);
@@ -465,10 +462,11 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
         ),
       ]
     : [
-        // Session : son navigateur s'il est ouvert, puis ses sous-agents qui sont la page courante ou attendent une réponse.
+        // Session : son navigateur s'il est ouvert, puis ses sous-agents qui sont la page courante ou attendent une réponse
+        // (carte repliée seulement : dépliée, ils sont listés en lignes dessous, une puce ferait doublon).
         ...(session?.browserActive ? [{ key: 'browser', to: `/sessions/${session.id}/browser`, active: current === `/sessions/${session.id}/browser`, label: 'Navigateur', title: "Voir en direct la page ouverte par l'agent", node: <i className="bi bi-globe2 wb-browser-icon" />, extra: null, owner: null }] : []),
         ...children
-          .filter((c) => isCurrent(`/sessions/${c.session.id}`) || c.session.pendingRequestCount > 0)
+          .filter((c) => !expanded && (isCurrent(`/sessions/${c.session.id}`) || c.session.pendingRequestCount > 0))
           .map(({ session: s, ...n }) => ({
             key: `s:${s.id}`,
             to: `/sessions/${s.id}`,
@@ -614,8 +612,8 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
                     <span className="wb-row-label">Navigateur</span>
                   </Link>
                 )}
-                {children.length > 0 && <SubagentsRow children={children.map((c) => c.session)} indent={30} expanded={subsExpanded} onToggle={() => setSubsOpen(!subsExpanded)} />}
-                {subsExpanded && children.map((c) => <SessionRow key={c.session.id} s={c.session} indent={30} depth={c.depth} byAgent parentName={c.parentName} elsewhere={null} />)}
+                {/* La carte dépliée liste directement les sous-agents : pas de ligne « N sous-agents » intermédiaire, la carte se replie déjà. */}
+                {children.map((c) => <SessionRow key={c.session.id} s={c.session} indent={16} depth={c.depth} byAgent parentName={c.parentName} elsewhere={null} />)}
               </>
             )
           )}

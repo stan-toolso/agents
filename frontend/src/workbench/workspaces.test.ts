@@ -130,6 +130,21 @@ describe('WorkspaceIndex', () => {
     expect(index.keyOf('/projects/p/files/README.md')).toBe('/projects/p/files');
   });
 
+  it('ouvre un sous-agent (et ses fichiers, terminaux) dans l’onglet de sa session racine', () => {
+    const index = new WorkspaceIndex([
+      project(
+        [session('a', { id: 'w1', branch: 'feat/a' }), session('c', { id: 'w2', branch: 'feat/c' }, 'a'), session('g', { id: 'w3', branch: 'feat/g' }, 'c'), session('o', { id: 'w4', branch: 'feat/o' }, 'archivee')],
+        [{ id: 't2', name: 'T2', status: 'RUNNING', worksession: { id: 'w2' } }],
+      ),
+    ]);
+    expect(index.keyOf('/sessions/c')).toBe('/sessions/a');
+    expect(index.keyOf('/sessions/c/files/README.md')).toBe('/sessions/a');
+    expect(index.keyOf('/terminals/t2')).toBe('/sessions/a');
+    expect(index.keyOf('/sessions/g')).toBe('/sessions/a');
+    // Parente absente de la sidebar (archivée) : le sous-agent garde son onglet.
+    expect(index.keyOf('/sessions/o')).toBe('/sessions/o');
+  });
+
   it('garde les sessions et terminaux sans dossier (d’avant les work sessions) dans le checkout principal', () => {
     const index = new WorkspaceIndex([project([session('old', null)], [{ id: 't0', name: 'T0', status: 'RUNNING', worksession: null }])]);
     const primary = index.get('/projects/p/files')!;

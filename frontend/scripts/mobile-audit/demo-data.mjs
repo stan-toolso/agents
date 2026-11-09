@@ -143,7 +143,7 @@ function session(id, p, name, opts = {}) {
     agent: opts.owner?.agent ?? null,
     archivedAt: opts.archivedAt ?? null,
     formerWorksession: null,
-    parentSession: null,
+    parentSession: opts.parent ?? null,
     childSessions: [],
     workflowRun: null,
     prompt: opts.prompt ?? name,
@@ -199,6 +199,8 @@ const sessionsOf = (projectId, args = {}) =>
 
 const S = {
   tarifs: session('s-page-tarifs', P.site, 'Refonte de la page tarifs', { activity: 'BUSY', age: 70, updated: 0, cost: 1.86, tokens: 64_000, prompt: 'Refonds la page /tarifs : trois offres en cartes, un comparatif détaillé dessous et une FAQ. Garde le style du site.' }),
+  // Sous-agent lancé par l'agent de la session « page tarifs » (sessions.create) : son propre dossier, rangé sous sa parente.
+  tarifsFaq: session('s-tarifs-faq', P.site, 'Rédiger la FAQ des tarifs', { activity: 'BUSY', age: 20, updated: 0, cost: 0.38, model: 'claude-sonnet-5-5', prompt: 'Rédige la FAQ de la page /tarifs (8 questions).' }),
   contact: session('s-formulaire-contact', P.site, 'Formulaire de contact sur mobile', { model: 'claude-sonnet-5-5', age: 60 * 5, updated: 25, cost: 0.74 }),
   blog: session('s-chris-tri-blog', P.site, 'Tri des demandes du blog', { owner: U.chris, requestedBy: U.me, age: 60 * 3, updated: 40, cost: 0.31, branch: null }),
   pdf: session('s-export-pdf', P.api, 'Export des factures en PDF', { owner: U.hugo, activity: 'BUSY', age: 50, updated: 1, cost: 1.12 }),
@@ -239,6 +241,9 @@ const sharedPagesDemo = [
   demoSharedPage('page-offre', 'Proposition commerciale 2027', U.me, [[U.hugo, null], [user('u-claire', 'claire.martin@client.fr', 'claire.martin@client.fr', { isGuest: false, lastLoginAt: null }), 'Bonjour Claire, voici notre proposition.']]),
   demoSharedPage('page-audit', 'Audit des performances du portail', U.lea, [[U.me, "Camille, voici l'audit dont on a parlé ce matin.\nJ'aimerais ton avis sur la partie cache avant jeudi : commente directement sur la page."]]),
 ];
+// Le sous-agent rattaché à sa parente (référence posée après la création des deux sessions).
+S.tarifsFaq.parentSession = S.tarifs;
+S.tarifs.childSessions = [S.tarifsFaq];
 // Pages publiées depuis une session : onglets de la sous-barre de son dossier (au-delà de 3, un onglet « Pages » à menu).
 S.tarifs.pages = [
   demoSharedPage('page-maquette-tarifs', 'Maquette des trois offres', U.me, [], { version: 3, openComments: 2, session: S.tarifs, project: P.site }),

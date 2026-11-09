@@ -212,6 +212,17 @@ export function attachedElsewhere(s: { parentSession: { id: string } | null }, h
   return false;
 }
 
+/** Session racine d'un sous-agent : sa parente, ou l'aïeule la plus haute, présente dans `pool` (la session elle-même sinon). */
+export function rootOf<T extends { id: string; parentSession: { id: string } | null }>(s: T, pool: Map<string, T>): T {
+  const seen = new Set<string>([s.id]);
+  let current = s;
+  while (current.parentSession && pool.has(current.parentSession.id) && !seen.has(current.parentSession.id)) {
+    seen.add(current.parentSession.id);
+    current = pool.get(current.parentSession.id)!;
+  }
+  return current;
+}
+
 /** Résumé d'un lot de sous-agents pour une ligne repliée : « 2 sous-agents », état dominant, demandes en attente. */
 export function subagentsSummary(children: Pick<SidebarSession, 'status' | 'activity' | 'pendingRequestCount'>[]): { label: string; state: WorkspaceState; pending: number; hint: string | null } {
   const pending = children.reduce((n, s) => n + s.pendingRequestCount, 0);
@@ -292,6 +303,19 @@ export class WorkspaceIndex {
         for (const s of ws.sessions) this.owners.set(`/sessions/${s.id}`, ws.key);
         for (const t of ws.terminals) this.owners.set(`/terminals/${t.id}`, ws.key);
       }
+      // Un sous-agent (session lancée par l'agent d'une autre session) s'ouvre dans l'onglet de sa session racine, où la
+      // sous-barre le montre sous elle, plutôt que dans un onglet à part pour son propre dossier : ses pages (fichiers,
+      // navigateur, pages publiées, terminaux) suivent.
+      const byId = new Map(p.sessions.map((s) => [s.id, s]));
+      const redirect = new Map<string, string>();
+      for (const s of p.sessions) {
+        const root = rootOf(s, byId);
+        if (root === s) continue;
+        const from = this.owners.get(`/sessions/${s.id}`);
+        const to = this.owners.get(`/sessions/${root.id}`);
+        if (from && to && from !== to) redirect.set(from, to);
+      }
+      if (redirect.size) for (const [path, key] of this.owners) if (redirect.has(key)) this.owners.set(path, redirect.get(key)!);
     }
   }
 
