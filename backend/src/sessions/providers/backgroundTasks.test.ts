@@ -30,7 +30,7 @@ describe('BackgroundHold', () => {
   afterEach(() => vi.useRealTimers());
 
   it("laisse la session redevenir inactive à la fin d'un tour sans sous-agent", () => {
-    const release = vi.fn(async () => undefined);
+    const release = vi.fn(async (_notice: string | null) => undefined);
     const hold = new BackgroundHold(release);
     expect(hold.turnEnded()).toEqual({ hold: false, first: false });
     expect(hold.isHolding).toBe(false);
@@ -39,7 +39,7 @@ describe('BackgroundHold', () => {
   // Cas du 09/11 (session toolso 06fd9ea2) : tour clos sur « j'attends les sous-agents », puis le CLI ouvre un tour
   // pour chaque compte rendu.
   it("garde la session au travail tant que des sous-agents tournent, jusqu'au tour qui traite leur compte rendu", () => {
-    const release = vi.fn(async () => undefined);
+    const release = vi.fn(async (_notice: string | null) => undefined);
     const hold = new BackgroundHold(release, { settleMs: 1000 });
     hold.setTasks([agent('a'), agent('b')]);
     expect(hold.turnEnded()).toEqual({ hold: true, first: true });
@@ -62,7 +62,7 @@ describe('BackgroundHold', () => {
   });
 
   it("rend la session inactive si le CLI n'ouvre aucun tour après le dernier sous-agent", () => {
-    const release = vi.fn(async () => undefined);
+    const release = vi.fn(async (_notice: string | null) => undefined);
     const hold = new BackgroundHold(release, { settleMs: 1000 });
     hold.setTasks([agent('a')]);
     hold.turnEnded();
@@ -75,7 +75,7 @@ describe('BackgroundHold', () => {
   });
 
   it('annule le délai si un tour s’ouvre ou si une nouvelle tâche démarre', () => {
-    const release = vi.fn(async () => undefined);
+    const release = vi.fn(async (_notice: string | null) => undefined);
     const hold = new BackgroundHold(release, { settleMs: 1000 });
     hold.setTasks([agent('a')]);
     hold.turnEnded();
@@ -90,7 +90,7 @@ describe('BackgroundHold', () => {
   });
 
   it("met fin à l'attente au bout de la durée maximale, avec une notice", () => {
-    const release = vi.fn(async () => undefined);
+    const release = vi.fn(async (_notice: string | null) => undefined);
     const hold = new BackgroundHold(release, { maxMs: 60_000 });
     hold.setTasks([agent('a')]);
     hold.turnEnded();
@@ -100,7 +100,7 @@ describe('BackgroundHold', () => {
   });
 
   it("n'appelle plus rien après la fin de l'exécution", () => {
-    const release = vi.fn(async () => undefined);
+    const release = vi.fn(async (_notice: string | null) => undefined);
     const hold = new BackgroundHold(release, { settleMs: 1000, maxMs: 2000 });
     hold.setTasks([agent('a')]);
     hold.turnEnded();
