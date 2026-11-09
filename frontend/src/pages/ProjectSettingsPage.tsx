@@ -271,7 +271,7 @@ import {
   INVITE_PROJECT_MEMBER,
   PREPARE_PROJECT_WORKSPACE,
   PROJECT,
-  PROJECTS,
+  evictProjectLists,
   PROJECT_MEMBERS,
   PROJECT_CONTAINER_STATS,
   UPDATE_PROJECT,
@@ -633,7 +633,8 @@ export default function ProjectSettingsPage() {
   const [prepareWorkspace, { loading: preparing, error: prepareError }] = useMutation(PREPARE_PROJECT_WORKSPACE);
   const { confirm } = useDialogs();
   const [deleteProject, { error: deleteError }] = useMutation(DELETE_PROJECT, {
-    refetchQueries: [{ query: PROJECTS }],
+    update: (cache) => evictProjectLists(cache),
+    refetchQueries: ['Projects'],
     onCompleted: () => navigate('/projects'),
   });
 

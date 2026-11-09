@@ -116,7 +116,7 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
   const navigate = useNavigate();
   const { data: providersData } = useQuery<{ providers: Provider[] }>(PROVIDERS);
   // L'espace personnel est proposé avec les projets : on y lance aussi des sessions.
-  const { data: projectsData, loading: projectsLoading } = useQuery<{ projects: Project[] }>(PROJECTS, { variables: { includePersonal: true } });
+  const { data: projectsData, loading: projectsLoading } = useQuery<{ projects: Project[] }>(PROJECTS, { variables: { includePersonal: true }, fetchPolicy: 'cache-and-network' });
   const providers = providersData?.providers ?? [];
   const projects = projectsData?.projects ?? [];
 
@@ -147,8 +147,9 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
 
   useEffect(() => {
     if (!projectId && projects.length) setProjectId(projects[0].id);
-    else if (projectId && projects.length && !projects.some((p) => p.id === projectId)) setProjectId(projects[0].id);
-  }, [projects, projectId]);
+    // Pas tant que la liste fraîche n'est pas arrivée : le cache peut ignorer un projet qui vient d'être créé.
+    else if (!projectsLoading && projectId && projects.length && !projects.some((p) => p.id === projectId)) setProjectId(projects[0].id);
+  }, [projects, projectId, projectsLoading]);
 
   useEffect(() => {
     if (!providerType && providers.length) setProviderType(providers[0].type);

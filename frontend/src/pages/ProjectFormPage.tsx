@@ -8,7 +8,7 @@ import { bypassConnectionsWarning, permissionModeLabels } from '../lib/humanize'
 import ContextLimitField from '../components/ContextLimitField';
 import { PRIORITY_MODEL_KEYS, cleanTaskModels, modelOptions } from '../lib/models';
 import { NO_CONTEXT_LIMIT, cleanupFromLimit, limitFromCleanup, validLimit, type ContextLimit } from '../lib/contextLimit';
-import { CREATE_PROJECT, GITHUB_REPOSITORIES, GITHUB_STATUS, GITLAB_REPOSITORIES, GITLAB_STATUS, PROJECT, PROJECTS, PROVIDERS, UPDATE_PROJECT, type GithubAuthStatus, type GithubRepository, type GitlabAuthStatus, type GitlabRepository, type Project, type Provider, type TaskModels } from '../graphql/operations';
+import { CREATE_PROJECT, evictProjectLists, GITHUB_REPOSITORIES, GITHUB_STATUS, GITLAB_REPOSITORIES, GITLAB_STATUS, PROJECT, PROVIDERS, UPDATE_PROJECT, type GithubAuthStatus, type GithubRepository, type GitlabAuthStatus, type GitlabRepository, type Project, type Provider, type TaskModels } from '../graphql/operations';
 
 /** Modes proposés comme réglage de projet (même liste que le backend, projects/types.ts). */
 const projectPermissionModes = ['default', 'acceptEdits', 'bypassPermissions', 'plan'];
@@ -96,7 +96,10 @@ export default function ProjectFormPage() {
   const { data, loading, error } = useQuery<{ project: Project | null }>(PROJECT, { variables: { id }, skip: !isEdit });
   useTabTitle(isEdit ? (data?.project ? `Modifier · ${data.project.name}` : null) : 'Nouveau projet');
   const [createProject, { loading: creating, error: createError }] = useMutation<{ createProject: Project }>(CREATE_PROJECT, {
-    refetchQueries: [{ query: PROJECTS }],
+    // La liste des projets est en cache sous plusieurs jeux de variables (includePersonal pour la modale de
+    // lancement, all pour les super-admins…) : on les oublie toutes, sinon le nouveau projet manque ailleurs.
+    update: (cache) => evictProjectLists(cache),
+    refetchQueries: ['Projects'],
     onCompleted: (res) => navigate(`/projects/${res.createProject.id}`),
   });
   const [updateProject, { loading: updating, error: updateError }] = useMutation<{ updateProject: Project }>(UPDATE_PROJECT, {
