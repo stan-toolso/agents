@@ -1,6 +1,6 @@
 // Commandes envoyées par les sessions Skipper. Chaque commande vise un onglet auquel la session a droit : ceux du
 // groupe de la session (ouverts par elle) et ceux que la personne a confiés à Skipper (groupe « Skipper »).
-import { focusedIsPassword, locateRef, pageHasText, scrollPage, snapshotPage } from './page.js';
+import { focusedIsPassword, installIndicator, locateRef, pageHasText, removeIndicator, scrollPage, snapshotPage } from './page.js';
 
 export const SHARED_GROUP_TITLE = 'Skipper';
 const SESSION_GROUP_PREFIX = 'Skipper · ';
@@ -123,6 +123,8 @@ async function tabFor(args, session, { own = false } = {}) {
         ? `L'onglet ${id} n'a pas été ouvert par cette session : seule la personne peut le fermer.`
         : `L'onglet ${id} n'est pas confié à Skipper : demande à la personne de l'y ajouter (icône Skipper › « Confier cet onglet »), ou ouvre une page avec open.`,
     );
+  // Visible dans l'onglet : bandeau « Skipper agit » et titre préfixé (pages internes de Chrome exclues).
+  if (/^https?:/.test(tab.url || '')) await mark(tab.id, session).catch(() => {});
   return tab;
 }
 
@@ -149,8 +151,13 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   }
   if (state.console.length > CONSOLE_MAX) state.console.splice(0, state.console.length - CONSOLE_MAX);
 });
-chrome.debugger.onDetach.addListener((source) => attached.delete(source.tabId));
-chrome.tabs.onRemoved.addListener((tabId) => attached.delete(tabId));
+chrome.debugger.onDetach.addListener((source) => forget(source.tabId));
+chrome.tabs.onRemoved.addListener((tabId) => forget(tabId));
+
+function forget(tabId) {
+  clearTimeout(attached.get(tabId)?.idleTimer);
+  attached.delete(tabId);
+}
 
 async function attach(tabId) {
   if (attached.has(tabId)) return;
@@ -159,10 +166,71 @@ async function attach(tabId) {
   } catch (err) {
     if (!String(err.message).includes('Another debugger')) throw new Error(`Impossible de piloter cet onglet (${err.message}) : les pages internes de Chrome et du Web Store sont exclues.`);
   }
-  attached.set(tabId, { console: [] });
+  attached.set(tabId, { console: [], indicatorScript: null, indicatorSession: null, idleTimer: null });
   await cdp(tabId, 'Runtime.enable');
+  await cdp(tabId, 'Page.enable').catch(() => {});
   await cdp(tabId, 'Log.enable').catch(() => {});
+  // Bouton « Reprendre la main » du bandeau (Runtime.bindingCalled).
+  await cdp(tabId, 'Runtime.addBinding', { name: '__skipperRelease' }).catch(() => {});
 }
+
+// ——— Indicateur « piloté par Skipper » (bandeau et titre de l'onglet) ———
+
+const IDLE_AFTER_MS = 1500;
+
+/**
+ * Signale dans la page que Skipper agit sur l'onglet, au nom de la session : bandeau animé pendant l'action, puis au
+ * repos. Le script est aussi posé pour chaque nouveau document de l'onglet (navigation) tant que Skipper le pilote.
+ */
+async function mark(tabId, session) {
+  await attach(tabId);
+  const state = attached.get(tabId);
+  const info = { sessionName: String(session.name || ''), sessionUrl: session.url || null };
+  if (state.indicatorSession !== session.id) {
+    if (state.indicatorScript) await cdp(tabId, 'Page.removeScriptToEvaluateOnNewDocument', { identifier: state.indicatorScript }).catch(() => {});
+    const added = await cdp(tabId, 'Page.addScriptToEvaluateOnNewDocument', { source: `(${installIndicator.toString()})(${JSON.stringify({ ...info, busy: false })})` }).catch(() => null);
+    state.indicatorScript = added?.identifier ?? null;
+    state.indicatorSession = session.id;
+  }
+  await indicate(tabId, { ...info, busy: true });
+  clearTimeout(state.idleTimer);
+  state.idleTimer = setTimeout(() => void indicate(tabId, { busy: false }), IDLE_AFTER_MS);
+}
+
+async function indicate(tabId, info) {
+  if (!attached.has(tabId)) return;
+  const expression = `(${installIndicator.toString()})(${JSON.stringify(info)})`;
+  await cdp(tabId, 'Runtime.evaluate', { expression }).catch(() => {});
+}
+
+/** Rend l'onglet à la personne : bandeau et titre retirés, débogueur détaché, onglet sorti du groupe si demandé. */
+export async function releaseTab(tabId, { ungroup = true } = {}) {
+  const state = attached.get(tabId);
+  if (state) {
+    clearTimeout(state.idleTimer);
+    await cdp(tabId, 'Runtime.evaluate', { expression: `(${removeIndicator.toString()})()` }).catch(() => {});
+    if (state.indicatorScript) await cdp(tabId, 'Page.removeScriptToEvaluateOnNewDocument', { identifier: state.indicatorScript }).catch(() => {});
+    forget(tabId);
+    await chrome.debugger.detach({ tabId }).catch(() => {});
+  }
+  if (ungroup) await chrome.tabs.ungroup(tabId).catch(() => {});
+}
+
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  if (method === 'Runtime.bindingCalled' && params.name === '__skipperRelease' && source.tabId !== undefined) void releaseTab(source.tabId);
+});
+
+/** Groupes d'onglets de Skipper (onglets confiés et groupes des sessions). */
+export async function skipperGroupIds() {
+  const groups = await groupsState();
+  return new Set([groups.shared, ...Object.values(groups.sessions ?? {})].filter((id) => typeof id === 'number'));
+}
+
+// Onglet sorti d'un groupe Skipper par la personne (glisser hors du groupe, « Dégrouper ») : Skipper le lâche.
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
+  if (changeInfo.groupId === undefined || !attached.has(tabId)) return;
+  if (!(await skipperGroupIds()).has(changeInfo.groupId)) await releaseTab(tabId, { ungroup: false });
+});
 
 function cdp(tabId, method, params = {}) {
   return chrome.debugger.sendCommand({ tabId }, method, params);
@@ -257,6 +325,7 @@ export const commands = {
     const url = checkUrl(String(args.url ?? ''));
     const tab = await chrome.tabs.create({ url, active: true, windowId: await targetWindowId(session) });
     await addToSessionGroup(tab.id, session);
+    await mark(tab.id, session).catch(() => {});
     const loaded = await waitForLoad(tab.id);
     return { text: `Onglet ${tab.id} ouvert : ${describeTab(loaded)}` };
   },

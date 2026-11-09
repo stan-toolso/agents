@@ -1,6 +1,6 @@
 // Service worker de « Skipper pour Chrome » : connexion WebSocket au serveur Skipper (jeton du navigateur),
 // exécution des commandes des sessions, appairage par la page /chrome/connect de Skipper.
-import { commands, shareTab, sharedGroupId } from './commands.js';
+import { commands, releaseTab, shareTab, skipperGroupIds } from './commands.js';
 
 const PING_MS = 20_000; // garde le service worker éveillé (Chrome 116+) et la connexion ouverte
 const RETRY_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
@@ -135,8 +135,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       case 'getState': {
         const { serverUrl } = await settings();
         const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
-        const shared = await sharedGroupId();
-        return { state, serverUrl, activeTab: active ? { id: active.id, title: active.title, url: active.url, shared: shared !== null && active.groupId === shared } : null };
+        // « Reprendre cet onglet » pour tout onglet d'un groupe Skipper (confié ou ouvert par une session).
+        const groups = await skipperGroupIds();
+        return { state, serverUrl, activeTab: active ? { id: active.id, title: active.title, url: active.url, shared: groups.has(active.groupId) } : null };
       }
       case 'pair':
         await startPairing(msg.serverUrl);
@@ -161,7 +162,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         await shareTab(msg.tabId);
         return { ok: true };
       case 'unshare':
-        await chrome.tabs.ungroup(msg.tabId);
+        await releaseTab(msg.tabId);
         return { ok: true };
       default:
         return { ok: false };

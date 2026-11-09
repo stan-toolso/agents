@@ -1844,6 +1844,14 @@ Manifest V3, sans étape de build).
   - Elle n'ouvre que des adresses http(s).
   - Le pilotage passe par `chrome.debugger` (CDP) : Chrome affiche son bandeau « a commencé à déboguer ce navigateur »
     pendant que Skipper est attaché.
+  - **Onglet piloté visible** (`installIndicator` de `page.js`) : un bandeau Skipper s'affiche en haut de la page. Il
+    est complet pendant une action (« Skipper agit dans cet onglet », nom de la session avec lien, bouton « Reprendre la
+    main ») et se réduit au repos en une languette « 🤖 Skipper ». Le titre de l'onglet est préfixé de 🤖. L'indicateur
+    est posé à chaque nouveau document tant que Skipper pilote l'onglet. Il est dans un shadow DOM fermé, hors de
+    `read_page`, et ne capte que les clics sur ses propres boutons.
+  - « Reprendre la main » (bouton du bandeau, liaison CDP `__skipperRelease`, ou popup) rend l'onglet à la personne :
+    l'indicateur est retiré, le débogueur détaché et l'onglet sort de son groupe. Sortir soi-même l'onglet d'un groupe
+    Skipper a le même effet.
 - **Tests** :
   - `backend/src/chrome/*.test.ts` couvrent les jetons, le routage local ou entre instances, le WebSocket et l'archive.
   - `chrome-extension/test/e2e.mjs` charge l'extension dans un vrai Chromium (Playwright, dans un dossier jetable) et

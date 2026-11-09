@@ -78,6 +78,16 @@ const check = (label, ok, detail) => {
   console.log(`${ok ? '✓' : '✗'} ${label}${ok ? '' : ` — ${JSON.stringify(detail).slice(0, 600)}`}`);
 };
 
+// Page Playwright d'un onglet piloté (pour regarder l'indicateur depuis la page).
+const pageWith = async (pred) => {
+  for (let i = 0; i < 20; i++) {
+    for (const p of context.pages()) if (await pred(p).catch(() => false)) return p;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return null;
+};
+const indicator = (p) => p.evaluate(() => ({ title: document.title, host: Boolean(document.querySelector('skipper-indicator')) }));
+
 let r = await command('tabs');
 check('tabs vide', r.ok && /Aucun onglet/.test(r.result.text), r);
 
@@ -96,6 +106,10 @@ r = await command('tabs');
 check('tabs liste l’onglet', r.ok && r.result.text.includes(`[${tabId}]`) && r.result.text.includes('ouvert par cette session'), r);
 
 r = await command('read_page', { tab: tabId });
+check('read_page ignore le bandeau', r.ok && !r.result.text.includes('piloté par Skipper') && !r.result.text.includes('Reprendre la main'), r);
+const formPage = await pageWith(async (p) => p.url() === `${base}/`);
+let ind = formPage ? await indicator(formPage) : null;
+check('bandeau et titre 🤖 sur l’onglet piloté', ind?.host && ind.title === '🤖 Formulaire', ind);
 check('read_page', r.ok && r.result.text.includes('Texte de la page') && /\[e\d+\] bouton « Envoyer »/.test(r.result.text) && /champ text « Nom » = « ancien »/.test(r.result.text), r);
 const text = r.result?.text ?? '';
 const refOf = (re) => text.match(re)?.[1];
@@ -125,6 +139,9 @@ check('scroll', r.ok, r);
 
 r = await command('click', { tab: tabId, ref: linkRef });
 check('click sur un lien → navigation', r.ok && /Deux/.test(r.result.text), r);
+await new Promise((res) => setTimeout(res, 500));
+ind = await indicator(formPage);
+check('indicateur conservé après navigation', ind.host && ind.title === '🤖 Deux', ind);
 
 r = await command('navigate', { tab: tabId, url: 'back' });
 check('navigate back', r.ok && /Formulaire/.test(r.result.text), r);
@@ -151,7 +168,19 @@ check('close_tab refusé sur un onglet confié', !r.ok, r);
 r = await command('navigate', { tab: tabId, url: 'file:///etc/passwd' });
 check('URL non http refusée', !r.ok, r);
 
-r = await command('close_tab', { tab: tabId });
+// « Reprendre la main » (bouton du bandeau → liaison __skipperRelease) : Skipper lâche l'onglet.
+// Après « back », Chrome peut avoir changé de cible (cache de navigation) : on reprend la page de l'onglet.
+const backPage = await pageWith(async (p) => p.url() === `${base}/` && !p.isClosed() && (await p.title()).startsWith('🤖'));
+await backPage.evaluate(() => window.__skipperRelease('release'));
+await new Promise((res) => setTimeout(res, 800));
+ind = await indicator(backPage);
+check('reprendre la main retire bandeau et titre', !ind.host && !ind.title.startsWith('🤖'), ind);
+r = await command('read_page', { tab: tabId });
+check('onglet repris inaccessible à la session', !r.ok && /pas confié/.test(r.error), r);
+r = await command('open', { url: `${base}/` });
+const tab2 = Number(r.result?.text.match(/Onglet (\d+)/)?.[1]);
+r = await command('close_tab', { tab: tab2 });
+
 check('close_tab', r.ok, r);
 
 r = await command('inconnue');
