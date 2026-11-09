@@ -101,8 +101,12 @@ export class DockerRunner implements Runner {
   }
 
   /** Dossier `~/.claude` persistant du conteneur : conversations Claude Code du projet (reprises après recréation), sans les identifiants de l'hôte. */
-  private claudeHome(project: Project): string {
+  private claudeHome(project: Pick<Project, 'slug'>): string {
     return path.join(config.workspacesRoot, '.runners', project.slug, 'claude-home');
+  }
+
+  claudeConfigHostDir(project: Pick<Project, 'slug'>): string {
+    return this.claudeHome(project);
   }
 
   /**

@@ -10,7 +10,7 @@ import {
   type SDKResultMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import { access, mkdir } from 'node:fs/promises';
+import { access, mkdir, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { config } from '../../config.js';
@@ -66,6 +66,7 @@ import type { Attachment } from '../types.js';
 import type { DescribeContext, ProviderDescription, RunContext, RunningHandle, RunResult, SessionProvider } from './provider.js';
 import { isNoise } from './claudeNoise.js';
 import { BackgroundHold, describeBackgroundTasks } from './backgroundTasks.js';
+import { conversationJournalPath, missedMessages, readJournal, readSubagentEntries } from './cliJournal.js';
 import { isEmptyNotificationResult, isLastResultEcho, resultError } from './claudeResult.js';
 import { liveDraftService } from '../live.js';
 import { SESSION_ENV } from '../../runners/stats.js';
@@ -89,6 +90,12 @@ interface ClaudeConfig {
 /** Liste d'outils pré-autorisés d'une session (« Read,Bash(git:*) »). */
 export const splitAllowedTools = (value: unknown): string[] =>
   value ? String(value).split(',').map((t) => t.trim()).filter(Boolean) : [];
+
+/** Numéro de la dernière exécution lancée par session (le rapprochement de fin d'une exécution s'efface devant la suivante). */
+const runGenerations = new Map<string, number>();
+/** Attente du `cost-state` de sortie : fin ordinaire, puis flux coupé alors que du travail restait (sous-agents orphelins). */
+const AFTER_EXIT_MS = 60_000;
+const AFTER_EXIT_PENDING_MS = 30 * 60_000;
 
 const permissionModes: PermissionMode[] = ['default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions'];
 
@@ -368,6 +375,15 @@ export class ClaudeProvider implements SessionProvider {
     const notes: string[] = [];
     const takeNotes = () => (notes.length ? notes.splice(0).join('\n\n') : null);
 
+    // Exécution courante de la session : le rapprochement de fin d'une exécution précédente s'efface devant elle.
+    const generation = (runGenerations.get(ctx.session.id) ?? 0) + 1;
+    runGenerations.set(ctx.session.id, generation);
+    // Reprise de la conversation Claude si la session a déjà tourné et que le CLI la retrouve encore.
+    const resumeId = await this.resumableConversation(ctx);
+    // Journal de la conversation (cliJournal.ts) : coût laissé par le processus précédent, puis rapprochement en fin d'exécution.
+    const configDir = chat ? chatConfigDir(ctx.project) : runner.claudeConfigHostDir(ctx.project);
+    const journal = configDir && resumeId ? conversationJournalPath(configDir, ctx.cwd, resumeId) : null;
+    const costStatesAtStart = await this.reconcileAtStart(ctx, journal, Boolean(resumeId), model ?? 'default', billable);
     const options: Options = {
       cwd: ctx.cwd,
       systemPrompt: { type: 'preset', preset: 'claude_code', append: fullSystemPrompt },
@@ -422,8 +438,7 @@ export class ClaudeProvider implements SessionProvider {
       ...(review ? { disallowedTools: REVIEW_DISALLOWED_TOOLS } : {}),
       // Le coffre saisit des secrets dans le navigateur : les outils qui pourraient relire la valeur sont retirés à l'agent.
       ...(browserServer && vaultBrowser ? { disallowedTools: BROWSER_FIELD_READERS.map((t) => `mcp__playwright__${t}`) } : {}),
-      // Reprise de la conversation Claude si la session a déjà tourné et que le CLI la retrouve encore.
-      resume: (await this.resumableConversation(ctx)) ?? undefined,
+      resume: resumeId ?? undefined,
       pathToClaudeCodeExecutable: claudeExecutable,
       // Événements de streaming de l'API (texte au fil de l'eau) : jamais journalisés, ils alimentent le brouillon
       // en direct de la session (liveDraftService) que l'interface affiche en attendant le message complet.
@@ -479,6 +494,11 @@ export class ClaudeProvider implements SessionProvider {
     queue.push(await this.instruction(ctx, ctx.initialMessage, ctx.initialAttachments, ctx.initialPreamble, null, ctx.initialAuthor));
     // Un tour est en cours entre l'envoi d'une instruction et le message `result` qui le clôt.
     let turnInProgress = true;
+    // Messages reçus dans le flux (uuid) et heure du dernier : ce que le journal du CLI contient au-delà a été perdu.
+    const streamed = new Set<string>();
+    let lastStreamedAt = new Date().toISOString();
+    // Conversation du CLI (reprise, ou nouvelle dès son premier message) : nom de son journal.
+    let conversationId: string | null = resumeId;
     await ctx.setActivity('busy');
     // Sous-agents en arrière-plan encore vivants (backgroundTasks.ts) : après la fin d'un tour, la session reste « au
     // travail » tant qu'il en reste, puis jusqu'au tour que le CLI ouvre pour traiter leur compte rendu.
@@ -512,6 +532,11 @@ export class ClaudeProvider implements SessionProvider {
       const run: RunState = { rateLimitStatus: null, mcpReported: new Set(), billable };
       try {
         for await (const message of stream) {
+          const uuid = (message as { uuid?: unknown }).uuid;
+          if (typeof uuid === 'string') streamed.add(uuid);
+          lastStreamedAt = new Date().toISOString();
+          const sid = (message as { session_id?: unknown }).session_id;
+          if (typeof sid === 'string' && sid) conversationId = sid;
           // Le modèle travaille alors qu'aucun tour n'était en cours : tour lancé par le CLI lui-même (fin d'une
           // commande de fond), ou suite d'une instruction après un résultat qui ne la concernait pas.
           // Seuls les messages de l'agent principal ouvrent un tour : ceux d'un sous-agent en arrière-plan arrivent aussi
@@ -581,6 +606,15 @@ export class ClaudeProvider implements SessionProvider {
       if (error) return { exitCode: 1, error };
       return { exitCode: 0 };
     })();
+
+    // Fin de l'exécution, quelle qu'en soit la cause : le journal du CLI dit ce que le flux n'a pas apporté (messages des
+    // sous-agents et de l'agent après la coupure, coût du travail fait après le dernier tour).
+    void done.then(() => {
+      const file = configDir && conversationId ? conversationJournalPath(configDir, ctx.cwd, conversationId) : null;
+      if (!file) return;
+      const pending = hold.live.length > 0 || turnInProgress || stopped;
+      return this.reconcileAfterExit(ctx, { file, costStatesAtStart: file === journal ? costStatesAtStart : 0, after: lastStreamedAt, streamed, pending, generation, model: model ?? 'default', billable });
+    }).catch((err) => log.error(`[usage] rapprochement de fin de la session ${ctx.session.id}`, err));
 
     return {
       wait: () => done,
@@ -784,6 +818,84 @@ export class ClaudeProvider implements SessionProvider {
    * message utilisateur : le texte, complété par la liste des fichiers joints et leur chemin, puis les images et
    * PDF en blocs de contenu pour que le modèle les voie directement.
    */
+  /**
+   * Avant de lancer le CLI : aligne le dernier total relevé sur celui dont le CLI va repartir (cliJournal.ts).
+   * - Conversation reprise : dernière ligne `cost-state` de son journal. Plus haute que le relevé, l'écart est le travail
+   *   fait après le dernier tour du processus précédent (sous-agents finis en orphelin) et il est enregistré ; plus
+   *   basse (processus tué sans l'écrire), le relevé y est ramené pour que le premier tour soit compté en entier.
+   * - Conversation neuve : le CLI part de 0.
+   * Renvoie le nombre de lignes `cost-state` du journal (repère pour le rapprochement de fin).
+   */
+  private async reconcileAtStart(ctx: RunContext, journal: string | null, resumed: boolean, fallbackModel: string, billable: boolean): Promise<number> {
+    try {
+      if (!resumed) {
+        await usageService.reconcileTotal(ctx.session.id, ctx.project.id, ctx.session.ownerId, 0, {}, fallbackModel, billable, { realign: true });
+        return 0;
+      }
+      const parsed = journal ? await readJournal(journal) : null;
+      const last = parsed?.costStates.at(-1);
+      if (!parsed || !last) return parsed?.costStates.length ?? 0;
+      const delta = await usageService.reconcileTotal(ctx.session.id, ctx.project.id, ctx.session.ownerId, last.totalCostUSD, last.modelCosts, fallbackModel, billable, { realign: true });
+      if (delta > 0) await this.noteReconciled(ctx, delta, last.totalCostUSD, billable, 'à la reprise');
+      return parsed.costStates.length;
+    } catch (err) {
+      log.error(`[usage] rapprochement au lancement de la session ${ctx.session.id}`, err);
+      return 0;
+    }
+  }
+
+  /**
+   * Après la fin d'une exécution : attend que le CLI écrive son `cost-state` de sortie (aussitôt d'ordinaire ; jusqu'à
+   * 30 min quand des sous-agents tournaient encore ou que le flux a été coupé, le CLI lancé par `docker exec` finissant
+   * leur travail en orphelin), puis importe dans la session les messages que le flux n'a pas apportés et enregistre le
+   * coût du travail fait après le dernier tour. S'efface devant une nouvelle exécution de la session, qui fait le
+   * rapprochement elle-même à son lancement.
+   */
+  private async reconcileAfterExit(
+    ctx: RunContext,
+    run: { file: string; costStatesAtStart: number; after: string; streamed: ReadonlySet<string>; pending: boolean; generation: number; model: string; billable: boolean },
+  ): Promise<void> {
+    const deadline = Date.now() + (run.pending ? AFTER_EXIT_PENDING_MS : AFTER_EXIT_MS);
+    const current = () => runGenerations.get(ctx.session.id) === run.generation;
+    let size = -1;
+    for (;;) {
+      if (!current()) return;
+      // Journal relu seulement quand il a grandi (il peut peser plusieurs Mo).
+      const now = await stat(run.file).then((st) => st.size, () => -1);
+      if (now === size && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, run.pending ? 15_000 : 5_000));
+        continue;
+      }
+      size = now;
+      const parsed = await readJournal(run.file);
+      const exited = Boolean(parsed && parsed.costStates.length > run.costStatesAtStart);
+      if (exited || Date.now() >= deadline) {
+        if (!current()) return;
+        const missed = missedMessages(parsed?.entries ?? [], await readSubagentEntries(run.file), run.after, run.streamed);
+        for (const m of missed) await ctx.emit(`claude.${String(m.type)}`, m.type === 'user' ? (withoutBinaryData(m as unknown as SDKMessage) as unknown as Record<string, unknown>) : m);
+        if (missed.length) {
+          await ctx.emit('system', { notice: true, recovered: true, message: `${missed.length} message${missed.length > 1 ? 's' : ''} de l'agent et de ses sous-agents écrit${missed.length > 1 ? 's' : ''} après la coupure du flux, récupéré${missed.length > 1 ? 's' : ''} dans le journal du CLI.` });
+        }
+        const last = exited ? parsed!.costStates.at(-1)! : null;
+        if (last) {
+          const delta = await usageService.reconcileTotal(ctx.session.id, ctx.project.id, ctx.session.ownerId, last.totalCostUSD, last.modelCosts, run.model, run.billable, { realign: false });
+          if (delta > 0) await this.noteReconciled(ctx, delta, last.totalCostUSD, run.billable, 'après la fin du flux');
+        } else if (run.pending) {
+          log.warn(`[usage] session ${ctx.session.id} : pas de coût final dans le journal du CLI ${Math.round(AFTER_EXIT_PENDING_MS / 60_000)} min après l'arrêt ; il sera relevé à la prochaine reprise`);
+        }
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, run.pending ? 15_000 : 5_000));
+    }
+  }
+
+  /** Coût rattrapé depuis le journal du CLI : événement `usage` (transcript, coût des exécutions planifiées) et alerte de budget. */
+  private async noteReconciled(ctx: RunContext, delta: number, total: number, billable: boolean, when: string): Promise<void> {
+    log.info(`[usage] session ${ctx.session.id} : ${delta.toFixed(4)} $ rattrapés ${when} depuis le journal du CLI`);
+    await ctx.emit('usage', billable ? { deltaUsd: Number(delta.toFixed(6)), totalUsd: total, reconciled: true } : { billable: false, reconciled: true });
+    void projectBudget.checkAlert(ctx.project.id);
+  }
+
   /**
    * Identifiant de la conversation Claude Code à reprendre : celui de la session, si son transcript existe encore
    * dans l'environnement du projet (`~/.claude/projects/<cwd encodé>/<id>.jsonl`). Sinon (conteneur recréé avant que
