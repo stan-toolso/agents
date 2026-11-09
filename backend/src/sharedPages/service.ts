@@ -2,7 +2,7 @@ import { AppError, NotFoundError } from '../errors.js';
 import { config } from '../config.js';
 import { log } from '../log.js';
 import { notificationService } from '../notifications/service.js';
-import { smtpService } from '../notifications/smtp.js';
+import { mailService } from '../notifications/mail.js';
 import { userRepository } from '../users/repository.js';
 import { userService } from '../users/service.js';
 import type { User } from '../users/types.js';
@@ -43,11 +43,11 @@ export function invitationEmail(actor: Pick<User, 'name' | 'email'>, page: Pick<
   return { subject, text, html };
 }
 
-/** E-mail d'invitation, si un serveur SMTP est configuré ; un échec est journalisé (le lien reste à envoyer à la main). */
+/** E-mail d'invitation, si l'envoi des e-mails est configuré ; un échec est journalisé (le lien reste à envoyer à la main). */
 async function sendInvitation(actor: User, page: SharedPage, user: User): Promise<void> {
   try {
-    if (!(await smtpService.configured())) return;
-    await smtpService.send({ to: user.email, ...invitationEmail(actor, page, user.email, config.appUrl) });
+    if (!(await mailService.configured())) return;
+    await mailService.send({ to: user.email, ...invitationEmail(actor, page, user.email, config.appUrl) });
   } catch (err) {
     log.warn(`[pages] e-mail d'invitation à ${user.email} : ${(err as Error).message}`);
   }
@@ -151,7 +151,7 @@ export const sharedPageService = {
   /**
    * Ajoute une personne à la page. Une adresse sans compte Skipper est refusée (code NO_ACCOUNT), sauf avec `invite` :
    * un compte d'invité des pages partagées est alors créé (il ne verra que les pages partagées avec lui) et, si un
-   * serveur SMTP est configuré, un e-mail d'invitation lui donne le lien.
+   * l'envoi des e-mails est configuré, un e-mail d'invitation lui donne le lien.
    */
   async addMember(actor: User, id: string, email: string, opts: { invite?: boolean } = {}): Promise<SharedPage> {
     const page = await this.getOwned(actor.id, id);

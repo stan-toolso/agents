@@ -420,7 +420,7 @@ const CHANNEL_FIELDS = gql`
   }
 `;
 
-/** Un e-mail peut-il partir (serveur SMTP configuré) ? Sert à dire si l'invitation à une page a été envoyée. */
+/** Un e-mail peut-il partir (envoi des e-mails configuré) ? Sert à dire si l'invitation à une page a été envoyée. */
 export const EMAIL_AVAILABLE = gql`
   query EmailAvailable {
     emailNotificationsAvailable
@@ -480,53 +480,49 @@ export const TEST_NOTIFICATION_CHANNEL = gql`
   ${CHANNEL_FIELDS}
 `;
 
-export interface SmtpSettings {
+export interface MailSettings {
   source: 'env' | 'settings' | 'none';
-  host: string | null;
-  port: number | null;
-  secure: boolean;
-  user: string | null;
+  provider: string;
   from: string | null;
-  hasPassword: boolean;
+  hasApiKey: boolean;
+  apiKeyHint: string | null;
 }
 
-const SMTP_FIELDS = gql`
-  fragment SmtpSettingsFields on SmtpSettings {
+const MAIL_FIELDS = gql`
+  fragment MailSettingsFields on MailSettings {
     source
-    host
-    port
-    secure
-    user
+    provider
     from
-    hasPassword
+    hasApiKey
+    apiKeyHint
   }
 `;
 
-export const SMTP_SETTINGS = gql`
-  query SmtpSettings {
-    smtpSettings {
-      ...SmtpSettingsFields
+export const MAIL_SETTINGS = gql`
+  query MailSettings {
+    mailSettings {
+      ...MailSettingsFields
     }
   }
-  ${SMTP_FIELDS}
+  ${MAIL_FIELDS}
 `;
 
-export const UPDATE_SMTP_SETTINGS = gql`
-  mutation UpdateSmtpSettings($input: SmtpSettingsInput!) {
-    updateSmtpSettings(input: $input) {
-      ...SmtpSettingsFields
+export const UPDATE_MAIL_SETTINGS = gql`
+  mutation UpdateMailSettings($input: MailSettingsInput!) {
+    updateMailSettings(input: $input) {
+      ...MailSettingsFields
     }
   }
-  ${SMTP_FIELDS}
+  ${MAIL_FIELDS}
 `;
 
-export const CLEAR_SMTP_SETTINGS = gql`
-  mutation ClearSmtpSettings {
-    clearSmtpSettings {
-      ...SmtpSettingsFields
+export const CLEAR_MAIL_SETTINGS = gql`
+  mutation ClearMailSettings {
+    clearMailSettings {
+      ...MailSettingsFields
     }
   }
-  ${SMTP_FIELDS}
+  ${MAIL_FIELDS}
 `;
 
 export const SEND_TEST_EMAIL = gql`

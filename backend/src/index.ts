@@ -176,7 +176,7 @@ async function main() {
   await signInService.purgeExpiredTokens().catch((err) => log.warn(`[auth] purge des liens de mot de passe : ${(err as Error).message}`));
   {
     const methods = await signInService.availableMethods();
-    const active = [methods.google && 'Google', methods.microsoft && 'Microsoft', methods.github && 'GitHub', methods.password && `mot de passe${methods.passwordReset ? '' : ' (sans SMTP : liens créés par un administrateur)'}`].filter(Boolean);
+    const active = [methods.google && 'Google', methods.microsoft && 'Microsoft', methods.github && 'GitHub', methods.password && `mot de passe${methods.passwordReset ? '' : ' (sans envoi d’e-mails : liens créés par un administrateur)'}`].filter(Boolean);
     log.info(active.length ? `[auth] connexion : ${active.join(', ')}${googleAuth.configured ? ` (callback Google ${googleAuth.redirectUri})` : ''}` : '[auth] aucun mode de connexion actif : personne ne peut se connecter');
   }
 
