@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('./smtp.js', () => ({ smtpService: { send: vi.fn() } }));
+vi.mock('./mail.js', () => ({ mailService: { send: vi.fn() } }));
 const { discordPayload, emailContent, slackPayload, validateTarget } = await import('./transports.js');
 
 const item = { title: '« Revue » attend votre autorisation', message: 'Bash: rm -rf <dist> & co', url: 'https://skipper.example/sessions/s1', projectName: 'Skipper' };

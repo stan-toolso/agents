@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExternalIdentity, User, UserIdentity } from '../users/types.js';
 
-// Base et SMTP simulés : le dépôt des utilisateurs tient en mémoire.
+// Base et envoi des e-mails simulés : le dépôt des utilisateurs tient en mémoire.
 const state = vi.hoisted(() => ({
   users: [] as User[],
   hashes: new Map<string, string | null>(),
@@ -62,8 +62,8 @@ vi.mock('../users/repository.js', () => {
     },
   };
 });
-vi.mock('../notifications/smtp.js', () => ({
-  smtpService: { configured: async () => state.smtp, send: async (m: { to: string; subject: string; text: string }) => void state.sent.push(m) },
+vi.mock('../notifications/mail.js', () => ({
+  mailService: { configured: async () => state.smtp, send: async (m: { to: string; subject: string; text: string }) => void state.sent.push(m) },
 }));
 
 const { signInService } = await import('./signInService.js');
@@ -153,7 +153,7 @@ describe('liens de mot de passe', () => {
     expect((await signInService.loginWithPassword('alice@example.com', 'nouveau mot de passe', null)).id).toBe('alice');
   });
 
-  it("n'envoie rien pour une adresse inconnue, un agent ou sans SMTP", async () => {
+  it("n'envoie rien pour une adresse inconnue, un agent ou sans envoi des e-mails", async () => {
     await signInService.requestPasswordReset('inconnu@example.com');
     await signInService.requestPasswordReset('ben@agents.local');
     state.smtp = false;

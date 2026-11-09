@@ -80,6 +80,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'notification_channel.update': 'a modifié le canal de notification',
   'notification_channel.delete': 'a supprimé le canal de notification',
   'app.smtp': 'a réglé le serveur SMTP',
+  'app.mail': 'a réglé l’envoi des e-mails (Brevo)',
   'app.claude_cell': 'a choisi le compte Claude de la cellule',
   'api_key.create': 'a créé la clé d’API',
   'api_key.delete': 'a supprimé la clé d’API',

@@ -2,7 +2,7 @@ import { AppError, NotFoundError } from '../errors.js';
 import { config } from '../config.js';
 import { log } from '../log.js';
 import { notificationService } from '../notifications/service.js';
-import { smtpService } from '../notifications/smtp.js';
+import { mailService } from '../notifications/mail.js';
 import { userRepository } from '../users/repository.js';
 import { userService } from '../users/service.js';
 import type { User } from '../users/types.js';
@@ -35,16 +35,16 @@ function cleanMessage(raw: string | null | undefined): string | null {
 }
 
 /**
- * E-mail de partage, si un serveur SMTP est configuré ; un échec est journalisé (le lien reste à envoyer à la main).
+ * E-mail de partage, si l'envoi des e-mails est configuré ; un échec est journalisé (le lien reste à envoyer à la main).
  * Un invité reçoit un lien de connexion directe (aucun compte à créer) ; une personne de Skipper, le lien de la page.
  */
 async function sendShareEmail(actor: User, page: SharedPage, user: User, message: string | null): Promise<void> {
   try {
-    if (!(await smtpService.configured())) return;
+    if (!(await mailService.configured())) return;
     const pagePath = `/shared/${page.id}`;
     const direct = user.isGuest;
     const url = direct ? await signInService.createLoginLink(user, pagePath, { createdById: actor.id, ttlMs: SHARE_LOGIN_LINK_DAYS * 24 * 3600 * 1000 }) : `${config.appUrl}${pagePath}`;
-    await smtpService.send({ to: user.email, ...pageShareEmail({ actor, page, to: user.email, message, url, directLoginDays: direct ? SHARE_LOGIN_LINK_DAYS : null }) });
+    await mailService.send({ to: user.email, ...pageShareEmail({ actor, page, to: user.email, message, url, directLoginDays: direct ? SHARE_LOGIN_LINK_DAYS : null }) });
   } catch (err) {
     log.warn(`[pages] e-mail de partage à ${user.email} : ${(err as Error).message}`);
   }
@@ -148,7 +148,7 @@ export const sharedPageService = {
   /**
    * Ajoute une personne à la page, avec un message d'introduction facultatif. Une adresse sans compte Skipper est
    * refusée (code NO_ACCOUNT), sauf avec `invite` : un compte d'invité des pages partagées est alors créé (il ne
-   * verra que les pages partagées avec lui). Avec `notify` (par défaut), un e-mail la prévient si un serveur SMTP est
+   * verra que les pages partagées avec lui). Avec `notify` (par défaut), un e-mail la prévient si l'envoi des e-mails est
    * configuré : lien de connexion directe pour un invité, lien de la page sinon. Partager à nouveau avec quelqu'un
    * qui a déjà accès remplace le message et le prévient de nouveau.
    */

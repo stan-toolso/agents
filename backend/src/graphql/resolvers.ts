@@ -17,7 +17,7 @@ import { accountOf, googleAccountService } from '../google/service.js';
 import { pushPreferencesService } from '../notifications/preferences.js';
 import { pushService, type PushSubscriptionInput } from '../notifications/push.js';
 import { notificationChannelService, type ChannelInput, type ChannelPatch } from '../notifications/channels.js';
-import { smtpService, type SmtpInput } from '../notifications/smtp.js';
+import { mailService, type MailInput } from '../notifications/mail.js';
 import { searchService, type SearchKind } from '../search/service.js';
 import { sharedPageCommentService } from '../sharedPages/commentService.js';
 import { sharedPageService } from '../sharedPages/service.js';
@@ -1214,13 +1214,13 @@ export const resolvers = {
       await requireProject(ctx, args.projectId, 'member');
       return notificationChannelService.list({ projectId: args.projectId });
     },
-    smtpSettings: (_: unknown, __: unknown, ctx: Ctx) => {
+    mailSettings: (_: unknown, __: unknown, ctx: Ctx) => {
       requireAdmin(ctx);
-      return smtpService.view();
+      return mailService.view();
     },
     emailNotificationsAvailable: (_: unknown, __: unknown, ctx: Ctx) => {
       requireUser(ctx);
-      return smtpService.configured();
+      return mailService.configured();
     },
     settings: (_: unknown, __: unknown, ctx: Ctx) => appSettings(ctx),
     vaultAwsAccounts: (_: unknown, args: { id: string }, ctx: Ctx) => awsService.accounts(vaultActor(ctx), args.id),
@@ -2277,18 +2277,18 @@ export const resolvers = {
       await guardNotificationChannel(ctx, args.id);
       return notificationChannelService.test(args.id);
     },
-    updateSmtpSettings: (_: unknown, args: { input: SmtpInput }, ctx: Ctx) => {
+    updateMailSettings: (_: unknown, args: { input: MailInput }, ctx: Ctx) => {
       requireAdmin(ctx);
-      return smtpService.update(args.input);
+      return mailService.update(args.input);
     },
-    clearSmtpSettings: (_: unknown, __: unknown, ctx: Ctx) => {
+    clearMailSettings: (_: unknown, __: unknown, ctx: Ctx) => {
       requireAdmin(ctx);
-      return smtpService.clear();
+      return mailService.clear();
     },
     sendTestEmail: async (_: unknown, __: unknown, ctx: Ctx) => {
       const user = requireAdmin(ctx);
       try {
-        await smtpService.send({ to: user.email, subject: 'Skipper : test des notifications par e-mail', text: 'Le serveur SMTP de Skipper fonctionne.' });
+        await mailService.send({ to: user.email, subject: 'Skipper : test des notifications par e-mail', text: 'L’envoi des e-mails de Skipper (Brevo) fonctionne.' });
       } catch (err) {
         throw new AppError(`Envoi impossible : ${(err as Error).message}`);
       }

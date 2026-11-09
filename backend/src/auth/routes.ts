@@ -133,7 +133,7 @@ const vaultPage = (projectId: string | null, params: Record<string, string>) => 
  *   `itemId` ; le retour passe par le même callback et ramène sur la page du coffre ;
  * - GET  /auth/methods              : modes de connexion offerts (page de connexion) ;
  * - POST /auth/password/login       : e-mail et mot de passe (JSON), ouvre la session ;
- * - POST /auth/password/forgot      : envoie un lien pour choisir ou réinitialiser son mot de passe (si SMTP) ;
+ * - POST /auth/password/forgot      : envoie un lien pour choisir ou réinitialiser son mot de passe (si l'envoi des e-mails est configuré) ;
  * - GET  /auth/password/token       : à qui appartient un lien de mot de passe ;
  * - POST /auth/password/reset       : choisit le mot de passe avec un lien, ouvre la session ;
  * - GET  /auth/link/<jeton>         : lien de connexion directe d'un invité des pages partagées, ouvre la session ;

@@ -32,7 +32,7 @@ vi.mock('../users/service.js', () => ({
     },
   },
 }));
-vi.mock('../notifications/smtp.js', () => ({ smtpService: { configured: async () => state.smtp, send: async (m: (typeof state.sent)[number]) => void state.sent.push(m) } }));
+vi.mock('../notifications/mail.js', () => ({ mailService: { configured: async () => state.smtp, send: async (m: (typeof state.sent)[number]) => void state.sent.push(m) } }));
 vi.mock('../notifications/service.js', () => ({ notificationService: { notify: async (n: { userId: string; message: string }) => void state.notified.push({ userId: n.userId, message: n.message }) } }));
 vi.mock('../auth/signInService.js', () => ({
   SHARE_LOGIN_LINK_DAYS: 30,

@@ -106,7 +106,7 @@ export default function SharePageModal({ page, onClose }: { page: SharedPage; on
               label={message.trim() ? 'Prévenir par e-mail, avec ce message' : 'Prévenir par e-mail'}
             />
           ) : (
-            <div className="small text-secondary mt-2">Aucun serveur d'e-mail configuré : le message s'affichera sur la page, envoyez le lien vous-même.</div>
+            <div className="small text-secondary mt-2">L'envoi des e-mails n'est pas configuré : le message s'affichera sur la page, envoyez le lien vous-même.</div>
           )}
         </Form>
         {noAccount && (

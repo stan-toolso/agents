@@ -2633,27 +2633,23 @@ input NotificationChannelPatch {
   enabled: Boolean
 }
 
-"Serveur SMTP des notifications par e-mail (le mot de passe n'est jamais renvoyé)."
-type SmtpSettings {
-  "env (variable SMTP_URL, non modifiable ici), settings ou none."
+"Envoi des e-mails de Skipper par l'API Brevo (la clé d'API n'est jamais renvoyée)."
+type MailSettings {
+  "env (variable BREVO_API_KEY, non modifiable ici), settings ou none."
   source: String!
-  host: String
-  port: Int
-  secure: Boolean!
-  user: String
+  "Service d'envoi : brevo."
+  provider: String!
+  "Expéditeur, ex. « Skipper <skipper@toolso.io> »."
   from: String
-  hasPassword: Boolean!
+  hasApiKey: Boolean!
+  "Quatre derniers caractères de la clé d'API."
+  apiKeyHint: String
 }
 
-input SmtpSettingsInput {
-  host: String!
-  port: Int!
-  "TLS dès la connexion (port 465) ; sinon STARTTLS si le serveur le propose."
-  secure: Boolean!
-  user: String
-  "Absent : garder le mot de passe enregistré ; chaîne vide : le retirer."
-  password: String
-  "Expéditeur, ex. « Skipper <skipper@exemple.fr> »."
+input MailSettingsInput {
+  "Clé d'API Brevo (SMTP & API › Clés API) ; absente : garder la clé enregistrée. Vérifiée auprès de Brevo avant d'être gardée."
+  apiKey: String
+  "Expéditeur validé dans Brevo, ex. « Skipper <skipper@toolso.io> » ; vide : celui par défaut."
   from: String!
 }
 
@@ -2908,9 +2904,9 @@ type Query {
   myNotificationChannels: [NotificationChannel!]!
   "Canaux de notification d'un projet (membres) : les notifications adressées à tous ses membres y sont relayées."
   projectNotificationChannels(projectId: ID!): [NotificationChannel!]!
-  "Serveur SMTP des notifications par e-mail (administrateurs)."
-  smtpSettings: SmtpSettings!
-  "Un serveur SMTP est-il configuré (canaux e-mail utilisables) ?"
+  "Envoi des e-mails par Brevo (administrateurs)."
+  mailSettings: MailSettings!
+  "L'envoi des e-mails est-il configuré (canaux e-mail utilisables) ?"
   emailNotificationsAvailable: Boolean!
   "Fichiers d'environnement d'un projet (membres) : modèles écrits dans chaque nouveau dossier de travail."
   envFiles(projectId: ID!): [EnvFile!]!
@@ -3394,8 +3390,8 @@ type Mutation {
   """
   Ajoute une personne à la page (propriétaire). Une adresse sans compte Skipper est refusée (code NO_ACCOUNT), sauf avec
   invite : un compte d'invité est créé, qui ne verra que les pages partagées avec lui. message : mot d'introduction
-  (2000 caractères au plus), repris dans l'e-mail et affiché sur la page. notify (par défaut) : e-mail si un serveur
-  SMTP est configuré, avec un lien de connexion directe pour un invité.
+  (2000 caractères au plus), repris dans l'e-mail et affiché sur la page. notify (par défaut) : e-mail si l'envoi des
+  e-mails est configuré, avec un lien de connexion directe pour un invité.
   """
   addSharedPageMember(id: ID!, email: String!, invite: Boolean = false, message: String, notify: Boolean = true): SharedPage!
   "Le propriétaire retire qui il veut ; une personne ajoutée peut se retirer elle-même."
@@ -3429,9 +3425,9 @@ type Mutation {
   deleteNotificationChannel(id: ID!): Boolean!
   "Envoie aussitôt un message de test sur le canal ; erreur avec la raison en cas d'échec."
   testNotificationChannel(id: ID!): NotificationChannel!
-  "Règle le serveur SMTP (administrateurs)."
-  updateSmtpSettings(input: SmtpSettingsInput!): SmtpSettings!
-  clearSmtpSettings: SmtpSettings!
+  "Règle l'envoi des e-mails par Brevo (administrateurs)."
+  updateMailSettings(input: MailSettingsInput!): MailSettings!
+  clearMailSettings: MailSettings!
   "Envoie un e-mail de test à la personne connectée (administrateurs)."
   sendTestEmail: Boolean!
   "Termine le shell."
@@ -4445,6 +4441,6 @@ extend type Mutation {
   removeMyPassword: MyLoginMethods!
   "Retire un compte relié pour la connexion (google, microsoft, github)."
   unlinkMyLoginIdentity(provider: String!): MyLoginMethods!
-  "Lien pour qu'une personne choisisse son mot de passe (administrateurs) ; sendEmail : l'envoyer aussi par e-mail (SMTP requis)."
+  "Lien pour qu'une personne choisisse son mot de passe (administrateurs) ; sendEmail : l'envoyer aussi par e-mail (envoi des e-mails configuré)."
   createPasswordLink(userId: ID!, sendEmail: Boolean = false): PasswordLink!
 }

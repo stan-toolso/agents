@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { config } from '../config.js';
 import { AppError } from '../errors.js';
 import { log } from '../log.js';
-import { smtpService } from '../notifications/smtp.js';
+import { mailService } from '../notifications/mail.js';
 import { userRepository } from '../users/repository.js';
 import type { ExternalIdentity, User, UserIdentity } from '../users/types.js';
 import { loginLinkEmail } from '../sharedPages/emails.js';
@@ -49,14 +49,14 @@ export interface LoginMethodsView {
 
 /** Modes de connexion offerts par le serveur (page de connexion, sans session). */
 export async function availableMethods(): Promise<{ google: boolean; microsoft: boolean; github: boolean; password: boolean; passwordReset: boolean; emailLink: boolean }> {
-  const smtp = await smtpService.configured().catch(() => false);
+  const mail = await mailService.configured().catch(() => false);
   return {
     google: googleAuth.configured,
     microsoft: loginProviders.microsoft.configured,
     github: loginProviders.github.configured,
     password: config.passwordLogin,
-    passwordReset: config.passwordLogin && smtp,
-    emailLink: smtp,
+    passwordReset: config.passwordLogin && mail,
+    emailLink: mail,
   };
 }
 
@@ -155,14 +155,14 @@ export const signInService = {
 
   /**
    * « Mot de passe oublié » : envoie un lien valable une heure si l'adresse est celle d'une personne invitée et qu'un
-   * serveur SMTP est configuré. Ne dit jamais si l'adresse existe.
+   * l'envoi des e-mails (Brevo) est configuré. Ne dit jamais si l'adresse existe.
    */
   async requestPasswordReset(rawEmail: string): Promise<void> {
     if (!config.passwordLogin) return;
     const email = rawEmail.trim().toLowerCase();
     const user = email ? await userRepository.findByEmail(email) : null;
     if (!user || user.kind !== 'person') return;
-    if (!(await smtpService.configured())) return;
+    if (!(await mailService.configured())) return;
     const last = await userRepository.lastSelfServiceTokenAt(user.id);
     if (last && Date.now() - last.getTime() < SELF_SERVICE_COOLDOWN_MS) return;
     const token = randomBytes(32).toString('base64url');
@@ -171,7 +171,7 @@ export const signInService = {
     const hasPassword = Boolean(user.passwordSetAt);
     const subject = hasPassword ? 'Réinitialiser votre mot de passe Skipper' : 'Choisir votre mot de passe Skipper';
     const text = `Bonjour ${user.name},\n\nPour ${hasPassword ? 'réinitialiser' : 'choisir'} votre mot de passe Skipper, ouvrez ce lien (valable une heure) :\n${url}\n\nSi vous n'êtes pas à l'origine de cette demande, ignorez ce message.`;
-    await smtpService.send({ to: user.email, subject, text }).catch((err) => log.warn(`[auth] envoi du lien de mot de passe à ${user.email} impossible : ${(err as Error).message}`));
+    await mailService.send({ to: user.email, subject, text }).catch((err) => log.warn(`[auth] envoi du lien de mot de passe à ${user.email} impossible : ${(err as Error).message}`));
   },
 
   /**
@@ -188,9 +188,9 @@ export const signInService = {
     const url = resetUrl(token);
     let emailed = false;
     if (sendEmail) {
-      if (!(await smtpService.configured())) throw new AppError('Aucun serveur SMTP configuré (Paramètres › Serveur) : copiez le lien et transmettez-le');
+      if (!(await mailService.configured())) throw new AppError('Envoi des e-mails non configuré (Paramètres › Serveur, clé d’API Brevo) : copiez le lien et transmettez-le');
       const text = `Bonjour ${target.name},\n\n${admin.name} vous invite à choisir votre mot de passe Skipper. Ouvrez ce lien (valable 7 jours) :\n${url}\n\nVous vous connecterez ensuite sur ${config.appUrl} avec votre adresse ${target.email}.`;
-      await smtpService.send({ to: target.email, subject: 'Choisir votre mot de passe Skipper', text });
+      await mailService.send({ to: target.email, subject: 'Choisir votre mot de passe Skipper', text });
       emailed = true;
     }
     return { url, expiresAt, emailed };
@@ -256,19 +256,19 @@ export const signInService = {
 
   /**
    * « Recevoir un lien de connexion » (page de connexion) : pour un invité des pages partagées, un lien valable une
-   * heure, si un serveur SMTP est configuré. Ne dit jamais si l'adresse existe ; une personne ordinaire garde ses
+   * heure, si l'envoi des e-mails est configuré. Ne dit jamais si l'adresse existe ; une personne ordinaire garde ses
    * modes habituels (et « mot de passe oublié »).
    */
   async requestLoginLink(rawEmail: string, nextPath: string | null): Promise<void> {
     const email = rawEmail.trim().toLowerCase();
     const user = email ? await userRepository.findByEmail(email) : null;
     if (!user || user.kind !== 'person' || !user.isGuest) return;
-    if (!(await smtpService.configured())) return;
+    if (!(await mailService.configured())) return;
     const last = await userRepository.lastSelfServiceLoginLinkAt(user.id);
     if (last && Date.now() - last.getTime() < SELF_SERVICE_COOLDOWN_MS) return;
     const next = safeAppPath(nextPath);
     const url = await this.createLoginLink(user, next.startsWith('/shared') ? next : '/shared', { createdById: null, ttlMs: SELF_LOGIN_LINK_MINUTES * 60 * 1000 });
-    await smtpService.send({ to: user.email, ...loginLinkEmail({ name: user.name, to: user.email, url, minutes: SELF_LOGIN_LINK_MINUTES }) }).catch((err) => log.warn(`[auth] envoi du lien de connexion à ${user.email} impossible : ${(err as Error).message}`));
+    await mailService.send({ to: user.email, ...loginLinkEmail({ name: user.name, to: user.email, url, minutes: SELF_LOGIN_LINK_MINUTES }) }).catch((err) => log.warn(`[auth] envoi du lien de connexion à ${user.email} impossible : ${(err as Error).message}`));
   },
 
   purgeExpiredTokens: () => userRepository.deleteExpiredPasswordTokens(),

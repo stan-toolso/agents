@@ -227,8 +227,8 @@ export const AUDITED: Record<string, MutationAudit> = {
   updateServerSettings: { action: 'app.settings', app: true, targetId: () => null, details: (a) => a },
   setCellClaudeAccount: { action: 'app.claude_cell', app: true, targetId: () => null, details: (a) => ({ itemId: a.itemId ?? null }) },
   // Jamais le mot de passe dans les détails.
-  updateSmtpSettings: { action: 'app.smtp', app: true, targetId: () => null, details: (a) => ({ host: a.input?.host, port: a.input?.port, secure: a.input?.secure, user: a.input?.user, from: a.input?.from, password: a.input?.password == null ? 'inchangé' : 'modifié' }) },
-  clearSmtpSettings: { action: 'app.smtp', app: true, targetId: () => null, details: () => ({ cleared: true }) },
+  updateMailSettings: { action: 'app.mail', app: true, targetId: () => null, details: (a) => ({ from: a.input?.from, apiKey: a.input?.apiKey ? 'modifiée' : 'inchangée' }) },
+  clearMailSettings: { action: 'app.mail', app: true, targetId: () => null, details: () => ({ cleared: true }) },
   updateBillingSettings: { action: 'app.billing', app: true, targetId: () => null, details: (a) => ({ fields: keysOf(a.input) }) },
   addCtoTimeEntry: { action: 'app.cto_time_add', app: true, details: (a) => ({ input: a.input }) },
   deleteCtoTimeEntry: { action: 'app.cto_time_delete', app: true },

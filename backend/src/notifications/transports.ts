@@ -1,5 +1,5 @@
 import { AppError } from '../errors.js';
-import { smtpService } from './smtp.js';
+import { mailService } from './mail.js';
 
 /**
  * Transports des canaux de notification hors navigateur : webhook Slack, webhook Discord, e-mail. Chaque envoi
@@ -101,5 +101,5 @@ export async function deliver(kind: ChannelKind, target: string, items: Outgoing
   if (kind === 'slack') return postJson(target, slackPayload(items));
   if (kind === 'discord') return postJson(target, discordPayload(items));
   const { subject, text, html } = emailContent(items);
-  await smtpService.send({ to: target, subject, text, html });
+  await mailService.send({ to: target, subject, text, html });
 }

@@ -12,7 +12,7 @@ import RateLimitGauges from '../components/RateLimitGauges';
 import ServerHealthCard from '../components/ServerHealthCard';
 import LoginMethodsSection from '../components/settings/LoginMethodsSection';
 import NotificationsSection from '../components/settings/NotificationsSection';
-import SmtpCard from '../components/settings/SmtpCard';
+import MailCard from '../components/settings/MailCard';
 import OpencodeSection from '../components/settings/OpencodeSection';
 import VaultTokenPicker from '../components/settings/VaultTokenPicker';
 import {
@@ -665,7 +665,7 @@ function ServerSection({ server }: { server: ServerState }) {
       <ServerHealthCard memoryAlertThresholdMb={server.memoryAlertThresholdMb} />
       <CellClaudeCard server={server} />
       <SessionLimitsCard server={server} />
-      <SmtpCard />
+      <MailCard />
       <Card className="mb-4">
         <Card.Header>
           Mode maintenance

@@ -263,7 +263,7 @@ export default function NotificationChannelsCard({ projectId, canManage = true }
               </Button>
             </InputGroup>
             {kind === 'email' && !emailAvailable && (
-              <div className="text-warning mb-2">Aucun serveur SMTP n’est configuré : un administrateur le règle dans Paramètres › Serveur.</div>
+              <div className="text-warning mb-2">L’envoi des e-mails n’est pas configuré : un administrateur règle la clé d’API Brevo dans Paramètres › Serveur.</div>
             )}
             {kind !== 'email' && (
               <div className="text-secondary mb-2">
