@@ -3,6 +3,9 @@ import { pullRequestRepository } from '../pullRequests/repository.js';
 import type { TrackedPullRequest } from '../pullRequests/types.js';
 import { projectRepository } from '../projects/repository.js';
 import { requestRepository } from '../requests/repository.js';
+import { sharedPageCommentRepository } from '../sharedPages/commentRepository.js';
+import { sharedPageRepository } from '../sharedPages/repository.js';
+import type { SharedPage } from '../sharedPages/types.js';
 import { scheduleRepository } from '../schedules/repository.js';
 import type { SessionSchedule } from '../schedules/types.js';
 import { sessionRepository } from '../sessions/repository.js';
@@ -91,6 +94,19 @@ export function createLoaders() {
     schedule: createBatcher<string, SessionSchedule>((ids) => scheduleRepository.findByIds(ids)),
     /** PR suivie d'une work session (en préparation comprise), voir `pullRequestRepository.findForWorksessions`. */
     trackedPullRequest: createBatcher<{ id: string; projectId: string; branch: string }, TrackedPullRequest>((keys) => pullRequestRepository.findForWorksessions(keys), (k) => k.id),
+    /** Pages publiées depuis une session et visibles de la personne qui demande (`viewerId`, le même dans toute la requête). */
+    sessionPages: createBatcher<{ sessionId: string; viewerId: string }, SharedPage[]>(
+      async (keys) => {
+        const byViewer = new Map<string, string[]>();
+        for (const k of keys) byViewer.set(k.viewerId, [...(byViewer.get(k.viewerId) ?? []), k.sessionId]);
+        const out = new Map<string, SharedPage[]>();
+        for (const [viewerId, ids] of byViewer) for (const [sessionId, pages] of await sharedPageRepository.listForSessions(ids, viewerId)) out.set(`${viewerId}\u0000${sessionId}`, pages);
+        return out;
+      },
+      (k) => `${k.viewerId}\u0000${k.sessionId}`,
+    ),
+    /** Commentaires non traités d'une page partagée (absente : aucun). */
+    sharedPageOpenComments: createBatcher<string, number>((ids) => sharedPageCommentRepository.countOpenByPages(ids)),
     taskForBranch: createBatcher<{ projectId: string; branch: string }, Task>((keys) => taskRepository.findForBranches(keys), branchKey),
   };
 }

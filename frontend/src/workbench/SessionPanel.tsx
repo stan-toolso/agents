@@ -7,10 +7,13 @@ import { useAuth } from '../auth/AuthContext';
 import { SessionReviewReport, type SessionReviewInfo } from '../components/CodeReview';
 import { ContextBanner, ContextGauge } from '../components/ContextGauge';
 import { SessionChildren, SessionParentNote, useSessionActions, type ControlledSession } from '../components/SessionControls';
+import { SESSION_PAGES, type SessionPage } from '../graphql/misc';
 import { SESSION } from '../graphql/operations';
 import { describeCron } from '../lib/cron';
 import { formatCost, permissionModeLabels, sessionStateHint, sessionStatusLabels } from '../lib/humanize';
+import { usePollingQuery } from '../lib/usePollingQuery';
 import { sessionDotClass } from './WorkspaceTabs';
+import { sessionPagePath } from './workspaces';
 import '../components/terminal.css';
 
 const fmt = (iso: string) => new Date(iso).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
@@ -66,6 +69,72 @@ function SessionLink({ sessionId }: { sessionId: string }) {
         <i className={`bi ${copied === 'ok' ? 'bi-check2' : 'bi-clipboard'} me-1`} />
         {copied === 'ok' ? 'copié' : copied === 'ko' ? 'copie refusée' : 'copier'}
       </button>
+    </>
+  );
+}
+
+/** Bouton qui copie le lien à part entière d'une page partagée (/shared/<id>), celui qui vaut pour tous. */
+function CopyPageLink({ pageId }: { pageId: string }) {
+  const [copied, setCopied] = useState(false);
+  const url = `${window.location.origin}/shared/${pageId}`;
+  return (
+    <button
+      type="button"
+      className="cc-link session-panel-copy"
+      title={`Copier le lien de la page (${url.replace(/^https?:\/\//, '')})`}
+      onClick={() => {
+        void navigator.clipboard?.writeText(url).then(() => {
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 2000);
+        });
+      }}
+    >
+      <i className={`bi ${copied ? 'bi-check2' : 'bi-link-45deg'} me-1`} />
+      {copied ? 'copié' : 'lien'}
+    </button>
+  );
+}
+
+const pageAccess = (p: SessionPage) => (p.linkAccess ? { icon: 'bi-building', text: 'lien ouvert' } : p.members.length ? { icon: 'bi-people', text: `partagée (${p.members.length})` } : { icon: 'bi-lock', text: 'privée' });
+
+/** Pages publiées depuis la session et visibles de la personne : elles s'ouvrent dans le dossier de la session. */
+function SessionPages({ sessionId }: { sessionId: string }) {
+  const { user } = useAuth();
+  const { data } = usePollingQuery<{ session: { id: string; pages: SessionPage[] } | null }>(SESSION_PAGES, { variables: { id: sessionId }, pollInterval: 30_000 });
+  const pages = data?.session?.pages ?? [];
+  if (!pages.length) return null;
+  return (
+    <>
+      <div className="git-subhead">{pages.length > 1 ? `Pages (${pages.length})` : 'Page'}</div>
+      <ul className="session-panel-pages">
+        {pages.map((p) => {
+          const access = pageAccess(p);
+          return (
+            <li key={p.id}>
+              <Link to={sessionPagePath(sessionId, p.id)} className="session-panel-page" title={`Ouvrir « ${p.title} » à côté de la session`}>
+                <i className="bi bi-file-earmark-richtext me-1" />
+                {p.title}
+              </Link>
+              <div className="cc-dim session-panel-page-meta">
+                <span title={access.text}>
+                  <i className={`bi ${access.icon} me-1`} />
+                  {access.text}
+                </span>
+                {' · '}v{p.version} · {fmt(p.updatedAt)}
+                {p.owner.id !== user?.id && <> · de {p.owner.name}</>}
+                {p.openComments > 0 && (
+                  <span className="cc-yellow">
+                    {' · '}
+                    {p.openComments} commentaire{p.openComments > 1 ? 's' : ''} à traiter
+                  </span>
+                )}
+                {' · '}
+                <CopyPageLink pageId={p.id} />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
     </>
   );
 }
@@ -231,6 +300,8 @@ export default function SessionPanel({ sessionId }: { sessionId: string }) {
           </div>
         )}
       </dl>
+
+      <SessionPages sessionId={session.id} />
 
       {session.parentSession && (
         <>

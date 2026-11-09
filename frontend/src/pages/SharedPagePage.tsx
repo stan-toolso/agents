@@ -22,9 +22,13 @@ const fmt = (iso: string) => new Date(iso).toLocaleString('fr-FR', { dateStyle: 
  * propriétaire, accès, versions, origine), Commentaires, Partager, et un menu « ⋯ » pour le reste (lien, onglet,
  * téléchargement, renommer, supprimer, quitter). Panneau de commentaires : généraux ou ancrés sur un élément de la
  * page (components/pages/PageComments.tsx).
+ *
+ * Deux adresses : /shared/<id>, la page à part entière (lien partagé, notifications, personnes qui ne voient pas la
+ * session), et /sessions/<session>/pages/<id>, la même page ouverte dans le dossier de la session qui l'a publiée
+ * (onglet de la sous-barre). Le lien copié reste toujours /shared/<id>.
  */
 export default function SharedPagePage() {
-  const { id = '' } = useParams();
+  const { id = '', sessionId } = useParams();
   const navigate = useNavigate();
   const [search, setSearch] = useSearchParams();
   const focusComment = search.get('comment');
@@ -55,8 +59,8 @@ export default function SharedPagePage() {
     if (focusComment) setCommentsOpen(true);
   }, [focusComment]);
   const [update] = useMutation(UPDATE_SHARED_PAGE, { refetchQueries: ['SharedPage', 'SharedPages'], onError: (e) => void showError(e) });
-  const [remove] = useMutation(DELETE_SHARED_PAGE, { refetchQueries: ['SharedPages'], onError: (e) => void showError(e) });
-  const [leave] = useMutation(REMOVE_SHARED_PAGE_MEMBER, { refetchQueries: ['SharedPages'], onError: (e) => void showError(e) });
+  const [remove] = useMutation(DELETE_SHARED_PAGE, { refetchQueries: ['SharedPages', 'Sidebar'], onError: (e) => void showError(e) });
+  const [leave] = useMutation(REMOVE_SHARED_PAGE_MEMBER, { refetchQueries: ['SharedPages', 'Sidebar'], onError: (e) => void showError(e) });
   const [requestUpdate] = useMutation<{ requestSharedPageUpdate: { id: string; name: string } }>(REQUEST_SHARED_PAGE_UPDATE, { onError: (e) => void showError(e) });
 
   if (loading && !data) return <PageLoading />;
@@ -143,7 +147,7 @@ export default function SharedPagePage() {
             onClick: async () => {
               if (await confirm({ title: 'Supprimer la page', message: `Supprimer « ${page.title} » et ses ${page.versions.length} version${page.versions.length > 1 ? 's' : ''} ?${shared ? ' Le lien cessera de fonctionner pour toutes les personnes avec qui elle est partagée.' : ''}`, confirmLabel: 'Supprimer', danger: true })) {
                 await remove({ variables: { id: page.id } });
-                navigate('/shared');
+                navigate(sessionId ? `/sessions/${sessionId}` : '/shared');
               }
             },
           },
@@ -158,7 +162,7 @@ export default function SharedPagePage() {
             onClick: async () => {
               if (await confirm({ title: 'Quitter la page', message: `Ne plus voir cette page de ${page.owner.name} ?${page.linkAccess ? ' Le lien restera ouvert à toute personne de Skipper.' : ''}`, confirmLabel: 'Quitter' })) {
                 await leave({ variables: { id: page.id, userId: user?.id } });
-                navigate('/shared');
+                navigate(sessionId ? `/sessions/${sessionId}` : '/shared');
               }
             },
           },

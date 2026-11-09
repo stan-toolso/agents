@@ -633,6 +633,11 @@
 .wb-ws-label { overflow: hidden; text-overflow: ellipsis; }
 .wb-ws-group { display: inline-flex; align-items: stretch; }
 .wb-ws-group .wb-ws-tab + .wb-ws-tab { padding-left: 6px; border-left: 0; }
+/* Pages publiées par une session (onglets de la sous-barre) */
+.wb-page-icon { color: var(--cc-accent); font-size: 11px; }
+.wb-page-count { background: var(--cc-accent); color: var(--cc-bg); border-radius: 999px; font-size: 10.5px; font-weight: 600; padding: 0 6px; line-height: 1.5; }
+.wb-ws-tab-btn { background: none; border: 0; border-right: 1px solid var(--cc-border); font: inherit; cursor: pointer; }
+.wb-ws-chevron { font-size: 9px; color: var(--cc-dimmer); }
 .wb-ws-add { display: flex; align-items: center; padding: 0 4px; position: relative; }
 .wb-ws-add .wb-plus { background: none; border: 0; color: var(--cc-dim); cursor: pointer; padding: 2px 6px; }
 .wb-ws-add .wb-plus:hover { color: var(--cc-accent); }
@@ -711,6 +716,11 @@
 .session-panel-fields dt { color: var(--cc-dim); font-weight: 500; white-space: nowrap; }
 .session-panel-fields dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .session-panel-fields a { color: var(--cc-fg); text-decoration: none; }
+.session-panel-pages { list-style: none; margin: 0; padding: 2px 10px 6px; display: flex; flex-direction: column; gap: 6px; }
+.session-panel-page { color: var(--cc-fg); text-decoration: none; overflow-wrap: anywhere; }
+.session-panel-page:hover { color: var(--cc-accent); }
+.session-panel-page .bi { color: var(--cc-accent); }
+.session-panel-page-meta { font-size: 11.5px; }
 .session-panel-fields a:hover { color: var(--cc-accent); }
 .session-panel-fields code { background: none; padding: 0; color: inherit; font-size: inherit; }
 .session-panel .cc-link { font: inherit; background: none; border: 0; padding: 0; color: var(--cc-fg); text-decoration: underline dotted; cursor: pointer; }

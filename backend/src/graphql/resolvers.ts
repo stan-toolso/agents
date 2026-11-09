@@ -758,7 +758,7 @@ export const resolvers = {
       return { owner: p.ownerId === user.id, member: members.some((m) => m.userId === user.id) };
     },
     comments: (p: SharedPage) => sharedPageCommentService.roots(p.id),
-    openComments: (p: SharedPage) => sharedPageCommentService.countOpen(p.id),
+    openComments: async (p: SharedPage, _: unknown, ctx: Ctx) => (await loadersOf(ctx).sharedPageOpenComments(p.id)) ?? 0,
     // Réglage effectif : sans session d'origine, rien ne peut être transmis.
     agentHandoff: (p: SharedPage) => (p.sessionId ? p.agentHandoff.toUpperCase() : 'OFF'),
   },
@@ -916,6 +916,8 @@ export const resolvers = {
       requestService.list({ sessionId: session.id, status: fromGqlRequestStatus(args.status) }),
     pendingRequestCount: async (session: Session, _: unknown, ctx: Ctx) => (await loadersOf(ctx).pendingRequestCount(session.id)) ?? 0,
     browserActive: (session: Session) => liveBrowserService.isActive(session.id),
+    // Pages publiées depuis la session, réduites à celles que la personne voit : les autres gardent /shared/<id>.
+    pages: async (session: Session, _: unknown, ctx: Ctx) => (ctx.user ? ((await loadersOf(ctx).sessionPages({ sessionId: session.id, viewerId: ctx.user.id })) ?? []) : []),
     liveDraft: (session: Session) => liveDraftService.get(session.id),
     queuePosition: (session: Session) => (session.status === 'queued' ? sessionService.queuePosition(session.id) : null),
     promptAttachments: (session: Session) => session.promptAttachments.map(publicAttachment),

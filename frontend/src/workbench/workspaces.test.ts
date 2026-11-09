@@ -124,6 +124,7 @@ describe('WorkspaceIndex', () => {
     expect(index.keyOf('/sessions/a')).toBe('/sessions/a');
     expect(index.keyOf('/sessions/a/files/src/index.ts')).toBe('/sessions/a');
     expect(index.keyOf('/sessions/a/browser')).toBe('/sessions/a');
+    expect(index.keyOf('/sessions/a/pages/p1')).toBe('/sessions/a');
     expect(index.keyOf('/terminals/t1')).toBe('/sessions/a');
     expect(index.keyOf('/sessions/inconnue')).toBeNull();
     expect(index.keyOf('/projects/p/files/README.md')).toBe('/projects/p/files');

@@ -98,6 +98,8 @@ function PageRoutes({ location, isAdmin }: { location: Location; isAdmin: boolea
       <Route path="/chats/:id" element={<SessionDetailPage />} />
       <Route path="/me" element={<PersonalSpaceRedirect />} />
       <Route path="/sessions/:id/browser" element={<BrowserPage />} />
+      {/* Page publiée par la session, ouverte dans son dossier ; /shared/:id reste la page à part entière (lien partagé, sans session). */}
+      <Route path="/sessions/:sessionId/pages/:id" element={<SharedPagePage />} />
       <Route path="/inbox" element={<InboxPage />} />
       <Route path="/requests" element={<RequestsPage />} />
       <Route path="/terminals/:id" element={<TerminalPage />} />

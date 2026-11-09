@@ -312,6 +312,33 @@ export const SHARED_PAGES = gql`
   }
 `;
 
+/** Pages publiées depuis une session (section « Pages » de l'onglet Session du panneau de droite). */
+export type SessionPage = Pick<SharedPage, 'id' | 'title' | 'linkAccess' | 'version' | 'updatedAt' | 'openComments'> & { owner: { id: string; name: string }; members: { user: { id: string } }[] };
+export const SESSION_PAGES = gql`
+  query SessionPages($id: ID!) {
+    session(id: $id) {
+      id
+      pages {
+        id
+        title
+        linkAccess
+        version
+        updatedAt
+        openComments
+        owner {
+          id
+          name
+        }
+        members {
+          user {
+            id
+          }
+        }
+      }
+    }
+  }
+`;
+
 export const SHARED_PAGE = gql`
   ${SHARED_PAGE_FIELDS}
   query SharedPage($id: ID!) {

@@ -159,6 +159,7 @@ function session(id, p, name, opts = {}) {
     startedAt: ago(opts.age ?? 90),
     endedAt: opts.status && opts.status !== 'RUNNING' ? ago(opts.updated ?? 30) : null,
     browserActive: false,
+    pages: [],
     liveDraft: null,
     queuedAt: null,
     queuePosition: null,
@@ -238,6 +239,15 @@ const sharedPagesDemo = [
   demoSharedPage('page-offre', 'Proposition commerciale 2027', U.me, [[U.hugo, null], [user('u-claire', 'claire.martin@client.fr', 'claire.martin@client.fr', { isGuest: false, lastLoginAt: null }), 'Bonjour Claire, voici notre proposition.']]),
   demoSharedPage('page-audit', 'Audit des performances du portail', U.lea, [[U.me, "Camille, voici l'audit dont on a parlé ce matin.\nJ'aimerais ton avis sur la partie cache avant jeudi : commente directement sur la page."]]),
 ];
+// Pages publiées depuis une session : onglets de la sous-barre de son dossier (au-delà de 3, un onglet « Pages » à menu).
+S.tarifs.pages = [
+  demoSharedPage('page-maquette-tarifs', 'Maquette des trois offres', U.me, [], { version: 3, openComments: 2, session: S.tarifs, project: P.site }),
+  sharedPagesDemo[0],
+];
+S.hebdo.pages = ['Inscriptions de la semaine', 'Camps les plus demandés', 'Désinscriptions', 'Comparatif 2025'].map((t, i) =>
+  demoSharedPage(`page-hebdo-${i + 1}`, t, U.hugo, [[U.me, null]], { linkAccess: i === 0, openComments: i === 1 ? 1 : 0, session: S.hebdo, project: P.data }),
+);
+sharedPagesDemo.push(...S.tarifs.pages.slice(0, 1), ...S.hebdo.pages);
 
 export const schedules = [
   schedule('sch-rapport-lundi', P.data, 'Rapport du lundi', U.hugo, { allowedTools: ['Bash(npm run report *)'], lastRunAt: ago(60 * 24 * 4) }),

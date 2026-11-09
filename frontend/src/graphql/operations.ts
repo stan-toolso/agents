@@ -1630,6 +1630,11 @@ export const SIDEBAR = gql`
     activity
     pendingRequestCount
     browserActive
+    pages {
+      id
+      title
+      openComments
+    }
     model
     context {
       tokens

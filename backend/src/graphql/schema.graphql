@@ -4330,6 +4330,11 @@ type SessionShare {
 }
 
 extend type Session {
+  "Pages partagées publiées depuis cette session (au moins une version), réduites à celles que la personne voit ; les plus récentes d'abord."
+  pages: [SharedPage!]!
+}
+
+extend type Session {
   "Liens publics encore valables (membres du projet ; vide pour un lecteur)."
   shares: [SessionShare!]!
 }
