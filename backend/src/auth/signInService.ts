@@ -5,6 +5,7 @@ import { log } from '../log.js';
 import { smtpService } from '../notifications/smtp.js';
 import { userRepository } from '../users/repository.js';
 import type { ExternalIdentity, User, UserIdentity } from '../users/types.js';
+import { loginLinkEmail } from '../sharedPages/emails.js';
 import { googleAuth } from './google.js';
 import { hashPassword, loginThrottle, passwordProblem, verifyPassword } from './password.js';
 import { isLoginProviderId, loginProviders, type LoginProviderId } from './providers.js';
@@ -23,6 +24,16 @@ const ADMIN_LINK_TTL_MS = 7 * 24 * 3600 * 1000;
 /** Un seul lien « mot de passe oublié » toutes les deux minutes par personne. */
 const SELF_SERVICE_COOLDOWN_MS = 2 * 60 * 1000;
 
+/** Lien de connexion directe d'un invité : envoyé avec un partage (30 jours), ou demandé par l'invité (1 h). */
+export const SHARE_LOGIN_LINK_DAYS = 30;
+const SELF_LOGIN_LINK_MINUTES = 60;
+
+/** Chemin de l'application après connexion : uniquement un chemin relatif (jamais une URL externe). */
+export function safeAppPath(raw: string | null | undefined): string {
+  if (!raw || !raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\') || raw.length > 500) return '/';
+  return raw;
+}
+
 /** Empreinte de comparaison quand l'adresse est inconnue : le temps de réponse ne dit pas si le compte existe. */
 let dummyHash: Promise<string> | null = null;
 
@@ -37,13 +48,15 @@ export interface LoginMethodsView {
 }
 
 /** Modes de connexion offerts par le serveur (page de connexion, sans session). */
-export async function availableMethods(): Promise<{ google: boolean; microsoft: boolean; github: boolean; password: boolean; passwordReset: boolean }> {
+export async function availableMethods(): Promise<{ google: boolean; microsoft: boolean; github: boolean; password: boolean; passwordReset: boolean; emailLink: boolean }> {
+  const smtp = await smtpService.configured().catch(() => false);
   return {
     google: googleAuth.configured,
     microsoft: loginProviders.microsoft.configured,
     github: loginProviders.github.configured,
     password: config.passwordLogin,
-    passwordReset: config.passwordLogin && (await smtpService.configured().catch(() => false)),
+    passwordReset: config.passwordLogin && smtp,
+    emailLink: smtp,
   };
 }
 
@@ -219,6 +232,43 @@ export const signInService = {
       ],
       passwordLoginEnabled: config.passwordLogin,
     };
+  },
+
+  /**
+   * Lien de connexion directe pour un invité des pages partagées (aucun compte à créer, aucun mot de passe) : sert
+   * plusieurs fois jusqu'à son expiration, et seulement tant que le compte reste un invité.
+   */
+  async createLoginLink(user: User, nextPath: string, opts: { createdById: string | null; ttlMs: number }): Promise<string> {
+    if (user.kind !== 'person' || !user.isGuest) throw new AppError('Lien de connexion directe réservé aux invités des pages partagées', 'FORBIDDEN');
+    const token = randomBytes(32).toString('base64url');
+    await userRepository.createLoginLink(hash(token), user.id, safeAppPath(nextPath), new Date(Date.now() + opts.ttlMs), opts.createdById);
+    return `${config.apiUrl.replace(/\/$/, '')}/auth/link/${token}`;
+  },
+
+  /** Connexion par un lien direct : la personne et le chemin à ouvrir, ou le chemin seul si le lien n'est plus valable. */
+  async loginWithLink(token: string): Promise<{ user: User; nextPath: string } | { user: null; nextPath: string | null }> {
+    const found = token ? await userRepository.findLoginLink(hash(token)) : null;
+    if (!found) return { user: null, nextPath: null };
+    if (found.expired || found.user.kind !== 'person' || !found.user.isGuest) return { user: null, nextPath: found.nextPath };
+    await userRepository.touchLoginLink(hash(token));
+    return { user: await userRepository.touchLogin(found.user.id), nextPath: found.nextPath };
+  },
+
+  /**
+   * « Recevoir un lien de connexion » (page de connexion) : pour un invité des pages partagées, un lien valable une
+   * heure, si un serveur SMTP est configuré. Ne dit jamais si l'adresse existe ; une personne ordinaire garde ses
+   * modes habituels (et « mot de passe oublié »).
+   */
+  async requestLoginLink(rawEmail: string, nextPath: string | null): Promise<void> {
+    const email = rawEmail.trim().toLowerCase();
+    const user = email ? await userRepository.findByEmail(email) : null;
+    if (!user || user.kind !== 'person' || !user.isGuest) return;
+    if (!(await smtpService.configured())) return;
+    const last = await userRepository.lastSelfServiceLoginLinkAt(user.id);
+    if (last && Date.now() - last.getTime() < SELF_SERVICE_COOLDOWN_MS) return;
+    const next = safeAppPath(nextPath);
+    const url = await this.createLoginLink(user, next.startsWith('/shared') ? next : '/shared', { createdById: null, ttlMs: SELF_LOGIN_LINK_MINUTES * 60 * 1000 });
+    await smtpService.send({ to: user.email, ...loginLinkEmail({ name: user.name, to: user.email, url, minutes: SELF_LOGIN_LINK_MINUTES }) }).catch((err) => log.warn(`[auth] envoi du lien de connexion à ${user.email} impossible : ${(err as Error).message}`));
   },
 
   purgeExpiredTokens: () => userRepository.deleteExpiredPasswordTokens(),

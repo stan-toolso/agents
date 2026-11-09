@@ -6,6 +6,8 @@ import { smtpService } from '../notifications/smtp.js';
 import { userRepository } from '../users/repository.js';
 import { userService } from '../users/service.js';
 import type { User } from '../users/types.js';
+import { SHARE_LOGIN_LINK_DAYS, signInService } from '../auth/signInService.js';
+import { pageShareEmail } from './emails.js';
 import { sharedPageRepository } from './repository.js';
 import type { PublishInput, SharedPage } from './types.js';
 
@@ -24,32 +26,27 @@ function cleanDescription(raw: string | null | undefined): string | null {
   return d || null;
 }
 
-const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+export const MAX_SHARE_MESSAGE = 2000;
 
-/** Contenu de l'e-mail d'invitation à une page partagée (pur, testé). */
-export function invitationEmail(actor: Pick<User, 'name' | 'email'>, page: Pick<SharedPage, 'id' | 'title'>, to: string, appUrl: string): { subject: string; text: string; html: string } {
-  const link = `${appUrl.replace(/\/$/, '')}/shared/${page.id}`;
-  const subject = `${actor.name} vous a partagé « ${page.title} »`;
-  const text = [
-    `${actor.name} (${actor.email}) a partagé une page avec vous sur Skipper : « ${page.title} ».`,
-    '',
-    `Ouvrez-la ici : ${link}`,
-    '',
-    `Connectez-vous avec l'adresse ${to} (compte Google, Microsoft ou GitHub de cette adresse, ou mot de passe, selon ce que propose la page de connexion). Vous ne verrez que les pages partagées avec vous, et pourrez y laisser des commentaires.`,
-  ].join('\n');
-  const html = `<p>${escapeHtml(actor.name)} (${escapeHtml(actor.email)}) a partagé une page avec vous sur Skipper : <strong>${escapeHtml(page.title)}</strong>.</p>
-<p><a href="${escapeHtml(link)}">Ouvrir la page</a></p>
-<p style="color:#666">Connectez-vous avec l'adresse ${escapeHtml(to)} (compte Google, Microsoft ou GitHub de cette adresse, ou mot de passe, selon ce que propose la page de connexion). Vous ne verrez que les pages partagées avec vous, et pourrez y laisser des commentaires.</p>`;
-  return { subject, text, html };
+function cleanMessage(raw: string | null | undefined): string | null {
+  const m = (raw ?? '').replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  if (m.length > MAX_SHARE_MESSAGE) throw new AppError(`Le message dépasse ${MAX_SHARE_MESSAGE} caractères`);
+  return m || null;
 }
 
-/** E-mail d'invitation, si un serveur SMTP est configuré ; un échec est journalisé (le lien reste à envoyer à la main). */
-async function sendInvitation(actor: User, page: SharedPage, user: User): Promise<void> {
+/**
+ * E-mail de partage, si un serveur SMTP est configuré ; un échec est journalisé (le lien reste à envoyer à la main).
+ * Un invité reçoit un lien de connexion directe (aucun compte à créer) ; une personne de Skipper, le lien de la page.
+ */
+async function sendShareEmail(actor: User, page: SharedPage, user: User, message: string | null): Promise<void> {
   try {
     if (!(await smtpService.configured())) return;
-    await smtpService.send({ to: user.email, ...invitationEmail(actor, page, user.email, config.appUrl) });
+    const pagePath = `/shared/${page.id}`;
+    const direct = user.isGuest;
+    const url = direct ? await signInService.createLoginLink(user, pagePath, { createdById: actor.id, ttlMs: SHARE_LOGIN_LINK_DAYS * 24 * 3600 * 1000 }) : `${config.appUrl}${pagePath}`;
+    await smtpService.send({ to: user.email, ...pageShareEmail({ actor, page, to: user.email, message, url, directLoginDays: direct ? SHARE_LOGIN_LINK_DAYS : null }) });
   } catch (err) {
-    log.warn(`[pages] e-mail d'invitation à ${user.email} : ${(err as Error).message}`);
+    log.warn(`[pages] e-mail de partage à ${user.email} : ${(err as Error).message}`);
   }
 }
 
@@ -149,27 +146,28 @@ export const sharedPageService = {
   },
 
   /**
-   * Ajoute une personne à la page. Une adresse sans compte Skipper est refusée (code NO_ACCOUNT), sauf avec `invite` :
-   * un compte d'invité des pages partagées est alors créé (il ne verra que les pages partagées avec lui) et, si un
-   * serveur SMTP est configuré, un e-mail d'invitation lui donne le lien.
+   * Ajoute une personne à la page, avec un message d'introduction facultatif. Une adresse sans compte Skipper est
+   * refusée (code NO_ACCOUNT), sauf avec `invite` : un compte d'invité des pages partagées est alors créé (il ne
+   * verra que les pages partagées avec lui). Avec `notify` (par défaut), un e-mail la prévient si un serveur SMTP est
+   * configuré : lien de connexion directe pour un invité, lien de la page sinon. Partager à nouveau avec quelqu'un
+   * qui a déjà accès remplace le message et le prévient de nouveau.
    */
-  async addMember(actor: User, id: string, email: string, opts: { invite?: boolean } = {}): Promise<SharedPage> {
+  async addMember(actor: User, id: string, email: string, opts: { invite?: boolean; message?: string | null; notify?: boolean } = {}): Promise<SharedPage> {
     const page = await this.getOwned(actor.id, id);
+    const message = cleanMessage(opts.message);
     const address = email.trim().toLowerCase();
     let user = await userRepository.findByEmail(address);
-    let invited = false;
     if (!user) {
       if (!opts.invite) throw new AppError(`Aucun compte Skipper pour ${email.trim()} : invitez cette personne pour qu'elle puisse se connecter et voir la page`, 'NO_ACCOUNT');
       if (actor.isGuest) throw new AppError('Un invité ne peut pas inviter de nouvelles personnes', 'FORBIDDEN');
-      ({ user, created: invited } = await userService.findOrCreateGuest(address));
+      ({ user } = await userService.findOrCreateGuest(address));
     }
     if (user.kind === 'agent') throw new AppError("Cette adresse est celle d'un agent de projet : une page se partage avec des personnes");
     if (user.id === page.ownerId) throw new AppError('Le propriétaire voit toujours la page');
-    if (await sharedPageRepository.addMember(id, user.id, actor.id)) {
-      void notificationService.notify({ type: 'page.shared', title: `${actor.name} a partagé une page avec vous`, message: page.title, link: `/shared/${page.id}`, userId: user.id, payload: { pageId: page.id } });
-      // Jamais connecté : la cloche ne l'atteint pas, l'e-mail (s'il est possible) lui apporte le lien.
-      if (invited || !user.lastLoginAt) void sendInvitation(actor, page, user);
-    }
+    const notify = opts.notify !== false;
+    const added = await sharedPageRepository.addMember(id, user.id, actor.id, message);
+    if (added || message) void notificationService.notify({ type: 'page.shared', title: `${actor.name} a partagé une page avec vous`, message: message ? `${page.title}\n\n${message}` : page.title, link: `/shared/${page.id}`, userId: user.id, payload: { pageId: page.id } });
+    if (notify) void sendShareEmail(actor, page, user, message);
     return page;
   },
 

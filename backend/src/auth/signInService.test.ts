@@ -9,6 +9,7 @@ const state = vi.hoisted(() => ({
   tokens: new Map<string, { userId: string; used: boolean; expiresAt: Date; createdBy: string | null; createdAt: Date }>(),
   sent: [] as { to: string; subject: string; text: string }[],
   smtp: true,
+  links: new Map<string, { userId: string; nextPath: string; expiresAt: Date; createdBy: string | null; createdAt: Date; used: number }>(),
   deletedSessions: [] as { userId: string; except: string | null }[],
 }));
 
@@ -51,6 +52,13 @@ vi.mock('../users/repository.js', () => {
       lastSelfServiceTokenAt: async (userId: string) => [...state.tokens.values()].filter((t) => t.userId === userId && !t.createdBy).map((t) => t.createdAt).sort((a, b) => +b - +a)[0] ?? null,
       deleteUserSessions: async (userId: string, except: string | null = null) => void state.deletedSessions.push({ userId, except }),
       deleteExpiredPasswordTokens: async () => 0,
+      createLoginLink: async (h: string, userId: string, nextPath: string, expiresAt: Date, createdBy: string | null) => void state.links.set(h, { userId, nextPath, expiresAt, createdBy, createdAt: new Date(), used: 0 }),
+      findLoginLink: async (h: string) => {
+        const l = state.links.get(h);
+        return l ? { user: find(l.userId)!, nextPath: l.nextPath, expired: l.expiresAt <= new Date() } : null;
+      },
+      touchLoginLink: async (h: string) => void (state.links.get(h)!.used += 1),
+      lastSelfServiceLoginLinkAt: async (userId: string) => [...state.links.values()].filter((l) => l.userId === userId && !l.createdBy).map((l) => l.createdAt).sort((a, b) => +b - +a)[0] ?? null,
     },
   };
 });
@@ -74,6 +82,7 @@ beforeEach(() => {
   state.sent = [];
   state.smtp = true;
   state.deletedSessions = [];
+  state.links.clear();
   loginThrottle.reset();
 });
 
@@ -167,5 +176,53 @@ describe('liens de mot de passe', () => {
     const token = new URL(url).searchParams.get('token')!;
     await expect(signInService.resetPassword(token, 'court')).rejects.toThrow(/au moins/);
     expect((await signInService.resetPassword(token, 'assez long cette fois')).id).toBe('alice');
+  });
+});
+
+describe('liens de connexion directe des invités', () => {
+  const guest = () => {
+    const g = person('claire', 'claire@client.fr', { isGuest: true, name: 'Claire Martin' });
+    state.users.push(g);
+    return g;
+  };
+  const tokenOf = (url: string) => url.split('/auth/link/')[1];
+
+  it('ouvre la session et la page, plusieurs fois, tant que le lien vit', async () => {
+    const g = guest();
+    const url = await signInService.createLoginLink(g, '/shared/p1', { createdById: 'alice', ttlMs: 60_000 });
+    expect(url).toMatch(/\/auth\/link\/[A-Za-z0-9_-]{40,}$/);
+    expect(await signInService.loginWithLink(tokenOf(url))).toMatchObject({ user: { id: 'claire' }, nextPath: '/shared/p1' });
+    // Les antivirus des messageries ouvrent le lien avant la personne : il sert encore.
+    expect((await signInService.loginWithLink(tokenOf(url))).user?.id).toBe('claire');
+  });
+
+  it("refuse un lien expiré, inconnu, ou d'un compte qui n'est plus invité, en gardant le chemin visé", async () => {
+    const g = guest();
+    const expired = await signInService.createLoginLink(g, '/shared/p1', { createdById: null, ttlMs: -1 });
+    expect(await signInService.loginWithLink(tokenOf(expired))).toEqual({ user: null, nextPath: '/shared/p1' });
+    expect(await signInService.loginWithLink('inconnu-inconnu-inconnu')).toEqual({ user: null, nextPath: null });
+    const url = await signInService.createLoginLink(g, '/shared/p2', { createdById: null, ttlMs: 60_000 });
+    g.isGuest = false; // promu : il a désormais des projets, le lien ne suffit plus
+    expect((await signInService.loginWithLink(tokenOf(url))).user).toBeNull();
+  });
+
+  it("n'en crée jamais pour une personne ordinaire ni un agent, et n'accepte qu'un chemin de l'application", async () => {
+    await expect(signInService.createLoginLink(state.users[0], '/', { createdById: null, ttlMs: 1000 })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(signInService.createLoginLink(state.users[2], '/', { createdById: null, ttlMs: 1000 })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    const url = await signInService.createLoginLink(guest(), 'https://evil.example/', { createdById: null, ttlMs: 60_000 });
+    expect((await signInService.loginWithLink(tokenOf(url))).nextPath).toBe('/');
+  });
+
+  it("« recevoir un lien » : seulement pour un invité, une fois toutes les deux minutes, sans rien dire sinon", async () => {
+    guest();
+    await signInService.requestLoginLink('alice@example.com', null);
+    await signInService.requestLoginLink('inconnu@example.com', null);
+    expect(state.sent).toEqual([]);
+    await signInService.requestLoginLink(' Claire@Client.fr ', '/shared/p9');
+    await signInService.requestLoginLink('claire@client.fr', '/shared/p9');
+    expect(state.sent).toHaveLength(1);
+    expect(state.sent[0]).toMatchObject({ to: 'claire@client.fr', subject: 'Votre lien de connexion à Skipper' });
+    expect(state.sent[0].text).toContain('Bonjour Claire,');
+    expect([...state.links.values()][0]).toMatchObject({ nextPath: '/shared/p9', createdBy: null });
   });
 });

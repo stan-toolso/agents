@@ -136,10 +136,15 @@ export const smtpService = {
     return (await transport()) !== null;
   },
 
-  async send(mail: { to: string; subject: string; text: string; html?: string }): Promise<void> {
+  /**
+   * Envoie un e-mail. `fromName` remplace le nom affiché de l'expéditeur (l'adresse reste celle du serveur, pour la
+   * délivrabilité) ; `replyTo` dirige les réponses vers une personne (celle qui partage une page, par exemple).
+   */
+  async send(mail: { to: string; subject: string; text: string; html?: string; fromName?: string; replyTo?: string }): Promise<void> {
     const t = await transport();
     if (!t) throw new Error('Aucun serveur SMTP configuré (Paramètres › Serveur ou SMTP_URL)');
-    await t.transporter.sendMail({ from: t.from, to: mail.to, subject: mail.subject, text: mail.text, ...(mail.html ? { html: mail.html } : {}) });
+    const from = mail.fromName ? { name: mail.fromName.replace(/[\r\n"<>]/g, ' ').trim().slice(0, 120), address: t.from.replace(/^.*<(.+)>$/, '$1').trim() } : t.from;
+    await t.transporter.sendMail({ from, to: mail.to, subject: mail.subject, text: mail.text, ...(mail.html ? { html: mail.html } : {}), ...(mail.replyTo ? { replyTo: mail.replyTo } : {}) });
   },
 
   /** Oublie le transport en cache (réglages modifiés par une autre instance). */

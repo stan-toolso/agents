@@ -40,6 +40,14 @@ export default function SharedPagePage() {
   const [picking, setPicking] = useState(false);
   const [details, setDetails] = useState(false);
   const [menuAt, setMenuAt] = useState<{ top: number; right: number } | null>(null);
+  // Message du partage, montré à la personne avec qui la page a été partagée jusqu'à ce qu'elle le referme.
+  const [hiddenNotes, setHiddenNotes] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('skipper.sharedPage.hiddenNotes') ?? '[]') as string[];
+    } catch {
+      return [];
+    }
+  });
   const frameRef = useRef<HTMLIFrameElement>(null);
   const openComments_ = useCallback(() => setCommentsOpen(true), []);
   // Le lien d'une notification (?comment=) ouvre le panneau sur le commentaire ; le paramètre est ensuite retiré.
@@ -62,6 +70,15 @@ export default function SharedPagePage() {
   const shared = page.linkAccess || page.members.length > 0;
   const openComments = page.openComments;
   const link = `${window.location.origin}/shared/${page.id}`;
+  const mine = page.members.find((m) => m.user.id === user?.id && m.message);
+  const noteKey = mine ? `${page.id}:${mine.message!.length}:${mine.message!.slice(0, 40)}` : null;
+  const note = mine && noteKey && !hiddenNotes.includes(noteKey) ? mine : null;
+  const hideNote = () => {
+    if (!noteKey) return;
+    const next = [...hiddenNotes.filter((k) => !k.startsWith(`${page.id}:`)), noteKey].slice(-200);
+    setHiddenNotes(next);
+    localStorage.setItem('skipper.sharedPage.hiddenNotes', JSON.stringify(next));
+  };
   // Renvoi à la session qui a publié la page (propriétaire) : les commentaires à traiter, et/ou une demande libre.
   const canSendToAgent = owner && Boolean(page.session);
   const sendToAgent = async (instruction: string | null) => {
@@ -224,6 +241,18 @@ export default function SharedPagePage() {
               <i className="bi bi-folder" /> Depuis {page.project.name}
             </span>
           )}
+        </div>
+      )}
+      {note && (
+        <div className="sp-note" role="note">
+          <i className="bi bi-chat-quote" />
+          <div className="sp-note-body">
+            <div className="sp-note-from">{note.addedBy?.name ?? page.owner.name} vous a partagé cette page :</div>
+            <div className="sp-note-text">{note.message}</div>
+          </div>
+          <button type="button" className="sp-note-close" onClick={hideNote} title="Masquer le message" aria-label="Masquer le message">
+            <i className="bi bi-x-lg" />
+          </button>
         </div>
       )}
       {picking && (

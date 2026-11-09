@@ -98,6 +98,8 @@ export interface AuthMethods {
   github: boolean;
   password: boolean;
   passwordReset: boolean;
+  /** Lien de connexion par e-mail pour les invités des pages partagées (serveur SMTP configuré). */
+  emailLink?: boolean;
 }
 
 export async function fetchAuthMethods(): Promise<AuthMethods> {
