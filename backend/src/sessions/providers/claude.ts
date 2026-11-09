@@ -65,6 +65,7 @@ import { attachmentsNote, inlineBlocks, publicAttachment } from '../attachments.
 import type { Attachment } from '../types.js';
 import type { DescribeContext, ProviderDescription, RunContext, RunningHandle, RunResult, SessionProvider } from './provider.js';
 import { isNoise } from './claudeNoise.js';
+import { BackgroundHold, describeBackgroundTasks } from './backgroundTasks.js';
 import { isEmptyNotificationResult, isLastResultEcho, resultError } from './claudeResult.js';
 import { liveDraftService } from '../live.js';
 import { SESSION_ENV } from '../../runners/stats.js';
@@ -479,6 +480,16 @@ export class ClaudeProvider implements SessionProvider {
     // Un tour est en cours entre l'envoi d'une instruction et le message `result` qui le clôt.
     let turnInProgress = true;
     await ctx.setActivity('busy');
+    // Sous-agents en arrière-plan encore vivants (backgroundTasks.ts) : après la fin d'un tour, la session reste « au
+    // travail » tant qu'il en reste, puis jusqu'au tour que le CLI ouvre pour traiter leur compte rendu.
+    const hold = new BackgroundHold(
+      async (notice) => {
+        if (turnInProgress || stopped) return;
+        if (notice) await ctx.emit('system', { notice: true, message: notice });
+        await ctx.setActivity('idle');
+      },
+      { onError: (err) => log.error("[sessions] fin d'attente des sous-agents", err) },
+    );
 
     let stream: ReturnType<typeof query>;
     try {
@@ -503,10 +514,14 @@ export class ClaudeProvider implements SessionProvider {
         for await (const message of stream) {
           // Le modèle travaille alors qu'aucun tour n'était en cours : tour lancé par le CLI lui-même (fin d'une
           // commande de fond), ou suite d'une instruction après un résultat qui ne la concernait pas.
-          if (!turnInProgress && (message.type === 'stream_event' || message.type === 'assistant')) {
+          // Seuls les messages de l'agent principal ouvrent un tour : ceux d'un sous-agent en arrière-plan arrivent aussi
+          // entre deux tours, et le tour qui suit leur compte rendu peut se clore sur un résultat vide (notification).
+          if (!turnInProgress && (message.type === 'stream_event' || message.type === 'assistant') && !message.parent_tool_use_id) {
             turnInProgress = true;
+            hold.turnStarted();
             await ctx.setActivity('busy');
           }
+          if (message.type === 'system' && message.subtype === 'background_tasks_changed') hold.setTasks(message.tasks);
           if (message.type === 'stream_event') {
             liveDraftService.apply(ctx.session.id, message.event, message.parent_tool_use_id);
             continue;
@@ -532,6 +547,13 @@ export class ClaudeProvider implements SessionProvider {
             // Fin d'un tour : l'agent attend la prochaine instruction.
             lastResult = message;
             turnInProgress = false;
+            // Tour clos, sous-agents encore au travail : la session n'est pas inactive (pas de garage pendant un drainage,
+            // de fin d'exécution planifiée, d'archivage ni de fin pour inactivité).
+            const held = hold.turnEnded();
+            if (held.hold) {
+              if (held.first) await ctx.emit('system', { notice: true, message: `Tour terminé, ${describeBackgroundTasks(hold.live)} : la session reste au travail jusqu'à leur compte rendu.` });
+              continue;
+            }
             await ctx.setActivity('idle');
           }
         }
@@ -546,6 +568,7 @@ export class ClaudeProvider implements SessionProvider {
         }
         return { exitCode: 1, error: (err as Error).message };
       } finally {
+        hold.dispose();
         liveDraftService.clear(ctx.session.id);
         await disposeAll();
       }
@@ -562,6 +585,13 @@ export class ClaudeProvider implements SessionProvider {
     return {
       wait: () => done,
       async stop() {
+        // Arrêt (personne, fin de drainage, recréation du conteneur…) avec des sous-agents encore au travail : leur
+        // travail en cours et leur compte rendu sont perdus, autant le dire plutôt que de laisser croire à un refus.
+        if (hold.live.length) {
+          await ctx
+            .emit('system', { notice: true, message: `Session arrêtée alors que ${describeBackgroundTasks(hold.live)} travaillai${hold.live.length > 1 ? 'en' : ''}t encore : leur travail en cours et leur compte rendu sont perdus.` })
+            .catch(() => undefined);
+        }
         stopped = true;
         queue.close();
         abortController.abort();
@@ -573,6 +603,7 @@ export class ClaudeProvider implements SessionProvider {
         await projectBudget.assertAvailable(ctx.project.id);
         queue.push(await this.instruction(ctx, text, attachments, null, takeNotes(), author));
         turnInProgress = true;
+        hold.turnStarted();
         await ctx.setActivity('busy');
       },
       async notify(text) {
