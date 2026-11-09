@@ -8,7 +8,7 @@ import PageLoading from '../components/PageLoading';
 import PopMenu, { type MenuItem } from '../components/PopMenu';
 import PageComments from '../components/pages/PageComments';
 import SharePageModal from '../components/pages/SharePageModal';
-import { DELETE_SHARED_PAGE, REMOVE_SHARED_PAGE_MEMBER, REQUEST_SHARED_PAGE_UPDATE, SHARED_PAGE, UPDATE_SHARED_PAGE, type SharedPage } from '../graphql/misc';
+import { DELETE_SHARED_PAGE, REMOVE_SHARED_PAGE_MEMBER, REQUEST_SHARED_PAGE_UPDATE, SHARED_PAGE, UPDATE_SHARED_PAGE, type SharedPage, type SharedPageAgentHandoff } from '../graphql/misc';
 import { useAuth } from '../auth/AuthContext';
 import { formatSize } from '../lib/files';
 import { usePollingQuery } from '../lib/usePollingQuery';
@@ -80,7 +80,10 @@ export default function SharedPagePage() {
     localStorage.setItem('skipper.sharedPage.hiddenNotes', JSON.stringify(next));
   };
   // Renvoi à la session qui a publié la page (propriétaire) : les commentaires à traiter, et/ou une demande libre.
-  const canSendToAgent = owner && Boolean(page.session);
+  // Réglage par page (propriétaire) : désactivé, sur demande, ou automatique (chaque commentaire part à la session).
+  const hasAgent = owner && Boolean(page.session);
+  const canSendToAgent = hasAgent && page.agentHandoff !== 'OFF';
+  const setHandoff = (mode: SharedPageAgentHandoff) => void update({ variables: { id: page.id, input: { agentHandoff: mode } } });
   const sendToAgent = async (instruction: string | null) => {
     const res = await requestUpdate({ variables: { id: page.id, instruction, withComments: true } });
     const session = res.data?.requestSharedPageUpdate;
@@ -274,7 +277,7 @@ export default function SharedPagePage() {
           initialFocus={focusComment}
           open={commentsOpen}
           onOpen={openComments_}
-          onSendToAgent={canSendToAgent ? sendComments : undefined}
+          agent={hasAgent && page.session ? { sessionName: page.session.name, onSetMode: setHandoff, onSend: sendComments } : undefined}
           onClose={() => {
             setCommentsOpen(false);
             setPicking(false);

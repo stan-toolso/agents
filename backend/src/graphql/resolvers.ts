@@ -758,6 +758,8 @@ export const resolvers = {
     },
     comments: (p: SharedPage) => sharedPageCommentService.roots(p.id),
     openComments: (p: SharedPage) => sharedPageCommentService.countOpen(p.id),
+    // Réglage effectif : sans session d'origine, rien ne peut être transmis.
+    agentHandoff: (p: SharedPage) => (p.sessionId ? p.agentHandoff.toUpperCase() : 'OFF'),
   },
   SharedPageComment: {
     author: (c: SharedPageComment, _: unknown, ctx: Ctx) => userOrNull(ctx, c.authorId),
@@ -2232,7 +2234,16 @@ export const resolvers = {
       const file = await readRawFile(args, args.path);
       return sharedPageService.publish({ ownerId: requireUser(ctx).id, title: args.title, html: file.data, pageId: args.pageId ?? null, projectId: args.projectId, sourcePath: args.path });
     },
-    updateSharedPage: (_: unknown, args: { id: string; input: { title?: string | null; description?: string | null; linkAccess?: boolean | null } }, ctx: Ctx) => sharedPageService.update(requireUser(ctx).id, args.id, args.input),
+    updateSharedPage: async (_: unknown, args: { id: string; input: { title?: string | null; description?: string | null; linkAccess?: boolean | null; agentHandoff?: string | null } }, ctx: Ctx) => {
+      const user = requireUser(ctx);
+      const { agentHandoff, ...input } = args.input;
+      if (agentHandoff === 'AUTO') {
+        // Les commentaires partiront à la session au nom de leurs auteurs : le propriétaire doit pouvoir y écrire.
+        const page = await sharedPageService.getOwned(user.id, args.id);
+        if (page.sessionId) await guardSession(ctx, page.sessionId, 'member');
+      }
+      return sharedPageService.update(user.id, args.id, { ...input, agentHandoff: agentHandoff ? agentHandoff.toLowerCase() : null });
+    },
     addSharedPageMember: (_: unknown, args: { id: string; email: string; invite?: boolean | null; message?: string | null; notify?: boolean | null }, ctx: Ctx) =>
       sharedPageService.addMember(requireUser(ctx), args.id, args.email, { invite: Boolean(args.invite), message: args.message, notify: args.notify !== false }),
     removeSharedPageMember: (_: unknown, args: { id: string; userId: string }, ctx: Ctx) => sharedPageService.removeMember(requireUser(ctx), args.id, args.userId),

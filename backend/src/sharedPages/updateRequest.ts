@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import { AppError } from '../errors.js';
+import { log } from '../log.js';
 import { personAuthor } from '../sessions/instructionAuthor.js';
 import { sessionService } from '../sessions/service.js';
 import type { Session } from '../sessions/types.js';
@@ -13,7 +14,9 @@ import type { SharedPage, SharedPageComment } from './types.js';
  * Mise à jour d'une page partagée par la session qui l'a publiée (« je commente, l'agent corrige ») : le propriétaire
  * de la page envoie à cette session une instruction qui reprend les commentaires à traiter (ancre, fil) et, s'il
  * en a donné une, sa demande ; l'agent republie une version avec `pages.publish` puis marque les commentaires
- * traités avec `pages.resolve`.
+ * traités avec `pages.resolve`. Le propriétaire règle ce renvoi page par page (`agentHandoff`) : désactivé, sur
+ * demande (bouton « Transmettre à l'agent »), ou automatique (`forward` : chaque commentaire ou réponse d'une
+ * personne part aussitôt à la session, avec son fil).
  */
 
 export interface UpdateRequestInput {
@@ -34,11 +37,20 @@ const MAX_INSTRUCTION = 10_000;
 
 const indent = (text: string, pad: string) => text.split('\n').map((l) => `${pad}${l}`).join('\n');
 
+/** Transmission automatique : un nouveau commentaire, ou une réponse dans le fil d'un commentaire. */
+export type AutoTrigger = 'comment' | 'reply';
+
 /** Texte de l'instruction envoyée à la session (fonction pure, testée). */
-export function formatUpdateInstruction(page: SharedPage, threads: ThreadForInstruction[], instruction: string | null, author: string): string {
+export function formatUpdateInstruction(page: SharedPage, threads: ThreadForInstruction[], instruction: string | null, author: string, auto?: AutoTrigger): string {
   const lines: string[] = [];
   const n = threads.length;
-  lines.push(`Mise à jour demandée par ${author} de la page partagée « ${page.title} » (page_id ${page.id}, version ${page.version}, ${config.appUrl}/shared/${page.id}).`);
+  const ref = `« ${page.title} » (page_id ${page.id}, version ${page.version}, ${config.appUrl}/shared/${page.id})`;
+  if (auto) {
+    const what = auto === 'reply' ? `Nouvelle réponse de ${author} dans le fil d'un commentaire` : `Nouveau commentaire de ${author}`;
+    lines.push(`${what} sur la page partagée ${ref}, transmis automatiquement (réglage de la page).`);
+  } else {
+    lines.push(`Mise à jour demandée par ${author} de la page partagée ${ref}.`);
+  }
   if (instruction) lines.push('', `Demande : ${instruction}`);
   if (n) {
     lines.push('', `${n} commentaire${n > 1 ? 's' : ''} à prendre en compte :`);
@@ -62,7 +74,11 @@ export function formatUpdateInstruction(page: SharedPage, threads: ThreadForInst
 export const sharedPageUpdateService = {
   /** Commentaires non traités de la page, avec leurs réponses et les noms des auteurs. */
   async openThreads(page: SharedPage): Promise<ThreadForInstruction[]> {
-    const roots = (await sharedPageCommentService.roots(page.id)).filter((c) => !c.resolvedAt);
+    return this.threads((await sharedPageCommentService.roots(page.id)).filter((c) => !c.resolvedAt));
+  },
+
+  /** Les commentaires racines donnés, avec leurs réponses et les noms des auteurs. */
+  async threads(roots: SharedPageComment[]): Promise<ThreadForInstruction[]> {
     const replies = await Promise.all(roots.map((r) => sharedPageCommentService.replies(r.id)));
     const ids = new Set<string>();
     roots.forEach((r, i) => {
@@ -80,6 +96,7 @@ export const sharedPageUpdateService = {
    */
   async request(user: User, pageId: string, input: UpdateRequestInput): Promise<{ session: Session; text: string }> {
     const page = await sharedPageService.getOwned(user.id, pageId);
+    if (page.agentHandoff === 'off') throw new AppError("La transmission à l'agent est désactivée pour cette page (réglage du panneau Commentaires)");
     if (!page.sessionId) throw new AppError("Cette page n'est rattachée à aucune session : seule une page publiée par un agent (outil pages.publish) peut lui être renvoyée");
     const instruction = (input.instruction ?? '').trim().slice(0, MAX_INSTRUCTION) || null;
     const threads = input.withComments === false ? [] : await this.openThreads(page);
@@ -87,5 +104,23 @@ export const sharedPageUpdateService = {
     const text = formatUpdateInstruction(page, threads, instruction, user.name || user.email);
     const session = await sessionService.sendMessage(page.sessionId, text, null, { byPerson: true, unarchive: true, author: personAuthor(user) });
     return { session, text };
+  },
+
+  /**
+   * Transmission automatique (page réglée sur « auto ») d'un commentaire ou d'une réponse que `actor` vient
+   * d'écrire : le fil du commentaire part à la session d'origine de la page, relancée ou restaurée. Rien pour une
+   * page sans session ou réglée autrement ; jamais d'erreur (l'envoi suit l'écriture du commentaire, qui a réussi).
+   * Les commentaires écrits par une session (outils `pages.*`) ne sont pas transmis : l'appelant les écarte.
+   */
+  async forward(page: SharedPage, root: SharedPageComment, actor: User, trigger: AutoTrigger): Promise<Session | null> {
+    if (page.agentHandoff !== 'auto' || !page.sessionId) return null;
+    try {
+      const threads = await this.threads([root]);
+      const text = formatUpdateInstruction(page, threads, null, actor.name || actor.email, trigger);
+      return await sessionService.sendMessage(page.sessionId, text, null, { unarchive: true, author: personAuthor(actor) });
+    } catch (err) {
+      log.warn(`[pages] transmission automatique du commentaire ${root.id} (page ${page.id}) à la session ${page.sessionId} : ${(err as Error).message}`);
+      return null;
+    }
   },
 };

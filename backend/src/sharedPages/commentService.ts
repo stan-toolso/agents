@@ -1,4 +1,5 @@
 import { AppError, NotFoundError } from '../errors.js';
+import { log } from '../log.js';
 import { notificationService } from '../notifications/service.js';
 import type { User } from '../users/types.js';
 import { sharedPageCommentRepository } from './commentRepository.js';
@@ -73,6 +74,7 @@ export const sharedPageCommentService = {
     if (!Number.isInteger(version) || version < 1 || version > page.version) throw new AppError('Version de la page inconnue');
     const comment = await sharedPageCommentRepository.create({ pageId: page.id, parentId: null, authorId: actor.user.id, sessionId: actor.sessionId ?? null, body, anchor: cleanAnchor(input.anchor), version });
     this.notify(page, comment, [page.ownerId], actor.user, `${actor.user.name} a commenté « ${page.title} »`);
+    this.forward(page, comment, actor, 'comment');
     return comment;
   },
 
@@ -83,6 +85,7 @@ export const sharedPageCommentService = {
     const replies = await sharedPageCommentRepository.replies(root.id);
     const reply = await sharedPageCommentRepository.create({ pageId: page.id, parentId: root.id, authorId: actor.user.id, sessionId: actor.sessionId ?? null, body: cleanBody(body), anchor: null, version: root.version });
     this.notify(page, root, [page.ownerId, root.authorId, ...replies.map((r) => r.authorId)], actor.user, `${actor.user.name} a répondu à un commentaire sur « ${page.title} »`, reply.body);
+    this.forward(page, root, actor, 'reply');
     return reply;
   },
 
@@ -106,6 +109,18 @@ export const sharedPageCommentService = {
     const { comment, page } = await this.getFor(actor.user.id, id);
     if (comment.authorId !== actor.user.id && page.ownerId !== actor.user.id) throw new AppError("Seuls l'auteur et le propriétaire de la page suppriment un commentaire", 'FORBIDDEN');
     return sharedPageCommentRepository.delete(id);
+  },
+
+  /**
+   * Page réglée sur la transmission automatique : le fil du commentaire part à la session d'origine de la page, en
+   * tâche de fond. Pas pour ce qu'écrit une session (ses réponses lui reviendraient). Import différé : le module de
+   * transmission dépend de celui-ci.
+   */
+  forward(page: SharedPage, root: SharedPageComment, actor: CommentActor, trigger: 'comment' | 'reply'): void {
+    if (page.agentHandoff !== 'auto' || !page.sessionId || actor.sessionId) return;
+    void import('./updateRequest.js')
+      .then(({ sharedPageUpdateService }) => sharedPageUpdateService.forward(page, root, actor.user, trigger))
+      .catch((err) => log.warn(`[pages] transmission automatique du commentaire ${root.id} : ${(err as Error).message}`));
   },
 
   /** Prévient les personnes concernées (sans doublon, jamais l'auteur de l'action). */

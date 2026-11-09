@@ -1,5 +1,5 @@
 import { pool } from '../db/pool.js';
-import type { SharedPage, SharedPageMember, SharedPageVersion } from './types.js';
+import type { AgentHandoff, SharedPage, SharedPageMember, SharedPageVersion } from './types.js';
 
 interface Row {
   id: string;
@@ -11,6 +11,7 @@ interface Row {
   project_id: string | null;
   session_id: string | null;
   source_path: string | null;
+  agent_handoff: AgentHandoff;
   created_at: Date;
   updated_at: Date;
 }
@@ -24,6 +25,7 @@ const toPage = (r: Row): SharedPage => ({
   projectId: r.project_id,
   sessionId: r.session_id,
   sourcePath: r.source_path,
+  agentHandoff: r.agent_handoff ?? 'manual',
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -113,12 +115,13 @@ export const sharedPageRepository = {
     }
   },
 
-  async update(id: string, patch: { title?: string; description?: string | null; linkAccess?: boolean }): Promise<SharedPage | null> {
+  async update(id: string, patch: { title?: string; description?: string | null; linkAccess?: boolean; agentHandoff?: AgentHandoff }): Promise<SharedPage | null> {
     const sets = ['updated_at = now()'];
     const params: unknown[] = [id];
     if (patch.title !== undefined) sets.push(`title = $${params.push(patch.title)}`);
     if (patch.description !== undefined) sets.push(`description = $${params.push(patch.description)}`);
     if (patch.linkAccess !== undefined) sets.push(`link_access = $${params.push(patch.linkAccess)}`);
+    if (patch.agentHandoff !== undefined) sets.push(`agent_handoff = $${params.push(patch.agentHandoff)}`);
     const { rows } = await pool.query<Row>(`UPDATE shared_pages SET ${sets.join(', ')} WHERE id = $1 RETURNING *`, params);
     return rows[0] ? toPage(rows[0]) : null;
   },

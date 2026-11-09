@@ -2,7 +2,7 @@ import { useMutation } from '@apollo/client';
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Form } from 'react-bootstrap';
 import { useAuth } from '../../auth/AuthContext';
-import { ADD_SHARED_PAGE_COMMENT, DELETE_SHARED_PAGE_COMMENT, REPLY_SHARED_PAGE_COMMENT, RESOLVE_SHARED_PAGE_COMMENT, SHARED_PAGE_COMMENTS, UPDATE_SHARED_PAGE_COMMENT, type SharedPage, type SharedPageAnchor, type SharedPageComment } from '../../graphql/misc';
+import { ADD_SHARED_PAGE_COMMENT, DELETE_SHARED_PAGE_COMMENT, REPLY_SHARED_PAGE_COMMENT, RESOLVE_SHARED_PAGE_COMMENT, SHARED_PAGE_COMMENTS, UPDATE_SHARED_PAGE_COMMENT, type SharedPage, type SharedPageAgentHandoff, type SharedPageAnchor, type SharedPageComment } from '../../graphql/misc';
 import { timeAgo } from '../../lib/humanize';
 import { usePollingQuery } from '../../lib/usePollingQuery';
 import DictationButton from '../DictationButton';
@@ -52,16 +52,25 @@ interface Props {
   open: boolean;
   onOpen: () => void;
   onClose: () => void;
-  /** Propriétaire d'une page publiée par une session : envoie les commentaires à traiter à cette session. */
-  onSendToAgent?: () => Promise<void>;
+  /**
+   * Propriétaire d'une page publiée par une session : réglage du renvoi des commentaires à cette session (désactivé,
+   * sur demande, automatique) et envoi des commentaires à traiter.
+   */
+  agent?: {
+    sessionName: string;
+    onSetMode: (mode: SharedPageAgentHandoff) => void;
+    onSend: () => Promise<void>;
+  };
 }
+
+const HANDOFF_LABELS: Record<SharedPageAgentHandoff, string> = { OFF: 'Désactivée', MANUAL: 'Sur demande', AUTO: 'Automatique' };
 
 /**
  * Panneau des commentaires d'une page partagée : commentaires généraux ou ancrés sur un élément de la page (choisi en
  * cliquant dedans), chacun une micro-conversation avec ses réponses et un état « traité ». Dialogue avec le script
  * injecté dans la page par postMessage : repères numérotés, choix d'un élément, mise en avant.
  */
-export default function PageComments({ page, version, frameRef, picking, setPicking, initialFocus, open, onOpen, onClose, onSendToAgent }: Props) {
+export default function PageComments({ page, version, frameRef, picking, setPicking, initialFocus, open, onOpen, onClose, agent }: Props) {
   const { user } = useAuth();
   const { confirm, showError } = useDialogs();
   const { data } = usePollingQuery<{ sharedPage: { id: string; version: number; openComments: number; comments: SharedPageComment[] } | null }>(SHARED_PAGE_COMMENTS, { variables: { id: page.id }, pollInterval: 10_000 });
@@ -246,12 +255,33 @@ export default function PageComments({ page, version, frameRef, picking, setPick
         </div>
       </div>
 
-      {onSendToAgent && openCount > 0 && (
+      {agent ? (
         <div className="pc-agent-row">
-          <button type="button" className="cc-btn" onClick={() => void onSendToAgent()} title="L'agent qui a publié la page prend en compte les commentaires à traiter, publie une nouvelle version et les marque traités">
-            <i className="bi bi-robot" /> Transmettre à l'agent ({openCount})
-          </button>
+          <label className="pc-agent-mode" title={`Renvoi des commentaires à la session « ${agent.sessionName} » qui a publié la page`}>
+            <i className="bi bi-robot" /> Transmission à l'agent
+            <Form.Select size="sm" value={page.agentHandoff} onChange={(e) => agent.onSetMode(e.target.value as SharedPageAgentHandoff)} aria-label="Transmission des commentaires à l'agent">
+              {(Object.keys(HANDOFF_LABELS) as SharedPageAgentHandoff[]).map((m) => (
+                <option key={m} value={m}>
+                  {HANDOFF_LABELS[m]}
+                </option>
+              ))}
+            </Form.Select>
+          </label>
+          {page.agentHandoff === 'MANUAL' && openCount > 0 && (
+            <button type="button" className="cc-btn" onClick={() => void agent.onSend()} title="L'agent qui a publié la page prend en compte les commentaires à traiter, publie une nouvelle version et les marque traités">
+              <i className="bi bi-send" /> Transmettre à l'agent ({openCount})
+            </button>
+          )}
+          {page.agentHandoff === 'AUTO' && <div className="pc-agent-note">Chaque nouveau commentaire ou réponse est envoyé aussitôt à « {agent.sessionName} ».</div>}
         </div>
+      ) : (
+        page.agentHandoff === 'AUTO' && (
+          <div className="pc-agent-row">
+            <div className="pc-agent-note">
+              <i className="bi bi-robot" /> Vos commentaires sont transmis automatiquement à l'agent qui a publié la page.
+            </div>
+          </div>
+        )
       )}
       <div className="pc-list" ref={listRef}>
         {!data && <div className="pc-empty">Chargement…</div>}

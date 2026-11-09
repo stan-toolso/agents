@@ -8,11 +8,15 @@ const state = vi.hoisted(() => ({
   roots: [] as SharedPageComment[],
   replies: new Map<string, SharedPageComment[]>(),
   sent: [] as Array<{ id: string; text: string; opts: Record<string, unknown> }>,
+  failSend: false,
+  warned: [] as string[],
 }));
+vi.mock('../log.js', () => ({ log: { warn: (m: string) => void state.warned.push(m) } }));
 vi.mock('../config.js', () => ({ config: { appUrl: 'https://skipper.example.org' } }));
 vi.mock('../sessions/service.js', () => ({
   sessionService: {
     sendMessage: async (id: string, text: string, _files: unknown, opts: Record<string, unknown>) => {
+      if (state.failSend) throw new Error('Session en file d’attente');
       state.sent.push({ id, text, opts });
       return { id, name: 'Rapport Elixis' };
     },
@@ -33,7 +37,7 @@ vi.mock('./commentService.js', () => ({ sharedPageCommentService: { roots: async
 const { formatUpdateInstruction, sharedPageUpdateService: svc } = await import('./updateRequest.js');
 
 const owner = { id: 'owner', name: 'Olivia', email: 'olivia@example.org' } as unknown as import('../users/types.js').User;
-const page = (extra: Partial<SharedPage> = {}): SharedPage => ({ id: 'p1', ownerId: 'owner', title: 'Rapport', description: null, linkAccess: false, version: 3, projectId: 'pr', sessionId: 's1', sourcePath: 'rapport.html', createdAt: new Date(), updatedAt: new Date(), ...extra });
+const page = (extra: Partial<SharedPage> = {}): SharedPage => ({ id: 'p1', ownerId: 'owner', title: 'Rapport', description: null, linkAccess: false, version: 3, projectId: 'pr', sessionId: 's1', sourcePath: 'rapport.html', agentHandoff: 'manual', createdAt: new Date(), updatedAt: new Date(), ...extra });
 const comment = (id: string, extra: Partial<SharedPageComment> = {}): SharedPageComment => ({ id, pageId: 'p1', parentId: null, authorId: 'alice', sessionId: null, body: 'Trop petit', anchor: { selector: 'main > h1', text: 'Titre', tag: 'h1' }, version: 3, resolvedAt: null, resolvedById: null, createdAt: new Date(), updatedAt: new Date(), ...extra });
 
 beforeEach(() => {
@@ -41,6 +45,8 @@ beforeEach(() => {
   state.roots = [];
   state.replies.clear();
   state.sent = [];
+  state.failSend = false;
+  state.warned = [];
 });
 
 describe("texte de l'instruction", () => {
@@ -93,5 +99,39 @@ describe('demande de mise à jour', () => {
     await expect(svc.request(owner, 'p1', { withComments: false })).rejects.toThrow('Rien à transmettre');
     await expect(svc.request({ ...owner, id: 'alice' } as typeof owner, 'p1', {})).rejects.toThrow('propriétaire');
     expect(state.sent).toEqual([]);
+  });
+});
+
+describe('réglage de la transmission', () => {
+  it('« off » : la demande est refusée', async () => {
+    state.page = page({ agentHandoff: 'off' });
+    state.roots = [comment('c1')];
+    await expect(svc.request(owner, 'p1', {})).rejects.toThrow('désactivée');
+    expect(state.sent).toEqual([]);
+  });
+
+  it('« auto » : le fil du commentaire part à la session au nom de son auteur, sans prendre la main', async () => {
+    const p = page({ agentHandoff: 'auto' });
+    const root = comment('c1');
+    state.replies.set('c1', [comment('r1', { parentId: 'c1', authorId: 'bob', body: 'Je confirme', anchor: null })]);
+    const alice = { id: 'alice', name: 'Alice', email: 'alice@example.org' } as unknown as typeof owner;
+    const session = await svc.forward(p, root, alice, 'reply');
+    expect(session?.id).toBe('s1');
+    expect(state.sent).toHaveLength(1);
+    expect(state.sent[0].opts).toEqual({ unarchive: true, author: { type: 'user', id: 'alice', name: 'Alice', email: 'alice@example.org' } });
+    expect(state.sent[0].text).toContain("Nouvelle réponse de Alice dans le fil d'un commentaire sur la page partagée « Rapport » (page_id p1");
+    expect(state.sent[0].text).toContain('transmis automatiquement');
+    expect(state.sent[0].text).toContain('1. [c1] Alice, sur <h1>');
+    expect(state.sent[0].text).toContain('↳ Bob : Je confirme');
+    expect(state.sent[0].text).toContain('pages.resolve');
+  });
+
+  it('« auto » : rien hors réglage ou sans session, et un échec d’envoi est journalisé sans erreur', async () => {
+    expect(await svc.forward(page(), comment('c1'), owner, 'comment')).toBeNull();
+    expect(await svc.forward(page({ agentHandoff: 'auto', sessionId: null }), comment('c1'), owner, 'comment')).toBeNull();
+    expect(state.sent).toEqual([]);
+    state.failSend = true;
+    expect(await svc.forward(page({ agentHandoff: 'auto' }), comment('c1'), owner, 'comment')).toBeNull();
+    expect(state.warned[0]).toContain('transmission automatique du commentaire c1');
   });
 });

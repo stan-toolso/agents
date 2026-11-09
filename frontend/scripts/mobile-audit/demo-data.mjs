@@ -226,17 +226,17 @@ const scheduleRun = (id, s, status, startedMin, over = {}) => ({
   message: null, answer: status === 'DONE' ? 'Aucune anomalie : 12 tables vérifiées, index à jour.' : null, session: s, ...over,
 });
 // Pages partagées : une à moi (fenêtre « Partager »), une partagée avec moi avec un message (bandeau du message).
-const sharedPageDemo = (id, title, owner, members, extra = {}) => ({
+const demoSharedPage = (id, title, owner, members, extra = {}) => ({
   __typename: 'SharedPage', id, title, description: null, owner, linkAccess: false, version: 1, createdAt: ago(60 * 24), updatedAt: ago(60 * 3),
   members: members.map(([u, message]) => ({ __typename: 'SharedPageMember', user: u, addedBy: owner, addedAt: ago(60 * 20), message })),
   versions: [{ __typename: 'SharedPageVersion', version: 1, size: 18_400, createdBy: owner, createdAt: ago(60 * 24) }],
-  project: null, session: null, sourcePath: null, comments: [], openComments: 0,
+  project: null, session: null, sourcePath: null, comments: [], openComments: 0, agentHandoff: 'MANUAL',
   viewerAccess: { __typename: 'SharedPageViewerAccess', owner: owner === U.me, member: owner !== U.me },
   ...extra,
 });
 const sharedPagesDemo = [
-  sharedPageDemo('page-offre', 'Proposition commerciale 2027', U.me, [[U.hugo, null], [user('u-claire', 'claire.martin@client.fr', 'claire.martin@client.fr', { isGuest: false, lastLoginAt: null }), 'Bonjour Claire, voici notre proposition.']]),
-  sharedPageDemo('page-audit', 'Audit des performances du portail', U.lea, [[U.me, "Camille, voici l'audit dont on a parlé ce matin.\nJ'aimerais ton avis sur la partie cache avant jeudi : commente directement sur la page."]]),
+  demoSharedPage('page-offre', 'Proposition commerciale 2027', U.me, [[U.hugo, null], [user('u-claire', 'claire.martin@client.fr', 'claire.martin@client.fr', { isGuest: false, lastLoginAt: null }), 'Bonjour Claire, voici notre proposition.']]),
+  demoSharedPage('page-audit', 'Audit des performances du portail', U.lea, [[U.me, "Camille, voici l'audit dont on a parlé ce matin.\nJ'aimerais ton avis sur la partie cache avant jeudi : commente directement sur la page."]]),
 ];
 
 export const schedules = [
@@ -795,6 +795,22 @@ const auditLog = (a = {}) => {
   return auditEntries.filter((e) => (!f.actorKind || e.actorKind === f.actorKind) && (!f.actorUserId || e.actor?.id === f.actorUserId) && (!f.targetType || e.targetType === f.targetType) && (!f.action || e.action === f.action) && (!f.from || e.createdAt >= f.from) && (!f.to || e.createdAt < f.to) && (!a.before || Number(e.id) < Number(a.before)));
 };
 
+const sharedPageState = { agentHandoff: 'MANUAL' };
+const sharedPageDemo = (id) => ({
+  __typename: 'SharedPage',
+  id,
+  title: 'Maquette de la page tarifs',
+  description: null,
+  owner: U.me,
+  linkAccess: true,
+  members: [],
+  project: P.site,
+  session: S.tarifs,
+  sourcePath: 'maquette-tarifs.html',
+  viewerAccess: { __typename: 'SharedPageViewerAccess', owner: true, member: false },
+  agentHandoff: sharedPageState.agentHandoff,
+});
+
 export const demoRoot = {
   usageReport,
   auditLog,
@@ -872,8 +888,17 @@ export const demoRoot = {
   },
   workflows: [],
   workflowRuns: [],
+  // Pages partagées : « page-offre » et « page-audit » (message du partage) ; toute autre adresse donne la page à moi
+  // publiée par la session « Refonte de la page tarifs », dont le réglage de la transmission des commentaires à
+  // l'agent (panneau Commentaires) se change et reste en mémoire.
   sharedPages: () => sharedPagesDemo,
-  sharedPage: (a = {}) => sharedPagesDemo.find((pg) => pg.id === a.id) ?? null,
+  sharedPage: (a = {}) => sharedPagesDemo.find((pg) => pg.id === a.id) ?? sharedPageDemo(a.id),
+  updateSharedPage: (a) => {
+    const mine = sharedPagesDemo.find((pg) => pg.id === a.id);
+    if (mine) return mine;
+    if (a.input?.agentHandoff) sharedPageState.agentHandoff = a.input.agentHandoff;
+    return sharedPageDemo(a.id);
+  },
   githubPullRequests: [],
   gitStatus,
   gitLog: (a = {}) => (worksessionOf(a.worksessionId) ? commits : commits.slice(2)).slice(0, a.limit ?? 50),

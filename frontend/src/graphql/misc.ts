@@ -119,7 +119,12 @@ export interface SharedPage {
   viewerAccess: { owner: boolean; member: boolean };
   /** Commentaires non traités. */
   openComments: number;
+  /** Renvoi des commentaires à la session d'origine (OFF sans session). */
+  agentHandoff: SharedPageAgentHandoff;
 }
+
+/** Renvoi des commentaires à l'agent : désactivé, sur demande (bouton), ou automatique (chaque commentaire). */
+export type SharedPageAgentHandoff = 'OFF' | 'MANUAL' | 'AUTO';
 
 /** Élément de la page visé par un commentaire (choisi en cliquant dans la page). */
 export interface SharedPageAnchor {
@@ -155,6 +160,7 @@ export const SHARED_PAGE_FIELDS = gql`
       email
     }
     linkAccess
+    agentHandoff
     version
     createdAt
     updatedAt
