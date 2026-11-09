@@ -24,6 +24,17 @@ export interface SidebarWorksession {
   task: SidebarTask | null;
 }
 
+/** Page partagée publiée depuis une session : onglet dans la sous-barre de son dossier. */
+export interface SidebarPage {
+  id: string;
+  title: string;
+  /** Commentaires non traités. */
+  openComments: number;
+}
+
+/** Chemin d'une page partagée ouverte dans le dossier de la session qui l'a publiée ; `/shared/<id>` reste son lien à part entière. */
+export const sessionPagePath = (sessionId: string, pageId: string) => `/sessions/${sessionId}/pages/${pageId}`;
+
 export interface SidebarSession {
   id: string;
   name: string;
@@ -31,6 +42,8 @@ export interface SidebarSession {
   activity: SessionActivity | null;
   pendingRequestCount: number;
   browserActive: boolean;
+  /** Pages partagées publiées depuis la session et visibles de la personne (absent : pas encore chargé). */
+  pages?: SidebarPage[];
   /** Coût cumulé de la session (unité d'affichage), montré dans l'infobulle de sa ligne. */
   costUsd?: number;
   /** Modèle de la session (sa configuration, sinon le défaut de son propriétaire) ; absent ou null : inconnu. */
@@ -294,11 +307,11 @@ export class WorkspaceIndex {
     return [...this.byKey.values()];
   }
 
-  /** Clé du dossier auquel appartient un chemin (fichiers, session, navigateur, terminal), ou null. */
+  /** Clé du dossier auquel appartient un chemin (fichiers, session, navigateur, page publiée, terminal), ou null. */
   keyOf(pathname: string): string | null {
     const files = pathname.match(/^(\/projects\/[^/]+\/files)(?:\/|$)/);
     if (files) return this.byKey.has(files[1]) ? files[1] : null;
-    const session = pathname.match(/^(\/sessions\/[^/]+)(?:\/browser|\/files(?:\/.*)?)?$/);
+    const session = pathname.match(/^(\/sessions\/[^/]+)(?:\/browser|\/pages\/[^/]+|\/files(?:\/.*)?)?$/);
     if (session) return this.owners.get(session[1]) ?? null;
     const terminal = pathname.match(/^(\/terminals\/[^/]+)$/);
     if (terminal) return this.owners.get(terminal[1]) ?? null;

@@ -146,6 +146,29 @@ export const sharedPageRepository = {
     return rows.map(toMember);
   },
 
+  /**
+   * Pages publiées par chacune des sessions (au moins une version publiée depuis elle : une page republiée par une autre
+   * session reste aussi celle de la première) et que `viewerId` peut voir (propriétaire, membre, ou lien ouvert ; un invité
+   * des pages ne voit jamais de session). Par session, les plus récemment mises à jour d'abord.
+   */
+  async listForSessions(sessionIds: string[], viewerId: string): Promise<Map<string, SharedPage[]>> {
+    const out = new Map<string, SharedPage[]>();
+    if (!sessionIds.length) return out;
+    const { rows } = await pool.query<Row & { by_session: string }>(
+      `SELECT p.*, s.by_session FROM shared_pages p
+         JOIN (SELECT DISTINCT page_id, session_id AS by_session FROM shared_page_versions WHERE session_id = ANY($1::uuid[])) s ON s.page_id = p.id
+        WHERE p.owner_id = $2 OR p.link_access OR EXISTS (SELECT 1 FROM shared_page_members m WHERE m.page_id = p.id AND m.user_id = $2)
+        ORDER BY p.updated_at DESC`,
+      [sessionIds, viewerId],
+    );
+    for (const r of rows) {
+      const list = out.get(r.by_session) ?? [];
+      list.push(toPage(r));
+      out.set(r.by_session, list);
+    }
+    return out;
+  },
+
   async isMember(pageId: string, userId: string): Promise<boolean> {
     const { rowCount } = await pool.query('SELECT 1 FROM shared_page_members WHERE page_id = $1 AND user_id = $2', [pageId, userId]);
     return (rowCount ?? 0) > 0;

@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { formatTokens } from '../lib/humanize';
+import PopMenu from '../components/PopMenu';
 import AddMenu from './AddMenu';
 import { useTabs } from './TabsContext';
-import { attachedElsewhere, filesKey, mineFirst, sessionGroups, subagentsSummary, type SidebarSession } from './workspaces';
+import { attachedElsewhere, filesKey, mineFirst, sessionGroups, sessionPagePath, subagentsSummary, type SidebarPage, type SidebarSession } from './workspaces';
 
 export function sessionDotClass(s: Pick<SidebarSession, 'status' | 'activity' | 'pendingRequestCount'>): string {
   if (s.pendingRequestCount > 0) return 'ask';
@@ -44,9 +45,72 @@ export const initialsOf = (name: string) =>
     .slice(0, 2)
     .toUpperCase();
 
+/** Au-delà, les pages d'une session tiennent dans un seul onglet « Pages » qui ouvre un menu. */
+export const MAX_PAGE_TABS = 3;
+
+/** Pastille des commentaires non traités d'une page (ou d'un groupe de pages). */
+const CommentCount = ({ n }: { n: number }) =>
+  n > 0 ? (
+    <span className="wb-page-count" title={`${n} commentaire${n > 1 ? 's' : ''} à traiter`}>
+      {n}
+    </span>
+  ) : null;
+
+/**
+ * Pages partagées publiées depuis une session, dans la sous-barre de son dossier : un onglet par page (jusqu'à
+ * MAX_PAGE_TABS), sinon un onglet « Pages » avec un menu. Elles s'ouvrent dans le dossier (/sessions/<id>/pages/<page>) ;
+ * leur lien à part entière reste /shared/<page>, pour qui ne voit pas la session.
+ */
+function SessionPageTabs({ sessionId, pages, pathname }: { sessionId: string; pages: SidebarPage[]; pathname: string }) {
+  const [menuAt, setMenuAt] = useState<{ top: number; left: number } | null>(null);
+  if (!pages.length) return null;
+  const pathOf = (p: SidebarPage) => sessionPagePath(sessionId, p.id);
+  if (pages.length <= MAX_PAGE_TABS)
+    return (
+      <>
+        {pages.map((p) => (
+          <Link key={p.id} to={pathOf(p)} className={`wb-ws-tab${pathname === pathOf(p) ? ' active' : ''}`} title={`Page « ${p.title} » publiée par la session`}>
+            <i className="bi bi-file-earmark-richtext wb-page-icon" />
+            <span className="wb-ws-label">{p.title}</span>
+            <CommentCount n={p.openComments} />
+          </Link>
+        ))}
+      </>
+    );
+  const current = pages.find((p) => pathname === pathOf(p));
+  const open = pages.reduce((n, p) => n + p.openComments, 0);
+  return (
+    <>
+      <button
+        type="button"
+        className={`wb-ws-tab wb-ws-tab-btn${current ? ' active' : ''}`}
+        title={`${pages.length} pages publiées par la session`}
+        aria-haspopup="menu"
+        onClick={(e) => {
+          e.stopPropagation();
+          const r = e.currentTarget.getBoundingClientRect();
+          setMenuAt((m) => (m ? null : { top: r.bottom + 2, left: r.left }));
+        }}
+      >
+        <i className="bi bi-file-earmark-richtext wb-page-icon" />
+        <span className="wb-ws-label">{current ? current.title : `Pages (${pages.length})`}</span>
+        <CommentCount n={open} />
+        <i className="bi bi-chevron-down wb-ws-chevron" />
+      </button>
+      {menuAt && (
+        <PopMenu
+          at={menuAt}
+          onClose={() => setMenuAt(null)}
+          items={pages.map((p) => ({ label: p.openComments > 0 ? `${p.title} · ${p.openComments} à traiter` : p.title, icon: pathname === pathOf(p) ? 'bi-check2' : 'bi-file-earmark-richtext', to: pathOf(p) }))}
+        />
+      )}
+    </>
+  );
+}
+
 /**
  * Sous-barre d'un dossier de travail (celui d'une session, ou le checkout principal pour les sessions d'avant) :
- * la session (et ses sous-agents), son navigateur s'il est ouvert, ses fichiers, ses terminaux, et un « + » pour
+ * la session (et ses sous-agents), son navigateur s'il est ouvert, les pages qu'elle a publiées, ses fichiers, ses terminaux, et un « + » pour
  * y ouvrir quelque chose. Affichée seulement quand la page courante appartient à un dossier.
  */
 export default function WorkspaceTabs() {
@@ -70,6 +134,9 @@ export default function WorkspaceTabs() {
   const sessions = mineFirst(ws.sessions, user?.id ?? null).filter((s) => !attachedElsewhere(s, here, poolById));
   const files = filesKey(ws);
   const filesActive = location.pathname === files || location.pathname.startsWith(`${files}/`);
+  // Une page republiée par une autre session du dossier n'y a qu'un onglet, auprès de la première qui l'affiche.
+  const shownPages = new Set<string>();
+  const pagesOf = (s: SidebarSession) => (s.pages ?? []).filter((p) => !shownPages.has(p.id) && shownPages.add(p.id));
   const link = (to: string, active: boolean, title: string, children: React.ReactNode) => (
     <Link key={to} to={to} className={`wb-ws-tab${active ? ' active' : ''}`} title={title}>
       {children}
@@ -116,6 +183,7 @@ export default function WorkspaceTabs() {
                     <i className="bi bi-globe2 wb-browser-icon" /> Navigateur
                   </>
                 ))}
+              <SessionPageTabs sessionId={s.id} pages={pagesOf(s)} pathname={location.pathname} />
             </span>
           );
           }),

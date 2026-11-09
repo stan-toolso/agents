@@ -55,6 +55,16 @@ export const sharedPageCommentRepository = {
     return Number(rows[0]?.n ?? 0);
   },
 
+  /** Commentaires non traités de plusieurs pages (absente : aucun). */
+  async countOpenByPages(pageIds: string[]): Promise<Map<string, number>> {
+    if (!pageIds.length) return new Map();
+    const { rows } = await pool.query<{ page_id: string; n: string }>(
+      'SELECT page_id, count(*)::text AS n FROM shared_page_comments WHERE page_id = ANY($1::uuid[]) AND parent_id IS NULL AND resolved_at IS NULL GROUP BY page_id',
+      [pageIds],
+    );
+    return new Map(rows.map((r) => [r.page_id, Number(r.n)]));
+  },
+
   async create(input: { pageId: string; parentId: string | null; authorId: string; sessionId: string | null; body: string; anchor: CommentAnchor | null; version: number }): Promise<SharedPageComment> {
     const { rows } = await pool.query<Row>(
       `INSERT INTO shared_page_comments (page_id, parent_id, author_id, session_id, body, anchor, version) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7) RETURNING *`,
