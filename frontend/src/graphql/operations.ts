@@ -1,4 +1,4 @@
-import { gql } from '@apollo/client';
+import { gql, type ApolloCache } from '@apollo/client';
 import { TASK_PULL_REQUEST_FIELDS, TRACKED_PULL_REQUEST_FIELDS, type TrackedPullRequest, type TrackedPullRequestSummary } from './pullRequests';
 import type { AttachmentRef } from '../lib/attachments';
 import type { ClaudeRateLimits } from './settings';
@@ -873,6 +873,15 @@ export const PROVIDERS = gql`
     }
   }
 `;
+
+/**
+ * Oublie toutes les listes de projets du cache Apollo (une entrée par jeu de variables : includePersonal, all…),
+ * après une création ou une suppression de projet : chaque écran qui les lit les recharge à son prochain affichage.
+ */
+export function evictProjectLists(cache: ApolloCache<unknown>): void {
+  cache.evict({ id: 'ROOT_QUERY', fieldName: 'projects' });
+  cache.gc();
+}
 
 export const PROJECTS = gql`
   ${PROJECT_FIELDS}
