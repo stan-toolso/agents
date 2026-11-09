@@ -14,12 +14,13 @@ const errorMessages: Record<string, string> = {
   google_error: 'Google a renvoyé une erreur pendant la connexion. Réessayez.',
   provider_error: 'Le fournisseur a renvoyé une erreur pendant la connexion. Réessayez.',
   unauthenticated: 'Connectez-vous d’abord.',
+  link_expired: 'Ce lien de connexion a expiré. Saisissez votre adresse : un nouveau lien vous est envoyé tout de suite.',
 };
 
 /** Codes dont le message du serveur est plus précis que le nôtre (adresse non garantie, annuaire refusé…). */
 const serverMessageFirst = new Set(['email_not_verified', 'provider_error', 'bad_request', 'account_mismatch']);
 
-type Mode = 'login' | 'forgot' | 'sent';
+type Mode = 'login' | 'forgot' | 'sent' | 'link' | 'linkSent';
 
 /**
  * Écran de connexion : Google, Microsoft, GitHub (ceux que le serveur a configurés) et e-mail + mot de passe.
@@ -47,7 +48,8 @@ export default function LoginPage() {
       });
   }, []);
 
-  const [mode, setMode] = useState<Mode>('login');
+  // Lien de connexion expiré (invité d'une page partagée) : on propose d'emblée d'en recevoir un autre.
+  const [mode, setMode] = useState<Mode>(errorCode === 'link_expired' ? 'link' : 'login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -81,6 +83,20 @@ export default function LoginPage() {
     }
   };
 
+  const submitLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setFormError(null);
+    try {
+      await authPost('email-link', { email, next });
+      setMode('linkSent');
+    } catch (err) {
+      setFormError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const shownError = errorCode ? ((serverMessageFirst.has(errorCode) && errorMessage) || errorMessages[errorCode] || errorMessage || `Connexion impossible (${errorCode}).`) : null;
   const oauth = methods ? [methods.google, methods.microsoft, methods.github].some(Boolean) : false;
   const nothing = methods && !oauth && !methods.password;
@@ -88,11 +104,13 @@ export default function LoginPage() {
   return (
     <AuthShell>
       <div>
-        <h2 className="auth-card-title">{mode === 'login' ? 'Connexion' : 'Choisir un mot de passe'}</h2>
+        <h2 className="auth-card-title">{mode === 'login' ? 'Connexion' : mode === 'link' || mode === 'linkSent' ? 'Lien de connexion' : 'Choisir un mot de passe'}</h2>
         <p className="auth-card-sub">
           {mode === 'login'
             ? 'Utilisez le compte invité sur vos projets, ou l’adresse avec laquelle on vous a partagé une page.'
-            : 'Recevez par e-mail un lien pour choisir ou réinitialiser votre mot de passe.'}
+            : mode === 'link' || mode === 'linkSent'
+              ? 'On vous a partagé une page ? Recevez un lien qui vous connecte en un clic, sans mot de passe.'
+              : 'Recevez par e-mail un lien pour choisir ou réinitialiser votre mot de passe.'}
         </p>
         {shownError && (
           <Alert variant="warning" className="text-start py-2 small">
@@ -109,7 +127,29 @@ export default function LoginPage() {
             Aucun mode de connexion n'est configuré sur ce serveur{methodsError ? ` (${methodsError})` : ''}.
           </Alert>
         )}
-        {methods && (
+        {methods && (mode === 'link' || mode === 'linkSent') && (
+          <>
+            {mode === 'link' ? (
+              <Form onSubmit={submitLink}>
+                <Form.Control type="email" autoComplete="email" className="mb-2" placeholder="L’adresse qui a reçu le partage" aria-label="Adresse e-mail" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
+                {formError && <div className="text-danger small mb-2">{formError}</div>}
+                <Button type="submit" size="lg" className="w-100" disabled={busy || !email}>
+                  {busy ? <Spinner animation="border" size="sm" /> : 'Recevoir mon lien'}
+                </Button>
+              </Form>
+            ) : (
+              <Alert variant="success" className="small py-2">
+                Si {email} a reçu le partage d’une page, un lien de connexion vient de lui être envoyé (valable une heure). Pensez à regarder dans les indésirables.
+              </Alert>
+            )}
+            <div className="text-center mt-2">
+              <Button variant="link" size="sm" onClick={() => (setMode('login'), setFormError(null))}>
+                Autres modes de connexion
+              </Button>
+            </div>
+          </>
+        )}
+        {methods && mode !== 'link' && mode !== 'linkSent' && (
           <div className="d-grid gap-2">
             {methods.google && (
               <Button href={googleLoginUrl(next)} size="lg" variant={methods.password || methods.microsoft || methods.github ? 'outline-primary' : 'primary'}>
@@ -131,7 +171,7 @@ export default function LoginPage() {
             )}
           </div>
         )}
-        {methods?.password && (
+        {methods?.password && mode !== 'link' && mode !== 'linkSent' && (
           <>
             {oauth && (
               <div className="d-flex align-items-center gap-2 my-3 text-secondary small">
@@ -191,6 +231,14 @@ export default function LoginPage() {
               </Alert>
             )}
           </>
+        )}
+        {methods?.emailLink && mode === 'login' && (
+          <div className="text-center mt-3 small border-top pt-3">
+            <Button variant="link" size="sm" className="p-0" onClick={() => (setMode('link'), setFormError(null))}>
+              <i className="bi bi-envelope me-1" />
+              On vous a partagé une page ? Recevoir un lien de connexion
+            </Button>
+          </div>
         )}
       </div>
     </AuthShell>

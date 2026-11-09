@@ -37,6 +37,8 @@ export interface SharedPageMember {
   pageId: string;
   userId: string;
   addedById: string | null;
+  /** Message d'introduction de la personne qui a partagé. */
+  message: string | null;
   createdAt: Date;
 }
 

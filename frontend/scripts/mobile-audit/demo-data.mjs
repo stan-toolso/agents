@@ -225,6 +225,20 @@ const scheduleRun = (id, s, status, startedMin, over = {}) => ({
   finishedAt: status === 'RUNNING' ? null : ago(startedMin - 9), durationMs: status === 'RUNNING' ? null : 9 * 60_000, costUsd: s ? s.costUsd : null,
   message: null, answer: status === 'DONE' ? 'Aucune anomalie : 12 tables vérifiées, index à jour.' : null, session: s, ...over,
 });
+// Pages partagées : une à moi (fenêtre « Partager »), une partagée avec moi avec un message (bandeau du message).
+const demoSharedPage = (id, title, owner, members, extra = {}) => ({
+  __typename: 'SharedPage', id, title, description: null, owner, linkAccess: false, version: 1, createdAt: ago(60 * 24), updatedAt: ago(60 * 3),
+  members: members.map(([u, message]) => ({ __typename: 'SharedPageMember', user: u, addedBy: owner, addedAt: ago(60 * 20), message })),
+  versions: [{ __typename: 'SharedPageVersion', version: 1, size: 18_400, createdBy: owner, createdAt: ago(60 * 24) }],
+  project: null, session: null, sourcePath: null, comments: [], openComments: 0, agentHandoff: 'MANUAL',
+  viewerAccess: { __typename: 'SharedPageViewerAccess', owner: owner === U.me, member: owner !== U.me },
+  ...extra,
+});
+const sharedPagesDemo = [
+  demoSharedPage('page-offre', 'Proposition commerciale 2027', U.me, [[U.hugo, null], [user('u-claire', 'claire.martin@client.fr', 'claire.martin@client.fr', { isGuest: false, lastLoginAt: null }), 'Bonjour Claire, voici notre proposition.']]),
+  demoSharedPage('page-audit', 'Audit des performances du portail', U.lea, [[U.me, "Camille, voici l'audit dont on a parlé ce matin.\nJ'aimerais ton avis sur la partie cache avant jeudi : commente directement sur la page."]]),
+];
+
 export const schedules = [
   schedule('sch-rapport-lundi', P.data, 'Rapport du lundi', U.hugo, { allowedTools: ['Bash(npm run report *)'], lastRunAt: ago(60 * 24 * 4) }),
   schedule('sch-revue-bases', P.site, 'Revue des bases', U.me, { cron: '35 12 * * *', prompt: 'Passe en revue les bases de production : tailles, index inutilisés, requêtes lentes. Signale ce qui mérite une action.', nextRunAt: inDays(1), lastRunAt: ago(12) }),
@@ -874,11 +888,14 @@ export const demoRoot = {
   },
   workflows: [],
   workflowRuns: [],
-  sharedPages: [],
-  // Page partagée : à moi, publiée par la session « Refonte de la page tarifs » ; le réglage de la transmission
-  // des commentaires à l'agent (panneau Commentaires) se change et reste en mémoire.
-  sharedPage: (a) => sharedPageDemo(a.id),
+  // Pages partagées : « page-offre » et « page-audit » (message du partage) ; toute autre adresse donne la page à moi
+  // publiée par la session « Refonte de la page tarifs », dont le réglage de la transmission des commentaires à
+  // l'agent (panneau Commentaires) se change et reste en mémoire.
+  sharedPages: () => sharedPagesDemo,
+  sharedPage: (a = {}) => sharedPagesDemo.find((pg) => pg.id === a.id) ?? sharedPageDemo(a.id),
   updateSharedPage: (a) => {
+    const mine = sharedPagesDemo.find((pg) => pg.id === a.id);
+    if (mine) return mine;
     if (a.input?.agentHandoff) sharedPageState.agentHandoff = a.input.agentHandoff;
     return sharedPageDemo(a.id);
   },

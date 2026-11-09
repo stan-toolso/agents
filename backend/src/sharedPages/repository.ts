@@ -44,9 +44,10 @@ interface MemberRow {
   page_id: string;
   user_id: string;
   added_by: string | null;
+  message: string | null;
   created_at: Date;
 }
-const toMember = (r: MemberRow): SharedPageMember => ({ pageId: r.page_id, userId: r.user_id, addedById: r.added_by, createdAt: r.created_at });
+const toMember = (r: MemberRow): SharedPageMember => ({ pageId: r.page_id, userId: r.user_id, addedById: r.added_by, message: r.message ?? null, createdAt: r.created_at });
 
 export const sharedPageRepository = {
   async findById(id: string): Promise<SharedPage | null> {
@@ -150,10 +151,15 @@ export const sharedPageRepository = {
     return (rowCount ?? 0) > 0;
   },
 
-  /** Ajoute un membre ; false s'il l'était déjà. */
-  async addMember(pageId: string, userId: string, addedBy: string): Promise<boolean> {
-    const { rowCount } = await pool.query('INSERT INTO shared_page_members (page_id, user_id, added_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [pageId, userId, addedBy]);
-    return (rowCount ?? 0) > 0;
+  /** Ajoute un membre (ou remplace son message s'il en est donné un) ; false s'il l'était déjà. */
+  async addMember(pageId: string, userId: string, addedBy: string, message: string | null = null): Promise<boolean> {
+    const { rows } = await pool.query<{ inserted: boolean }>(
+      `INSERT INTO shared_page_members (page_id, user_id, added_by, message) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (page_id, user_id) DO UPDATE SET message = COALESCE(EXCLUDED.message, shared_page_members.message)
+       RETURNING (xmax = 0) AS inserted`,
+      [pageId, userId, addedBy, message],
+    );
+    return Boolean(rows[0]?.inserted);
   },
 
   async removeMember(pageId: string, userId: string): Promise<boolean> {

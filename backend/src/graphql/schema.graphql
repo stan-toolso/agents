@@ -2568,6 +2568,8 @@ type SharedPageMember {
   user: User!
   addedBy: User
   addedAt: DateTime!
+  "Message d'introduction du partage ; visible du propriétaire, de la personne qui a partagé et du membre lui-même."
+  message: String
 }
 
 type SharedPageVersion {
@@ -3400,10 +3402,11 @@ type Mutation {
   updateSharedPage(id: ID!, input: SharedPageInput!): SharedPage!
   """
   Ajoute une personne à la page (propriétaire). Une adresse sans compte Skipper est refusée (code NO_ACCOUNT), sauf avec
-  invite : un compte d'invité est créé, qui ne verra que les pages partagées avec lui (e-mail d'invitation si un
-  envoi des e-mails est configuré).
+  invite : un compte d'invité est créé, qui ne verra que les pages partagées avec lui. message : mot d'introduction
+  (2000 caractères au plus), repris dans l'e-mail et affiché sur la page. notify (par défaut) : e-mail si l'envoi des
+  e-mails est configuré, avec un lien de connexion directe pour un invité.
   """
-  addSharedPageMember(id: ID!, email: String!, invite: Boolean = false): SharedPage!
+  addSharedPageMember(id: ID!, email: String!, invite: Boolean = false, message: String, notify: Boolean = true): SharedPage!
   "Le propriétaire retire qui il veut ; une personne ajoutée peut se retirer elle-même."
   removeSharedPageMember(id: ID!, userId: ID!): SharedPage!
   deleteSharedPage(id: ID!): Boolean!

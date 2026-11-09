@@ -44,6 +44,13 @@ describe('brevoPayload', () => {
       htmlContent: '<p>T</p>',
     });
   });
+
+  it("remplace le nom de l'expéditeur et ajoute l'adresse de réponse", () => {
+    const p = brevoPayload(DEFAULT_FROM, { to: 'a@b.fr', subject: 'S', text: 'T', fromName: 'Stan "G" <x>\n via Skipper', replyTo: 'stan@toolso.io' });
+    expect(p.sender).toEqual({ name: 'Stan G x via Skipper', email: 'skipper@toolso.io' });
+    expect(p.replyTo).toEqual({ email: 'stan@toolso.io' });
+    expect(brevoPayload(DEFAULT_FROM, { to: 'a@b.fr', subject: 'S', text: 'T', replyTo: 'pas une adresse' }).replyTo).toBeUndefined();
+  });
 });
 
 describe('mailService', () => {

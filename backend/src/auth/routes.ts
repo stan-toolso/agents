@@ -136,6 +136,8 @@ const vaultPage = (projectId: string | null, params: Record<string, string>) => 
  * - POST /auth/password/forgot      : envoie un lien pour choisir ou réinitialiser son mot de passe (si l'envoi des e-mails est configuré) ;
  * - GET  /auth/password/token       : à qui appartient un lien de mot de passe ;
  * - POST /auth/password/reset       : choisit le mot de passe avec un lien, ouvre la session ;
+ * - GET  /auth/link/<jeton>         : lien de connexion directe d'un invité des pages partagées, ouvre la session ;
+ * - POST /auth/email-link           : envoie un lien de connexion directe à un invité (si SMTP) ;
  * - GET  /auth/microsoft|github[?next=…], …/link, …/callback : connexion ou liaison d'un compte Microsoft ou GitHub ;
  * - POST /auth/logout               : ferme la session.
  * Renvoie false si l'URL n'est pas une route d'authentification.
@@ -180,6 +182,42 @@ export async function handleAuthRoute(req: IncomingMessage, res: ServerResponse)
     try {
       const body = await readJsonBody(req);
       await signInService.requestPasswordReset(str(body.email, 320));
+      cors(req, res);
+      res.writeHead(204);
+      res.end();
+    } catch (err) {
+      sendError(req, res, err);
+    }
+    return true;
+  }
+
+  // Lien de connexion directe d'un invité (e-mail de partage d'une page, ou demandé depuis la page de connexion) :
+  // ouvre la session et la page. Lien expiré : retour à la page visée, qui propose d'en recevoir un nouveau.
+  const linkMatch = /^\/auth\/link\/([A-Za-z0-9_-]{20,200})$/.exec(url.pathname);
+  if (linkMatch && req.method === 'GET') {
+    try {
+      const { user, nextPath } = await signInService.loginWithLink(linkMatch[1]);
+      if (!user) {
+        const target = new URL(toApp(nextPath ?? '/shared'));
+        target.searchParams.set('authError', 'link_expired');
+        redirect(res, target.toString());
+        return true;
+      }
+      const token = await authSession.create(user);
+      log.info(`[auth] connexion de ${user.email} (lien direct)`);
+      redirect(res, toApp(safeNext(nextPath)), [authSession.cookie(token)]);
+    } catch (err) {
+      log.warn(`[auth] lien de connexion : ${(err as Error).message}`);
+      redirect(res, loginError('link_expired'));
+    }
+    return true;
+  }
+
+  // « Recevoir un lien de connexion » (invités des pages partagées) : toujours 204, que l'adresse existe ou non.
+  if (url.pathname === '/auth/email-link' && req.method === 'POST') {
+    try {
+      const body = await readJsonBody(req);
+      await signInService.requestLoginLink(str(body.email, 320), typeof body.next === 'string' ? body.next.slice(0, 500) : null);
       cors(req, res);
       res.writeHead(204);
       res.end();

@@ -42,6 +42,10 @@ export interface Mail {
   subject: string;
   text: string;
   html?: string;
+  /** Nom affiché de l'expéditeur (« Stan via Skipper ») ; l'adresse reste celle configurée, pour la délivrabilité. */
+  fromName?: string;
+  /** Adresse de réponse (la personne qui partage une page, par exemple). */
+  replyTo?: string;
 }
 
 interface Resolved {
@@ -110,9 +114,11 @@ async function brevo(apiKey: string, path: string, body?: unknown): Promise<unkn
 export function brevoPayload(from: string, mail: Mail): Record<string, unknown> {
   const sender = parseSender(from);
   if (!sender) throw new Error(`Expéditeur invalide : ${from}`);
+  const name = mail.fromName?.replace(/[\r\n"<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
   return {
-    sender,
+    sender: name ? { name, email: sender.email } : sender,
     to: [{ email: mail.to }],
+    ...(mail.replyTo && /^[^\s@<>]+@[^\s@<>]+$/.test(mail.replyTo) ? { replyTo: { email: mail.replyTo } } : {}),
     subject: mail.subject,
     textContent: mail.text,
     ...(mail.html ? { htmlContent: mail.html } : {}),

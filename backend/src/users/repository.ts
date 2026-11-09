@@ -222,7 +222,34 @@ export const userRepository = {
 
   async deleteExpiredPasswordTokens(): Promise<number> {
     const { rowCount } = await pool.query(`DELETE FROM password_tokens WHERE expires_at <= now() - interval '7 days'`);
-    return rowCount ?? 0;
+    const links = await pool.query(`DELETE FROM login_links WHERE expires_at <= now() - interval '30 days'`);
+    return (rowCount ?? 0) + (links.rowCount ?? 0);
+  },
+
+  // ---- Liens de connexion directe (invités des pages partagées) -------------------------------
+
+  async createLoginLink(tokenHash: string, userId: string, nextPath: string, expiresAt: Date, createdById: string | null): Promise<void> {
+    await pool.query('INSERT INTO login_links (token_hash, user_id, next_path, expires_at, created_by) VALUES ($1, $2, $3, $4, $5)', [tokenHash, userId, nextPath, expiresAt, createdById]);
+  },
+
+  /** Lien encore valable, ou null ; un lien expiré donne seulement son chemin (pour proposer d'en recevoir un autre). */
+  async findLoginLink(tokenHash: string): Promise<{ user: User; nextPath: string; expired: boolean } | null> {
+    const { rows } = await pool.query<UserRow & { link_next_path: string; link_expired: boolean }>(
+      `SELECT u.*, l.next_path AS link_next_path, (l.expires_at <= now()) AS link_expired FROM login_links l JOIN users u ON u.id = l.user_id WHERE l.token_hash = $1`,
+      [tokenHash],
+    );
+    const row = rows[0];
+    return row ? { user: toUser(row), nextPath: row.link_next_path, expired: row.link_expired } : null;
+  },
+
+  async touchLoginLink(tokenHash: string): Promise<void> {
+    await pool.query('UPDATE login_links SET last_used_at = now() WHERE token_hash = $1', [tokenHash]);
+  },
+
+  /** Date du dernier lien demandé par l'invité lui-même (anti-rafale). */
+  async lastSelfServiceLoginLinkAt(userId: string): Promise<Date | null> {
+    const { rows } = await pool.query<{ at: Date | null }>('SELECT max(created_at) AS at FROM login_links WHERE user_id = $1 AND created_by IS NULL', [userId]);
+    return rows[0]?.at ?? null;
   },
 
   // ---- Comptes externes (Microsoft, GitHub) ---------------------------------------------------

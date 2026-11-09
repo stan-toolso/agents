@@ -111,7 +111,7 @@ export interface SharedPage {
   version: number;
   createdAt: string;
   updatedAt: string;
-  members: { user: { id: string; name: string; email: string; isGuest?: boolean }; addedBy: { id: string; name: string } | null; addedAt: string }[];
+  members: { user: { id: string; name: string; email: string; isGuest?: boolean }; addedBy: { id: string; name: string } | null; addedAt: string; message?: string | null }[];
   versions: { version: number; size: number; createdBy: { id: string; name: string } | null; createdAt: string }[];
   project: { id: string; name: string } | null;
   session: { id: string; name: string } | null;
@@ -176,6 +176,7 @@ export const SHARED_PAGE_FIELDS = gql`
         name
       }
       addedAt
+      message
     }
     versions {
       version
@@ -340,8 +341,8 @@ export const UPDATE_SHARED_PAGE = gql`
 
 export const ADD_SHARED_PAGE_MEMBER = gql`
   ${SHARED_PAGE_FIELDS}
-  mutation AddSharedPageMember($id: ID!, $email: String!, $invite: Boolean) {
-    addSharedPageMember(id: $id, email: $email, invite: $invite) {
+  mutation AddSharedPageMember($id: ID!, $email: String!, $invite: Boolean, $message: String, $notify: Boolean) {
+    addSharedPageMember(id: $id, email: $email, invite: $invite, message: $message, notify: $notify) {
       ...SharedPageFields
     }
   }

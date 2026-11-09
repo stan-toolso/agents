@@ -772,6 +772,11 @@ export const resolvers = {
     user: (m: SharedPageMember) => userService.get(m.userId),
     addedBy: (m: SharedPageMember, _: unknown, ctx: Ctx) => userOrNull(ctx, m.addedById),
     addedAt: (m: SharedPageMember) => m.createdAt,
+    message: async (m: SharedPageMember, _: unknown, ctx: Ctx) => {
+      if (!m.message || !ctx.user) return null;
+      if (ctx.user.id === m.userId || ctx.user.id === m.addedById) return m.message;
+      return (await sharedPageService.get(m.pageId)).ownerId === ctx.user.id ? m.message : null;
+    },
   },
   SharedPageVersion: {
     createdBy: (v: SharedPageVersion, _: unknown, ctx: Ctx) => userOrNull(ctx, v.createdById),
@@ -2239,7 +2244,8 @@ export const resolvers = {
       }
       return sharedPageService.update(user.id, args.id, { ...input, agentHandoff: agentHandoff ? agentHandoff.toLowerCase() : null });
     },
-    addSharedPageMember: (_: unknown, args: { id: string; email: string; invite?: boolean | null }, ctx: Ctx) => sharedPageService.addMember(requireUser(ctx), args.id, args.email, { invite: Boolean(args.invite) }),
+    addSharedPageMember: (_: unknown, args: { id: string; email: string; invite?: boolean | null; message?: string | null; notify?: boolean | null }, ctx: Ctx) =>
+      sharedPageService.addMember(requireUser(ctx), args.id, args.email, { invite: Boolean(args.invite), message: args.message, notify: args.notify !== false }),
     removeSharedPageMember: (_: unknown, args: { id: string; userId: string }, ctx: Ctx) => sharedPageService.removeMember(requireUser(ctx), args.id, args.userId),
     deleteSharedPage: (_: unknown, args: { id: string }, ctx: Ctx) => sharedPageService.delete(requireUser(ctx).id, args.id),
     addSharedPageComment: (_: unknown, args: { pageId: string; body: string; anchor?: unknown; version?: number | null }, ctx: Ctx) =>
