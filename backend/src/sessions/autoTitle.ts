@@ -1,5 +1,6 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../config.js';
+import { sessionBillable } from '../billing/billable.js';
 import { pool } from '../db/pool.js';
 import { agentService } from '../agents/service.js';
 import { log } from '../log.js';
@@ -81,15 +82,16 @@ export function cleanTitle(raw: string | null | undefined): string | null {
 }
 
 /** Inscrit le coût de la génération dans usage_ledger (rattaché à la session et à son propriétaire). */
-async function recordCost(session: Session, costUsd: number, models: Record<string, number>): Promise<void> {
+async function recordCost(session: Session, costUsd: number, models: Record<string, number>, billable: boolean): Promise<void> {
   if (!(costUsd > 0)) return;
   const byModel = Object.keys(models).length ? models : { [TITLE_MODEL]: costUsd };
-  await pool.query('INSERT INTO usage_ledger (session_id, project_id, user_id, models, cost_usd) VALUES ($1, $2, $3, $4::jsonb, $5)', [
+  await pool.query('INSERT INTO usage_ledger (session_id, project_id, user_id, models, cost_usd, billable) VALUES ($1, $2, $3, $4::jsonb, $5, $6)', [
     session.id,
     session.projectId,
     session.ownerId,
     JSON.stringify(Object.fromEntries(Object.entries(byModel).map(([k, v]) => [k, Number(v.toFixed(6))]))),
     costUsd.toFixed(6),
+    billable,
   ]);
 }
 
@@ -173,7 +175,9 @@ export const autoTitleService = {
     const answer = typeof event?.payload.result === 'string' ? event.payload.result : null;
     const credentials = await settings.credentialEnv(undefined, { sessionId: session.id, projectId: session.projectId });
     const { text, costUsd, models } = await this.generator(cliEnv(credentials), titlePrompt(session.prompt, answer));
-    await recordCost(session, costUsd, models).catch((err) => log.error('[usage] coût du titre de session', err));
+    // Compté comme les tours de la session : compte de la cellule ou d'un CTO Skipper (billing/billable.ts).
+    const billable = await sessionBillable(accounts.claudeUserId, settings.usesCellAccount()).catch(() => true);
+    await recordCost(session, costUsd, models, billable).catch((err) => log.error('[usage] coût du titre de session', err));
     return cleanTitle(text);
   },
 };

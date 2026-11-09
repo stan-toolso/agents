@@ -38,7 +38,7 @@ export function alertToSend(level: number, alerted: { month: string | null; leve
 export const projectBudget = {
   /** Consommation du mois d'un projet, en USD. */
   async monthSpent(projectId: string, now = new Date()): Promise<number> {
-    const { rows } = await pool.query<{ total: string }>('SELECT COALESCE(SUM(cost_usd), 0) AS total FROM usage_ledger WHERE project_id = $1 AND recorded_at >= $2', [projectId, currentMonthStart(now)]);
+    const { rows } = await pool.query<{ total: string }>('SELECT COALESCE(SUM(cost_usd), 0) AS total FROM usage_ledger WHERE project_id = $1 AND billable AND recorded_at >= $2', [projectId, currentMonthStart(now)]);
     return Number(rows[0].total);
   },
 
@@ -46,7 +46,7 @@ export const projectBudget = {
   async monthSpentOf(projectIds: string[], now = new Date()): Promise<Map<string, number>> {
     if (!projectIds.length) return new Map();
     const { rows } = await pool.query<{ project_id: string; total: string }>(
-      'SELECT project_id, SUM(cost_usd) AS total FROM usage_ledger WHERE project_id = ANY($1::uuid[]) AND recorded_at >= $2 GROUP BY project_id',
+      'SELECT project_id, SUM(cost_usd) AS total FROM usage_ledger WHERE project_id = ANY($1::uuid[]) AND billable AND recorded_at >= $2 GROUP BY project_id',
       [projectIds, currentMonthStart(now)],
     );
     return new Map(rows.map((r) => [r.project_id, Number(r.total)]));

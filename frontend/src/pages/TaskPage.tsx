@@ -181,8 +181,11 @@ export default function TaskPage() {
                           {s.startedAt ? timeAgo(s.startedAt) : '—'}
                           {s.endedAt && <span className="text-secondary"> · fin {timeAgo(s.endedAt)}</span>}
                         </td>
-                        <td className="text-end">{formatCost(s.costUsd)}</td>
-                        <td className="text-end">{formatCost(task.sessionCosts?.find((c) => c.session.id === s.id)?.usd ?? 0)}</td>
+                        <td className="text-end">{s.costUsd > 0 ? formatCost(s.costUsd) : null}</td>
+                        <td className="text-end">{(() => {
+                          const usd = task.sessionCosts?.find((c) => c.session.id === s.id)?.usd ?? 0;
+                          return usd > 0 ? formatCost(usd) : null;
+                        })()}</td>
                       </tr>
                     ))}
                   </tbody>

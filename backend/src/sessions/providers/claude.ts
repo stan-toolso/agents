@@ -55,6 +55,7 @@ import { archivePromptSummary, createSessionsMcpServer, sessionsPromptSummary } 
 import { archivesWhenIdle } from '../autoArchive.js';
 import { claudeSettings, cliEnv } from '../../settings/claude.js';
 import { usageService } from '../../settings/usage.js';
+import { sessionBillable } from '../../billing/billable.js';
 import { projectBudget } from '../../projects/budget.js';
 import { describeRejection, rateLimitService } from '../../settings/rateLimits.js';
 import type { PermissionResponse, QuestionResponse } from '../../requests/types.js';
@@ -240,6 +241,12 @@ export class ClaudeProvider implements SessionProvider {
     const scopedAgents = scopeProjects.length ? await agentService.listActive(scopeProjects.map((p) => p.id)) : [];
     const actor = { sessionId: ctx.session.id, projectId: ctx.project.id };
     const credentials = await owner.credentialEnv(general.authMode, actor);
+    // Les tours de cette exécution comptent-ils dans la consommation (crédits) ? Compte de la cellule ou d'un CTO Skipper
+    // seulement, quand la cellule facture en crédits (billing/billable.ts).
+    const billable = await sessionBillable(accounts?.claudeUserId ?? null, owner.usesCellAccount(general.authMode)).catch((err) => {
+      log.error('[usage] facturation de la session indéterminée, tours comptés', err);
+      return true;
+    });
     // Un chat reçoit l'environnement du serveur sans ses secrets Anthropic (comme la vérification des identifiants), un dossier
     // de configuration propre à l'espace (conversations reprises) et aucune variable git ; une session, ses seuls identifiants.
     const env: Record<string, string | undefined> = chat
@@ -482,7 +489,7 @@ export class ClaudeProvider implements SessionProvider {
       // Taille du contexte : tokens d'entrée (dont cache) du dernier appel au modèle, relevée sur les messages assistant.
       let contextTokens: number | null = null;
       // Statut de limite d'utilisation rapporté en dernier à cette session : seuls ses changements sont journalisés.
-      const run: RunState = { rateLimitStatus: null, mcpReported: new Set() };
+      const run: RunState = { rateLimitStatus: null, mcpReported: new Set(), billable };
       try {
         for await (const message of stream) {
           // Le modèle travaille alors qu'aucun tour n'était en cours : tour lancé par le CLI lui-même (fin d'une
@@ -509,7 +516,7 @@ export class ClaudeProvider implements SessionProvider {
             await ctx.setContextTokens?.(contextTokens);
           }
           if (message.type === 'result') {
-            previousModelTotals = await this.recordUsage(ctx, message, previousModelTotals, model ?? 'default');
+            previousModelTotals = await this.recordUsage(ctx, message, previousModelTotals, model ?? 'default', billable);
             await ctx.setContextTokens?.(contextTokens);
             // Tour vide ouvert par le CLI sur une notification de tâche de fond : l'instruction envoyée reste à traiter.
             if (turnInProgress && isEmptyNotificationResult(message)) continue;
@@ -716,13 +723,14 @@ export class ClaudeProvider implements SessionProvider {
    * cumul par modèle ; on enregistre le delta depuis le dernier total connu. Renvoie les cumuls par
    * modèle pour le prochain tour. Une erreur de relevé ne doit jamais interrompre la session.
    */
-  private async recordUsage(ctx: RunContext, result: SDKResultMessage, previous: Record<string, number>, fallbackModel: string): Promise<Record<string, number>> {
+  private async recordUsage(ctx: RunContext, result: SDKResultMessage, previous: Record<string, number>, fallbackModel: string, billable: boolean): Promise<Record<string, number>> {
     const modelTotals: Record<string, number> = {};
     for (const [name, usage] of Object.entries(result.modelUsage ?? {})) modelTotals[name] = usage.costUSD;
     try {
-      const delta = await usageService.recordTotal(ctx.session.id, ctx.project.id, ctx.session.ownerId, result.total_cost_usd ?? 0, modelTotals, previous, fallbackModel);
+      const delta = await usageService.recordTotal(ctx.session.id, ctx.project.id, ctx.session.ownerId, result.total_cost_usd ?? 0, modelTotals, previous, fallbackModel, billable);
       if (delta > 0) {
-        await ctx.emit('usage', { deltaUsd: Number(delta.toFixed(6)), totalUsd: result.total_cost_usd });
+        // Tour non compté : l'événement ne porte aucun montant (ni transcript, ni coût d'une exécution planifiée).
+        await ctx.emit('usage', billable ? { deltaUsd: Number(delta.toFixed(6)), totalUsd: result.total_cost_usd } : { billable: false });
         void projectBudget.checkAlert(ctx.project.id);
       }
     } catch (err) {
@@ -828,7 +836,7 @@ export class ClaudeProvider implements SessionProvider {
     if (message.type === 'assistant' && message.message.content.some((b) => b.type === 'tool_use' && b.name.startsWith('mcp__playwright__'))) {
       liveBrowserService.markUsed(ctx.session.id);
     }
-    const payload = message.type === 'user' ? withoutBinaryData(message) : message;
+    const payload = message.type === 'user' ? withoutBinaryData(message) : message.type === 'result' && !run.billable ? { ...message, skipperUnbilled: true } : message;
     await ctx.emit(`claude.${message.type}`, payload as unknown as Record<string, unknown>);
   }
 }
@@ -847,6 +855,8 @@ interface RunState {
   rateLimitStatus: string | null;
   /** Serveurs MCP déjà signalés en échec. */
   mcpReported: Set<string>;
+  /** Tours comptés dans la consommation ; sinon les résultats sont marqués `skipperUnbilled` (aucun coût affiché). */
+  billable: boolean;
 }
 
 type ContentBlock = { type?: string; source?: { type?: string; data?: string }; content?: unknown };

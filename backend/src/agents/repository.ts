@@ -214,7 +214,7 @@ export const agentRepository = {
       pool.query<{ n: string }>(`SELECT count(DISTINCT ts.task_id)::text AS n FROM task_sessions ts JOIN sessions s ON s.id = ts.session_id WHERE s.owner_id = $1`, [agentId]),
       pool.query<{ month: string | null; total: string | null }>(
         `SELECT coalesce(sum(l.cost_usd) FILTER (WHERE l.recorded_at >= date_trunc('month', now())), 0)::text AS month, coalesce(sum(l.cost_usd), 0)::text AS total
-         FROM usage_ledger l JOIN sessions s ON s.id = l.session_id WHERE s.owner_id = $1`,
+         FROM usage_ledger l JOIN sessions s ON s.id = l.session_id WHERE s.owner_id = $1 AND l.billable`,
         [agentId],
       ),
     ]);

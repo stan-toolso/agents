@@ -93,7 +93,7 @@ export interface Session {
    * au modèle avec la première instruction de la conversation neuve (hors transcript), puis effacés.
    */
   resumeDigest: string | null;
-  /** Coût estimé cumulé (USD, tarif API), d'après le SDK. */
+  /** Coût estimé cumulé (USD, tarif API) des seuls tours comptés dans la consommation (billing/billable.ts). */
   costUsd: number;
   /** Commit HEAD du dossier de travail au premier démarrage (référence de l'onglet « Modifications »), null sans git. */
   baseCommit: string | null;

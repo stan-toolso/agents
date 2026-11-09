@@ -99,7 +99,7 @@ import type { ClaudeAuthMode } from '../settings/types.js';
 import { usageService } from '../settings/usage.js';
 import { scheduleLabel, scheduleService } from '../schedules/service.js';
 import { cleanupService } from '../sessions/cleanup.js';
-import { CONTEXT_WARN_TOKENS, contextEstimate, contextModel } from '../sessions/context.js';
+import { CONTEXT_WARN_TOKENS, contextEstimate, contextLedger } from '../sessions/context.js';
 import type { SessionCleanup } from '../sessions/types.js';
 import { terminalService } from '../terminals/service.js';
 import { worksessionPath, worksessionService } from '../worksessions/service.js';
@@ -148,9 +148,10 @@ const guardSession = async (ctx: Ctx, id: string, min: ProjectRole) => requirePr
 /** Parent des champs de `SessionContext` : la session, et le modèle résolu paresseusement (une requête au plus). */
 interface ContextParent {
   session: Session;
-  model?: Promise<string | null>;
+  ledger?: Promise<{ model: string | null; billable: boolean }>;
 }
-const modelOfContext = (p: ContextParent) => (p.model ??= contextModel(p.session).catch(() => null));
+const ledgerOfContext = (p: ContextParent) => (p.ledger ??= contextLedger(p.session).catch(() => ({ model: null, billable: true })));
+const modelOfContext = async (p: ContextParent) => (await ledgerOfContext(p)).model;
 /**
  * Seuil de signalement du contexte de la personne connectée (réglages Claude), lu une fois par requête quel que soit
  * le nombre de sessions listées ; seuil par défaut sans personne connectée ou si la lecture échoue.
@@ -935,7 +936,8 @@ export const resolvers = {
     model: (p: ContextParent) => modelOfContext(p),
     windowTokens: async (p: ContextParent) => contextEstimate(p.session.contextTokens, await modelOfContext(p)).windowTokens,
     share: async (p: ContextParent) => contextEstimate(p.session.contextTokens, await modelOfContext(p)).share,
-    coldTurnUsd: async (p: ContextParent) => contextEstimate(p.session.contextTokens, await modelOfContext(p)).coldTurnUsd,
+    // Dernier tour non compté (propre compte Claude, cellule en crédits) : pas de coût estimé à montrer.
+    coldTurnUsd: async (p: ContextParent) => ((await ledgerOfContext(p)).billable ? contextEstimate(p.session.contextTokens, await modelOfContext(p)).coldTurnUsd : null),
   },
 
   Agent: {

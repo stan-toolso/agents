@@ -156,7 +156,7 @@ async function projectStats(projectIds: string[], monthStart: Date): Promise<Map
          FROM tasks WHERE project_id = ANY($1::uuid[]) GROUP BY project_id),
      u AS (
        SELECT project_id, sum(cost_usd) AS month_usd
-         FROM usage_ledger WHERE project_id = ANY($1::uuid[]) AND recorded_at >= $2 GROUP BY project_id)
+         FROM usage_ledger WHERE project_id = ANY($1::uuid[]) AND billable AND recorded_at >= $2 GROUP BY project_id)
      SELECT ids.project_id,
             COALESCE(s.busy, 0)::text AS busy, COALESCE(s.idle, 0)::text AS idle,
             COALESCE(r.pending_requests, 0)::text AS pending_requests,
@@ -188,7 +188,7 @@ async function globalCounts(projectIds: string[]): Promise<Omit<DashboardCounts,
 async function usage(userId: string, projectIds: string[], monthStart: Date): Promise<DashboardUsage> {
   // Le plafond affiché est celui de la personne (ses réglages Claude), la consommation celle de ses projets.
   const monthlyBudgetUsd = (await claudeSettings.forUser(userId)).settings.monthlyBudgetUsd;
-  const { rows: global } = await pool.query<{ total: string }>('SELECT COALESCE(sum(cost_usd), 0)::text AS total FROM usage_ledger WHERE recorded_at >= $1', [monthStart]);
+  const { rows: global } = await pool.query<{ total: string }>('SELECT COALESCE(sum(cost_usd), 0)::text AS total FROM usage_ledger WHERE billable AND recorded_at >= $1', [monthStart]);
   const globalMonthUsd = n(global[0].total);
   if (!projectIds.length) {
     return { monthStart, monthUsd: 0, globalMonthUsd, monthlyBudgetUsd, todayUsd: 0, last7DaysUsd: 0, previous7DaysUsd: 0, byDay: [], topSessions: [] };
@@ -199,13 +199,13 @@ async function usage(userId: string, projectIds: string[], monthStart: Date): Pr
               COALESCE(sum(cost_usd) FILTER (WHERE recorded_at >= date_trunc('day', now())), 0)::text AS today,
               COALESCE(sum(cost_usd) FILTER (WHERE recorded_at >= date_trunc('day', now()) - interval '6 days'), 0)::text AS last7,
               COALESCE(sum(cost_usd) FILTER (WHERE recorded_at >= date_trunc('day', now()) - interval '13 days' AND recorded_at < date_trunc('day', now()) - interval '6 days'), 0)::text AS prev7
-         FROM usage_ledger WHERE project_id = ANY($1::uuid[])`,
+         FROM usage_ledger WHERE project_id = ANY($1::uuid[]) AND billable`,
       [projectIds, monthStart],
     ),
     pool.query<{ day: string; usd: string }>(
       `SELECT to_char(d.day, 'YYYY-MM-DD') AS day, COALESCE(sum(l.cost_usd), 0)::text AS usd
          FROM generate_series(date_trunc('day', now()) - ($2::int - 1) * interval '1 day', date_trunc('day', now()), interval '1 day') AS d(day)
-         LEFT JOIN usage_ledger l ON l.project_id = ANY($1::uuid[]) AND l.recorded_at >= d.day AND l.recorded_at < d.day + interval '1 day'
+         LEFT JOIN usage_ledger l ON l.project_id = ANY($1::uuid[]) AND l.billable AND l.recorded_at >= d.day AND l.recorded_at < d.day + interval '1 day'
         GROUP BY d.day ORDER BY d.day`,
       [projectIds, DAYS_OF_HISTORY],
     ),
@@ -214,7 +214,7 @@ async function usage(userId: string, projectIds: string[], monthStart: Date): Pr
          FROM usage_ledger l
          LEFT JOIN sessions s ON s.id = l.session_id
          LEFT JOIN projects p ON p.id = COALESCE(l.project_id, s.project_id)
-        WHERE l.project_id = ANY($1::uuid[]) AND l.recorded_at >= $2
+        WHERE l.project_id = ANY($1::uuid[]) AND l.billable AND l.recorded_at >= $2
         GROUP BY l.session_id, s.name, p.name ORDER BY sum(l.cost_usd) DESC LIMIT 5`,
       [projectIds, monthStart],
     ),
