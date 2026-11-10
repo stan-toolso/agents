@@ -8,7 +8,7 @@ import PageLoading from '../components/PageLoading';
 import PopMenu, { type MenuItem } from '../components/PopMenu';
 import PageComments from '../components/pages/PageComments';
 import SharePageModal from '../components/pages/SharePageModal';
-import { DELETE_SHARED_PAGE, REMOVE_SHARED_PAGE_MEMBER, REQUEST_SHARED_PAGE_UPDATE, SHARED_PAGE, UPDATE_SHARED_PAGE, type SharedPage, type SharedPageAgentHandoff } from '../graphql/misc';
+import { DELETE_ALL_SHARED_PAGE_COMMENTS, DELETE_SHARED_PAGE, REMOVE_SHARED_PAGE_MEMBER, REQUEST_SHARED_PAGE_UPDATE, SET_SHARED_PAGE_HISTORY, SHARED_PAGE, UPDATE_SHARED_PAGE, type SharedPage, type SharedPageAgentHandoff } from '../graphql/misc';
 import { useAuth } from '../auth/AuthContext';
 import { formatSize } from '../lib/files';
 import { usePollingQuery } from '../lib/usePollingQuery';
@@ -37,7 +37,7 @@ export default function SharedPagePage() {
   const { data, loading, error } = usePollingQuery<{ sharedPage: SharedPage | null }>(SHARED_PAGE, { variables: { id }, pollInterval: 15_000 });
   const page = data?.sharedPage;
   useTabTitle(page?.title ?? 'Page');
-  const [version, setVersion] = useState<number | null>(null);
+  const [pickedVersion, setVersion] = useState<number | null>(null);
   const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(Boolean(focusComment));
@@ -61,12 +61,18 @@ export default function SharedPagePage() {
   const [update] = useMutation(UPDATE_SHARED_PAGE, { refetchQueries: ['SharedPage', 'SharedPages'], onError: (e) => void showError(e) });
   const [remove] = useMutation(DELETE_SHARED_PAGE, { refetchQueries: ['SharedPages', 'Sidebar'], onError: (e) => void showError(e) });
   const [leave] = useMutation(REMOVE_SHARED_PAGE_MEMBER, { refetchQueries: ['SharedPages', 'Sidebar'], onError: (e) => void showError(e) });
+  const [setHistory] = useMutation(SET_SHARED_PAGE_HISTORY, { refetchQueries: ['SharedPage'], onError: (e) => void showError(e) });
+  const [purgeComments] = useMutation<{ deleteAllSharedPageComments: number }>(DELETE_ALL_SHARED_PAGE_COMMENTS, { refetchQueries: ['SharedPage', 'SharedPageComments', 'SharedPages'], onError: (e) => void showError(e) });
   const [requestUpdate] = useMutation<{ requestSharedPageUpdate: { id: string; name: string } }>(REQUEST_SHARED_PAGE_UPDATE, { onError: (e) => void showError(e) });
 
   if (loading && !data) return <PageLoading />;
   if (error) return <Alert variant="danger" className="m-3">Erreur : {error.message}</Alert>;
   if (!page) return <Alert variant="warning" className="m-3">Cette page n'existe pas, ou elle ne vous a pas été partagée. Demandez à son propriétaire de la partager avec vous.</Alert>;
   const owner = page.viewerAccess.owner;
+  // Propriétaire ou administrateur de Skipper : historique et suppression de tous les commentaires.
+  const admin = page.viewerAccess.admin;
+  // Historique désactivé : seule la dernière version (le serveur refuse aussi les autres).
+  const version = page.historyEnabled ? pickedVersion : null;
   const shown = version ?? page.version;
   const shownVersion = page.versions.find((v) => v.version === shown);
   const viewUrl = sharedPageUrl(page.id, version);
@@ -129,6 +135,45 @@ export default function SharedPagePage() {
     { label: 'Ouvrir dans un onglet', icon: 'bi-box-arrow-up-right', onClick: () => void window.open(viewUrl, '_blank', 'noopener') },
     { label: 'Télécharger le HTML', icon: 'bi-download', onClick: () => void window.open(sharedPageUrl(page.id, version, true), '_self') },
     ...(canSendToAgent ? [{ label: "Demander une mise à jour à l'agent", icon: 'bi-robot', separatorBefore: true, onClick: () => void askUpdate() }] : []),
+    ...(admin
+      ? [
+          {
+            label: page.historyEnabled ? "Désactiver l'historique" : "Réactiver l'historique",
+            icon: 'bi-clock-history',
+            separatorBefore: true,
+            onClick: async () => {
+              if (page.historyEnabled) {
+                const ok = await confirm({
+                  title: "Désactiver l'historique",
+                  message: `Les anciennes versions de « ${page.title} » ne seront plus consultables par personne : seule la dernière version restera visible. Elles ne sont pas supprimées et réapparaîtront si l'historique est réactivé.`,
+                  confirmLabel: 'Désactiver',
+                });
+                if (!ok) return;
+                setVersion(null);
+              }
+              await setHistory({ variables: { id: page.id, enabled: !page.historyEnabled } });
+            },
+          },
+          {
+            label: 'Supprimer tous les commentaires',
+            icon: 'bi-chat-square-text',
+            danger: true,
+            onClick: async () => {
+              const total = page.openComments;
+              const ok = await confirm({
+                title: 'Supprimer tous les commentaires',
+                message: `Supprimer tous les commentaires de « ${page.title} », traités ou non, avec leurs réponses${total > 0 ? ` (dont ${total} à traiter)` : ''} ? Cette action est définitive.`,
+                confirmLabel: 'Tout supprimer',
+                danger: true,
+              });
+              if (!ok) return;
+              const res = await purgeComments({ variables: { id: page.id } });
+              const n = res.data?.deleteAllSharedPageComments;
+              if (n != null) await alert({ title: 'Commentaires supprimés', message: n === 0 ? "La page n'avait aucun commentaire." : `${n} fil${n > 1 ? 's' : ''} de commentaires supprimé${n > 1 ? 's' : ''}.`, closeLabel: 'Fermer' });
+            },
+          },
+        ]
+      : []),
     ...(owner
       ? [
           {
@@ -214,6 +259,11 @@ export default function SharedPagePage() {
           <span>
             <i className={`bi ${access.icon}`} /> {access.text}
           </span>
+          {!page.historyEnabled && (
+            <span title="Seule la dernière version est consultable">
+              <i className="bi bi-eye-slash" /> Historique désactivé
+            </span>
+          )}
           {page.versions.length > 1 ? (
             <span>
               <i className="bi bi-clock-history" />{' '}

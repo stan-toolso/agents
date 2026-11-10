@@ -233,8 +233,8 @@ const demoSharedPage = (id, title, owner, members, extra = {}) => ({
   __typename: 'SharedPage', id, title, description: null, owner, linkAccess: false, version: 1, createdAt: ago(60 * 24), updatedAt: ago(60 * 3),
   members: members.map(([u, message]) => ({ __typename: 'SharedPageMember', user: u, addedBy: owner, addedAt: ago(60 * 20), message })),
   versions: [{ __typename: 'SharedPageVersion', version: 1, size: 18_400, createdBy: owner, createdAt: ago(60 * 24) }],
-  project: null, session: null, sourcePath: null, comments: [], openComments: 0, agentHandoff: 'MANUAL',
-  viewerAccess: { __typename: 'SharedPageViewerAccess', owner: owner === U.me, member: owner !== U.me },
+  project: null, session: null, sourcePath: null, comments: [], openComments: 0, agentHandoff: 'MANUAL', historyEnabled: true,
+  viewerAccess: { __typename: 'SharedPageViewerAccess', owner: owner === U.me, member: owner !== U.me, admin: owner === U.me },
   ...extra,
 });
 const sharedPagesDemo = [
@@ -810,7 +810,8 @@ const auditLog = (a = {}) => {
   return auditEntries.filter((e) => (!f.actorKind || e.actorKind === f.actorKind) && (!f.actorUserId || e.actor?.id === f.actorUserId) && (!f.targetType || e.targetType === f.targetType) && (!f.action || e.action === f.action) && (!f.from || e.createdAt >= f.from) && (!f.to || e.createdAt < f.to) && (!a.before || Number(e.id) < Number(a.before)));
 };
 
-const sharedPageState = { agentHandoff: 'MANUAL' };
+const sharedPageState = { agentHandoff: 'MANUAL', historyEnabled: true };
+const sharedPageVersionsDemo = [3, 2, 1].map((version) => ({ __typename: 'SharedPageVersion', version, size: 14_000 + version * 1_200, createdBy: U.me, createdAt: ago(60 * 24 * (4 - version)) }));
 const sharedPageDemo = (id) => ({
   __typename: 'SharedPage',
   id,
@@ -822,8 +823,11 @@ const sharedPageDemo = (id) => ({
   project: P.site,
   session: S.tarifs,
   sourcePath: 'maquette-tarifs.html',
-  viewerAccess: { __typename: 'SharedPageViewerAccess', owner: true, member: false },
+  viewerAccess: { __typename: 'SharedPageViewerAccess', owner: true, member: false, admin: true },
   agentHandoff: sharedPageState.agentHandoff,
+  version: 3,
+  historyEnabled: sharedPageState.historyEnabled,
+  versions: sharedPageState.historyEnabled ? sharedPageVersionsDemo : sharedPageVersionsDemo.slice(0, 1),
 });
 
 export const demoRoot = {
@@ -914,6 +918,13 @@ export const demoRoot = {
     if (a.input?.agentHandoff) sharedPageState.agentHandoff = a.input.agentHandoff;
     return sharedPageDemo(a.id);
   },
+  setSharedPageHistory: (a) => {
+    const mine = sharedPagesDemo.find((pg) => pg.id === a.id);
+    if (mine) return { ...mine, historyEnabled: a.enabled };
+    sharedPageState.historyEnabled = a.enabled;
+    return sharedPageDemo(a.id);
+  },
+  deleteAllSharedPageComments: () => 3,
   githubPullRequests: [],
   gitStatus,
   gitLog: (a = {}) => (worksessionOf(a.worksessionId) ? commits : commits.slice(2)).slice(0, a.limit ?? 50),

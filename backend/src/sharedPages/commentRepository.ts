@@ -94,4 +94,13 @@ export const sharedPageCommentRepository = {
     const { rowCount } = await pool.query('DELETE FROM shared_page_comments WHERE id = $1', [id]);
     return (rowCount ?? 0) > 0;
   },
+
+  /** Supprime tous les commentaires de la page (réponses comprises) ; renvoie le nombre de commentaires racines supprimés. */
+  async deleteAllOfPage(pageId: string): Promise<number> {
+    const { rows } = await pool.query<{ roots: number }>(
+      'WITH d AS (DELETE FROM shared_page_comments WHERE page_id = $1 RETURNING parent_id) SELECT count(*) FILTER (WHERE parent_id IS NULL)::int AS roots FROM d',
+      [pageId],
+    );
+    return rows[0]?.roots ?? 0;
+  },
 };

@@ -8,6 +8,7 @@ import { userService } from '../users/service.js';
 import type { User } from '../users/types.js';
 import { SHARE_LOGIN_LINK_DAYS, signInService } from '../auth/signInService.js';
 import { pageShareEmail } from './emails.js';
+import { sharedPageCommentRepository } from './commentRepository.js';
 import { sharedPageRepository } from './repository.js';
 import { AGENT_HANDOFF_MODES, type AgentHandoff, type PublishInput, type SharedPage } from './types.js';
 
@@ -83,9 +84,39 @@ export const sharedPageService = {
     return page;
   },
 
+  /** Administrer la page (historique, suppression de tous les commentaires) : son propriétaire ou un administrateur de Skipper. */
+  canManage(page: SharedPage, user: Pick<User, 'id' | 'isAdmin' | 'isGuest'>): boolean {
+    return page.ownerId === user.id || (user.isAdmin && !user.isGuest);
+  },
+
+  /** Page visible par la personne et qu'elle administre ; sinon FORBIDDEN (ou « introuvable » si elle ne la voit pas). */
+  async getManaged(user: User, id: string): Promise<SharedPage> {
+    const page = await this.getFor(user.id, id);
+    if (!this.canManage(page, user)) throw new AppError('Seul le propriétaire de la page ou un administrateur peut faire cela', 'FORBIDDEN');
+    return page;
+  },
+
+  /** Active ou désactive l'historique : désactivé, seule la dernière version est listée et servie (pour tout le monde). */
+  async setHistory(user: User, id: string, enabled: boolean): Promise<SharedPage> {
+    await this.getManaged(user, id);
+    return (await sharedPageRepository.update(id, { historyEnabled: enabled })) ?? this.get(id);
+  },
+
+  /** Supprime tous les commentaires de la page (réponses comprises) ; renvoie le nombre de fils supprimés. */
+  async deleteAllComments(user: User, id: string): Promise<number> {
+    await this.getManaged(user, id);
+    return sharedPageCommentRepository.deleteAllOfPage(id);
+  },
+
   listFor: (userId: string) => sharedPageRepository.listFor(userId),
   listOwned: (userId: string, limit = 20) => sharedPageRepository.listOwned(userId, Math.min(Math.max(limit, 1), 100)),
   versions: (pageId: string) => sharedPageRepository.versions(pageId),
+
+  /** Versions consultables : toutes, ou seulement la dernière quand l'historique est désactivé. */
+  async visibleVersions(page: SharedPage) {
+    const all = await sharedPageRepository.versions(page.id);
+    return page.historyEnabled ? all : all.filter((v) => v.version === page.version);
+  },
   members: (pageId: string) => sharedPageRepository.members(pageId),
 
   /** La page est-elle vue par d'autres que son propriétaire ? */
@@ -131,6 +162,7 @@ export const sharedPageService = {
   async content(page: SharedPage, version?: number | null): Promise<{ html: Buffer; version: number }> {
     const v = version ?? page.version;
     if (!Number.isInteger(v) || v < 1 || v > page.version) throw new NotFoundError('Version introuvable');
+    if (v !== page.version && !page.historyEnabled) throw new NotFoundError("L'historique de cette page est désactivé : seule la dernière version est consultable");
     const html = await sharedPageRepository.content(page.id, v);
     if (!html) throw new NotFoundError('Le contenu de cette version est manquant');
     return { html, version: v };

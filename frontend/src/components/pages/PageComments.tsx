@@ -299,7 +299,7 @@ export default function PageComments({ page, version, frameRef, picking, setPick
             missing={Boolean(c.anchor) && found !== null && !found.has(c.id)}
             focused={c.id === focused}
             flash={c.id === flash}
-            canDelete={user?.id === c.author.id || page.viewerAccess.owner}
+            canDelete={user?.id === c.author.id || page.viewerAccess.owner || page.viewerAccess.admin}
             userId={user?.id ?? null}
             onFocus={() => focus(c)}
             onReply={(body) => reply({ variables: { commentId: c.id, body } })}
