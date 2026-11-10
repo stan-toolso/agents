@@ -646,8 +646,17 @@
 .wb-banners { display: flex; flex-direction: column; }
 .wb-banner { display: flex; align-items: center; gap: 6px; padding: 5px 14px; font-size: 12.5px; border-bottom: 1px solid var(--cc-border); }
 .wb-banner.offline { background: rgba(229, 83, 75, 0.12); color: var(--cc-red); }
-.wb-banner.update { background: rgba(var(--cc-accent-rgb), 0.12); color: var(--cc-fg); }
-.wb-banner-btn { background: var(--cc-accent); color: var(--cc-accent-contrast); border: 0; border-radius: 4px; padding: 1px 8px; font: inherit; font-weight: 600; cursor: pointer; }
+.wb-banner.update { position: relative; overflow: hidden; background: rgba(var(--cc-accent-rgb), 0.12); color: var(--cc-fg); }
+.wb-banner-btn { background: var(--cc-accent); color: var(--cc-accent-contrast); border: 0; border-radius: 4px; padding: 1px 8px; font: inherit; font-weight: 600; cursor: pointer; transition: filter 0.12s ease, transform 0.08s ease, box-shadow 0.12s ease; }
+.wb-banner-btn:hover:not(:disabled) { filter: brightness(1.1); box-shadow: 0 1px 4px rgba(var(--cc-accent-rgb), 0.35); }
+.wb-banner-btn:active:not(:disabled) { transform: scale(0.95); filter: brightness(0.95); }
+.wb-banner-btn:focus-visible { outline: 2px solid var(--cc-accent); outline-offset: 2px; }
+.wb-banner-btn:disabled { cursor: progress; opacity: 0.85; }
+.wb-banner-spin { display: inline-block; animation: wb-banner-spin 0.8s linear infinite; }
+@keyframes wb-banner-spin { to { transform: rotate(360deg); } }
+.wb-banner-progress { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: var(--cc-accent); transform-origin: left; transform: scaleX(0); animation: wb-banner-progress linear forwards; }
+@keyframes wb-banner-progress { 0% { transform: scaleX(0.08); } 30% { transform: scaleX(0.55); } 100% { transform: scaleX(0.95); } }
+@media (prefers-reduced-motion: reduce) { .wb-banner-spin { animation: none; } .wb-banner-progress { animation: none; transform: scaleX(0.6); } }
 .wb-banner-hint { color: var(--cc-dim); margin-left: auto; }
 .wb-toast {
   position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 1100;
