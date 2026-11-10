@@ -1,4 +1,4 @@
--- Fichiers joints à une tâche (comment_id null) ou à l'un de ses commentaires (repris de Cockpit) : les
+-- Fichiers joints à une tâche (comment_id null) ou à l'un de ses commentaires : les
 -- métadonnées ici, le contenu sur le disque du serveur (WORKSPACES_ROOT/.task-attachments/<tâche>/<id>/<nom>).
 CREATE TABLE task_attachments (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),

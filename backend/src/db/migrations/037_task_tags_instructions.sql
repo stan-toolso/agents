@@ -1,4 +1,4 @@
--- Tâches (repris de Cockpit).
+-- Tâches.
 -- Étiquette d'état : court libellé libre de l'avancement dans le statut (« en revue », « bloquée »,
 -- « attend la CI »…), posé par les personnes ou par la session en charge ; affiché à côté du statut.
 -- Étiquettes : libellés libres d'une tâche (plusieurs), pour regrouper et filtrer.
