@@ -267,6 +267,7 @@ export const TASK_LAUNCH_INFO = gql`
         id
         defaultModel
         taskModels
+        defaultPermissionMode
       }
       session {
         id
