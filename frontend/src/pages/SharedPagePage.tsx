@@ -10,6 +10,7 @@ import PageComments from '../components/pages/PageComments';
 import PageData, { refreshLabel } from '../components/pages/PageData';
 import SlidesBar, { useSlides } from '../components/pages/SlidesBar';
 import SharePageModal from '../components/pages/SharePageModal';
+import FavoriteButton from '../components/pages/FavoriteButton';
 import { DELETE_ALL_SHARED_PAGE_COMMENTS, DELETE_SHARED_PAGE, DUPLICATE_SHARED_PAGE, REFRESH_SHARED_PAGE_DATA, REMOVE_SHARED_PAGE_MEMBER, REQUEST_SHARED_PAGE_UPDATE, SET_SHARED_PAGE_HISTORY, SHARED_PAGE, UPDATE_SHARED_PAGE, type SharedPage, type SharedPageAgentHandoff } from '../graphql/misc';
 import { useAuth } from '../auth/AuthContext';
 import { formatSize } from '../lib/files';
@@ -293,6 +294,7 @@ export default function SharedPagePage() {
           <i className={`bi bi-chevron-${details ? 'up' : 'down'} sp-head-chevron`} />
         </button>
         <div className="sp-head-actions">
+          <FavoriteButton page={page} className="sp-btn sp-fav" />
           {isData && admin && (
             <button type="button" className="sp-btn" onClick={() => void refreshData({ variables: { id: page.id } })} disabled={refreshing || !page.sources.length} title="Rafraîchir les données maintenant" aria-label="Rafraîchir les données">
               <i className={`bi bi-arrow-repeat${refreshing ? ' spin' : ''}`} />

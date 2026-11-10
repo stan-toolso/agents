@@ -233,7 +233,7 @@ const demoSharedPage = (id, title, owner, members, extra = {}) => ({
   __typename: 'SharedPage', id, title, description: null, owner, linkAccess: false, version: 1, createdAt: ago(60 * 24), updatedAt: ago(60 * 3),
   members: members.map(([u, message]) => ({ __typename: 'SharedPageMember', user: u, addedBy: owner, addedAt: ago(60 * 20), message })),
   versions: [{ __typename: 'SharedPageVersion', version: 1, size: 18_400, createdBy: owner, createdAt: ago(60 * 24) }],
-  project: null, session: null, sourcePath: null, comments: [], openComments: 0, agentHandoff: 'MANUAL', historyEnabled: true, kind: 'PAGE', refreshMinutes: null, dataRefreshedAt: null, sources: [],
+  project: null, session: null, sourcePath: null, comments: [], openComments: 0, agentHandoff: 'MANUAL', historyEnabled: true, kind: 'PAGE', refreshMinutes: null, dataRefreshedAt: null, sources: [], favorite: false,
   viewerAccess: { __typename: 'SharedPageViewerAccess', owner: owner === U.me, member: owner !== U.me, admin: owner === U.me },
   ...extra,
 });
@@ -261,6 +261,8 @@ const dataSourcesDemo = [
 S.hebdo.pages.unshift(demoSharedPage('page-data-inscriptions', 'Inscriptions : tableau de bord', U.me, [[U.hugo, null]], { kind: 'DATA', refreshMinutes: 60, dataRefreshedAt: ago(12), sources: dataSourcesDemo, session: S.hebdo, project: P.data, version: 4 }));
 S.tarifs.pages.push(demoSharedPage('page-slides-offres', 'Présentation des trois offres', U.me, [[U.hugo, null]], { kind: 'SLIDES', session: S.tarifs, project: P.site, version: 2 }));
 sharedPagesDemo.push(...S.tarifs.pages.slice(0, 1), ...S.hebdo.pages, S.tarifs.pages[2]);
+// Favoris (section « Favoris » de la sidebar) : le tableau de bord des inscriptions et la présentation des offres.
+for (const pg of sharedPagesDemo) if (pg.id === 'page-data-inscriptions' || pg.id === 'page-slides-offres') pg.favorite = true;
 
 export const schedules = [
   schedule('sch-rapport-lundi', P.data, 'Rapport du lundi', U.hugo, { allowedTools: ['Bash(npm run report *)'], lastRunAt: ago(60 * 24 * 4) }),
@@ -919,7 +921,14 @@ export const demoRoot = {
   // Pages partagées : « page-offre » et « page-audit » (message du partage) ; toute autre adresse donne la page à moi
   // publiée par la session « Refonte de la page tarifs », dont le réglage de la transmission des commentaires à
   // l'agent (panneau Commentaires) se change et reste en mémoire.
-  sharedPages: () => sharedPagesDemo,
+  // Onglet Artefacts d'un projet : ceux du projet (le mock ne gère pas la visibilité).
+  sharedPages: (a = {}) => (a.projectId ? sharedPagesDemo.filter((pg) => pg.project?.id === a.projectId) : sharedPagesDemo),
+  favoriteSharedPages: () => sharedPagesDemo.filter((pg) => pg.favorite),
+  setSharedPageFavorite: (a) => {
+    const pg = sharedPagesDemo.find((x) => x.id === a.id) ?? sharedPageDemo(a.id);
+    pg.favorite = Boolean(a.favorite);
+    return pg;
+  },
   sharedPage: (a = {}) => sharedPagesDemo.find((pg) => pg.id === a.id) ?? sharedPageDemo(a.id),
   updateSharedPage: (a) => {
     const mine = sharedPagesDemo.find((pg) => pg.id === a.id);

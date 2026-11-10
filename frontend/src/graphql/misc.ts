@@ -129,6 +129,8 @@ export interface SharedPage {
   refreshMinutes: number | null;
   dataRefreshedAt: string | null;
   sources: SharedPageSource[];
+  /** Mis en favori par la personne connectée : son lien reste dans la sidebar. */
+  favorite: boolean;
 }
 
 export type ArtifactKind = 'PAGE' | 'DATA' | 'SLIDES';
@@ -191,6 +193,7 @@ export const SHARED_PAGE_FIELDS = gql`
     linkAccess
     agentHandoff
     historyEnabled
+    favorite
     kind
     refreshMinutes
     dataRefreshedAt
@@ -356,8 +359,8 @@ export const DELETE_SHARED_PAGE_COMMENT = gql`
 
 export const SHARED_PAGES = gql`
   ${SHARED_PAGE_FIELDS}
-  query SharedPages {
-    sharedPages {
+  query SharedPages($projectId: ID) {
+    sharedPages(projectId: $projectId) {
       ...SharedPageFields
     }
   }
@@ -413,6 +416,29 @@ export const REFRESH_SHARED_PAGE_DATA = gql`
   mutation RefreshSharedPageData($id: ID!) {
     refreshSharedPageData(id: $id) {
       ...SharedPageFields
+    }
+  }
+`;
+
+/** Artefacts en favori de la personne : section « Favoris » de la sidebar. */
+export type FavoriteSharedPage = Pick<SharedPage, 'id' | 'title' | 'kind' | 'openComments'>;
+export const FAVORITE_SHARED_PAGES = gql`
+  query FavoriteSharedPages {
+    favoriteSharedPages {
+      id
+      title
+      kind
+      openComments
+      favorite
+    }
+  }
+`;
+
+export const SET_SHARED_PAGE_FAVORITE = gql`
+  mutation SetSharedPageFavorite($id: ID!, $favorite: Boolean!) {
+    setSharedPageFavorite(id: $id, favorite: $favorite) {
+      id
+      favorite
     }
   }
 `;

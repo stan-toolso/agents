@@ -762,6 +762,7 @@ export const resolvers = {
     },
     comments: (p: SharedPage) => sharedPageCommentService.roots(p.id),
     openComments: async (p: SharedPage, _: unknown, ctx: Ctx) => (await loadersOf(ctx).sharedPageOpenComments(p.id)) ?? 0,
+    favorite: async (p: SharedPage, _: unknown, ctx: Ctx) => (ctx.user ? ((await loadersOf(ctx).sharedPageFavorite({ userId: ctx.user.id, pageId: p.id })) ?? false) : false),
     // Réglage effectif : sans session d'origine, rien ne peut être transmis.
     agentHandoff: (p: SharedPage) => (p.sessionId ? p.agentHandoff.toUpperCase() : 'OFF'),
     kind: (p: SharedPage) => p.kind.toUpperCase(),
@@ -1198,7 +1199,13 @@ export const resolvers = {
       return taskService.tags(args.projectId ? [args.projectId] : await accessibleProjectIds(ctx));
     },
     sharedPage: (_: unknown, args: { id: string }, ctx: Ctx) => sharedPageService.getFor(requireUser(ctx).id, args.id).catch(() => null),
-    sharedPages: (_: unknown, __: unknown, ctx: Ctx) => sharedPageService.listFor(requireUser(ctx).id),
+    sharedPages: async (_: unknown, args: { projectId?: string | null }, ctx: Ctx) => {
+      const user = requireUser(ctx);
+      if (!args.projectId) return sharedPageService.listFor(user.id);
+      await requireProject(ctx, args.projectId, 'viewer');
+      return sharedPageService.listForProject(user, args.projectId);
+    },
+    favoriteSharedPages: (_: unknown, __: unknown, ctx: Ctx) => sharedPageService.listFavorites(requireUser(ctx)),
     pushPublicKey: (_: unknown, __: unknown, ctx: Ctx) => {
       requireUser(ctx);
       return pushService.publicKey();
@@ -2270,6 +2277,7 @@ export const resolvers = {
     deleteSharedPage: (_: unknown, args: { id: string }, ctx: Ctx) => sharedPageService.delete(requireUser(ctx).id, args.id),
     setSharedPageHistory: (_: unknown, args: { id: string; enabled: boolean }, ctx: Ctx) => sharedPageService.setHistory(requireUser(ctx), args.id, args.enabled),
     refreshSharedPageData: (_: unknown, args: { id: string }, ctx: Ctx) => artifactDataService.refreshFor(requireUser(ctx), args.id),
+    setSharedPageFavorite: (_: unknown, args: { id: string; favorite: boolean }, ctx: Ctx) => sharedPageService.setFavorite(requireUser(ctx), args.id, args.favorite),
     duplicateSharedPage: (_: unknown, args: { id: string; title?: string | null; version?: number | null }, ctx: Ctx) => sharedPageService.duplicate(requireUser(ctx), args.id, { title: args.title, version: args.version }),
     deleteAllSharedPageComments: (_: unknown, args: { id: string }, ctx: Ctx) => sharedPageService.deleteAllComments(requireUser(ctx), args.id),
     addSharedPageComment: (_: unknown, args: { pageId: string; body: string; anchor?: unknown; version?: number | null }, ctx: Ctx) =>

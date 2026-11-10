@@ -5,13 +5,14 @@ import { PROJECT_UNREAD_MESSAGES } from '../graphql/conversations';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { useSessionLauncher } from './SessionLauncher';
 
-export type ProjectTab = 'overview' | 'conversations' | 'chats' | 'repo' | 'tasks' | 'agents' | 'pullRequests' | 'deliveries' | 'context' | 'vault' | 'env' | 'schedules' | 'workflows' | 'history' | 'audit' | 'usage' | 'settings';
+export type ProjectTab = 'overview' | 'conversations' | 'chats' | 'repo' | 'tasks' | 'artifacts' | 'agents' | 'pullRequests' | 'deliveries' | 'context' | 'vault' | 'env' | 'schedules' | 'workflows' | 'history' | 'audit' | 'usage' | 'settings';
 
 const TABS: { key: ProjectTab; label: string; path: string; icon: string; title?: string; absolute?: boolean }[] = [
   { key: 'overview', label: 'Tableau de bord', path: '', icon: 'bi-speedometer2', title: 'Ce qui attend une réponse, l’équipe au travail, le flux des tâches et la consommation du projet' },
   { key: 'conversations', label: 'Conversations', path: '/conversations', icon: 'bi-chat-left-text', title: 'Canaux de conversation d’équipe : mentionnez les personnes et les agents du projet, qui répondent dans le fil' },
   { key: 'repo', label: 'Dépôt', path: '/repo', icon: 'bi-code-square', title: 'Dépôt git : branches, commits et fichiers ; dépôt hébergé par Skipper et ses sauvegardes' },
   { key: 'tasks', label: 'Tâches', path: '/tasks', icon: 'bi-check2-square' },
+  { key: 'artifacts', label: 'Artefacts', path: '/artifacts', icon: 'bi-collection', title: 'Artefacts du projet : pages, tableaux de bord et diapositives publiés par les agents ; en créer un, en mettre en favori' },
   { key: 'agents', label: 'Agents', path: '/agents', icon: 'bi-robot', title: 'Agents du projet (Product Manager, Developer…) : membres qui ne sont pas des personnes, avec leurs comptes, instructions et déclencheurs' },
   { key: 'pullRequests', label: 'Pull requests', path: '/pull-requests', icon: 'bi-git', title: 'Pull requests suivies : à fusionner, fusionnées' },
   { key: 'deliveries', label: 'Livraisons', path: '/deliveries', icon: 'bi-rocket-takeoff', title: 'Livraisons et déploiements : CI de la branche principale, mise en production sous verrou, historique (qui, quel commit, durée, résultat)' },
@@ -42,7 +43,7 @@ function UnreadBadge({ projectId }: { projectId: string }) {
 const PERSONAL_TABS: typeof TABS = [
   { key: 'overview', label: 'Aperçu', path: '', icon: 'bi-person-circle' },
   { key: 'chats', label: 'Chats', path: '/chats', icon: 'bi-chat-left-text', title: 'Conversations légères, sans dossier de travail, avec accès à tous vos projets', absolute: true },
-  ...TABS.filter((t) => t.key === 'tasks' || t.key === 'schedules' || t.key === 'context' || t.key === 'vault' || t.key === 'env' || t.key === 'history'),
+  ...TABS.filter((t) => t.key === 'tasks' || t.key === 'artifacts' || t.key === 'schedules' || t.key === 'context' || t.key === 'vault' || t.key === 'env' || t.key === 'history'),
 ];
 
 export interface ProjectHeaderProject {

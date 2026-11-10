@@ -106,6 +106,15 @@ export function createLoaders() {
       (k) => `${k.viewerId}\u0000${k.sessionId}`,
     ),
     /** Commentaires non traités d'une page partagée (absente : aucun). */
+    /** Pages mises en favori par la personne connectée (clé : `<userId>:<pageId>`). */
+    sharedPageFavorite: createBatcher<{ userId: string; pageId: string }, boolean>(async (keys) => {
+      const out = new Map<string, boolean>();
+      for (const userId of new Set(keys.map((k) => k.userId))) {
+        const ids = await sharedPageRepository.favoriteIds(userId, keys.filter((k) => k.userId === userId).map((k) => k.pageId));
+        for (const k of keys) if (k.userId === userId) out.set(`${userId}:${k.pageId}`, ids.has(k.pageId));
+      }
+      return out;
+    }, (k) => `${k.userId}:${k.pageId}`),
     sharedPageOpenComments: createBatcher<string, number>((ids) => sharedPageCommentRepository.countOpenByPages(ids)),
     taskForBranch: createBatcher<{ projectId: string; branch: string }, Task>((keys) => taskRepository.findForBranches(keys), branchKey),
   };

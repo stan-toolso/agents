@@ -19,7 +19,7 @@ const only = process.argv.slice(2);
 
 const ROUTES = [
   '/', '/projects', '/projects/new', '/projects/p1', '/projects/p1/conversations', '/projects/p1/settings', '/projects/p1/edit', '/projects/p1/context', '/projects/p1/context?instruction=i1',
-  '/projects/p1/tasks', '/projects/p1/vault', '/projects/p1/history', '/tasks', '/tasks/t1', '/vault', '/agents', '/agents/a1',
+  '/projects/p1/tasks', '/projects/p1/artifacts', '/projects/p1/vault', '/projects/p1/history', '/tasks', '/tasks/t1', '/vault', '/agents', '/agents/a1',
   '/workflows', '/workflows/w1', '/workflows/w1/runs/r1', '/shared', '/shared/s1', '/sessions', '/sessions/s1', '/sessions/s1/browser',
   '/requests', '/terminals/t1', '/settings', '/users', '/projects/p1/files', '/projects/p1/files/previsionnel/Previsionnel_2026-2027.html',
   '/projects/p1/files/src/index.ts', '/worktrees/w1/files',

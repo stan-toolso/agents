@@ -122,7 +122,7 @@ export function describeRoute(pathname: string): { title: string; kind: TabKind 
   if (pathname === '/schedules' || /^\/projects\/[^/]+\/schedules$/.test(pathname)) return { title: 'Planifications', kind: 'schedules' };
   if (/^\/workflows\/[^/]+\/runs\/[^/]+$/.test(pathname)) return { title: 'Exécution', kind: 'workflow-run' };
   if (/^\/workflows\/[^/]+$/.test(pathname)) return { title: 'Workflow', kind: 'workflow' };
-  if (pathname === '/shared') return { title: 'Artefacts', kind: 'shared-pages' };
+  if (pathname === '/shared' || /^\/projects\/[^/]+\/artifacts$/.test(pathname)) return { title: 'Artefacts', kind: 'shared-pages' };
   if (/^\/shared\/[^/]+$/.test(pathname)) return { title: 'Page', kind: 'shared-page' };
   if (pathname === '/users') return { title: 'Utilisateurs', kind: 'users' };
   if (pathname === '/billing') return { title: 'Consommation', kind: 'billing' };

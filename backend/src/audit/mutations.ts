@@ -275,6 +275,8 @@ export const NOT_AUDITED = new Set([
   'addSharedPageComment', 'replySharedPageComment', 'updateSharedPageComment', 'resolveSharedPageComment', 'deleteSharedPageComment',
   // Instruction à la session qui a publié une page (le transcript la garde, comme sendSessionMessage).
   'requestSharedPageUpdate',
+  // Favoris : préférence personnelle d'affichage (sidebar).
+  'setSharedPageFavorite',
   'postMessage', 'updateMessage', 'deleteMessage', 'toggleMessageReaction', 'markConversationRead',
   // Git sans effet durable, synchronisations et lectures.
   'gitStage', 'gitUnstage', 'gitFetch', 'backupHostedGit', 'syncPullRequests', 'watchPullRequests',

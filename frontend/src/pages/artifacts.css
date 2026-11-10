@@ -58,3 +58,13 @@
   .af-grid { grid-template-columns: 1fr; }
   .af-thumb { height: 140px; padding: 16px 20px 0; }
 }
+
+/* Étoile « favori » sur la carte (au-dessus du lien, en haut à droite de l'aperçu) : visible au survol, toujours quand elle est allumée. */
+.af-card-wrap { position: relative; display: flex; flex-direction: column; }
+.af-card-wrap > .af-card { flex: 1; }
+.af-fav { position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--cc-border); background: var(--cc-bg-elevated); color: var(--cc-dim); display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0; transition: opacity 0.15s ease; box-shadow: 0 2px 6px -2px var(--cc-shadow); }
+.af-card-wrap:hover .af-fav, .af-fav:focus-visible, .af-fav.on { opacity: 1; }
+.af-fav:hover { color: var(--cc-fg); }
+.af-fav.on { color: var(--cc-yellow); }
+.af-head h1.af-h1-sub { font-size: 20px; }
+@media (hover: none) { .af-fav { opacity: 1; } }
