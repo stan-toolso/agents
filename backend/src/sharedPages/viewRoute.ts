@@ -3,7 +3,7 @@ import { authSession, readCookie, SESSION_COOKIE } from '../auth/session.js';
 import { config } from '../config.js';
 import { AppError } from '../errors.js';
 import { artifactDataService } from './dataService.js';
-import { INJECT_MAX_BYTES, injectCommentScript, injectDataScript } from './inject.js';
+import { INJECT_MAX_BYTES, injectCommentScript, injectDataScript, injectSlidesScript } from './inject.js';
 import { sharedPageRepository } from './repository.js';
 import { downloadName, sharedPageService } from './service.js';
 
@@ -17,7 +17,9 @@ const ROUTE = /^\/api\/shared\/([0-9a-f-]{36})$/;
  * (voir `inject.ts`) : il dialogue avec l'application par postMessage pour pointer un élément et placer les repères.
  * Artefact de données : les données de ses sources sont injectées en tête de la page (`window.Skipper`), téléchargement
  * compris (la page reste lisible hors de Skipper, avec les données du moment) ; l'ouverture est notée (`viewed_at`),
- * ce qui garde le rafraîchissement automatique en marche.
+ * ce qui garde le rafraîchissement automatique en marche. Artefact de diapositives : le lecteur est injecté (mode
+ * `thumb=1` pour l'aperçu réduit, `print=1` pour l'export PDF : toutes les diapositives puis impression), sauf au
+ * téléchargement et avec `raw=1` (le fichier HTML tel que publié).
  */
 export async function handleSharedPageRoute(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const url = new URL(req.url ?? '/', config.apiUrl);
@@ -49,6 +51,10 @@ export async function handleSharedPageRoute(req: IncomingMessage, res: ServerRes
       html = Buffer.from(injectDataScript(html.toString('utf8'), { data, meta }), 'utf8');
       // Aperçu réduit de la galerie (`thumb=1`) : pas une lecture, le rafraîchissement automatique n'en tient pas compte.
       if (!download && url.searchParams.get('thumb') !== '1') void sharedPageRepository.touchViewed(page.id).catch(() => undefined);
+    }
+    if (!raw && page.kind === 'slides') {
+      const mode = url.searchParams.get('print') === '1' ? 'print' : url.searchParams.get('thumb') === '1' ? 'thumb' : 'view';
+      html = Buffer.from(injectSlidesScript(html.toString('utf8'), mode), 'utf8');
     }
     if (!raw) html = Buffer.from(injectCommentScript(html.toString('utf8')), 'utf8');
     res.writeHead(200, {

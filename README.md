@@ -1998,9 +1998,9 @@ lignes au plus). Ouvert aux **lecteurs** du projet (`auditLog`, `auditFacets`).
 ## Artefacts : pages et données
 
 Les **artefacts** sont ce que les agents produisent pour les personnes : des **pages** (rapport, maquette,
-note : un fichier HTML) et des **données** (une page dont les chiffres viennent de sources que Skipper
-rafraîchit tout seul). D'autres types viendront (`shared_pages.kind`, enum GraphQL `ArtifactKind`,
-`ARTIFACT_KINDS` côté frontend). La galerie `/shared` (`pages/SharedPagesPage.tsx`) les montre en cartes avec un
+note : un fichier HTML), des **données** (une page dont les chiffres viennent de sources que Skipper
+rafraîchit tout seul) et des **diapositives** (un deck HTML lu par le lecteur de Skipper). D'autres types
+viendront (`shared_pages.kind`, enum GraphQL `ArtifactKind`, `ARTIFACT_KINDS` côté frontend). La galerie `/shared` (`pages/SharedPagesPage.tsx`) les montre en cartes avec un
 aperçu réduit, des filtres (les vôtres, partagés avec vous, par type) et des tuiles « Créer » qui ouvrent une
 nouvelle session avec une consigne à compléter.
 
@@ -2030,6 +2030,18 @@ dessine elle-même à partir de ces données (jamais de chiffres en dur). Outils
 (relance les sources) et `pages.data` (ce que la page reçoit). Interface : bouton **Données** de la page (panneau
 `components/pages/PageData.tsx` : état de chaque source, requête ou script pour le propriétaire et les
 administrateurs, intervalle, « Rafraîchir »), mutation `refreshSharedPageData`, `SharedPageInput.refreshMinutes`.
+
+**Diapositives** (`kind: slides`) : l'agent écrit un seul fichier HTML, une `<section class="slide">` (ou
+`[data-slide]`) de **1280 × 720** par diapositive, `data-title` pour le titre, `<aside class="notes">` pour les notes
+de l'orateur (jamais affichées). À la lecture, Skipper injecte le **lecteur** `sharedPages/slides-client.js`
+(`injectSlidesScript`, avant `</body>`) : une diapositive à la fois, mise à l'échelle de la fenêtre, clavier (flèches,
+espace, Home/End, G pour la grille, Échap), balayage sur mobile, **vue en grille** (toutes les diapositives, clic pour
+y aller), **mode présentation** (plein écran du cadre, un clic avance) et **export PDF** (`?print=1` : toutes les
+diapositives, une page chacune, puis impression ; `?thumb=1` : première diapositive pour l'aperçu de la galerie ;
+`download=1` et `raw=1` : le fichier tel que publié). Le lecteur dialogue avec l'application par `postMessage`
+(`ready`, `slide`, `grid` ; `goto`, `next`, `prev`, `grid`, `present`), source vérifiée : barre de navigation
+`components/pages/SlidesBar.tsx` sous l'en-tête (précédent / suivant, compteur et titre, Grille, Présenter) et
+« Exporter en PDF » dans le menu. Pas d'export PowerPoint.
 
 La page (`pages/SharedPagePage.tsx`) a un en-tête d'une ligne : le titre (cliquer déplie les détails : propriétaire,
 accès, choix de la version, origine), **Données** et **Rafraîchir** (artefact de données), **Commentaires**, **Partager**

@@ -50,3 +50,27 @@ export function injectDataScript(html: string, payload: { data: Record<string, u
   if (m) return html.slice(0, m.index + m[0].length) + tag + html.slice(m.index + m[0].length);
   return tag + html;
 }
+
+const SLIDES_MARKER = 'data-skipper-slides';
+let slidesScript: string | null = null;
+export function slidesClientScript(): string {
+  slidesScript ??= asciiOnly(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'slides-client.js'), 'utf8'));
+  return slidesScript;
+}
+
+export type SlidesMode = 'view' | 'thumb' | 'print';
+
+/**
+ * Artefact « diapositives » : le lecteur (slides-client.js) est injecté **avant `</body>`** (il attend le DOM), une seule
+ * fois, avec son mode : `view` (une diapositive à la fois, navigation), `thumb` (première diapositive, pour l'aperçu
+ * réduit) ou `print` (toutes, une page chacune, puis impression : l'export PDF).
+ */
+export function injectSlidesScript(html: string, mode: SlidesMode = 'view', script = slidesClientScript()): string {
+  if (html.includes(SLIDES_MARKER)) return html;
+  const tag = `<script ${SLIDES_MARKER} data-mode="${mode}">${script}</script>`;
+  for (const close of [/<\/body\s*>/i, /<\/html\s*>/i]) {
+    const m = close.exec(html);
+    if (m) return html.slice(0, m.index) + tag + html.slice(m.index);
+  }
+  return html + tag;
+}

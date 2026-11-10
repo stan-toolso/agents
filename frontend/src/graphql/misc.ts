@@ -131,7 +131,7 @@ export interface SharedPage {
   sources: SharedPageSource[];
 }
 
-export type ArtifactKind = 'PAGE' | 'DATA';
+export type ArtifactKind = 'PAGE' | 'DATA' | 'SLIDES';
 
 export interface SharedPageSource {
   id: string;
