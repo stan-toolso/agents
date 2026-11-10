@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { Spinner } from 'react-bootstrap';
 import { useAuth } from '../auth/AuthContext';
-import { CLOSE_TERMINAL, INBOX_COUNTS, REQUESTS, SIDEBAR, SIDEBAR_PULL_REQUESTS, STOP_SESSION, type HumanRequest } from '../graphql/operations';
+import { CLOSE_TERMINAL, INBOX_COUNTS, SIDEBAR, SIDEBAR_PULL_REQUESTS, STOP_SESSION } from '../graphql/operations';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { formatCost, sessionStateHint, taskChipOf } from '../lib/humanize';
 import Logo from '../components/Logo';
@@ -179,24 +179,26 @@ function FavoritesSection({ expanded, onToggle }: { expanded: boolean; onToggle:
 }
 
 /**
- * Menus principaux, avec leur libellé (grille de deux colonnes), puis les menus secondaires en une ligne d'icônes (le
- * libellé sert d'infobulle).
+ * L'essentiel en tête de la sidebar : l'accueil, ce qui attend une action, les tâches. Les autres pages (sessions,
+ * chats, artefacts, projets, coffre, planifications, workflows…) sont dans le menu du compte (`MORE_PAGES`) et la
+ * recherche (⌘K) ; les sessions, chats et projets sont de toute façon listés plus bas.
  */
 type MenuEntry = { to: string; label: string; icon: string; title?: string };
 const MAIN_MENU: MenuEntry[] = [
   { to: '/', label: 'Accueil', icon: 'bi-house', title: 'Tableau de bord' },
   { to: '/inbox', label: 'À traiter', icon: 'bi-inbox', title: 'À traiter : demandes, sessions en attente et pull requests à fusionner, tous projets' },
-  { to: '/tasks', label: 'Tâches', icon: 'bi-check2-square' },
-  { to: '/sessions', label: 'Sessions', icon: 'bi-chat-dots' },
-  { to: '/chats', label: 'Chats', icon: 'bi-chat-left-text', title: 'Chats : conversations légères de votre espace personnel, avec accès à tous vos projets' },
-  { to: '/shared', label: 'Artefacts', icon: 'bi-collection', title: 'Artefacts : pages et tableaux de bord publiés par les agents' },
+  { to: '/tasks', label: 'Tâches', icon: 'bi-check2-square', title: 'Tâches de tous vos projets' },
 ];
-const MORE_MENU: MenuEntry[] = [
-  { to: '/projects', label: 'Projets', icon: 'bi-folder2' },
-  { to: '/requests', label: 'Demandes', icon: 'bi-bell', title: 'Demandes des agents (autorisations, questions)' },
-  { to: '/vault', label: 'Coffre', icon: 'bi-shield-lock' },
-  { to: '/schedules', label: 'Planifications', icon: 'bi-alarm', title: 'Planifications : une nouvelle session à heures fixes, prochaines échéances et historique' },
-  { to: '/workflows', label: 'Workflows', icon: 'bi-diagram-3', title: "Workflows : enchaînements d'appels de modèle, de sessions et de tâches" },
+/** Pages moins fréquentes, rangées dans le menu du compte (bas de la sidebar). */
+const MORE_PAGES: MenuItem[] = [
+  { label: 'Sessions', icon: 'bi-chat-dots', to: '/sessions' },
+  { label: 'Chats', icon: 'bi-chat-left-text', to: '/chats' },
+  { label: 'Artefacts', icon: 'bi-collection', to: '/shared' },
+  { label: 'Projets', icon: 'bi-folder2', to: '/projects' },
+  { label: 'Demandes', icon: 'bi-bell', to: '/requests' },
+  { label: 'Coffre', icon: 'bi-shield-lock', to: '/vault' },
+  { label: 'Planifications', icon: 'bi-alarm', to: '/schedules' },
+  { label: 'Workflows', icon: 'bi-diagram-3', to: '/workflows' },
 ];
 
 /** PR suivie d'un dossier de travail : en préparation dès que la branche porte des modifications, puis ouverte sur GitHub. */
@@ -719,10 +721,11 @@ function UserBlock() {
   const [open, setOpen] = useState(false);
   if (!user) return null;
   const items: MenuItem[] = [
-    ...(installable ? [{ label: "Installer l'application", icon: 'bi-phone', onClick: install }] : []),
-    ...(user.isAdmin ? [{ label: 'Utilisateurs', icon: 'bi-people', to: '/users' }] : []),
+    ...(user.isGuest ? [] : MORE_PAGES),
+    ...(installable ? [{ label: "Installer l'application", icon: 'bi-phone', onClick: install, separatorBefore: !user.isGuest }] : []),
+    ...(user.isAdmin ? [{ label: 'Utilisateurs', icon: 'bi-people', to: '/users', separatorBefore: !installable && !user.isGuest }] : []),
     ...(user.isAdmin ? [{ label: 'Consommation', icon: 'bi-receipt', to: '/billing' }] : []),
-    { label: 'Premiers pas', icon: 'bi-compass', to: '/welcome' },
+    { label: 'Premiers pas', icon: 'bi-compass', to: '/welcome', separatorBefore: !installable && !user.isAdmin && !user.isGuest },
     { label: 'Paramètres', icon: 'bi-gear', to: '/settings' },
     { label: 'Se déconnecter', icon: 'bi-box-arrow-right', separatorBefore: true, onClick: () => void logout() },
   ];
@@ -770,8 +773,6 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   const { data } = usePollingQuery<{ projects: SidebarProject[]; chats: SidebarSession[] }>(SIDEBAR, { variables: { open }, pollInterval: 5000, fetchPolicy: 'cache-and-network' });
   const chats = data?.chats ?? [];
   const { data: prData } = usePollingQuery<{ projects: { id: string; worksessions: { id: string; trackedPullRequest: PullRequestRef | null }[] }[] }>(SIDEBAR_PULL_REQUESTS, { variables: { open }, pollInterval: 60_000 });
-  const { data: pendingData } = usePollingQuery<{ requests: HumanRequest[] }>(REQUESTS, { variables: { status: 'PENDING' }, pollInterval: 3000 });
-  const pending = pendingData?.requests.length ?? 0;
   const { data: inboxData } = usePollingQuery<{ inboxCounts: { total: number } }>(INBOX_COUNTS, { pollInterval: 5000 });
   const inboxTotal = inboxData?.inboxCounts.total ?? 0;
   const prByWorksession = useMemo(() => new Map((prData?.projects ?? []).flatMap((p) => p.worksessions.map((w) => [w.id, w.trackedPullRequest] as const))), [prData]);
@@ -861,37 +862,25 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
       </button>
 
       <nav className="wb-menu" aria-label="Navigation principale">
-        <div className="wb-menu-grid">
-          {MAIN_MENU.map((m) => (
-            <NavLink key={m.to} to={m.to} end={m.to !== '/inbox'} className="wb-menu-item" title={m.title ?? m.label}>
-              <i className={`bi ${m.icon} wb-icon`} />
-              <span className="wb-menu-label">{m.label}</span>
-              {m.to === '/inbox' && inboxTotal > 0 && (
-                <span className="wb-badge" title="Éléments qui attendent une action de votre part">
-                  {inboxTotal}
-                </span>
-              )}
-            </NavLink>
-          ))}
-        </div>
-        <div className="wb-menu-icons">
-          {MORE_MENU.map((m) => (
-            <NavLink key={m.to} to={m.to} end={m.to !== '/requests'} className="wb-menu-item" title={m.title ?? m.label} aria-label={m.label}>
-              <i className={`bi ${m.icon} wb-icon`} />
-              {m.to === '/requests' && pending > 0 && (
-                <span className="wb-badge" title="Un agent attend votre réponse">
-                  {pending}
-                </span>
-              )}
-            </NavLink>
-          ))}
-        </div>
+        {MAIN_MENU.map((m) => (
+          <NavLink key={m.to} to={m.to} end={m.to !== '/inbox'} className="wb-menu-item" title={m.title ?? m.label}>
+            <i className={`bi ${m.icon} wb-icon`} />
+            <span className="wb-menu-label">{m.label}</span>
+            {m.to === '/inbox' && inboxTotal > 0 && (
+              <span className="wb-badge" title="Éléments qui attendent une action de votre part">
+                {inboxTotal}
+              </span>
+            )}
+          </NavLink>
+        ))}
       </nav>
 
       {!user?.isGuest && <FavoritesSection expanded={expanded.favorites ?? true} onToggle={() => toggle('favorites', true)} />}
 
       <div className="wb-section-title">
-        <span>Projets</span>
+        <Link to="/projects" className="wb-section-link" title="Tous les projets">
+          Projets
+        </Link>
         <button
           type="button"
           className="wb-section-action wb-filter"
