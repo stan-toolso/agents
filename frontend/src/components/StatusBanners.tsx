@@ -5,6 +5,7 @@ import { onUpdateAvailable, reloadForUpdate } from '../lib/pwa';
 export default function StatusBanners() {
   const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
   const [update, setUpdate] = useState(false);
+  const [reloading, setReloading] = useState(false);
   useEffect(() => {
     const on = () => setOnline(true);
     const off = () => setOnline(false);
@@ -29,8 +30,16 @@ export default function StatusBanners() {
         <div className="wb-banner update">
           <i className="bi bi-arrow-repeat me-2" />
           Une nouvelle version de Skipper est disponible.
-          <button type="button" className="wb-banner-btn" onClick={() => void reloadForUpdate()}>
-            Recharger
+          <button
+            type="button"
+            className="wb-banner-btn"
+            disabled={reloading}
+            onClick={() => {
+              setReloading(true);
+              void reloadForUpdate();
+            }}
+          >
+            {reloading ? 'Rechargement…' : 'Recharger'}
           </button>
           <span className="wb-banner-hint">Les modifications non enregistrées seront perdues.</span>
         </div>
