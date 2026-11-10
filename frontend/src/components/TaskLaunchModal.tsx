@@ -9,7 +9,7 @@ import AgentAvatar from './AgentAvatar';
 import { bypassConnectionsWarning } from '../lib/humanize';
 import { agentConfigFields, agentConfigValues, agentProvider } from '../lib/agentSessions';
 import { projectModelForTask } from '../lib/models';
-import { buildConfig, FieldGroup, lastPermissionMode, rememberPermissionMode } from './SessionLauncher';
+import { buildConfig, FieldGroup } from './SessionLauncher';
 
 export interface LaunchTarget {
   id: string;
@@ -61,7 +61,7 @@ interface LaunchInfo {
     id: string;
     branch: string | null;
     priority: TaskPriority;
-    project: { id: string; defaultModel: string | null; taskModels: TaskModels | null };
+    project: { id: string; defaultModel: string | null; taskModels: TaskModels | null; defaultPermissionMode: string };
     session: { id: string; name: string; archivedAt: string | null } | null;
     resumableSession: ResumableSession | null;
     worksession: { id: string; name: string; branch: string; label: string; archivedAt: string | null } | null;
@@ -188,12 +188,10 @@ function TaskNewSessionModal({ task, target, info: infoData, onClose }: { task: 
     if (!provider) return;
     const defaults: Record<string, string> = {};
     for (const f of provider.configFields) if (f.defaultValue) defaults[f.key] = f.defaultValue;
-    const remembered = lastPermissionMode(task.project.id);
+    // Mode d'autorisation : celui du projet (lu avec la tâche, car la boîte « À traiter » n'a pas de cible), modifiable ici.
     const modeField = provider.configFields.find((f) => f.key === 'permissionMode');
-    if (modeField) {
-      const valid = (v: string | null) => v && modeField.options?.some((o) => o.value === v);
-      defaults.permissionMode = (valid(remembered) ? remembered : valid(target?.defaultPermissionMode ?? null) ? target!.defaultPermissionMode : defaults.permissionMode) ?? '';
-    }
+    const projectMode = infoData?.task?.project?.defaultPermissionMode ?? target?.defaultPermissionMode ?? null;
+    if (modeField && projectMode && modeField.options?.some((o) => o.value === projectMode)) defaults.permissionMode = projectMode;
     // Modèle proposé par le projet pour la priorité de la tâche (s'il fait partie des modèles proposés) ; celui de l'agent l'emporte.
     if (proposedModel && provider.configFields.find((f) => f.key === 'model')?.options?.some((o) => o.value === proposedModel)) defaults.model = proposedModel;
     const fromAgent = agent ? agentConfigValues(agent, provider.configFields) : {};
@@ -203,10 +201,7 @@ function TaskNewSessionModal({ task, target, info: infoData, onClose }: { task: 
 
   const [start, { loading, error }] = useMutation<{ startTaskSession: { id: string } }>(START_TASK_SESSION, {
     refetchQueries: ['Tasks', 'TaskPage', 'TaskDetail', 'Sidebar'],
-    onCompleted: () => {
-      if (values.permissionMode) rememberPermissionMode(task.project.id, values.permissionMode);
-      onClose();
-    },
+    onCompleted: () => onClose(),
   });
   // Le modèle, quand le projet en propose un pour les tâches, est montré d'emblée (pas dans les options avancées).
   const fields = useMemo(

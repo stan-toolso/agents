@@ -36,25 +36,6 @@ export function useSessionLauncher(): LauncherState {
 /** Providers dont la conversation a une limite de contexte réglable (compaction ou remise à zéro). */
 const CONTEXT_LIMIT_PROVIDERS = new Set(['claude', 'opencode']);
 
-/** Dernier mode d'autorisation choisi dans ce formulaire, par projet (prioritaire sur le réglage du projet). */
-const permissionModeKey = (projectId: string) => `skipper.launcher.permissionMode.${projectId}`;
-
-export function lastPermissionMode(projectId: string): string | null {
-  try {
-    return localStorage.getItem(permissionModeKey(projectId));
-  } catch {
-    return null;
-  }
-}
-
-export function rememberPermissionMode(projectId: string, mode: string): void {
-  try {
-    localStorage.setItem(permissionModeKey(projectId), mode);
-  } catch {
-    /* stockage indisponible (navigation privée) : rien à mémoriser */
-  }
-}
-
 function ConfigInput({ field, value, onChange }: { field: ConfigField; value: string; onChange: (v: string) => void }) {
   if (field.type === 'boolean') {
     return <Form.Check type="switch" checked={value === 'true'} onChange={(e) => onChange(String(e.target.checked))} />;
@@ -162,14 +143,14 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
     setValues(defaults);
   }, [provider]);
 
-  // Mode d'autorisation : le dernier choisi dans ce formulaire pour le projet, sinon celui du projet.
+  // Mode d'autorisation : toujours celui du projet au départ (pas de « dernier choix » mémorisé dans le navigateur,
+  // qui finissait par l'emporter sur le réglage du projet sans qu'on le voie) ; modifiable à chaque lancement.
   const projectDefaultMode = info?.defaultPermissionMode;
   useEffect(() => {
     const field = provider?.configFields.find((f) => f.key === 'permissionMode');
     if (!field || !projectId || !projectDefaultMode) return;
-    const saved = lastPermissionMode(projectId);
-    const mode = saved && (field.options ?? []).some((o) => o.value === saved) ? saved : projectDefaultMode;
-    setValues((prev) => ({ ...prev, permissionMode: mode }));
+    if (!(field.options ?? []).some((o) => o.value === projectDefaultMode)) return;
+    setValues((prev) => ({ ...prev, permissionMode: projectDefaultMode }));
   }, [provider, projectId, projectDefaultMode]);
 
   // Modèle : celui du projet s'il en fixe un et qu'il fait partie de vos modèles (le serveur l'appliquerait de toute façon).
@@ -222,8 +203,6 @@ function LaunchModal({ initial, onClose }: LaunchModalProps) {
     const chosenBranch = isGit && branch.trim() ? effectiveBranch : null;
     const newWorksession = { branch: chosenBranch, name: chosenBranch ? null : suggestedName, label: hasText ? derived.label : null, baseRef: isGit ? baseRef.trim() || null : null };
     try {
-      const chosenMode = values.permissionMode;
-      if (chosenMode && provider!.configFields.some((f) => f.key === 'permissionMode')) rememberPermissionMode(project.id, chosenMode);
       if (limitable) rememberContextLimit(project.id, contextLimit);
       const res = await createSession({
         variables: {
