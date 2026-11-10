@@ -25,7 +25,8 @@ export interface ScriptSourceConfig {
   timeoutSeconds: number;
 }
 
-export type DataSourceStatus = 'pending' | 'ok' | 'error' | 'skipped';
+/** `inactive` : jamais en base ; source d'une ancienne version dont la définition a changé depuis (plus rafraîchie, sans données). */
+export type DataSourceStatus = 'pending' | 'ok' | 'error' | 'skipped' | 'inactive';
 
 export interface DataSource {
   id: string;

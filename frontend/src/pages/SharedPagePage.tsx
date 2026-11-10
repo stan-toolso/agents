@@ -1,4 +1,4 @@
-import { useMutation } from '@apollo/client';
+import { useMutation, useQuery } from '@apollo/client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Form } from 'react-bootstrap';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -11,7 +11,7 @@ import PageData, { refreshLabel } from '../components/pages/PageData';
 import SlidesBar, { useSlides } from '../components/pages/SlidesBar';
 import SharePageModal from '../components/pages/SharePageModal';
 import FavoriteButton from '../components/pages/FavoriteButton';
-import { DELETE_ALL_SHARED_PAGE_COMMENTS, DELETE_SHARED_PAGE, DUPLICATE_SHARED_PAGE, REFRESH_SHARED_PAGE_DATA, REMOVE_SHARED_PAGE_MEMBER, REQUEST_SHARED_PAGE_UPDATE, SET_SHARED_PAGE_HISTORY, SHARED_PAGE, UPDATE_SHARED_PAGE, type SharedPage, type SharedPageAgentHandoff } from '../graphql/misc';
+import { DELETE_ALL_SHARED_PAGE_COMMENTS, DELETE_SHARED_PAGE, DUPLICATE_SHARED_PAGE, REFRESH_SHARED_PAGE_DATA, REMOVE_SHARED_PAGE_MEMBER, REQUEST_SHARED_PAGE_UPDATE, SET_SHARED_PAGE_HISTORY, SHARED_PAGE, SHARED_PAGE_VERSION_SOURCES, type SharedPageSource, UPDATE_SHARED_PAGE, type SharedPage, type SharedPageAgentHandoff } from '../graphql/misc';
 import { useAuth } from '../auth/AuthContext';
 import { formatSize } from '../lib/files';
 import { timeAgo } from '../lib/humanize';
@@ -63,6 +63,10 @@ export default function SharedPagePage() {
       return [];
     }
   });
+  // Ancienne version d'un artefact de données : ses propres sources (chaque version garde leur définition).
+  const oldVersion = page && page.historyEnabled && pickedVersion && pickedVersion !== page.version ? pickedVersion : null;
+  const oldVersionKind = oldVersion ? page?.versions.find((v) => v.version === oldVersion)?.kind : null;
+  const versionSourcesQ = useQuery<{ sharedPage: { id: string; versionSources: SharedPageSource[] } | null }>(SHARED_PAGE_VERSION_SOURCES, { variables: { id, version: oldVersion }, skip: !oldVersion || oldVersionKind !== 'DATA' });
   const frameRef = useRef<HTMLIFrameElement>(null);
   // Même clé que le cadre (recréé à chaque changement) : l'état du lecteur repart avec lui.
   const slides = useSlides(frameRef, page ? `${page.id}:${page.historyEnabled ? pickedVersion : null}:${page.dataRefreshedAt ?? ''}` : '');
@@ -105,11 +109,14 @@ export default function SharedPagePage() {
   const openComments = page.openComments;
   const link = `${window.location.origin}/shared/${page.id}`;
   // Artefact de données : sources en défaut (pastille du bouton « Données »), rechargement du cadre après un rafraîchissement.
-  const isData = page.kind === 'DATA';
-  const kindDef = ARTIFACT_KINDS[page.kind] ?? ARTIFACT_KINDS.PAGE;
-  const failingSources = isData ? page.sources.filter((s) => s.status === 'error' || s.status === 'skipped').length : 0;
+  // Chaque version garde son type, son rafraîchissement et ses sources : l'affichage suit la version montrée.
+  const shownKind = shownVersion?.kind ?? page.kind;
+  const isData = shownKind === 'DATA';
+  const kindDef = ARTIFACT_KINDS[shownKind] ?? ARTIFACT_KINDS.PAGE;
+  const dataPage = oldVersion ? { ...page, sources: versionSourcesQ.data?.sharedPage?.versionSources ?? [], refreshMinutes: shownVersion?.refreshMinutes ?? null } : page;
+  const failingSources = isData ? dataPage.sources.filter((s) => s.status === 'error' || s.status === 'skipped').length : 0;
   const frameKey = `${page.id}:${shown}:${page.dataRefreshedAt ?? ''}`;
-  const isSlides = page.kind === 'SLIDES';
+  const isSlides = shownKind === 'SLIDES';
   const present = () => {
     const frame = frameRef.current;
     if (!frame) return;
@@ -183,15 +190,15 @@ export default function SharedPagePage() {
     ...(isSlides ? [{ label: 'Exporter en PDF', icon: 'bi-file-earmark-pdf', onClick: () => void window.open(`${viewUrl}${viewUrl.includes('?') ? '&' : '?'}print=1`, '_blank', 'noopener') }] : []),
     { label: 'Télécharger le HTML', icon: 'bi-download', onClick: () => void window.open(sharedPageUrl(page.id, version, true), '_self') },
     // Copie privée (sources de données comprises) ; un artefact de données seulement par qui en voit les requêtes.
-    ...(!user?.isGuest && (page.kind !== 'DATA' || admin)
+    ...(!user?.isGuest && (shownKind !== 'DATA' || admin)
       ? [
           {
             label: 'Dupliquer',
             icon: 'bi-copy',
             onClick: async () => {
               const title = await prompt({
-                title: page.kind === 'DATA' ? "Dupliquer l'artefact de données" : 'Dupliquer la page',
-                message: `Une copie privée${version && version !== page.version ? ` de la version ${version}` : ''}, à votre nom${page.kind === 'DATA' ? ', avec ses sources de données' : ''} ; ni les personnes avec qui elle est partagée, ni les commentaires, ni l'historique ne suivent.`,
+                title: shownKind === 'DATA' ? "Dupliquer l'artefact de données" : 'Dupliquer la page',
+                message: `Une copie privée${version && version !== page.version ? ` de la version ${version}` : ''}, à votre nom${shownKind === 'DATA' ? ', avec ses sources de données' : ''} ; ni les personnes avec qui elle est partagée, ni les commentaires, ni l'historique ne suivent.`,
                 defaultValue: `Copie de ${page.title}`,
                 confirmLabel: 'Dupliquer',
               });
@@ -287,7 +294,7 @@ export default function SharedPagePage() {
     <div className="preview-page">
       <div className="sp-head">
         <button type="button" className={`sp-head-title${details ? ' open' : ''}`} onClick={() => setDetails((d) => !d)} title={details ? 'Masquer les détails' : 'Détails de la page (propriétaire, versions, origine)'} aria-expanded={details}>
-          <i className={`bi ${page.kind !== 'PAGE' ? kindDef.icon : access.icon} sp-head-access`} title={page.kind !== 'PAGE' ? `${kindDef.label} · ${access.text}` : access.text} />
+          <i className={`bi ${shownKind !== 'PAGE' ? kindDef.icon : access.icon} sp-head-access`} title={shownKind !== 'PAGE' ? `${kindDef.label} · ${access.text}` : access.text} />
           <span className="sp-head-name">{page.title}</span>
           {isData && page.dataRefreshedAt && <span className="sp-chip d-none d-md-inline" title={`Données rafraîchies ${new Date(page.dataRefreshedAt).toLocaleString()} · ${refreshLabel(page.refreshMinutes)}`}>{timeAgoShort(page.dataRefreshedAt)}</span>}
           {shown !== page.version && <span className="sp-chip">v{shown}</span>}
@@ -345,7 +352,7 @@ export default function SharedPagePage() {
           </span>
           {isData && (
             <span title="Artefact de données : la page lit ses chiffres dans des sources rafraîchies par Skipper">
-              <i className={`bi ${kindDef.icon}`} /> {kindDef.label} · {page.dataRefreshedAt ? `mis à jour ${timeAgo(page.dataRefreshedAt)}` : 'pas encore rafraîchi'} · {refreshLabel(page.refreshMinutes)}
+              <i className={`bi ${kindDef.icon}`} /> {kindDef.label} · {page.dataRefreshedAt ? `mis à jour ${timeAgo(page.dataRefreshedAt)}` : 'pas encore rafraîchi'} · {refreshLabel(dataPage.refreshMinutes)}
             </span>
           )}
           {!page.historyEnabled && (
@@ -361,6 +368,8 @@ export default function SharedPagePage() {
                 {page.versions.map((v) => (
                   <option key={v.version} value={v.version}>
                     v{v.version} · {fmt(v.createdAt)}
+                    {v.kind !== page.kind ? ` · ${ARTIFACT_KINDS[v.kind]?.label ?? v.kind}` : ''}
+                    {v.kind === 'DATA' && v.sourceCount != null ? ` · ${v.sourceCount} source${v.sourceCount > 1 ? 's' : ''}` : ''}
                   </option>
                 ))}
               </Form.Select>
@@ -430,7 +439,8 @@ export default function SharedPagePage() {
         />
         {isData && dataOpen && (
           <PageData
-            page={page}
+            page={dataPage}
+            oldVersion={oldVersion}
             manage={admin}
             refreshing={refreshing}
             onRefresh={() => void refreshData({ variables: { id: page.id } })}

@@ -41,8 +41,10 @@ export async function handleSharedPageRoute(req: IncomingMessage, res: ServerRes
     const download = url.searchParams.get('download') === '1';
     const raw = download || url.searchParams.get('raw') === '1' || content.html.length > INJECT_MAX_BYTES;
     let html = content.html;
-    if (page.kind === 'data' && content.html.length <= INJECT_MAX_BYTES && url.searchParams.get('raw') !== '1') {
-      const sources = await artifactDataService.sourcesWithData(page.id);
+    // Type de la version servie (une republication peut l'avoir changé) ; celui de l'artefact si elle ne l'a pas gardé.
+    const kind = content.version === page.version ? page.kind : ((await sharedPageRepository.version(page.id, content.version))?.kind ?? page.kind);
+    if (kind === 'data' && content.html.length <= INJECT_MAX_BYTES && url.searchParams.get('raw') !== '1') {
+      const sources = await artifactDataService.sourcesAt(page, content.version, true);
       const data = Object.fromEntries(sources.map((s) => [s.name, s.data]));
       const meta = {
         refreshedAt: page.dataRefreshedAt?.toISOString() ?? null,
@@ -52,7 +54,7 @@ export async function handleSharedPageRoute(req: IncomingMessage, res: ServerRes
       // Aperçu réduit de la galerie (`thumb=1`) : pas une lecture, le rafraîchissement automatique n'en tient pas compte.
       if (!download && url.searchParams.get('thumb') !== '1') void sharedPageRepository.touchViewed(page.id).catch(() => undefined);
     }
-    if (!raw && page.kind === 'slides') {
+    if (!raw && kind === 'slides') {
       const mode = url.searchParams.get('print') === '1' ? 'print' : url.searchParams.get('thumb') === '1' ? 'thumb' : 'view';
       html = Buffer.from(injectSlidesScript(html.toString('utf8'), mode), 'utf8');
     }

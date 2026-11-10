@@ -41,6 +41,7 @@ export function onInstallChange(listener: () => void): () => void {
 
 const updateListeners = new Set<() => void>();
 let updateReady: (() => Promise<void>) | null = null;
+let swRegistration: ServiceWorkerRegistration | null = null;
 
 /** Enregistre le service worker ; une nouvelle version attend que l'utilisateur demande le rechargement. */
 export function setupServiceWorker(): void {
@@ -54,6 +55,7 @@ export function setupServiceWorker(): void {
     onRegisteredSW(_url, registration) {
       // Vérification horaire et au retour sur l'onglet.
       if (!registration) return;
+      swRegistration = registration;
       setInterval(() => void registration.update(), 60 * 60 * 1000);
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') void registration.update();
@@ -72,10 +74,35 @@ export function onUpdateAvailable(listener: () => void): () => void {
   return () => updateListeners.delete(listener);
 }
 
-/** Applique la nouvelle version et recharge la page. */
+/** Délai au-delà duquel on recharge même si le nouveau service worker n'a pas encore pris la main. */
+export const RELOAD_FALLBACK_MS = 3000;
+let reloading = false;
+
+/**
+ * Applique la nouvelle version et recharge la page, toujours. On ne s'en remet pas seulement à l'événement
+ * « controlling » de workbox-window : il ne vient pas quand le worker en attente a déjà été activé par un
+ * autre onglet, quand un déploiement suivant l'a remplacé, ou quand son activation traîne ; le clic restait alors
+ * sans effet. Ici : message SKIP_WAITING au worker en attente (celui du moment), attente bornée du changement de
+ * contrôleur, puis rechargement.
+ */
 export async function reloadForUpdate(): Promise<void> {
-  if (updateReady) await updateReady();
-  else window.location.reload();
+  if (reloading) return;
+  reloading = true;
+  const reload = () => window.location.reload();
+  if (!('serviceWorker' in navigator)) return reload();
+  const changed = new Promise<void>((resolve) => {
+    navigator.serviceWorker.addEventListener('controllerchange', () => resolve(), { once: true });
+  });
+  try {
+    const registration = swRegistration ?? (await navigator.serviceWorker.getRegistration()) ?? null;
+    const waiting = registration?.waiting ?? null;
+    if (!waiting) return reload();
+    waiting.postMessage({ type: 'SKIP_WAITING' });
+  } catch {
+    return reload();
+  }
+  await Promise.race([changed, new Promise<void>((resolve) => setTimeout(resolve, RELOAD_FALLBACK_MS))]);
+  reload();
 }
 
 const navigateListeners = new Set<(link: string) => void>();

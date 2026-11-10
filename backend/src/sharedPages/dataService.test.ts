@@ -21,7 +21,7 @@ vi.mock('./dataRepository.js', () => ({
     dataOf: async () => ({}),
   },
 }));
-vi.mock('./repository.js', () => ({ sharedPageRepository: { markDataRefreshed: async () => void state.marked++, update: async (_id: string, patch: unknown) => ({ ...page(), ...(patch as object) }), dueForRefresh: async () => [] } }));
+vi.mock('./repository.js', () => ({ sharedPageRepository: { snapshotLatest: async () => undefined, version: async () => null, markDataRefreshed: async () => void state.marked++, update: async (_id: string, patch: unknown) => ({ ...page(), ...(patch as object) }), dueForRefresh: async () => [] } }));
 vi.mock('./service.js', () => ({ sharedPageService: { get: async () => page(), getManaged: async () => page() } }));
 vi.mock('../projects/service.js', () => ({ projectService: { get: async (id: string) => ({ id, name: 'Projet', slug: 'projet' }) } }));
 vi.mock('../users/service.js', () => ({ userService: { memberRoleFor: async () => state.member, get: async () => ({ id: 'owner', isAdmin: false }) } }));

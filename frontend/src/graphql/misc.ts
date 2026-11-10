@@ -112,7 +112,8 @@ export interface SharedPage {
   createdAt: string;
   updatedAt: string;
   members: { user: { id: string; name: string; email: string; isGuest?: boolean }; addedBy: { id: string; name: string } | null; addedAt: string; message?: string | null }[];
-  versions: { version: number; size: number; createdBy: { id: string; name: string } | null; createdAt: string }[];
+  /** Chaque version garde son HTML, son type, son rafraîchissement et la définition de ses sources (sourceCount null : non gardée). */
+  versions: { version: number; size: number; createdBy: { id: string; name: string } | null; createdAt: string; kind: ArtifactKind; refreshMinutes: number | null; sourceCount: number | null }[];
   project: { id: string; name: string } | null;
   session: { id: string; name: string } | null;
   sourcePath: string | null;
@@ -146,7 +147,8 @@ export interface SharedPageSource {
   interpreter: string | null;
   code: string | null;
   timeoutSeconds: number | null;
-  status: 'pending' | 'ok' | 'error' | 'skipped';
+  /** inactive : source d'une ancienne version dont la définition a changé depuis (plus rafraîchie, sans données). */
+  status: 'pending' | 'ok' | 'error' | 'skipped' | 'inactive';
   error: string | null;
   rowCount: number | null;
   durationMs: number | null;
@@ -239,6 +241,9 @@ export const SHARED_PAGE_FIELDS = gql`
         name
       }
       createdAt
+      kind
+      refreshMinutes
+      sourceCount
     }
     project {
       id
@@ -416,6 +421,32 @@ export const REFRESH_SHARED_PAGE_DATA = gql`
   mutation RefreshSharedPageData($id: ID!) {
     refreshSharedPageData(id: $id) {
       ...SharedPageFields
+    }
+  }
+`;
+
+/** Sources d'un artefact de données telles qu'à une ancienne version (panneau « Données » de cette version). */
+export const SHARED_PAGE_VERSION_SOURCES = gql`
+  query SharedPageVersionSources($id: ID!, $version: Int!) {
+    sharedPage(id: $id) {
+      id
+      versionSources: sources(version: $version) {
+        id
+        name
+        kind
+        item
+        database
+        query
+        interpreter
+        code
+        timeoutSeconds
+        status
+        error
+        rowCount
+        durationMs
+        refreshedAt
+        attemptedAt
+      }
     }
   }
 `;

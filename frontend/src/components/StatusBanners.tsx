@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { onUpdateAvailable, reloadForUpdate } from '../lib/pwa';
+import { RELOAD_FALLBACK_MS, onUpdateAvailable, reloadForUpdate } from '../lib/pwa';
 
 /** Bandeaux au-dessus des onglets : hors ligne, nouvelle version disponible. */
 export default function StatusBanners() {
   const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
   const [update, setUpdate] = useState(false);
+  const [reloading, setReloading] = useState(false);
   useEffect(() => {
     const on = () => setOnline(true);
     const off = () => setOnline(false);
@@ -26,13 +27,31 @@ export default function StatusBanners() {
         </div>
       )}
       {update && (
-        <div className="wb-banner update">
-          <i className="bi bi-arrow-repeat me-2" />
+        <div className={`wb-banner update${reloading ? ' reloading' : ''}`} aria-busy={reloading || undefined}>
+          <i className={`bi bi-arrow-repeat me-2${reloading ? ' wb-banner-spin' : ''}`} />
           Une nouvelle version de Skipper est disponible.
-          <button type="button" className="wb-banner-btn" onClick={() => void reloadForUpdate()}>
-            Recharger
+          <button
+            type="button"
+            className="wb-banner-btn"
+            disabled={reloading}
+            onClick={() => {
+              setReloading(true);
+              void reloadForUpdate();
+            }}
+          >
+            {reloading ? 'Rechargement…' : 'Recharger'}
           </button>
           <span className="wb-banner-hint">Les modifications non enregistrées seront perdues.</span>
+          {reloading && (
+            // Progression : se remplit sur le délai maximal avant rechargement (le nouveau service worker prend
+            // généralement la main avant, et la page se recharge alors aussitôt).
+            <span
+              className="wb-banner-progress"
+              role="progressbar"
+              aria-label="Rechargement de Skipper"
+              style={{ animationDuration: `${RELOAD_FALLBACK_MS}ms` }}
+            />
+          )}
         </div>
       )}
     </div>
