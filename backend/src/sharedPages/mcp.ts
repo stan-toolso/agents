@@ -82,7 +82,7 @@ export function createSharedPagesMcpServer(ctx: SharedPagesMcpContext): McpSdkSe
               }),
             )
             .optional()
-            .describe("kind data : les sources de données (remplacent celles de la version précédente)"),
+            .describe("kind data : les sources de données (remplacent celles de la version précédente, qui garde les siennes : chaque version est consultable avec ses sources) ; absentes, la nouvelle version reprend les sources actuelles"),
           refresh_minutes: z.number().int().min(0).max(DATA_LIMITS.maxRefreshMinutes).optional().describe("kind data : rafraîchissement automatique toutes les N minutes (5 à 10080) ; 0 ou absent : à la demande"),
         },
         async ({ path: p, title, description, page_id, anyone_with_link, kind, sources, refresh_minutes }) =>

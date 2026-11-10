@@ -26,6 +26,7 @@ const STATE: Record<SharedPageSource['status'], { label: string; icon: string }>
   error: { label: 'Erreur', icon: 'bi-x-circle' },
   skipped: { label: 'Non rafraîchie', icon: 'bi-pause-circle' },
   pending: { label: 'Jamais rafraîchie', icon: 'bi-hourglass' },
+  inactive: { label: 'Modifiée depuis', icon: 'bi-clock-history' },
 };
 
 function SourceCard({ s, full }: { s: SharedPageSource; full: boolean }) {
@@ -77,10 +78,14 @@ export interface PageDataProps {
   /** Demander une modification à l'agent (propriétaire d'une page avec session, transmission non désactivée). */
   onAskAgent?: () => void;
   onClose: () => void;
+  /** Ancienne version affichée : ses sources (lecture seule), le rafraîchissement agit sur la dernière version. */
+  oldVersion?: number | null;
 }
 
 /** Panneau « Données » : rafraîchissement (bouton, intervalle) et état de chaque source. */
-export default function PageData({ page, manage, refreshing, onRefresh, onSetRefresh, onAskAgent, onClose }: PageDataProps) {
+export default function PageData({ page, manage: canManage, refreshing, onRefresh, onSetRefresh, onAskAgent, onClose, oldVersion = null }: PageDataProps) {
+  // Une ancienne version se consulte : rafraîchir et régler l'intervalle restent sur la dernière version.
+  const manage = canManage && !oldVersion;
   const failing = page.sources.filter((s) => s.status === 'error' || s.status === 'skipped').length;
   return (
     <aside className="pc-panel pd-panel" aria-label="Données de l'artefact">
@@ -93,6 +98,11 @@ export default function PageData({ page, manage, refreshing, onRefresh, onSetRef
           <i className="bi bi-x-lg" />
         </Button>
       </div>
+      {oldVersion && (
+        <div className="pd-version-note">
+          <i className="bi bi-clock-history" /> Sources de la version {oldVersion}. Celles qui n’ont pas changé depuis reçoivent les données actuelles ; les autres sont marquées « Modifiée depuis ».
+        </div>
+      )}
       <div className="pd-refresh">
         <div className="pd-refresh-text">
           {page.dataRefreshedAt ? (
@@ -130,7 +140,7 @@ export default function PageData({ page, manage, refreshing, onRefresh, onSetRef
         </div>
       )}
       <div className="pd-list">
-        {page.sources.length === 0 ? <div className="pd-empty">Aucune source de données : la page n'a rien à afficher. Demandez à l'agent d'en déclarer (pages.publish, sources).</div> : page.sources.map((s) => <SourceCard key={s.id} s={s} full={manage} />)}
+        {page.sources.length === 0 ? <div className="pd-empty">Aucune source de données : la page n'a rien à afficher. Demandez à l'agent d'en déclarer (pages.publish, sources).</div> : page.sources.map((s) => <SourceCard key={s.id} s={s} full={canManage} />)}
       </div>
       <div className="pd-foot">
         Les sources sont exécutées au nom du propriétaire, en lecture seule ; une source en erreur garde ses dernières données.

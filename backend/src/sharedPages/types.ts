@@ -40,6 +40,13 @@ export interface SharedPage {
   updatedAt: Date;
 }
 
+/** Définition d'une source de données gardée avec une version (sans ses données, qui restent vivantes). */
+export interface VersionSource {
+  name: string;
+  kind: 'sql' | 'script';
+  config: Record<string, unknown>;
+}
+
 export interface SharedPageVersion {
   pageId: string;
   version: number;
@@ -47,6 +54,12 @@ export interface SharedPageVersion {
   createdById: string | null;
   sessionId: string | null;
   createdAt: Date;
+  /** Type de l'artefact à cette version ; null : inconnu (publiée avant le versionnage complet), celui de l'artefact. */
+  kind: ArtifactKind | null;
+  /** Données : rafraîchissement à cette version. */
+  refreshMinutes: number | null;
+  /** Données : définition des sources à cette version ; null : inconnue (on retombe sur les sources actuelles). */
+  sources: VersionSource[] | null;
 }
 
 export interface SharedPageMember {

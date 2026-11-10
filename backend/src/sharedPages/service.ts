@@ -158,9 +158,11 @@ export const sharedPageService = {
         kind: input.kind ?? null,
       });
       if (!updated) throw new NotFoundError('Page partagée introuvable');
+      // La nouvelle version garde le type, le rafraîchissement et les sources du moment (remplacées ensuite si l'agent en donne).
+      await sharedPageRepository.snapshotLatest(updated.id);
       return updated;
     }
-    return sharedPageRepository.create({
+    const created = await sharedPageRepository.create({
       ownerId: input.ownerId,
       title,
       description: description ?? null,
@@ -171,6 +173,8 @@ export const sharedPageService = {
       html: input.html,
       kind: input.kind ?? 'page',
     });
+    await sharedPageRepository.snapshotLatest(created.id);
+    return created;
   },
 
   /**
@@ -227,7 +231,9 @@ export const sharedPageService = {
       if (!AGENT_HANDOFF_MODES.includes(input.agentHandoff as AgentHandoff)) throw new AppError('Réglage de transmission à l’agent inconnu');
       patch.agentHandoff = input.agentHandoff as AgentHandoff;
     }
-    return (await sharedPageRepository.update(id, patch)) ?? this.get(id);
+    const updated = (await sharedPageRepository.update(id, patch)) ?? (await this.get(id));
+    if (patch.refreshMinutes !== undefined) await sharedPageRepository.snapshotLatest(id);
+    return updated;
   },
 
   /**

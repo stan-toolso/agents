@@ -11,7 +11,34 @@ import { dataSourceRepository } from './dataRepository.js';
 import { DATA_LIMITS, assertDataSize, countRows, normalizeSqlResult, parseRefreshMinutes, parseScriptOutput, parseSources, scriptCommand, type DataSource, type DataSourceInput, type ScriptSourceConfig, type SqlSourceConfig } from './dataSources.js';
 import { sharedPageRepository } from './repository.js';
 import { sharedPageService } from './service.js';
-import type { SharedPage } from './types.js';
+import type { SharedPage, SharedPageVersion } from './types.js';
+
+/**
+ * Sources d'une ancienne version (`version.sources`) rapprochées des sources actuelles : même nom, même type, même
+ * définition → la source actuelle (état, données) ; sinon une source `inactive`. Sans définition gardée : les actuelles.
+ */
+export function sourcesOfVersion(pageId: string, version: SharedPageVersion, live: DataSource[]): DataSource[] {
+  if (!version.sources) return live;
+  return version.sources.map((def, position) => {
+    const same = live.find((s) => s.name === def.name && s.kind === def.kind && JSON.stringify(s.config) === JSON.stringify(def.config));
+    if (same) return same;
+    return {
+      id: `${pageId}:v${version.version}:${def.name}`,
+      pageId,
+      name: def.name,
+      kind: def.kind,
+      config: def.config as unknown as DataSource['config'],
+      position,
+      data: null,
+      rowCount: null,
+      status: 'inactive',
+      error: null,
+      durationMs: null,
+      refreshedAt: null,
+      attemptedAt: null,
+    };
+  });
+}
 
 /**
  * Rafraîchissement des artefacts « Données » : chaque source est exécutée au nom du propriétaire de l'artefact, dans
@@ -99,13 +126,17 @@ export const artifactDataService = {
     if (page.kind !== 'data') throw new AppError("Cet artefact n'est pas un artefact de données (publie-le avec kind: data)");
     if (!page.projectId) throw new AppError("Un artefact de données doit être rattaché à un projet (c'est celui de la session qui le publie)");
     await dataSourceRepository.replace(page.id, parseSources(inputs));
+    // La dernière version garde la définition de ses sources (versionnage complet des artefacts).
+    await sharedPageRepository.snapshotLatest(page.id);
     return dataSourceRepository.list(page.id);
   },
 
   /** Règle l'intervalle du rafraîchissement automatique (null : à la demande). */
   async setRefresh(page: SharedPage, minutes: number | null | undefined): Promise<SharedPage> {
     if (page.kind !== 'data') throw new AppError("Seul un artefact de données se rafraîchit");
-    return (await sharedPageRepository.update(page.id, { refreshMinutes: parseRefreshMinutes(minutes) })) ?? page;
+    const updated = (await sharedPageRepository.update(page.id, { refreshMinutes: parseRefreshMinutes(minutes) })) ?? page;
+    await sharedPageRepository.snapshotLatest(page.id);
+    return updated;
   },
 
   /** Rafraîchit toutes les sources d'un artefact (en attendant un rafraîchissement déjà en cours plutôt que d'en lancer un second). */
@@ -136,6 +167,19 @@ export const artifactDataService = {
   },
 
   sources: (pageId: string) => dataSourceRepository.list(pageId),
+
+  /**
+   * Sources telles qu'à une version de l'artefact (avec leurs données si `withData`) : la dernière version, ou une
+   * version qui n'a pas gardé ses sources (publiée avant le versionnage complet), reçoit les sources actuelles ; une
+   * ancienne version reçoit sa propre définition, avec l'état et les données actuels des sources inchangées depuis, les
+   * autres étant `inactive` (plus rafraîchies, sans données).
+   */
+  async sourcesAt(page: SharedPage, version: number | null | undefined, withData = false): Promise<DataSource[]> {
+    const live = await dataSourceRepository.list(page.id, withData);
+    if (!version || version === page.version) return live;
+    const v = await sharedPageRepository.version(page.id, version);
+    return v ? sourcesOfVersion(page.id, v, live) : live;
+  },
   sourcesWithData: (pageId: string) => dataSourceRepository.list(pageId, true),
   dataOf: (pageId: string) => dataSourceRepository.dataOf(pageId),
 
