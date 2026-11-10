@@ -14,7 +14,7 @@ vi.mock('./repository.js', () => ({
     findById: async () => state.page,
     isMember: async (_p: string, userId: string) => state.members.has(userId),
     update: async (_id: string, patch: Partial<SharedPage>) => (state.page = { ...state.page, ...patch }),
-    versions: async (): Promise<SharedPageVersion[]> => [3, 2, 1].map((version) => ({ pageId: 'p1', version, size: 10, createdById: 'stan', sessionId: null, createdAt: new Date() })),
+    versions: async (): Promise<SharedPageVersion[]> => [3, 2, 1].map((version) => ({ pageId: 'p1', version, size: 10, createdById: 'stan', sessionId: null, createdAt: new Date(), kind: 'page', refreshMinutes: null, sources: null })),
     content: async (_p: string, v: number) => Buffer.from(`<p>v${v}</p>`),
   },
 }));

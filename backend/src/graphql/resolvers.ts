@@ -750,7 +750,8 @@ export const resolvers = {
       const members = await sharedPageService.members(p.id);
       return p.ownerId === user.id || members.some((m) => m.userId === user.id) ? members : [];
     },
-    versions: (p: SharedPage) => sharedPageService.visibleVersions(p),
+    // pageKind : type de repli d'une version qui ne l'a pas gardé.
+    versions: async (p: SharedPage) => (await sharedPageService.visibleVersions(p)).map((v) => ({ ...v, pageKind: p.kind })),
     historyEnabled: (p: SharedPage) => p.historyEnabled,
     project: (p: SharedPage, _: unknown, ctx: Ctx) => (p.ownerId === ctx.user?.id ? projectIfAccessible(ctx, p.projectId) : null),
     session: (p: SharedPage, _: unknown, ctx: Ctx) => (p.ownerId === ctx.user?.id && p.sessionId ? sessionService.get(p.sessionId) : null),
@@ -766,11 +767,14 @@ export const resolvers = {
     // Réglage effectif : sans session d'origine, rien ne peut être transmis.
     agentHandoff: (p: SharedPage) => (p.sessionId ? p.agentHandoff.toUpperCase() : 'OFF'),
     kind: (p: SharedPage) => p.kind.toUpperCase(),
-    sources: async (p: SharedPage, _: unknown, ctx: Ctx) => {
-      if (p.kind !== 'data') return [];
+    sources: async (p: SharedPage, args: { version?: number | null }, ctx: Ctx) => {
       const user = requireUser(ctx);
+      // Une ancienne version : seulement si l'historique la laisse consulter (comme son contenu).
+      const version = args.version && args.version !== p.version && p.historyEnabled ? args.version : null;
+      const kind = version ? ((await sharedPageService.versions(p.id)).find((v) => v.version === version)?.kind ?? p.kind) : p.kind;
+      if (kind !== 'data') return [];
       const full = sharedPageService.canManage(p, user);
-      return (await artifactDataService.sources(p.id)).map((s) => sourceView(s, full));
+      return (await artifactDataService.sourcesAt(p, version)).map((s) => sourceView(s, full));
     },
   },
   SharedPageComment: {
@@ -792,6 +796,8 @@ export const resolvers = {
   },
   SharedPageVersion: {
     createdBy: (v: SharedPageVersion, _: unknown, ctx: Ctx) => userOrNull(ctx, v.createdById),
+    kind: (v: SharedPageVersion & { pageKind?: string }) => (v.kind ?? v.pageKind ?? 'page').toUpperCase(),
+    sourceCount: (v: SharedPageVersion) => (v.sources ? v.sources.length : null),
   },
 
   Terminal: {

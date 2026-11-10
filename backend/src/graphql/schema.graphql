@@ -2526,8 +2526,8 @@ type SharedPage {
   refreshMinutes: Int
   "Données : dernière tentative de rafraîchissement."
   dataRefreshedAt: DateTime
-  "Données : les sources (état pour qui voit la page ; requête et script pour le propriétaire ou un administrateur)."
-  sources: [SharedPageSource!]!
+  "Données : les sources (état pour qui voit la page ; requête et script pour le propriétaire ou un administrateur). Avec version : celles de cette version (une source dont la définition a changé depuis est INACTIVE : status inactive, sans données)."
+  sources(version: Int): [SharedPageSource!]!
 }
 
 "Type d'artefact."
@@ -2628,6 +2628,12 @@ type SharedPageVersion {
   size: Int!
   createdBy: User
   createdAt: DateTime!
+  "Type de l'artefact à cette version (une republication peut le changer)."
+  kind: ArtifactKind!
+  "Données : rafraîchissement automatique à cette version (minutes ; null = à la demande)."
+  refreshMinutes: Int
+  "Données : nombre de sources à cette version ; null quand la version ne les a pas gardées (publiée avant le versionnage complet)."
+  sourceCount: Int
 }
 
 type SharedPageViewerAccess {

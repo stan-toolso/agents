@@ -1,5 +1,5 @@
 import { pool } from '../db/pool.js';
-import type { AgentHandoff, ArtifactKind, SharedPage, SharedPageMember, SharedPageVersion } from './types.js';
+import type { AgentHandoff, ArtifactKind, SharedPage, SharedPageMember, SharedPageVersion, VersionSource } from './types.js';
 
 interface Row {
   id: string;
@@ -47,8 +47,36 @@ interface VersionRow {
   created_by: string | null;
   session_id: string | null;
   created_at: Date;
+  kind: ArtifactKind | null;
+  refresh_minutes: number | null;
+  sources: VersionSource[] | null;
 }
-const toVersion = (r: VersionRow): SharedPageVersion => ({ pageId: r.page_id, version: r.version, size: r.size, createdById: r.created_by, sessionId: r.session_id, createdAt: r.created_at });
+const toVersion = (r: VersionRow): SharedPageVersion => ({
+  pageId: r.page_id,
+  version: r.version,
+  size: r.size,
+  createdById: r.created_by,
+  sessionId: r.session_id,
+  createdAt: r.created_at,
+  kind: r.kind ?? null,
+  refreshMinutes: r.refresh_minutes ?? null,
+  sources: r.sources ?? null,
+});
+const VERSION_META = 'page_id, version, size, created_by, session_id, created_at, kind, refresh_minutes, sources';
+
+/**
+ * Fige dans la dernière version l'état de l'artefact qui n'est pas dans son HTML : type, rafraîchissement, définition des
+ * sources (nom, type, requête ou script ; pas les données). Appelé à chaque publication et à chaque changement des
+ * sources ou du rafraîchissement de la dernière version.
+ */
+const SNAPSHOT_SQL = `UPDATE shared_page_versions v
+    SET kind = p.kind,
+        refresh_minutes = p.refresh_minutes,
+        sources = CASE WHEN p.kind = 'data' THEN
+          (SELECT COALESCE(jsonb_agg(jsonb_build_object('name', s.name, 'kind', s.kind, 'config', s.config) ORDER BY s.position, s.name), '[]'::jsonb)
+             FROM shared_page_sources s WHERE s.page_id = p.id) END
+   FROM shared_pages p
+  WHERE p.id = v.page_id AND v.page_id = $1 AND v.version = p.version`;
 
 interface MemberRow {
   page_id: string;
@@ -173,10 +201,13 @@ export const sharedPageRepository = {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      // Type et rafraîchissement de la version copiée (ceux de l'artefact quand la version ne les a pas gardés).
       const { rows } = await client.query<Row>(
         `INSERT INTO shared_pages (owner_id, title, description, link_access, project_id, session_id, source_path, kind, refresh_minutes, data_refreshed_at)
-         SELECT $2, $3, $4, false, $5, $6, $7, kind, refresh_minutes, data_refreshed_at FROM shared_pages WHERE id = $1 RETURNING *`,
-        [sourceId, input.ownerId, input.title, input.description, input.projectId, input.sessionId, input.sourcePath],
+         SELECT $2, $3, $4, false, $5, $6, $7, COALESCE(v.kind, p.kind), CASE WHEN v.kind IS NULL THEN p.refresh_minutes ELSE v.refresh_minutes END, p.data_refreshed_at
+           FROM shared_pages p JOIN shared_page_versions v ON v.page_id = p.id AND v.version = $8
+          WHERE p.id = $1 RETURNING *`,
+        [sourceId, input.ownerId, input.title, input.description, input.projectId, input.sessionId, input.sourcePath, version],
       );
       const copy = rows[0];
       if (!copy) {
@@ -192,11 +223,25 @@ export const sharedPageRepository = {
         await client.query('ROLLBACK');
         return null;
       }
-      await client.query(
-        `INSERT INTO shared_page_sources (page_id, name, kind, config, position, data, row_count, status, error, duration_ms, refreshed_at, attempted_at)
-         SELECT $1, name, kind, config, position, data, row_count, status, error, duration_ms, refreshed_at, attempted_at FROM shared_page_sources WHERE page_id = $2`,
-        [copy.id, sourceId],
-      );
+      const snapshot = await client.query<{ sources: VersionSource[] | null }>('SELECT sources FROM shared_page_versions WHERE page_id = $1 AND version = $2', [sourceId, version]);
+      if (copy.kind === 'data' && snapshot.rows[0]?.sources) {
+        // Sources de la version copiée ; les données suivent pour celles dont la définition n'a pas changé depuis.
+        await client.query(
+          `INSERT INTO shared_page_sources (page_id, name, kind, config, position, data, row_count, status, error, duration_ms, refreshed_at, attempted_at)
+           SELECT $1, d.def->>'name', d.def->>'kind', d.def->'config', d.ord - 1,
+                  s.data, s.row_count, COALESCE(s.status, 'pending'), s.error, s.duration_ms, s.refreshed_at, s.attempted_at
+             FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY AS d(def, ord)
+             LEFT JOIN shared_page_sources s ON s.page_id = $2 AND s.name = d.def->>'name' AND s.kind = d.def->>'kind' AND s.config = d.def->'config'`,
+          [copy.id, sourceId, JSON.stringify(snapshot.rows[0].sources)],
+        );
+      } else if (copy.kind === 'data') {
+        await client.query(
+          `INSERT INTO shared_page_sources (page_id, name, kind, config, position, data, row_count, status, error, duration_ms, refreshed_at, attempted_at)
+           SELECT $1, name, kind, config, position, data, row_count, status, error, duration_ms, refreshed_at, attempted_at FROM shared_page_sources WHERE page_id = $2`,
+          [copy.id, sourceId],
+        );
+      }
+      await client.query(SNAPSHOT_SQL, [copy.id]);
       await client.query('COMMIT');
       return toPage(copy);
     } catch (err) {
@@ -231,8 +276,18 @@ export const sharedPageRepository = {
   },
 
   async versions(pageId: string): Promise<SharedPageVersion[]> {
-    const { rows } = await pool.query<VersionRow>('SELECT page_id, version, size, created_by, session_id, created_at FROM shared_page_versions WHERE page_id = $1 ORDER BY version DESC', [pageId]);
+    const { rows } = await pool.query<VersionRow>(`SELECT ${VERSION_META} FROM shared_page_versions WHERE page_id = $1 ORDER BY version DESC`, [pageId]);
     return rows.map(toVersion);
+  },
+
+  async version(pageId: string, version: number): Promise<SharedPageVersion | null> {
+    const { rows } = await pool.query<VersionRow>(`SELECT ${VERSION_META} FROM shared_page_versions WHERE page_id = $1 AND version = $2`, [pageId, version]);
+    return rows[0] ? toVersion(rows[0]) : null;
+  },
+
+  /** Fige l'état courant de l'artefact (type, rafraîchissement, sources) dans sa dernière version. */
+  async snapshotLatest(pageId: string): Promise<void> {
+    await pool.query(SNAPSHOT_SQL, [pageId]);
   },
 
   async members(pageId: string): Promise<SharedPageMember[]> {

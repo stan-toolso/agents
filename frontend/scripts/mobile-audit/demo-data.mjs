@@ -232,7 +232,7 @@ const scheduleRun = (id, s, status, startedMin, over = {}) => ({
 const demoSharedPage = (id, title, owner, members, extra = {}) => ({
   __typename: 'SharedPage', id, title, description: null, owner, linkAccess: false, version: 1, createdAt: ago(60 * 24), updatedAt: ago(60 * 3),
   members: members.map(([u, message]) => ({ __typename: 'SharedPageMember', user: u, addedBy: owner, addedAt: ago(60 * 20), message })),
-  versions: [{ __typename: 'SharedPageVersion', version: 1, size: 18_400, createdBy: owner, createdAt: ago(60 * 24) }],
+  versions: [{ __typename: 'SharedPageVersion', version: 1, size: 18_400, createdBy: owner, createdAt: ago(60 * 24), kind: extra.kind ?? 'PAGE', refreshMinutes: extra.refreshMinutes ?? null, sourceCount: extra.kind === 'DATA' ? (extra.sources ?? []).length : null }],
   project: null, session: null, sourcePath: null, comments: [], openComments: 0, agentHandoff: 'MANUAL', historyEnabled: true, kind: 'PAGE', refreshMinutes: null, dataRefreshedAt: null, sources: [], favorite: false,
   viewerAccess: { __typename: 'SharedPageViewerAccess', owner: owner === U.me, member: owner !== U.me, admin: owner === U.me },
   ...extra,
@@ -259,6 +259,8 @@ const dataSourcesDemo = [
   { __typename: 'SharedPageSource', id: 'src-meteo', name: 'meteo', kind: 'script', item: null, database: null, query: null, interpreter: 'node', code: "const r = await fetch('https://api.open-meteo.com/v1/forecast?latitude=45.9&longitude=6.1&daily=temperature_2m_max');\nconsole.log(JSON.stringify(await r.json()));", timeoutSeconds: 60, status: 'ok', error: null, rowCount: null, durationMs: 1210, refreshedAt: ago(12), attemptedAt: ago(12) },
 ];
 S.hebdo.pages.unshift(demoSharedPage('page-data-inscriptions', 'Inscriptions : tableau de bord', U.me, [[U.hugo, null]], { kind: 'DATA', refreshMinutes: 60, dataRefreshedAt: ago(12), sources: dataSourcesDemo, session: S.hebdo, project: P.data, version: 4 }));
+// Chaque version d'un artefact garde son type et ses sources : quatre versions du tableau de bord, la première en page simple.
+S.hebdo.pages[0].versions = [4, 3, 2, 1].map((v) => ({ __typename: 'SharedPageVersion', version: v, size: 21_000 - v * 600, createdBy: U.me, createdAt: ago(60 * 24 * (5 - v)), kind: v === 1 ? 'PAGE' : 'DATA', refreshMinutes: v >= 3 ? 60 : null, sourceCount: v === 1 ? null : v === 2 ? 2 : 3 }));
 S.tarifs.pages.push(demoSharedPage('page-slides-offres', 'Présentation des trois offres', U.me, [[U.hugo, null]], { kind: 'SLIDES', session: S.tarifs, project: P.site, version: 2 }));
 sharedPagesDemo.push(...S.tarifs.pages.slice(0, 1), ...S.hebdo.pages, S.tarifs.pages[2]);
 // Favoris (section « Favoris » de la sidebar) : le tableau de bord des inscriptions et la présentation des offres.
