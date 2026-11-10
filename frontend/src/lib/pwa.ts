@@ -75,7 +75,7 @@ export function onUpdateAvailable(listener: () => void): () => void {
 }
 
 /** Délai au-delà duquel on recharge même si le nouveau service worker n'a pas encore pris la main. */
-const RELOAD_FALLBACK_MS = 3000;
+export const RELOAD_FALLBACK_MS = 3000;
 let reloading = false;
 
 /**
