@@ -85,7 +85,8 @@
   align-items: center;
   gap: 6px;
   margin: 0 6px;
-  padding: 5px 8px 5px 6px;
+  min-height: 26px;
+  padding: 2px 8px 2px 6px;
   border-radius: 7px;
   color: var(--cc-fg);
   text-decoration: none;
@@ -94,12 +95,12 @@
 .wb-row:hover { background: var(--cc-bg-hover); color: var(--cc-fg); }
 .wb-row.active { background: var(--cc-bg-elevated); color: var(--cc-fg); box-shadow: inset 0 0 0 1px var(--cc-border); }
 .wb-row-label { flex: 1; min-width: 40%; overflow: hidden; text-overflow: ellipsis; color: inherit; text-decoration: none; }
-.wb-project-row { color: var(--cc-fg); font-weight: 600; padding-top: 6px; padding-bottom: 6px; }
+.wb-project-row { color: var(--cc-fg); font-weight: 600; min-height: 28px; }
 .wb-project-row .wb-icon { color: var(--cc-dimmer); font-weight: 400; }
 .wb-project-row.active .wb-icon { color: var(--cc-accent); }
 .wb-project-row .wb-row-label { font-weight: 600; }
 /* Contenu d'un projet déplié : un filet le rattache à son projet. */
-.wb-project-body { margin: 0 0 6px 19px; padding-left: 2px; border-left: 1px solid var(--cc-border); }
+.wb-project-body { margin: 0 0 4px 19px; padding-left: 2px; border-left: 1px solid var(--cc-border); }
 .wb-session-row { padding-left: 30px; }
 .wb-empty { padding-left: 30px; color: var(--cc-dimmer); font-size: 12.5px; }
 .wb-chevron { background: none; border: 0; color: var(--cc-dim); padding: 0; width: 14px; font: inherit; cursor: pointer; }
@@ -605,18 +606,25 @@
 .wb-chats-head .wb-chats-new { margin-left: auto; visibility: hidden; }
 .wb-chats-head:hover .wb-chats-new, .wb-chats-head.active .wb-chats-new { visibility: visible; }
 .wb-chats-rows .wb-row-label { font-weight: 400; }
-.wb-ws { margin: 1px 8px 1px 6px; border: 1px solid transparent; border-radius: var(--cc-radius-sm); padding: 2px 0 3px; }
+.wb-ws { margin: 0 6px 0 4px; border: 1px solid transparent; border-radius: 7px; padding: 1px 0; }
 .wb-ws:hover { background: var(--cc-bg-hover); }
 .wb-ws.active { border-color: var(--cc-border); background: var(--cc-bg-elevated); box-shadow: 0 1px 2px var(--cc-border-soft); }
-.wb-ws-head { display: flex; align-items: center; gap: 4px; padding: 3px 6px 1px 8px; }
+.wb-ws-head { display: flex; align-items: center; gap: 4px; min-height: 24px; padding: 0 4px 0 8px; }
+.wb-ws-head .wb-ws-chevron { margin-left: 0; padding: 0 2px; }
 .wb-ws-link { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; color: var(--cc-fg); text-decoration: none; }
 .wb-ws-link:hover { color: var(--cc-fg); }
 .wb-ws-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 /* Ligne de méta d'une carte, en texte : état · tâche · PR · modèle, séparés par des points médians. */
-.wb-ws-meta { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; min-width: 0; padding: 0 8px 2px 24px; font-size: 11.5px; line-height: 18px; color: var(--cc-dim); white-space: nowrap; }
-/* Chaque morceau garde sa largeur (la ligne passe à la ligne plutôt que de les écraser) ; seul un libellé très long se tronque. */
-.wb-ws-meta > * { flex: 0 0 auto; max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; display: inline-flex; align-items: center; gap: 4px; }
-.wb-ws-meta > .wb-meta-task { max-width: 150px; }
+.wb-ws-meta { display: flex; align-items: center; column-gap: 9px; min-width: 0; margin-top: -3px; padding: 0 8px 3px 24px; font-size: 11.5px; line-height: 16px; color: var(--cc-dim); white-space: nowrap; overflow: hidden; }
+/* Une seule ligne : l'état et la PR gardent leur largeur ; la tâche et ce qui est ouvert se tronquent. */
+.wb-ws-meta > * { flex: 0 0 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; display: inline-flex; align-items: center; gap: 4px; }
+.wb-ws-meta > .wb-meta-task, .wb-ws-meta > .wb-meta-chip { flex: 0 1 auto; }
+.wb-ws-meta > .wb-meta-task { min-width: 4.5em; }
+.wb-meta-chip { color: var(--cc-dim); text-decoration: none; }
+.wb-meta-chip:hover, .wb-meta-chip.active { color: var(--cc-fg); }
+.wb-meta-chip .wb-dot { width: 6px; height: 6px; }
+.wb-meta-sub { background: none; border: 0; padding: 0; font: inherit; cursor: pointer; }
+.wb-meta-sub .wb-chip-sub { background: none; padding: 0; font-size: 11px; }
 
 .wb-ws-meta .bi { font-size: 10.5px; flex: 0 0 auto; }
 .wb-meta-state { flex: 0 0 auto; }
@@ -627,7 +635,8 @@
 .wb-meta-pr.wt-pr-merged { color: var(--cc-green); }
 .wb-meta-pr.wt-pr-draft, .wb-meta-pr.wt-pr-pending { color: var(--cc-dimmer); }
 .wb-meta-task.task-done .bi { color: var(--cc-green); }
-.wb-meta-model { color: var(--cc-dimmer); font-family: var(--cc-font-mono); font-size: 10px; line-height: 15px; padding: 0 5px; border: 1px solid var(--cc-border); border-radius: 4px; }
+.wb-meta-model { flex: 0 0 auto; color: var(--cc-dimmer); font-family: var(--cc-font-mono); font-size: 10px; }
+.wb-ws-link .wb-meta-model { margin-left: auto; }
 /* La tête d'une carte tient sur une ligne : la phrase d'état ne passe jamais à la ligne, se montre entière quand elle
    est courte (« travaille ») et se tronque au-delà de 40 % de la largeur ; le nom se tronque sur le reste. */
 .wb-ws-link .wb-state { flex: 0 0 auto; max-width: 40%; }
@@ -639,7 +648,8 @@
 .wb-ws-state.none { background: transparent; border: 1px solid var(--cc-dimmer); }
 .wb-tag { font-size: 10px; color: var(--cc-dimmer); border: 1px solid var(--cc-border); border-radius: 3px; padding: 0 4px; line-height: 1.4; flex: 0 0 auto; }
 .wb-tag.missing { color: var(--cc-yellow); border-color: var(--cc-yellow); }
-.wb-ws-items { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 3px 6px 3px 24px; }
+.wb-ws-items { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; padding: 0 6px 3px 24px; overflow: hidden; }
+.wb-ws-items .wb-chip { padding: 0 7px; line-height: 18px; flex: 0 1 auto; min-width: 0; }
 .wb-ws-empty { font-size: 11.5px; color: var(--cc-dimmer); }
 .wb-empty-link { color: var(--cc-dim); text-decoration: none; }
 .wb-empty-link:hover { color: var(--cc-fg); text-decoration: underline; }
@@ -665,6 +675,8 @@
 /* ---- Sidebar repliée (bureau) ----------------------------------------------------------------- */
 @media (min-width: 768px) {
   .wb.sidebar-collapsed .wb-sidebar, .wb.sidebar-collapsed .wb-resizer { display: none; }
+  /* Sidebar repliée : le bouton de la barre d'onglets la rouvre (sans lui, plus moyen de la retrouver). */
+  .wb.sidebar-collapsed .wb-burger { display: flex; width: 40px; font-size: 16px; }
 }
 
 /* ---- Sous-barre d'onglets d'un dossier de travail --------------------------------------------- */

@@ -557,6 +557,19 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
   // Modèle de la session du dossier : signalé sur la carte quand ce n'est pas Opus (planification ou tâche sur Sonnet…).
   const cheapModel = !ws.primary && session?.model && !isOpus(session.model) ? session.model : null;
   const hasRows = ws.primary ? visibleSessions.length > 0 || ws.terminals.length > 0 || hiddenOthers > 0 || elsewhereSubs.length > 0 : children.length > 0 || ws.terminals.length > 0 || Boolean(session?.browserActive);
+  // Ligne de méta (deuxième ligne, jamais plus) : ce qui appelle l'attention, la tâche, la PR, puis ce qui est ouvert
+  // dans le dossier. Sans rien de tout cela, la carte tient sur une ligne (le modèle passe alors sur la tête).
+  const prPill = pr && PR_PILL[prState(pr)] ? PR_PILL[prState(pr)] : null;
+  const subagentsChip = !ws.primary && children.length > 0 && !expanded;
+  const hasMeta = !ws.primary && Boolean(hint || (ws.task && taskChip) || prPill || subagentsChip || shown.length > 0);
+  // La PR ne s'écrit en toutes lettres que quand elle attend une action (« #87 à fusionner ») ; sinon son numéro ou son
+  // pictogramme, coloré selon l'étape, suffit (le détail est dans l'infobulle).
+  const prText = pr && prPill ? (prState(pr) === 'open' ? `${prLabel(pr)} ${prPill}` : pr.number == null ? '' : prLabel(pr)) : '';
+  const modelTag = cheapModel ? (
+    <span className="wb-meta-model" title={`Modèle : ${cheapModel}`}>
+      {shortModel(cheapModel)}
+    </span>
+  ) : null;
   return (
     <div className={`wb-ws${activeKey === ws.key ? ' active' : ''}${session && isCurrent(`/sessions/${session.id}`) ? ' current' : ''}`}>
       <div
@@ -574,6 +587,7 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
           <span className="wb-ws-name">{label ?? ws.name}</span>
           {ws.primary && ws.projectName && <span className="wb-tag" title="Sessions et terminaux d'avant les work sessions, dans le checkout principal">principal</span>}
           {!ws.exists && <span className="wb-tag missing">absent</span>}
+          {modelTag}
           {session?.agent ? (
             <AgentAvatar agent={session.agent} size={16} className="wb-owner wb-owner-agent" title={`Session de l'agent ${session.agent.name}`} />
           ) : (
@@ -586,6 +600,11 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
           )}
           {pending > 0 && <span className="wb-badge">{pending}</span>}
         </Link>
+        {hasRows && (
+          <button type="button" className="wb-chevron wb-ws-chevron" title={expanded ? 'Replier' : 'Détailler'} onClick={onToggle}>
+            <i className={`bi bi-chevron-${expanded ? 'down' : 'right'}`} style={{ fontSize: 10 }} />
+          </button>
+        )}
         <span className={`wb-row-actions${menu ? ' open' : ''}`}>
           <button
             type="button"
@@ -601,8 +620,7 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
           {menu && <AddMenu projectId={ws.projectId} session={session ? { id: session.id, name: session.name, status: session.status, worksessionId: ws.worksessionId, branch: ws.worksessionId ? ws.branch : null } : null} onClose={() => setMenu(false)} />}
         </span>
       </div>
-      {/* Ligne de méta, en texte : ce que fait la session, où en est sa tâche, sa pull request, son modèle s'il n'est pas Opus. */}
-      {!ws.primary && (hint || (ws.task && taskChip) || (pr && PR_PILL[prState(pr)]) || cheapModel) && (
+      {hasMeta && (
         <div className="wb-ws-meta">
           {hint && session && <span className={`wb-meta-state ${sessionDotClass(session)}`}>{hint}</span>}
           {ws.task && taskChip && (
@@ -611,27 +629,28 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
               <span className="wb-meta-text">{taskChip.tag || taskChip.text}</span>
             </Link>
           )}
-          {pr && PR_PILL[prState(pr)] && (
-            <button type="button" className={`wb-meta-pr wt-pr-${prState(pr)}`} title={`${icon.title} · ${pr.number == null ? 'créer la pull request' : 'voir la pull request'}`} disabled={!prWindow} onClick={() => setPrOpen(true)}>
+          {pr && prPill && (
+            <button type="button" className={`wb-meta-pr wt-pr-${prState(pr)}`} title={`${icon.title} · ${prPill} · ${pr.number == null ? 'créer la pull request' : 'voir la pull request'}`} disabled={!prWindow} onClick={() => setPrOpen(true)}>
               <i className="bi bi-git" />
-              {pr.number == null ? PR_PILL[prState(pr)] : `${prLabel(pr)} ${PR_PILL[prState(pr)]}`}
+              {prText && <span className="wb-meta-text">{prText}</span>}
             </button>
           )}
-          {cheapModel && (
-            <span className="wb-meta-model" title={`Modèle : ${cheapModel}`}>
-              {shortModel(cheapModel)}
-            </span>
-          )}
-        </div>
-      )}
-      {prOpen && prWindow && <PullRequestWindow projectId={ws.projectId} window={prWindow} onClose={() => setPrOpen(false)} />}
-      {(chips.length > 0 || ws.primary || hasRows || (!ws.primary && children.length > 0 && !expanded)) && (
-        <div className="wb-ws-items">
-          {!ws.primary && children.length > 0 && !expanded && (
-            <button type="button" className="wb-chip" title={`${subagentsSummary(children.map((c) => c.session)).label} lancé(s) par l'agent de cette session · cliquer pour détailler`} onClick={onToggle}>
+          {subagentsChip && (
+            <button type="button" className="wb-meta-sub" title={`${subagentsSummary(children.map((c) => c.session)).label} lancé(s) par l'agent de cette session · cliquer pour détailler`} onClick={onToggle}>
               <SubagentsCount children={children.map((c) => c.session)} />
             </button>
           )}
+          {shown.map((c) => (
+            <Link key={c.key} to={c.to} className={`wb-meta-chip${c.active ? ' active' : ''}`} title={c.title}>
+              {c.node}
+              <span className="wb-meta-text">{c.label}</span>
+            </Link>
+          ))}
+        </div>
+      )}
+      {prOpen && prWindow && <PullRequestWindow projectId={ws.projectId} window={prWindow} onClose={() => setPrOpen(false)} />}
+      {ws.primary && (
+        <div className="wb-ws-items">
           {shown.map((c) => (
             <Link key={c.key} to={c.to} className={`wb-chip${c.active ? ' active' : ''}`} title={c.title}>
               {c.node}
@@ -645,17 +664,12 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
               +{chips.length - shown.length}
             </button>
           )}
-          {ws.primary && hiddenOthers > 0 && (
+          {hiddenOthers > 0 && (
             <button type="button" className="wb-chip wb-chip-more" title={`Afficher les ${hiddenOthers} session(s) d'autres personnes`} onClick={onShowOthers}>
               <i className="bi bi-people" /> {hiddenOthers}
             </button>
           )}
-          {ws.primary && chips.length === 0 && hiddenOthers === 0 && (elsewhereSubs.length ? <ElsewhereNote subs={elsewhereSubs} poolById={poolById} /> : <span className="wb-ws-empty">rien d'ouvert</span>)}
-          {hasRows && (
-            <button type="button" className="wb-chevron wb-ws-chevron" title={expanded ? 'Replier' : 'Détailler'} onClick={onToggle}>
-              <i className={`bi bi-chevron-${expanded ? 'down' : 'right'}`} style={{ fontSize: 10 }} />
-            </button>
-          )}
+          {chips.length === 0 && hiddenOthers === 0 && (elsewhereSubs.length ? <ElsewhereNote subs={elsewhereSubs} poolById={poolById} /> : <span className="wb-ws-empty">rien d'ouvert</span>)}
         </div>
       )}
       {expanded && hasRows && (
