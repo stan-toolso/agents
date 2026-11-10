@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { Spinner } from 'react-bootstrap';
 import { useAuth } from '../auth/AuthContext';
-import { CLOSE_TERMINAL, INBOX_COUNTS, REQUESTS, SIDEBAR, SIDEBAR_PULL_REQUESTS, STOP_SESSION, type HumanRequest } from '../graphql/operations';
+import { CLOSE_TERMINAL, INBOX_COUNTS, SIDEBAR, SIDEBAR_PULL_REQUESTS, STOP_SESSION } from '../graphql/operations';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { formatCost, sessionStateHint, taskChipOf } from '../lib/humanize';
 import Logo from '../components/Logo';
@@ -69,7 +69,7 @@ function ChatRow({ chat, indent }: { chat: SidebarSession; indent: number }) {
     <RowWithMenu to={`/chats/${chat.id}`} active={location.pathname === `/chats/${chat.id}`} indent={indent} title={`${chat.name} · ${statusTitle(chat)}`} items={items}>
       <span className={`wb-dot ${sessionDotClass(chat)}`} />
       <span className="wb-row-label">{chat.name}</span>
-      {chat.pendingRequestCount > 0 ? <span className="wb-badge">{chat.pendingRequestCount}</span> : hint && <span className="wb-state">{hint}</span>}
+      {chat.pendingRequestCount > 0 ? <span className="wb-badge">{chat.pendingRequestCount}</span> : hint && sessionDotClass(chat) !== 'idle' && <span className={`wb-state ${sessionDotClass(chat)}`}>{hint}</span>}
     </RowWithMenu>
   );
 }
@@ -91,7 +91,7 @@ function ChatsBlock({ chats, expanded, onToggle }: { chats: SidebarSession[]; ex
   const hidden = chats.length - shown.length;
   return (
     <div className="wb-chats">
-      <div className={`wb-row wb-session-row wb-chats-head${location.pathname === '/chats' ? ' active' : ''}`} style={{ paddingLeft: 18 }}>
+      <div className={`wb-row wb-session-row wb-chats-head${location.pathname === '/chats' ? ' active' : ''}`} style={{ paddingLeft: 8 }}>
         <button type="button" className="wb-chevron" onClick={onToggle} title={expanded ? 'Replier les chats' : 'Déplier les chats'}>
           <i className={`bi bi-chevron-${expanded ? 'down' : 'right'}`} style={{ fontSize: 10 }} />
         </button>
@@ -106,15 +106,15 @@ function ChatsBlock({ chats, expanded, onToggle }: { chats: SidebarSession[]; ex
       {expanded && (
         <div className="wb-chats-rows">
           {shown.map((c) => (
-            <ChatRow key={c.id} chat={c} indent={30} />
+            <ChatRow key={c.id} chat={c} indent={26} />
           ))}
           {hidden > 0 && (
-            <Link to="/chats" className="wb-row wb-empty wb-empty-link" style={{ paddingLeft: 30 }}>
+            <Link to="/chats" className="wb-row wb-empty wb-empty-link" style={{ paddingLeft: 26 }}>
               + {hidden} autre{hidden > 1 ? 's' : ''} chat{hidden > 1 ? 's' : ''}
             </Link>
           )}
           {chats.length === 0 && (
-            <Link to="/chats" className="wb-row wb-empty wb-empty-link" style={{ paddingLeft: 30 }}>
+            <Link to="/chats" className="wb-row wb-empty wb-empty-link" style={{ paddingLeft: 26 }}>
               aucun chat : en ouvrir un
             </Link>
           )}
@@ -178,19 +178,27 @@ function FavoritesSection({ expanded, onToggle }: { expanded: boolean; onToggle:
   );
 }
 
-/** Menus principaux, affichés en une ligne d'icônes (le libellé sert d'infobulle). */
-const MAIN_MENU: { to: string; label: string; icon: string; title?: string }[] = [
-  { to: '/', label: 'Tableau de bord', icon: 'bi-speedometer2' },
+/**
+ * L'essentiel en tête de la sidebar : l'accueil, ce qui attend une action, les tâches. Les autres pages (sessions,
+ * chats, artefacts, projets, coffre, planifications, workflows…) sont dans le menu du compte (`MORE_PAGES`) et la
+ * recherche (⌘K) ; les sessions, chats et projets sont de toute façon listés plus bas.
+ */
+type MenuEntry = { to: string; label: string; icon: string; title?: string };
+const MAIN_MENU: MenuEntry[] = [
+  { to: '/', label: 'Accueil', icon: 'bi-house', title: 'Tableau de bord' },
   { to: '/inbox', label: 'À traiter', icon: 'bi-inbox', title: 'À traiter : demandes, sessions en attente et pull requests à fusionner, tous projets' },
-  { to: '/projects', label: 'Projets', icon: 'bi-folder2' },
-  { to: '/sessions', label: 'Sessions', icon: 'bi-chat-dots' },
-  { to: '/chats', label: 'Chats', icon: 'bi-chat-left-text', title: 'Chats : conversations légères de votre espace personnel, avec accès à tous vos projets' },
-  { to: '/tasks', label: 'Tâches', icon: 'bi-check2-square' },
-  { to: '/shared', label: 'Artefacts', icon: 'bi-collection', title: 'Artefacts : pages et tableaux de bord publiés par les agents' },
-  { to: '/vault', label: 'Coffre', icon: 'bi-shield-lock' },
-  { to: '/schedules', label: 'Planifications', icon: 'bi-alarm', title: 'Planifications : une nouvelle session à heures fixes, prochaines échéances et historique' },
-  { to: '/workflows', label: 'Workflows', icon: 'bi-diagram-3', title: "Workflows : enchaînements d'appels de modèle, de sessions et de tâches" },
-  { to: '/requests', label: 'Demandes', icon: 'bi-bell' },
+  { to: '/tasks', label: 'Tâches', icon: 'bi-check2-square', title: 'Tâches de tous vos projets' },
+];
+/** Pages moins fréquentes, rangées dans le menu du compte (bas de la sidebar). */
+const MORE_PAGES: MenuItem[] = [
+  { label: 'Sessions', icon: 'bi-chat-dots', to: '/sessions' },
+  { label: 'Chats', icon: 'bi-chat-left-text', to: '/chats' },
+  { label: 'Artefacts', icon: 'bi-collection', to: '/shared' },
+  { label: 'Projets', icon: 'bi-folder2', to: '/projects' },
+  { label: 'Demandes', icon: 'bi-bell', to: '/requests' },
+  { label: 'Coffre', icon: 'bi-shield-lock', to: '/vault' },
+  { label: 'Planifications', icon: 'bi-alarm', to: '/schedules' },
+  { label: 'Workflows', icon: 'bi-diagram-3', to: '/workflows' },
 ];
 
 /** PR suivie d'un dossier de travail : en préparation dès que la branche porte des modifications, puis ouverte sur GitHub. */
@@ -337,7 +345,7 @@ function SessionRow({ s, indent, depth = 0, byAgent = false, parentName = null, 
             </span>
           )
         )}
-        {s.pendingRequestCount > 0 ? <span className="wb-badge">{s.pendingRequestCount}</span> : hint && depth === 0 && <span className="wb-state">{hint}</span>}
+        {s.pendingRequestCount > 0 ? <span className="wb-badge">{s.pendingRequestCount}</span> : hint && depth === 0 && sessionDotClass(s) !== 'idle' && <span className={`wb-state ${sessionDotClass(s)}`}>{hint}</span>}
       </RowWithMenu>
       {s.browserActive && (
         <Link to={browserPath} className={`wb-row wb-session-row wb-browser-row${location.pathname === browserPath ? ' active' : ''}`} style={{ paddingLeft: left + 16 }} title="Voir en direct la page ouverte par l'agent">
@@ -361,7 +369,7 @@ function OwnerGroupRow({ group, expanded, onToggle }: { group: OwnerGroup<Worksp
   const who = group.agent ? `l'agent ${group.agent.name}` : group.owner.name;
   const count = `${sessions.length} session${sessions.length > 1 ? 's' : ''}`;
   return (
-    <button type="button" className={`wb-row wb-row-btn wb-owner-group${expanded ? ' open' : ''}`} style={{ paddingLeft: 18 }} title={`${count} de ${who} · cliquer pour ${expanded ? 'replier' : 'déplier'}`} onClick={onToggle}>
+    <button type="button" className={`wb-row wb-row-btn wb-owner-group${expanded ? ' open' : ''}`} style={{ paddingLeft: 8 }} title={`${count} de ${who} · cliquer pour ${expanded ? 'replier' : 'déplier'}`} onClick={onToggle}>
       {group.agent ? (
         <AgentAvatar agent={group.agent} size={16} className="wb-owner wb-owner-agent" />
       ) : (
@@ -393,7 +401,7 @@ function ScheduleGroupRow({ group, projectId, expanded, onToggle }: { group: Sch
       role="button"
       tabIndex={0}
       className={`wb-row wb-row-btn wb-schedule-group${expanded ? ' open' : ''}`}
-      style={{ paddingLeft: 18 }}
+      style={{ paddingLeft: 8 }}
       title={`Planification « ${group.schedule.name} »${group.schedule.enabled ? '' : ' (en pause)'} · ${count} dans la sidebar · cliquer pour ${expanded ? 'replier' : 'déplier'}`}
       onClick={onToggle}
       onKeyDown={(e) => {
@@ -493,7 +501,8 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
   const pending = [...ws.sessions, ...children.map((c) => c.session)].reduce((n, s) => n + s.pendingRequestCount, 0);
   const icon = branchIcon(ws, pr);
   const prWindow = pr ? windowFor(pr) : null;
-  const hint = session ? sessionStateHint(session.status, session.activity, session.pendingRequestCount) : null;
+  // « attend vos instructions » n'est pas écrit : l'anneau du point le dit déjà ; la ligne de méta garde ce qui appelle l'attention.
+  const hint = session && sessionDotClass(session) !== 'idle' ? sessionStateHint(session.status, session.activity, session.pendingRequestCount) : null;
   const mine = session ? participates(session, userId) : true;
   const chips = ws.primary
     ? [
@@ -550,6 +559,19 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
   // Modèle de la session du dossier : signalé sur la carte quand ce n'est pas Opus (planification ou tâche sur Sonnet…).
   const cheapModel = !ws.primary && session?.model && !isOpus(session.model) ? session.model : null;
   const hasRows = ws.primary ? visibleSessions.length > 0 || ws.terminals.length > 0 || hiddenOthers > 0 || elsewhereSubs.length > 0 : children.length > 0 || ws.terminals.length > 0 || Boolean(session?.browserActive);
+  // Ligne de méta (deuxième ligne, jamais plus) : ce qui appelle l'attention, la tâche, la PR, puis ce qui est ouvert
+  // dans le dossier. Sans rien de tout cela, la carte tient sur une ligne (le modèle passe alors sur la tête).
+  const prPill = pr && PR_PILL[prState(pr)] ? PR_PILL[prState(pr)] : null;
+  const subagentsChip = !ws.primary && children.length > 0 && !expanded;
+  const hasMeta = !ws.primary && Boolean(hint || (ws.task && taskChip) || prPill || subagentsChip || shown.length > 0);
+  // La PR ne s'écrit en toutes lettres que quand elle attend une action (« #87 à fusionner ») ; sinon son numéro ou son
+  // pictogramme, coloré selon l'étape, suffit (le détail est dans l'infobulle).
+  const prText = pr && prPill ? (prState(pr) === 'open' ? `${prLabel(pr)} ${prPill}` : pr.number == null ? '' : prLabel(pr)) : '';
+  const modelTag = cheapModel ? (
+    <span className="wb-meta-model" title={`Modèle : ${cheapModel}`}>
+      {shortModel(cheapModel)}
+    </span>
+  ) : null;
   return (
     <div className={`wb-ws${activeKey === ws.key ? ' active' : ''}${session && isCurrent(`/sessions/${session.id}`) ? ' current' : ''}`}>
       <div
@@ -563,10 +585,11 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
       >
         <Link to={headTo} className="wb-ws-link">
           {session ? <span className={`wb-dot ${sessionDotClass(session)}`} /> : <span className={`wb-ws-state ${state ?? 'none'}`} />}
-          {!ws.primary && <i className={`bi ${ws.task ? 'bi-check2-square' : 'bi-git'} wb-icon ${icon.cls}`} />}
+          {ws.primary && <i className="bi bi-folder2 wb-icon" />}
           <span className="wb-ws-name">{label ?? ws.name}</span>
           {ws.primary && ws.projectName && <span className="wb-tag" title="Sessions et terminaux d'avant les work sessions, dans le checkout principal">principal</span>}
           {!ws.exists && <span className="wb-tag missing">absent</span>}
+          {modelTag}
           {session?.agent ? (
             <AgentAvatar agent={session.agent} size={16} className="wb-owner wb-owner-agent" title={`Session de l'agent ${session.agent.name}`} />
           ) : (
@@ -577,8 +600,13 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
               </span>
             )
           )}
-          {pending > 0 ? <span className="wb-badge">{pending}</span> : hint && <span className="wb-state">{hint}</span>}
+          {pending > 0 && <span className="wb-badge">{pending}</span>}
         </Link>
+        {hasRows && (
+          <button type="button" className="wb-chevron wb-ws-chevron" title={expanded ? 'Replier' : 'Détailler'} onClick={onToggle}>
+            <i className={`bi bi-chevron-${expanded ? 'down' : 'right'}`} style={{ fontSize: 10 }} />
+          </button>
+        )}
         <span className={`wb-row-actions${menu ? ' open' : ''}`}>
           <button
             type="button"
@@ -594,31 +622,37 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
           {menu && <AddMenu projectId={ws.projectId} session={session ? { id: session.id, name: session.name, status: session.status, worksessionId: ws.worksessionId, branch: ws.worksessionId ? ws.branch : null } : null} onClose={() => setMenu(false)} />}
         </span>
       </div>
-      {(chips.length > 0 || ws.task || (pr && PR_PILL[prState(pr)]) || ws.primary || hasRows || children.length > 0 || cheapModel) && (
-        <div className="wb-ws-items">
+      {hasMeta && (
+        <div className="wb-ws-meta">
+          {hint && session && <span className={`wb-meta-state ${sessionDotClass(session)}`}>{hint}</span>}
           {ws.task && taskChip && (
-            <Link to={`/tasks/${ws.task.id}`} className={`wb-ws-task task-status task-status-${taskChip.cls}`} title={`Tâche : ${ws.task.title}${taskChip.note ? ` · ${taskChip.note}` : ''}`}>
-              {taskChip.text}
-              {taskChip.tag && <span className="task-status-tag">{taskChip.tag}</span>}
+            <Link to={`/tasks/${ws.task.id}`} className={`wb-meta-task task-${taskChip.cls}`} title={`Tâche : ${ws.task.title} · ${taskChip.text}${taskChip.tag ? ` · ${taskChip.tag}` : ''}${taskChip.note ? ` · ${taskChip.note}` : ''}`}>
+              <i className="bi bi-check2-square" />
+              <span className="wb-meta-text">{taskChip.tag || taskChip.text}</span>
             </Link>
           )}
-          {pr && PR_PILL[prState(pr)] && (
-            <button type="button" className={`wb-ws-pr task-status wt-pr-${prState(pr)}`} title={`${icon.title} · ${pr.number == null ? 'créer la pull request' : 'voir la pull request'}`} disabled={!prWindow} onClick={() => setPrOpen(true)}>
-              <i className="bi bi-git" /> {pr.number == null ? null : prLabel(pr)}
-              <span className="task-status-tag">{PR_PILL[prState(pr)]}</span>
+          {pr && prPill && (
+            <button type="button" className={`wb-meta-pr wt-pr-${prState(pr)}`} title={`${icon.title} · ${prPill} · ${pr.number == null ? 'créer la pull request' : 'voir la pull request'}`} disabled={!prWindow} onClick={() => setPrOpen(true)}>
+              <i className="bi bi-git" />
+              {prText && <span className="wb-meta-text">{prText}</span>}
             </button>
           )}
-          {cheapModel && (
-            <span className="wb-tag wb-model-tag" title={`Modèle : ${cheapModel}`}>
-              <i className="bi bi-cpu" /> {shortModel(cheapModel)}
-            </span>
-          )}
-          {prOpen && prWindow && <PullRequestWindow projectId={ws.projectId} window={prWindow} onClose={() => setPrOpen(false)} />}
-          {!ws.primary && children.length > 0 && !expanded && (
-            <button type="button" className="wb-chip" title={`${subagentsSummary(children.map((c) => c.session)).label} lancé(s) par l'agent de cette session · cliquer pour détailler`} onClick={onToggle}>
+          {subagentsChip && (
+            <button type="button" className="wb-meta-sub" title={`${subagentsSummary(children.map((c) => c.session)).label} lancé(s) par l'agent de cette session · cliquer pour détailler`} onClick={onToggle}>
               <SubagentsCount children={children.map((c) => c.session)} />
             </button>
           )}
+          {shown.map((c) => (
+            <Link key={c.key} to={c.to} className={`wb-meta-chip${c.active ? ' active' : ''}`} title={c.title}>
+              {c.node}
+              <span className="wb-meta-text">{c.label}</span>
+            </Link>
+          ))}
+        </div>
+      )}
+      {prOpen && prWindow && <PullRequestWindow projectId={ws.projectId} window={prWindow} onClose={() => setPrOpen(false)} />}
+      {ws.primary && (
+        <div className="wb-ws-items">
           {shown.map((c) => (
             <Link key={c.key} to={c.to} className={`wb-chip${c.active ? ' active' : ''}`} title={c.title}>
               {c.node}
@@ -632,17 +666,12 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
               +{chips.length - shown.length}
             </button>
           )}
-          {ws.primary && hiddenOthers > 0 && (
+          {hiddenOthers > 0 && (
             <button type="button" className="wb-chip wb-chip-more" title={`Afficher les ${hiddenOthers} session(s) d'autres personnes`} onClick={onShowOthers}>
               <i className="bi bi-people" /> {hiddenOthers}
             </button>
           )}
-          {ws.primary && chips.length === 0 && hiddenOthers === 0 && (elsewhereSubs.length ? <ElsewhereNote subs={elsewhereSubs} poolById={poolById} /> : <span className="wb-ws-empty">rien d'ouvert</span>)}
-          {hasRows && (
-            <button type="button" className="wb-chevron wb-ws-chevron" title={expanded ? 'Replier' : 'Détailler'} onClick={onToggle}>
-              <i className={`bi bi-chevron-${expanded ? 'down' : 'right'}`} style={{ fontSize: 10 }} />
-            </button>
-          )}
+          {chips.length === 0 && hiddenOthers === 0 && (elsewhereSubs.length ? <ElsewhereNote subs={elsewhereSubs} poolById={poolById} /> : <span className="wb-ws-empty">rien d'ouvert</span>)}
         </div>
       )}
       {expanded && hasRows && (
@@ -692,10 +721,11 @@ function UserBlock() {
   const [open, setOpen] = useState(false);
   if (!user) return null;
   const items: MenuItem[] = [
-    ...(installable ? [{ label: "Installer l'application", icon: 'bi-phone', onClick: install }] : []),
-    ...(user.isAdmin ? [{ label: 'Utilisateurs', icon: 'bi-people', to: '/users' }] : []),
+    ...(user.isGuest ? [] : MORE_PAGES),
+    ...(installable ? [{ label: "Installer l'application", icon: 'bi-phone', onClick: install, separatorBefore: !user.isGuest }] : []),
+    ...(user.isAdmin ? [{ label: 'Utilisateurs', icon: 'bi-people', to: '/users', separatorBefore: !installable && !user.isGuest }] : []),
     ...(user.isAdmin ? [{ label: 'Consommation', icon: 'bi-receipt', to: '/billing' }] : []),
-    { label: 'Premiers pas', icon: 'bi-compass', to: '/welcome' },
+    { label: 'Premiers pas', icon: 'bi-compass', to: '/welcome', separatorBefore: !installable && !user.isAdmin && !user.isGuest },
     { label: 'Paramètres', icon: 'bi-gear', to: '/settings' },
     { label: 'Se déconnecter', icon: 'bi-box-arrow-right', separatorBefore: true, onClick: () => void logout() },
   ];
@@ -743,8 +773,6 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   const { data } = usePollingQuery<{ projects: SidebarProject[]; chats: SidebarSession[] }>(SIDEBAR, { variables: { open }, pollInterval: 5000, fetchPolicy: 'cache-and-network' });
   const chats = data?.chats ?? [];
   const { data: prData } = usePollingQuery<{ projects: { id: string; worksessions: { id: string; trackedPullRequest: PullRequestRef | null }[] }[] }>(SIDEBAR_PULL_REQUESTS, { variables: { open }, pollInterval: 60_000 });
-  const { data: pendingData } = usePollingQuery<{ requests: HumanRequest[] }>(REQUESTS, { variables: { status: 'PENDING' }, pollInterval: 3000 });
-  const pending = pendingData?.requests.length ?? 0;
   const { data: inboxData } = usePollingQuery<{ inboxCounts: { total: number } }>(INBOX_COUNTS, { pollInterval: 5000 });
   const inboxTotal = inboxData?.inboxCounts.total ?? 0;
   const prByWorksession = useMemo(() => new Map((prData?.projects ?? []).flatMap((p) => p.worksessions.map((w) => [w.id, w.trackedPullRequest] as const))), [prData]);
@@ -833,18 +861,14 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
         <kbd>{displayComboText('mod+k')}</kbd>
       </button>
 
-      <nav className="wb-menu wb-menu-icons" aria-label="Navigation principale">
+      <nav className="wb-menu" aria-label="Navigation principale">
         {MAIN_MENU.map((m) => (
-          <NavLink key={m.to} to={m.to} end={m.to !== '/requests' && m.to !== '/inbox'} className="wb-menu-item" title={m.title ?? m.label} aria-label={m.label}>
+          <NavLink key={m.to} to={m.to} end={m.to !== '/inbox'} className="wb-menu-item" title={m.title ?? m.label}>
             <i className={`bi ${m.icon} wb-icon`} />
+            <span className="wb-menu-label">{m.label}</span>
             {m.to === '/inbox' && inboxTotal > 0 && (
               <span className="wb-badge" title="Éléments qui attendent une action de votre part">
                 {inboxTotal}
-              </span>
-            )}
-            {m.to === '/requests' && pending > 0 && (
-              <span className="wb-badge" title="Un agent attend votre réponse">
-                {pending}
               </span>
             )}
           </NavLink>
@@ -854,7 +878,9 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
       {!user?.isGuest && <FavoritesSection expanded={expanded.favorites ?? true} onToggle={() => toggle('favorites', true)} />}
 
       <div className="wb-section-title">
-        <span>Projets</span>
+        <Link to="/projects" className="wb-section-link" title="Tous les projets">
+          Projets
+        </Link>
         <button
           type="button"
           className="wb-section-action wb-filter"
@@ -912,8 +938,10 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
                   )}
                 </span>
               </div>
-              {open && p.isPersonal && <ChatsBlock chats={chats} expanded={expanded[`chats:${p.id}`] ?? true} onToggle={() => toggle(`chats:${p.id}`, true)} />}
-              {open && (() => {
+              {open && (
+              <div className="wb-project-body">
+              {p.isPersonal && <ChatsBlock chats={chats} expanded={expanded[`chats:${p.id}`] ?? true} onToggle={() => toggle(`chats:${p.id}`, true)} />}
+              {(() => {
                 const showOthers = othersShown.has(p.id);
                 const poolById = new Map(p.sessions.map((s) => [s.id, s]));
                 // Une carte par session de premier niveau (un sous-agent est rangé sous sa parente) ; avec le filtre
@@ -973,18 +1001,20 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
                       );
                     })}
                     {hiddenOthers > 0 && (
-                      <button type="button" className="wb-row wb-empty wb-row-btn" style={{ paddingLeft: 18 }} title="Afficher les sessions des autres personnes et des agents, rangées par personne ou agent" onClick={() => setOthersShown((prev) => new Set([...prev, p.id]))}>
+                      <button type="button" className="wb-row wb-empty wb-row-btn" style={{ paddingLeft: 8 }} title="Afficher les sessions des autres personnes et des agents, rangées par personne ou agent" onClick={() => setOthersShown((prev) => new Set([...prev, p.id]))}>
                         <i className="bi bi-people me-1" /> + {hiddenOthers} session{hiddenOthers > 1 ? 's' : ''} des autres
                       </button>
                     )}
-                    {cards.length === 0 && (
-                      <div className="wb-row wb-empty" style={{ paddingLeft: 18 }}>
+                    {cards.length === 0 && !(p.isPersonal && chats.length > 0) && (
+                      <div className="wb-row wb-empty" style={{ paddingLeft: 8 }}>
                         aucune session
                       </div>
                     )}
                   </>
                 );
               })()}
+              </div>
+              )}
             </div>
           );
         })}

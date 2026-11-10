@@ -312,13 +312,13 @@ function Cell({ task: t, col, onEdit, onTag, target }: { task: Task; col: TaskCo
         <>
           <TaskBlockedBadge task={t} short className="me-1" />
           <TaskStalledBadge task={t} short className="me-1" />
-          <Link to={`/tasks/${t.id}`} className="fw-semibold text-reset text-decoration-none">
+          <Link to={`/tasks/${t.id}`} className="task-grid-title text-reset text-decoration-none">
             {t.title}
           </Link>
         </>
       );
     case 'project':
-      return <Link to={`/projects/${t.project.id}/tasks`}>{t.project.name}</Link>;
+      return <Link to={`/projects/${t.project.id}/tasks`} className="task-grid-project">{t.project.name}</Link>;
     case 'status':
       return <TaskStatusBadge status={t.status} statusTag={t.statusTag} />;
     case 'statusTag':

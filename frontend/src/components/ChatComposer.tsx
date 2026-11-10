@@ -11,7 +11,6 @@ import { canAutoFocus } from '../lib/device';
 import { permissionModeLabels, permissionModeShortLabels } from '../lib/humanize';
 import AttachmentChips from './AttachmentChips';
 import DictationButton from './DictationButton';
-import Logo from './Logo';
 import './terminal.css';
 import './chat.css';
 
@@ -49,11 +48,12 @@ const SUGGESTIONS: { label: string; prompt: string }[] = [
   { label: 'Où en sont mes tâches', prompt: "Où en sont mes tâches en cours, projet par projet ? Signale celles qui attendent quelque chose de moi et celles dont l'agent s'est arrêté." },
 ];
 
-function greeting(name: string | undefined): string {
+/** « Bonjour, <em>Camille</em>. » : le prénom en italique d'accent (titre en serif, thème Nocturne). */
+function greeting(name: string | undefined) {
   const hour = new Date().getHours();
   const hello = hour < 5 || hour >= 18 ? 'Bonsoir' : 'Bonjour';
   const first = name?.trim().split(/\s+/)[0];
-  return first ? `${hello}, ${first}` : hello;
+  return first ? <>{hello}, <em>{first}</em>.</> : <>{hello}.</>;
 }
 
 /**
@@ -141,7 +141,7 @@ export default function ChatComposer({ withGreeting = false, autoFocus = false }
       <div className="chat-composer-head">
         {withGreeting && (
           <h2 className="chat-composer-greeting">
-            <Logo size={26} /> {greeting(user?.name)}
+            <span>{greeting(user?.name)}</span>
           </h2>
         )}
         <Link to="/chats" className="chat-composer-all" title="Vos chats précédents">

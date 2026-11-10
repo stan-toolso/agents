@@ -7,7 +7,7 @@ try {
   var theme = pref === 'dark' ? 'dark' : pref === 'system' && !window.matchMedia('(prefers-color-scheme: light)').matches ? 'dark' : 'light';
   document.documentElement.setAttribute('data-bs-theme', theme);
   var meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', theme === 'light' ? '#eceef1' : '#0f0f0f');
+  if (meta) meta.setAttribute('content', theme === 'light' ? '#f6f2ea' : '#14110e');
   var cs = document.querySelector('meta[name="color-scheme"]');
   if (cs) cs.setAttribute('content', theme);
 } catch (e) {}

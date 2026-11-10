@@ -7,28 +7,28 @@ import { EditorView } from '@codemirror/view';
  */
 export const darkAppTheme = EditorView.theme(
   {
-    '&': { backgroundColor: '#141414', fontSize: '13px' },
-    '.cm-scroller': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', lineHeight: '1.5' },
-    '.cm-gutters': { backgroundColor: '#141414', borderRight: '1px solid #262626' },
-    '.cm-activeLineGutter': { backgroundColor: '#1a1a1a' },
-    '.cm-activeLine': { backgroundColor: '#1a1a1a' },
-    '&.cm-focused .cm-cursor': { borderLeftColor: '#d97757' },
-    '&.cm-focused .cm-selectionBackground, ::selection': { backgroundColor: 'rgba(217, 119, 87, 0.3)' },
-    '.cm-placeholder': { color: '#5c5c5c' },
+    '&': { backgroundColor: '#1c1814', fontSize: '13px' },
+    '.cm-scroller': { fontFamily: "'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", lineHeight: '1.5' },
+    '.cm-gutters': { backgroundColor: '#1c1814', borderRight: '1px solid #2c261f', color: '#6e6558' },
+    '.cm-activeLineGutter': { backgroundColor: '#241f19' },
+    '.cm-activeLine': { backgroundColor: '#211c17' },
+    '&.cm-focused .cm-cursor': { borderLeftColor: '#e5865f' },
+    '&.cm-focused .cm-selectionBackground, ::selection': { backgroundColor: 'rgba(229, 134, 95, 0.28)' },
+    '.cm-placeholder': { color: '#6e6558' },
   },
   { dark: true },
 );
 
 export const lightAppTheme = EditorView.theme(
   {
-    '&': { backgroundColor: '#ffffff', fontSize: '13px' },
-    '.cm-scroller': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', lineHeight: '1.5' },
-    '.cm-gutters': { backgroundColor: '#f6f7f8', borderRight: '1px solid #d5d9dd', color: '#8a9097' },
-    '.cm-activeLineGutter': { backgroundColor: '#eceef0' },
-    '.cm-activeLine': { backgroundColor: '#f6f7f8' },
-    '&.cm-focused .cm-cursor': { borderLeftColor: '#b85c3a' },
-    '&.cm-focused .cm-selectionBackground, ::selection': { backgroundColor: 'rgba(184, 92, 58, 0.25)' },
-    '.cm-placeholder': { color: '#8a9097' },
+    '&': { backgroundColor: '#fffcf7', fontSize: '13px' },
+    '.cm-scroller': { fontFamily: "'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", lineHeight: '1.5' },
+    '.cm-gutters': { backgroundColor: '#f6f2ea', borderRight: '1px solid #e3dbcf', color: '#9a9184' },
+    '.cm-activeLineGutter': { backgroundColor: '#efe8dd' },
+    '.cm-activeLine': { backgroundColor: '#f8f3ea' },
+    '&.cm-focused .cm-cursor': { borderLeftColor: '#bf5b39' },
+    '&.cm-focused .cm-selectionBackground, ::selection': { backgroundColor: 'rgba(191, 91, 57, 0.22)' },
+    '.cm-placeholder': { color: '#9a9184' },
   },
   { dark: false },
 );

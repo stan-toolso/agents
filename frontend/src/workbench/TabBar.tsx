@@ -217,8 +217,8 @@ export default function TabBar({ onToggleSidebar, sidebarOpen = false, sidebarCo
   return (
     <div className="wb-topbar">
       {onToggleSidebar && (
-        <button type="button" className={`wb-burger${sidebarOpen ? ' open' : ''}${sidebarCollapsed ? ' collapsed' : ''}`} onClick={onToggleSidebar} aria-label="Menu" aria-expanded={sidebarOpen} title="Menu">
-          <i className={`bi ${sidebarOpen ? 'bi-x-lg' : 'bi-list'}`} />
+        <button type="button" className={`wb-burger${sidebarOpen ? ' open' : ''}${sidebarCollapsed ? ' collapsed' : ''}`} onClick={onToggleSidebar} aria-label={sidebarCollapsed ? 'Afficher la barre latérale' : 'Menu'} aria-expanded={sidebarOpen} title={sidebarCollapsed ? 'Afficher la barre latérale' : 'Menu'}>
+          <i className={`bi ${sidebarOpen ? 'bi-x-lg' : sidebarCollapsed ? 'bi-layout-sidebar' : 'bi-list'}`} />
           {inboxTotal > 0 && !sidebarOpen && <span className="wb-badge wb-burger-badge" title="Éléments à traiter">{inboxTotal}</span>}
         </button>
       )}
