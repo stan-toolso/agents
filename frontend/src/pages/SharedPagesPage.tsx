@@ -1,17 +1,21 @@
+import { useQuery } from '@apollo/client';
 import { useMemo, useState } from 'react';
 import { Alert } from 'react-bootstrap';
-import { Link } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { sharedPageUrl } from '../apollo';
 import { useAuth } from '../auth/AuthContext';
 import PageLoading from '../components/PageLoading';
+import ProjectHeader, { type ProjectHeaderProject } from '../components/ProjectHeader';
+import FavoriteButton from '../components/pages/FavoriteButton';
 import { useSessionLauncher } from '../components/SessionLauncher';
+import { PULL_REQUESTS_PROJECT } from '../graphql/pullRequests';
 import { SHARED_PAGES, type ArtifactKind, type SharedPage } from '../graphql/misc';
 import { timeAgo } from '../lib/humanize';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { useTabTitle } from '../workbench/TabsContext';
 import './artifacts.css';
 
-type Filter = 'all' | 'mine' | 'shared';
+type Filter = 'all' | 'mine' | 'shared' | 'favorites';
 type KindFilter = 'all' | ArtifactKind;
 
 export function accessLabel(page: Pick<SharedPage, 'linkAccess' | 'members'>): { icon: string; text: string } {
@@ -62,79 +66,92 @@ function ArtifactCard({ page, mine }: { page: SharedPage; mine: boolean }) {
   const state = dataState(page);
   const [broken, setBroken] = useState(false);
   return (
-    <Link to={`/shared/${page.id}`} className="af-card" title={page.description ?? page.title}>
-      <div className={`af-thumb ${kind.className}`}>
-        <div className="af-thumb-inner">
-          {broken ? (
-            <div className="af-thumb-fallback">
-              <i className={`bi ${kind.icon}`} />
-            </div>
-          ) : (
-            // Aperçu réduit de la page elle-même (bac à sable, sans interaction) ; `thumb=1` : l'ouverture n'est pas comptée.
-            <iframe src={`${sharedPageUrl(page.id)}?thumb=1`} title="" aria-hidden tabIndex={-1} loading="lazy" sandbox="allow-scripts" onError={() => setBroken(true)} />
-          )}
-        </div>
-      </div>
-      <div className="af-card-body">
-        <span className={`af-card-icon ${kind.className}`}>
-          <i className={`bi ${kind.icon}`} />
-        </span>
-        <div className="af-card-text">
-          <div className="af-card-title">{page.title}</div>
-          <div className="af-card-sub">
-            <span title={new Date(page.updatedAt).toLocaleString()}>Mis à jour {timeAgo(page.updatedAt)}</span>
-            <span className="sep">·</span>
-            <span>{mine ? 'Vous' : page.owner.name}</span>
+    <div className="af-card-wrap">
+      <Link to={`/shared/${page.id}`} className="af-card" title={page.description ?? page.title}>
+        <div className={`af-thumb ${kind.className}`}>
+          <div className="af-thumb-inner">
+            {broken ? (
+              <div className="af-thumb-fallback">
+                <i className={`bi ${kind.icon}`} />
+              </div>
+            ) : (
+              // Aperçu réduit de la page elle-même (bac à sable, sans interaction) ; `thumb=1` : l'ouverture n'est pas comptée.
+              <iframe src={`${sharedPageUrl(page.id)}?thumb=1`} title="" aria-hidden tabIndex={-1} loading="lazy" sandbox="allow-scripts" onError={() => setBroken(true)} />
+            )}
           </div>
         </div>
-        {page.openComments > 0 && (
-          <span className="af-card-badge comments" title={`${page.openComments} commentaire${page.openComments > 1 ? 's' : ''} à traiter`}>
-            <i className="bi bi-chat-left-text" /> {page.openComments}
+        <div className="af-card-body">
+          <span className={`af-card-icon ${kind.className}`}>
+            <i className={`bi ${kind.icon}`} />
           </span>
-        )}
-        {state && !page.openComments && (
-          <span className={`af-card-badge ${state.className}`} title={state.text}>
-            <i className={`bi ${state.icon}`} />
-            <span className="d-none d-sm-inline">{state.text}</span>
-          </span>
-        )}
-      </div>
-    </Link>
+          <div className="af-card-text">
+            <div className="af-card-title">{page.title}</div>
+            <div className="af-card-sub">
+              <span title={new Date(page.updatedAt).toLocaleString()}>Mis à jour {timeAgo(page.updatedAt)}</span>
+              <span className="sep">·</span>
+              <span>{mine ? 'Vous' : page.owner.name}</span>
+            </div>
+          </div>
+          {page.openComments > 0 && (
+            <span className="af-card-badge comments" title={`${page.openComments} commentaire${page.openComments > 1 ? 's' : ''} à traiter`}>
+              <i className="bi bi-chat-left-text" /> {page.openComments}
+            </span>
+          )}
+          {state && !page.openComments && (
+            <span className={`af-card-badge ${state.className}`} title={state.text}>
+              <i className={`bi ${state.icon}`} />
+              <span className="d-none d-sm-inline">{state.text}</span>
+            </span>
+          )}
+        </div>
+      </Link>
+      <FavoriteButton page={page} className="af-fav" />
+    </div>
   );
 }
 
 /**
  * Artefacts : ce que les agents produisent pour les personnes — pages HTML et tableaux de bord de données — privés
  * jusqu'au partage. Tuiles de création (une session lancée avec une consigne à compléter), filtres, cartes avec un
- * aperçu réduit de chaque artefact.
+ * aperçu réduit de chaque artefact et une étoile « favori » (le lien reste dans la sidebar).
+ *
+ * Deux adresses : /shared (tous les artefacts de la personne) et /projects/<id>/artifacts (onglet Artefacts du projet :
+ * ceux du projet qu'elle voit, y compris ceux dont le lien est ouvert ; les tuiles lancent la session dans ce projet).
  */
 export default function SharedPagesPage() {
+  const { id: projectId = null } = useParams();
   const { user } = useAuth();
   // Invité des pages partagées : il ne publie rien, la page ne liste que ce qu'on lui a partagé.
   const guest = Boolean(user?.isGuest);
-  useTabTitle('Artefacts');
+  const projectQ = useQuery<{ project: ProjectHeaderProject | null }>(PULL_REQUESTS_PROJECT, { variables: { id: projectId }, skip: !projectId });
+  const project = projectQ.data?.project ?? null;
+  useTabTitle(projectId ? (project ? `Artefacts · ${project.name}` : null) : 'Artefacts');
   const { openNewSession } = useSessionLauncher();
   const [filter, setFilter] = useState<Filter>('all');
   const [kind, setKind] = useState<KindFilter>('all');
   const [search, setSearch] = useState('');
-  const { data, loading, error } = usePollingQuery<{ sharedPages: SharedPage[] }>(SHARED_PAGES, { pollInterval: 30_000 });
+  const { data, loading, error } = usePollingQuery<{ sharedPages: SharedPage[] }>(SHARED_PAGES, { variables: { projectId }, pollInterval: 30_000 });
+  // Un lecteur du projet ne lance pas de session : pas de tuiles de création.
+  const canCreate = !guest && (!projectId || project?.myRole === 'ADMIN' || project?.myRole === 'MEMBER');
   const pages = useMemo(() => {
     const q = search.trim().toLowerCase();
     return (data?.sharedPages ?? [])
-      .filter((p) => (filter === 'mine' ? p.owner.id === user?.id : filter === 'shared' ? p.owner.id !== user?.id : true))
+      .filter((p) => (filter === 'mine' ? p.owner.id === user?.id : filter === 'shared' ? p.owner.id !== user?.id : filter === 'favorites' ? p.favorite : true))
       .filter((p) => kind === 'all' || p.kind === kind)
       .filter((p) => !q || p.title.toLowerCase().includes(q) || (p.description ?? '').toLowerCase().includes(q) || p.owner.name.toLowerCase().includes(q));
   }, [data, filter, kind, search, user?.id]);
-  if (loading && !data) return <PageLoading />;
-  if (error) return <Alert variant="danger">Erreur : {error.message}</Alert>;
+  if ((loading && !data) || (projectId && projectQ.loading && !project)) return <PageLoading />;
+  if (error || projectQ.error) return <Alert variant="danger">Erreur : {(error ?? projectQ.error)!.message}</Alert>;
+  if (projectId && !project) return <Alert variant="warning">Projet introuvable.</Alert>;
   const counts = { PAGE: 0, DATA: 0, SLIDES: 0 } as Record<ArtifactKind, number>;
   for (const p of data?.sharedPages ?? []) counts[p.kind] = (counts[p.kind] ?? 0) + 1;
   const empty =
-    guest ? 'Aucun artefact partagé avec vous pour le moment.' : search.trim() ? 'Aucun artefact ne correspond à cette recherche.' : filter === 'mine' ? "Vous n'avez pas encore d'artefact : demandez-en un à un agent, ou partez d'une tuile ci-dessus." : filter === 'shared' ? 'Aucun artefact partagé avec vous.' : 'Aucun artefact pour le moment.';
+    guest ? 'Aucun artefact partagé avec vous pour le moment.' : search.trim() ? 'Aucun artefact ne correspond à cette recherche.' : filter === 'mine' ? "Vous n'avez pas encore d'artefact : demandez-en un à un agent, ou partez d'une tuile ci-dessus." : filter === 'shared' ? 'Aucun artefact partagé avec vous.' : filter === 'favorites' ? 'Aucun favori : cliquez sur l’étoile d’un artefact pour garder son lien dans la sidebar.' : projectId ? 'Aucun artefact dans ce projet pour le moment : partez d’une tuile ci-dessus.' : 'Aucun artefact pour le moment.';
   return (
     <div className="af-page">
+      {project && <ProjectHeader project={project} active="artifacts" />}
       <div className="af-head">
-        <h1>{guest ? 'Artefacts partagés avec vous' : 'Artefacts'}</h1>
+        <h1 className={project ? 'af-h1-sub' : undefined}>{guest ? 'Artefacts partagés avec vous' : project ? 'Artefacts du projet' : 'Artefacts'}</h1>
         {!guest && (
           <div className="af-filters" role="tablist" aria-label="Qui">
             {(
@@ -142,6 +159,7 @@ export default function SharedPagesPage() {
                 ['all', 'Tous'],
                 ['mine', 'Les vôtres'],
                 ['shared', 'Partagés avec vous'],
+                ['favorites', 'Favoris'],
               ] as [Filter, string][]
             ).map(([f, label]) => (
               <button key={f} type="button" role="tab" aria-selected={filter === f} className={filter === f ? 'on' : ''} onClick={() => setFilter(f)}>
@@ -171,12 +189,12 @@ export default function SharedPagesPage() {
           <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher" aria-label="Rechercher un artefact" />
         </label>
       </div>
-      {!guest && (
+      {canCreate && (
         <>
-          <p className="af-section">Créer quelque chose de nouveau</p>
+          <p className="af-section">{project ? `Créer quelque chose de nouveau dans ${project.isPersonal ? 'votre espace' : `« ${project.name} »`}` : 'Créer quelque chose de nouveau'}</p>
           <div className="af-create">
             {(Object.entries(ARTIFACT_KINDS) as [ArtifactKind, (typeof ARTIFACT_KINDS)[ArtifactKind]][]).map(([k, def]) => (
-              <button key={k} type="button" className={`af-tile${k !== 'PAGE' ? ' beta' : ''}`} onClick={() => openNewSession({ prompt: def.prompt })} title={`${def.label} : ${def.hint}`}>
+              <button key={k} type="button" className={`af-tile${k !== 'PAGE' ? ' beta' : ''}`} onClick={() => openNewSession({ projectId, prompt: def.prompt })} title={`${def.label} : ${def.hint}`}>
                 <div className={`af-tile-art ${def.className}`}>
                   <i className={`bi ${def.icon}`} />
                 </div>

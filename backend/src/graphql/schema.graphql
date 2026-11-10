@@ -2516,6 +2516,8 @@ type SharedPage {
   comments: [SharedPageComment!]!
   "Nombre de commentaires non traités."
   openComments: Int!
+  "Mis en favori par la personne connectée (lien gardé dans la sidebar)."
+  favorite: Boolean!
   "Renvoi des commentaires à la session d'origine, réglé par le propriétaire ; OFF pour une page sans session."
   agentHandoff: SharedPageAgentHandoff!
   "Type d'artefact : page HTML, ou page alimentée par des sources de données rafraîchies par Skipper."
@@ -2960,8 +2962,10 @@ type Query {
   "Étiquettes distinctes des tâches (d'un projet, ou de tous les projets accessibles), les plus utilisées d'abord : suggestions des formulaires et filtres."
   taskTags(projectId: ID): [String!]!
   sharedPage(id: ID!): SharedPage
-  "Pages dont l'utilisateur est propriétaire ou membre."
-  sharedPages: [SharedPage!]!
+  "Pages dont l'utilisateur est propriétaire ou membre ; avec projectId, les artefacts de ce projet qu'il peut voir (les siens, ceux partagés avec lui, ceux dont le lien est ouvert)."
+  sharedPages(projectId: ID): [SharedPage!]!
+  "Artefacts mis en favori par la personne connectée (épinglés dans la sidebar), dans l'ordre d'ajout ; seulement ceux qu'elle voit encore."
+  favoriteSharedPages: [SharedPage!]!
   "Clé publique VAPID avec laquelle les navigateurs s'abonnent aux notifications push."
   pushPublicKey: String!
   "Familles de notifications de la personne connectée, avec leur état (toutes reçues par défaut)."
@@ -3471,6 +3475,8 @@ type Mutation {
   refreshSharedPageData(id: ID!): SharedPage!
   "Duplique un artefact : copie privée de la dernière version (ou de version), avec son type et ses sources de données ; ni membres, ni commentaires, ni historique. Un artefact de données : propriétaire ou administrateur seulement."
   duplicateSharedPage(id: ID!, title: String, version: Int): SharedPage!
+  "Met un artefact en favori (son lien reste dans la sidebar) ou l'en retire ; seulement un artefact que l'on voit."
+  setSharedPageFavorite(id: ID!, favorite: Boolean!): SharedPage!
   "Supprime tous les commentaires de la page, réponses comprises (propriétaire ou administrateur de Skipper) ; renvoie le nombre de fils supprimés."
   deleteAllSharedPageComments(id: ID!): Int!
   "Commentaire sur une page que l'on voit : général, ou ancré sur un élément (anchor). version : celle affichée (la dernière par défaut)."

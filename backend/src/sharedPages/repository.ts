@@ -74,6 +74,45 @@ export const sharedPageRepository = {
     return rows.map(toPage);
   },
 
+  /**
+   * Artefacts d'un projet que la personne peut voir : les siens, ceux qu'on lui a partagés, et ceux dont le lien est
+   * ouvert à toute personne de Skipper (`openLinks` : jamais pour un invité). Les plus récemment mis à jour d'abord.
+   */
+  async listForProject(projectId: string, userId: string, openLinks: boolean): Promise<SharedPage[]> {
+    const { rows } = await pool.query<Row>(
+      `SELECT p.* FROM shared_pages p
+        WHERE p.project_id = $1
+          AND (p.owner_id = $2 OR ($3 AND p.link_access) OR EXISTS (SELECT 1 FROM shared_page_members m WHERE m.page_id = p.id AND m.user_id = $2))
+        ORDER BY p.updated_at DESC`,
+      [projectId, userId, openLinks],
+    );
+    return rows.map(toPage);
+  },
+
+  /** Favoris de la personne qu'elle peut encore voir, dans l'ordre où elle les a ajoutés. */
+  async listFavorites(userId: string, openLinks: boolean): Promise<SharedPage[]> {
+    const { rows } = await pool.query<Row>(
+      `SELECT p.* FROM shared_page_favorites f JOIN shared_pages p ON p.id = f.page_id
+        WHERE f.user_id = $1
+          AND (p.owner_id = $1 OR ($2 AND p.link_access) OR EXISTS (SELECT 1 FROM shared_page_members m WHERE m.page_id = p.id AND m.user_id = $1))
+        ORDER BY f.created_at`,
+      [userId, openLinks],
+    );
+    return rows.map(toPage);
+  },
+
+  /** Parmi ces pages, celles que la personne a mises en favori. */
+  async favoriteIds(userId: string, pageIds: string[]): Promise<Set<string>> {
+    if (!pageIds.length) return new Set();
+    const { rows } = await pool.query<{ page_id: string }>('SELECT page_id FROM shared_page_favorites WHERE user_id = $1 AND page_id = ANY($2::uuid[])', [userId, pageIds]);
+    return new Set(rows.map((r) => r.page_id));
+  },
+
+  async setFavorite(userId: string, pageId: string, favorite: boolean): Promise<void> {
+    if (favorite) await pool.query('INSERT INTO shared_page_favorites (user_id, page_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [userId, pageId]);
+    else await pool.query('DELETE FROM shared_page_favorites WHERE user_id = $1 AND page_id = $2', [userId, pageId]);
+  },
+
   async listOwned(userId: string, limit: number): Promise<SharedPage[]> {
     const { rows } = await pool.query<Row>('SELECT * FROM shared_pages WHERE owner_id = $1 ORDER BY updated_at DESC LIMIT $2', [userId, limit]);
     return rows.map(toPage);

@@ -68,6 +68,7 @@ function PageRoutes({ location, isAdmin }: { location: Location; isAdmin: boolea
       <Route path="/projects/:id/settings" element={<ProjectSettingsPage />} />
       <Route path="/projects/:id/context" element={<ContextPage />} />
       <Route path="/projects/:id/tasks" element={<TasksPage />} />
+      <Route path="/projects/:id/artifacts" element={<SharedPagesPage />} />
       <Route path="/projects/:id/conversations" element={<ConversationsPage />} />
       <Route path="/projects/:id/conversations/:slug" element={<ConversationsPage />} />
       <Route path="/projects/:id/agents" element={<ProjectAgentsPage />} />

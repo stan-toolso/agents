@@ -110,6 +110,18 @@ export const sharedPageService = {
   },
 
   listFor: (userId: string) => sharedPageRepository.listFor(userId),
+  /** Artefacts d'un projet visibles par la personne (l'appartenance au projet est vérifiée par l'appelant). */
+  listForProject: (user: Pick<User, 'id' | 'isGuest'>, projectId: string) => sharedPageRepository.listForProject(projectId, user.id, !user.isGuest),
+  /** Favoris de la personne, limités à ce qu'elle peut encore voir. */
+  listFavorites: (user: Pick<User, 'id' | 'isGuest'>) => sharedPageRepository.listFavorites(user.id, !user.isGuest),
+  favoriteIds: (userId: string, pageIds: string[]) => sharedPageRepository.favoriteIds(userId, pageIds),
+
+  /** Met un artefact en favori (ou l'en retire) : seulement un artefact que la personne voit. */
+  async setFavorite(user: Pick<User, 'id' | 'isGuest'>, id: string, favorite: boolean): Promise<SharedPage> {
+    const page = await this.getFor(user.id, id);
+    await sharedPageRepository.setFavorite(user.id, page.id, favorite);
+    return page;
+  },
   listOwned: (userId: string, limit = 20) => sharedPageRepository.listOwned(userId, Math.min(Math.max(limit, 1), 100)),
   versions: (pageId: string) => sharedPageRepository.versions(pageId),
 

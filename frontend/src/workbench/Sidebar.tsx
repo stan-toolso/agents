@@ -17,6 +17,8 @@ import { useShortcutsHelp } from '../components/ShortcutsHelp';
 import { displayComboText } from '../lib/shortcuts';
 import { PullRequestWindow, windowFor } from '../components/TrackedPullRequests';
 import { localWorkText, type TrackedPullRequestSummary } from '../graphql/pullRequests';
+import { FAVORITE_SHARED_PAGES, type FavoriteSharedPage } from '../graphql/misc';
+import { useFavoriteToggle } from '../components/pages/FavoriteButton';
 import AddMenu from './AddMenu';
 import { useDeletions } from './useDeletions';
 import { useTabs } from './TabsContext';
@@ -116,6 +118,60 @@ function ChatsBlock({ chats, expanded, onToggle }: { chats: SidebarSession[]; ex
               aucun chat : en ouvrir un
             </Link>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Icône et libellé d'un type d'artefact (repris de ARTIFACT_KINDS de pages/SharedPagesPage, chargée à la demande : pas importée ici). */
+const FAVORITE_KINDS: Record<FavoriteSharedPage['kind'], { icon: string; label: string }> = {
+  PAGE: { icon: 'bi-file-earmark-richtext', label: 'Page' },
+  DATA: { icon: 'bi-bar-chart-line', label: 'Données' },
+  SLIDES: { icon: 'bi-easel', label: 'Diapositives' },
+};
+
+/**
+ * Section « Favoris » : les artefacts que la personne a mis en favori (étoile de la galerie ou de la page), dans
+ * l'ordre d'ajout ; repliable. Rien tant qu'il n'y a pas de favori. Menu de chaque ligne : ouvrir, retirer.
+ */
+function FavoritesSection({ expanded, onToggle }: { expanded: boolean; onToggle: () => void }) {
+  const location = useLocation();
+  const toggleFavorite = useFavoriteToggle();
+  const { data } = usePollingQuery<{ favoriteSharedPages: FavoriteSharedPage[] }>(FAVORITE_SHARED_PAGES, { pollInterval: 60_000 });
+  const favorites = data?.favoriteSharedPages ?? [];
+  if (!favorites.length) return null;
+  return (
+    <div className="wb-favorites-block">
+      <div className="wb-section-title">
+        <button type="button" className="wb-section-toggle" onClick={onToggle} title={expanded ? 'Replier les favoris' : 'Déplier les favoris'} aria-expanded={expanded}>
+          <i className={`bi bi-chevron-${expanded ? 'down' : 'right'}`} style={{ fontSize: 9 }} /> Favoris
+          {!expanded && <span className="wb-fav-count">{favorites.length}</span>}
+        </button>
+        <Link to="/shared" className="wb-section-action" title="Tous les artefacts">
+          <i className="bi bi-collection" />
+        </Link>
+      </div>
+      {expanded && (
+        <div className="wb-favorites">
+          {favorites.map((f) => {
+            const kind = FAVORITE_KINDS[f.kind] ?? FAVORITE_KINDS.PAGE;
+            const items: MenuItem[] = [
+              { label: 'Ouvrir', icon: 'bi-box-arrow-in-right', to: `/shared/${f.id}` },
+              { label: 'Retirer des favoris', icon: 'bi-star', separatorBefore: true, onClick: () => toggleFavorite({ id: f.id, favorite: true }) },
+            ];
+            return (
+              <RowWithMenu key={f.id} to={`/shared/${f.id}`} active={location.pathname === `/shared/${f.id}` || location.pathname.endsWith(`/pages/${f.id}`)} indent={14} title={`${kind.label} · ${f.title}`} items={items}>
+                <i className={`bi ${kind.icon} wb-icon wb-fav-icon wb-fav-${f.kind.toLowerCase()}`} />
+                <span className="wb-row-label">{f.title}</span>
+                {f.openComments > 0 && (
+                  <span className="wb-badge" title={`${f.openComments} commentaire${f.openComments > 1 ? 's' : ''} à traiter`}>
+                    {f.openComments}
+                  </span>
+                )}
+              </RowWithMenu>
+            );
+          })}
         </div>
       )}
     </div>
@@ -794,6 +850,8 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
           </NavLink>
         ))}
       </nav>
+
+      {!user?.isGuest && <FavoritesSection expanded={expanded.favorites ?? true} onToggle={() => toggle('favorites', true)} />}
 
       <div className="wb-section-title">
         <span>Projets</span>

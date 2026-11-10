@@ -12,6 +12,8 @@
 .sp-btn.on { background: color-mix(in srgb, var(--cc-accent) 14%, transparent); color: var(--cc-accent); }
 .sp-btn.primary { background: var(--cc-accent); color: #fff; }
 .sp-btn.primary:hover { filter: brightness(1.08); }
+.sp-btn.sp-fav.on { background: none; color: var(--cc-yellow); }
+.sp-btn.sp-fav.on:hover { background: var(--cc-bg-hover); }
 .sp-btn .bi { font-size: 15px; }
 .sp-btn .pc-count { margin-left: -2px; }
 .sp-btn.on .pc-count { background: var(--cc-accent); }
