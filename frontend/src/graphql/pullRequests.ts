@@ -45,7 +45,7 @@ export interface TrackedPullRequest {
   createdBy: { id: string; name: string } | null;
   createdBySession: { id: string; name: string } | null;
   /** Session d'agent rattachée (dossier de la branche, sinon session qui a ouvert la PR) : reçoit la demande de résolution des conflits. */
-  session: { id: string; name: string; status: string } | null;
+  session: { id: string; name: string; status: string; activity?: string | null } | null;
 }
 
 /** PR qu'un agent peut relire : dans le dépôt du projet, ouverte, ou en préparation avec son dossier de travail. */
@@ -132,6 +132,7 @@ export const TRACKED_PULL_REQUEST_FIELDS = gql`
       id
       name
       status
+      activity
     }
   }
 `;

@@ -1,7 +1,7 @@
 import { useMutation } from '@apollo/client';
 import { useState } from 'react';
-import { Alert, Button, Form, Modal, Table } from 'react-bootstrap';
-import { Link, useNavigate } from 'react-router-dom';
+import { Alert, Button, Form, Modal } from 'react-bootstrap';
+import { useNavigate } from 'react-router-dom';
 import {
   canRequestReview,
   canResolveConflicts,
@@ -18,21 +18,18 @@ import {
   type TrackedPullRequest,
   type TrackedPullRequestSummary,
 } from '../graphql/pullRequests';
-import { timeAgo } from '../lib/humanize';
 import { useRequestCodeReview } from './CodeReview';
 import { useDialogs } from './Dialogs';
 import PopMenu, { type MenuItem } from './PopMenu';
 import { CreatePullRequestModal, PullRequestIndicators, PullRequestModal, type PullRequestRelated } from './PullRequests';
 
 /**
- * Pull requests suivies : pastille d'étape, puce compacte (cartes et grilles de tâches), tableau avec actions
- * (détail et fusion via la fenêtre GitHub, statut, note, tâche, arrêt du suivi) et fenêtre « Suivre
+ * Pull requests suivies : pastille d'étape, puce compacte (cartes et grilles de tâches), menu « ⋮ » des actions de suivi
+ * (détail technique via la fenêtre de la forge, statut, note, tâche, arrêt du suivi) et fenêtre « Suivre
  * une pull request ». Une PR « en préparation » (branche avec des modifications, pas encore ouverte) propose de la
  * créer (fenêtre de création du panneau git). La PR GitHub en direct (checks, revues, fusion) reste `PullRequestModal`,
  * qui reçoit le dépôt quand la PR n'est pas dans celui du projet.
  */
-
-const fmt = (iso: string) => new Date(iso).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
 
 export function PullRequestStageBadge({ stage, className = '' }: { stage: PullRequestStage; className?: string }) {
   const s = STAGE_LABELS[stage];
@@ -152,19 +149,23 @@ export function useTrackedPullRequestActions() {
   };
 }
 
-function ActionsMenu({ pr, onOpen }: { pr: TrackedPullRequest; onOpen: () => void }) {
+/**
+ * Menu « ⋮ » d'une PR suivie : actions de suivi (note, statut, tâche) et accès au détail technique (fenêtre de la forge :
+ * checks, fichiers, fusion directe) ou à la création manuelle d'une PR en préparation (`onOpen`).
+ */
+export function TrackedPullRequestMenu({ pr, onOpen }: { pr: TrackedPullRequest; onOpen: () => void }) {
   const actions = useTrackedPullRequestActions();
   const [at, setAt] = useState<{ top: number; right: number } | null>(null);
   const pending = pr.status === 'PENDING';
   const items: MenuItem[] = [];
   if (pending) {
-    if (pr.worksession) items.push({ label: 'Créer la pull request', icon: 'bi-git', onClick: onOpen });
+    if (pr.worksession) items.push({ label: 'Créer la pull request moi-même', icon: 'bi-git', onClick: onOpen });
     if (pr.session) items.push({ label: `Session : ${pr.session.name}`, icon: 'bi-terminal', to: `/sessions/${pr.session.id}` });
     if (canRequestReview(pr)) items.push({ label: 'Faire relire par un agent', icon: 'bi-robot', onClick: () => void actions.review(pr) });
     items.push({ label: 'Modifier la note', icon: 'bi-pencil', onClick: () => void actions.editNote(pr) });
     if (pr.task) items.push({ label: 'Détacher de la tâche', icon: 'bi-link-45deg', onClick: () => void actions.detachTask(pr) });
   } else {
-    items.push({ label: 'Détail et fusion', icon: 'bi-git', onClick: onOpen });
+    items.push({ label: 'Détail technique (checks, fichiers)', icon: 'bi-git', onClick: onOpen });
     items.push({ label: `Ouvrir sur ${forgeOfUrl(pr.url)}`, icon: 'bi-box-arrow-up-right', onClick: () => window.open(pr.url, '_blank', 'noopener') });
     if (canRequestReview(pr)) items.push({ label: 'Faire relire par un agent', icon: 'bi-robot', onClick: () => void actions.review(pr) });
     items.push({ label: 'Modifier la note', icon: 'bi-pencil', onClick: () => void actions.editNote(pr) });
@@ -210,7 +211,7 @@ export function ResolveConflictsButton({ pr, className = '' }: { pr: TrackedPull
 }
 
 /** Tâche et sessions reliées à une PR suivie, pour les liens de la fenêtre GitHub (session rattachée, puis celle qui l'a ouverte). */
-const relatedOf = (pr: TrackedPullRequest): PullRequestRelated => ({
+export const relatedOf = (pr: TrackedPullRequest): PullRequestRelated => ({
   tasks: pr.task ? [pr.task] : [],
   sessions: [pr.session, pr.createdBySession].filter((x): x is { id: string; name: string } => x != null),
 });
@@ -239,121 +240,9 @@ export function TrackedPullRequestActions({ pr, canWrite }: { pr: TrackedPullReq
         </Button>
       )}
       {canWrite && <ResolveConflictsButton pr={pr} />}
-      {canWrite && <ActionsMenu pr={pr} onOpen={() => setOpen(true)} />}
+      {canWrite && <TrackedPullRequestMenu pr={pr} onOpen={() => setOpen(true)} />}
       {open && target && <PullRequestWindow projectId={pr.project.id} window={target} full={canWrite ? pr : undefined} onClose={() => setOpen(false)} />}
     </div>
-  );
-}
-
-/** Qui a ouvert ou déployé : personne, session d'agent (lien) ou synchronisation. */
-function By({ type, user, session, pending = false }: { type: string | null; user: { id: string; name: string } | null; session: { id: string; name: string } | null; pending?: boolean }) {
-  if (session) return <Link to={`/sessions/${session.id}`} title="Session d'agent">{session.name}</Link>;
-  if (user) return <>{user.name}</>;
-  if (type === 'system') return <span className="text-secondary">{pending ? 'branche' : 'synchronisation'}</span>;
-  return <span className="text-secondary">—</span>;
-}
-
-/**
- * Tableau des PR suivies. `showProject` (vue multi-projets), `showTask` (hors fiche de tâche). Chaque ligne ouvre la
- * fenêtre GitHub (checks, revues, fusion avec nettoyage), ou la création pour une PR en préparation ; le menu porte
- * les actions de suivi. Sur mobile (règles `.pr-table` de workbench.css), chaque ligne devient une carte : titre,
- * puis étape, date et menu sur une ligne.
- */
-export function TrackedPullRequestTable({ prs, showProject = false, showTask = true, compact = false }: { prs: TrackedPullRequest[]; showProject?: boolean; showTask?: boolean; compact?: boolean }) {
-  const [open, setOpen] = useState<{ pr: TrackedPullRequest; window: Window } | null>(null);
-  if (prs.length === 0) return null;
-  const openFor = (pr: TrackedPullRequest) => {
-    const window = windowFor(pr);
-    if (window) setOpen({ pr, window });
-  };
-  return (
-    <>
-      <Table size="sm" hover responsive className={`mb-0 pr-table${compact ? ' pr-table-compact' : ''}`}>
-        <thead>
-          <tr>
-            <th>Pull request</th>
-            <th>Étape</th>
-            {showProject && <th className="d-none d-lg-table-cell">Projet</th>}
-            {showTask && <th className="d-none d-md-table-cell">Tâche</th>}
-            {!compact && <th className="d-none d-lg-table-cell">Branche</th>}
-            {!compact && <th className="d-none d-lg-table-cell">Par</th>}
-            <th>Quand</th>
-            <th className="text-end"> </th>
-          </tr>
-        </thead>
-        <tbody>
-          {prs.map((pr) => {
-            const pending = pr.status === 'PENDING';
-            const when = pending ? { label: 'depuis', at: pr.openedAt } : pr.mergedAt ? { label: 'fusionnée', at: pr.mergedAt } : pr.closedAt ? { label: 'fermée', at: pr.closedAt } : { label: 'ouverte', at: pr.openedAt };
-            const clickable = Boolean(windowFor(pr));
-            return (
-              <tr key={pr.id} className={clickable ? 'pr-row' : undefined} onClick={() => openFor(pr)} role={clickable ? 'button' : undefined}>
-                <td className="pr-cell-title">
-                  {pr.number != null && <span className="text-secondary me-1">{prRef(pr)}</span>}
-                  {pending && <i className="bi bi-code-slash text-secondary me-1" title="Pas encore ouverte sur la forge" />}
-                  <span className="fw-semibold">{pr.title}</span>
-                  {!pending && <TrackedPullRequestIndicators pr={pr} />}
-                  {pr.note && (
-                    <div className="small text-secondary text-truncate" title={pr.note}>
-                      <i className="bi bi-sticky me-1" />
-                      {pr.note}
-                    </div>
-                  )}
-                  {showTask && pr.task && (
-                    <div className="small text-truncate d-md-none">
-                      <i className="bi bi-check2-square me-1 text-secondary" />
-                      <Link to={`/tasks/${pr.task.id}`} title={pr.task.title} onClick={(e) => e.stopPropagation()}>
-                        {pr.task.title}
-                      </Link>
-                    </div>
-                  )}
-                </td>
-                <td className="pr-cell-stage">
-                  <PullRequestStageBadge stage={pr.stage} />
-                  {pending && <div className="small text-secondary text-truncate">{localWorkText(pr) || 'modifications sur la branche'}</div>}
-                </td>
-                {showProject && (
-                  <td className="d-none d-lg-table-cell">
-                    <Link to={`/projects/${pr.project.id}/pull-requests`} onClick={(e) => e.stopPropagation()}>
-                      {pr.project.name}
-                    </Link>
-                  </td>
-                )}
-                {showTask && (
-                  <td className="d-none d-md-table-cell">
-                    {pr.task ? (
-                      <Link to={`/tasks/${pr.task.id}`} className="text-truncate d-inline-block" style={{ maxWidth: 220 }} title={pr.task.title} onClick={(e) => e.stopPropagation()}>
-                        {pr.task.title}
-                      </Link>
-                    ) : (
-                      <span className="text-secondary">—</span>
-                    )}
-                  </td>
-                )}
-                {!compact && (
-                  <td className="d-none d-lg-table-cell font-monospace small">
-                    {pr.headBranch}
-                    {pr.baseBranch && <span className="text-secondary"> → {pr.baseBranch}</span>}
-                  </td>
-                )}
-                {!compact && (
-                  <td className="d-none d-lg-table-cell small" onClick={(e) => e.stopPropagation()}>
-                    <By type={pr.createdByType} user={pr.createdBy} session={pr.createdBySession} pending={pending} />
-                  </td>
-                )}
-                <td className="pr-cell-when small text-secondary" title={fmt(when.at)}>
-                  {when.label} {timeAgo(when.at)}
-                </td>
-                <td className="pr-cell-actions text-end text-nowrap" onClick={(e) => e.stopPropagation()}>
-                  <ActionsMenu pr={pr} onOpen={() => openFor(pr)} />
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </Table>
-      {open && <PullRequestWindow projectId={open.pr.project.id} window={open.window} full={open.pr} onClose={() => setOpen(null)} />}
-    </>
   );
 }
 
