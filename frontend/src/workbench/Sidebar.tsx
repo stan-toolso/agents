@@ -559,14 +559,14 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
   // Modèle de la session du dossier : signalé sur la carte quand ce n'est pas Opus (planification ou tâche sur Sonnet…).
   const cheapModel = !ws.primary && session?.model && !isOpus(session.model) ? session.model : null;
   const hasRows = ws.primary ? visibleSessions.length > 0 || ws.terminals.length > 0 || hiddenOthers > 0 || elsewhereSubs.length > 0 : children.length > 0 || ws.terminals.length > 0 || Boolean(session?.browserActive);
-  // Ligne de méta (deuxième ligne, jamais plus) : ce qui appelle l'attention, la tâche, la PR, puis ce qui est ouvert
+  // Ligne de méta (deuxième ligne, jamais plus) : ce qui appelle l'attention, la PR, la tâche, puis ce qui est ouvert
   // dans le dossier. Sans rien de tout cela, la carte tient sur une ligne (le modèle passe alors sur la tête).
   const prPill = pr && PR_PILL[prState(pr)] ? PR_PILL[prState(pr)] : null;
   const subagentsChip = !ws.primary && children.length > 0 && !expanded;
   const hasMeta = !ws.primary && Boolean(hint || (ws.task && taskChip) || prPill || subagentsChip || shown.length > 0);
-  // La PR ne s'écrit en toutes lettres que quand elle attend une action (« #87 à fusionner ») ; sinon son numéro ou son
-  // pictogramme, coloré selon l'étape, suffit (le détail est dans l'infobulle).
-  const prText = pr && prPill ? (prState(pr) === 'open' ? `${prLabel(pr)} ${prPill}` : pr.number == null ? '' : prLabel(pr)) : '';
+  // L'étape de la PR s'écrit toujours en toutes lettres (« #87 à fusionner », « #87 brouillon », « en préparation ») :
+  // c'est ce qu'on cherche d'un coup d'œil dans la sidebar ; la pastille colorée la détache du reste de la ligne.
+  const prText = pr && prPill ? (pr.number == null ? prPill : `${prLabel(pr)} ${prPill}`) : '';
   const modelTag = cheapModel ? (
     <span className="wb-meta-model" title={`Modèle : ${cheapModel}`}>
       {shortModel(cheapModel)}
@@ -625,17 +625,17 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
       {hasMeta && (
         <div className="wb-ws-meta">
           {hint && session && <span className={`wb-meta-state ${sessionDotClass(session)}`}>{hint}</span>}
+          {pr && prPill && (
+            <button type="button" className={`wb-meta-pr wt-pr-${prState(pr)}`} title={`${icon.title} · ${prPill} · ${pr.number == null ? 'créer la pull request' : 'voir la pull request'}`} disabled={!prWindow} onClick={() => setPrOpen(true)}>
+              <i className="bi bi-git" />
+              <span className="wb-meta-text">{prText}</span>
+            </button>
+          )}
           {ws.task && taskChip && (
             <Link to={`/tasks/${ws.task.id}`} className={`wb-meta-task task-${taskChip.cls}`} title={`Tâche : ${ws.task.title} · ${taskChip.text}${taskChip.tag ? ` · ${taskChip.tag}` : ''}${taskChip.note ? ` · ${taskChip.note}` : ''}`}>
               <i className="bi bi-check2-square" />
               <span className="wb-meta-text">{taskChip.tag || taskChip.text}</span>
             </Link>
-          )}
-          {pr && prPill && (
-            <button type="button" className={`wb-meta-pr wt-pr-${prState(pr)}`} title={`${icon.title} · ${prPill} · ${pr.number == null ? 'créer la pull request' : 'voir la pull request'}`} disabled={!prWindow} onClick={() => setPrOpen(true)}>
-              <i className="bi bi-git" />
-              {prText && <span className="wb-meta-text">{prText}</span>}
-            </button>
           )}
           {subagentsChip && (
             <button type="button" className="wb-meta-sub" title={`${subagentsSummary(children.map((c) => c.session)).label} lancé(s) par l'agent de cette session · cliquer pour détailler`} onClick={onToggle}>
