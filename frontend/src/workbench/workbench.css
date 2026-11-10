@@ -28,29 +28,40 @@
 .wb-brand a { display: inline-flex; align-items: center; gap: 9px; color: var(--cc-fg); font-family: var(--cc-font-serif); font-size: 19px; font-weight: 500; letter-spacing: -0.02em; text-decoration: none; }
 .wb-brand a:hover { color: var(--cc-accent); }
 
-.wb-menu { padding: 4px 0 8px; border-bottom: 1px solid var(--cc-border-soft); }
+.wb-menu { padding: 2px 8px 10px; border-bottom: 1px solid var(--cc-border-soft); }
 .wb-menu-item {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 14px;
+  gap: 9px;
+  padding: 6px 9px;
+  border-radius: var(--cc-radius-sm);
   color: var(--cc-dim);
   text-decoration: none;
+  white-space: nowrap;
 }
 .wb-menu-item:hover { color: var(--cc-fg); background: var(--cc-bg-hover); }
-.wb-menu-item.active { color: var(--cc-fg); background: var(--cc-bg-elevated); box-shadow: inset 0 0 0 1px var(--cc-border); }
+.wb-menu-item.active { color: var(--cc-fg); background: var(--cc-bg-elevated); box-shadow: inset 0 0 0 1px var(--cc-border), 0 1px 2px var(--cc-border-soft); font-weight: 500; }
 .wb-icon { width: 1.3em; text-align: center; color: var(--cc-dim); }
 .wb-menu-item.active .wb-icon { color: var(--cc-accent); }
-/* Menus principaux : une seule ligne d'icônes, le libellé en infobulle ; la page courante est soulignée. */
-.wb-menu-icons { display: flex; align-items: stretch; gap: 2px; padding: 4px 8px 8px; }
-.wb-menu-icons .wb-menu-item { position: relative; flex: 1 1 0; justify-content: center; padding: 7px 0; border-radius: var(--cc-radius-sm); font-size: 15px; }
+/* Menus principaux : grille de deux colonnes, icône et libellé. */
+.wb-menu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+.wb-menu-grid .wb-icon { font-size: 14px; }
+.wb-menu-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.wb-menu-grid .wb-badge { margin-left: auto; }
+/* Menus secondaires : une ligne d'icônes, le libellé en infobulle. */
+.wb-menu-icons { display: flex; align-items: stretch; gap: 2px; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--cc-border-soft); }
+.wb-menu-icons .wb-menu-item { flex: 1 1 0; justify-content: center; padding: 6px 0; font-size: 14px; }
 .wb-menu-icons .wb-menu-item .wb-icon { width: auto; }
-.wb-menu-icons .wb-menu-item.active { background: var(--cc-bg-elevated); box-shadow: inset 0 0 0 1px var(--cc-border), 0 1px 2px var(--cc-border-soft); }
-.wb-menu-icons .wb-menu-item:hover { background: var(--cc-bg-hover); }
-.wb-menu-icons .wb-badge { position: absolute; top: 0; right: 0; margin: 0; font-size: 9.5px; line-height: 14px; padding: 0 4px; }
+.wb-menu-icons .wb-badge { position: absolute; top: -2px; right: 4px; margin: 0; font-size: 9.5px; line-height: 14px; padding: 0 4px; }
 /* La phrase d'état se tronque avant le nom : une ligne indentée (session lancée par un agent) garde un nom lisible. */
-.wb-state { margin-left: auto; font-size: 11px; color: var(--cc-dimmer); font-style: italic; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-state { margin-left: auto; font-size: 11.5px; color: var(--cc-dimmer); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-row.active .wb-state, .wb-row:hover .wb-state { color: var(--cc-dim); }
+/* Langage d'état partagé par les points, les phrases d'état et la ligne de méta des cartes. */
+.wb-state.busy, .wb-meta-state.busy { color: var(--cc-green); }
+.wb-state.ask, .wb-meta-state.ask { color: var(--cc-accent); font-weight: 600; }
+.wb-state.failed, .wb-meta-state.failed { color: var(--cc-red); }
+.wb-state.pending, .wb-meta-state.pending { color: var(--cc-blue); }
 
 .wb-section-title {
   display: flex;
@@ -74,18 +85,23 @@
   align-items: center;
   gap: 6px;
   margin: 0 6px;
-  padding: 4px 8px 4px 6px;
+  padding: 5px 8px 5px 6px;
   border-radius: 7px;
-  color: var(--cc-dim);
+  color: var(--cc-fg);
   text-decoration: none;
   white-space: nowrap;
 }
 .wb-row:hover { background: var(--cc-bg-hover); color: var(--cc-fg); }
 .wb-row.active { background: var(--cc-bg-elevated); color: var(--cc-fg); box-shadow: inset 0 0 0 1px var(--cc-border); }
 .wb-row-label { flex: 1; min-width: 40%; overflow: hidden; text-overflow: ellipsis; color: inherit; text-decoration: none; }
-.wb-project-row { color: var(--cc-fg); }
+.wb-project-row { color: var(--cc-fg); font-weight: 600; padding-top: 6px; padding-bottom: 6px; }
+.wb-project-row .wb-icon { color: var(--cc-dimmer); font-weight: 400; }
+.wb-project-row.active .wb-icon { color: var(--cc-accent); }
+.wb-project-row .wb-row-label { font-weight: 600; }
+/* Contenu d'un projet déplié : un filet le rattache à son projet. */
+.wb-project-body { margin: 0 0 6px 19px; padding-left: 2px; border-left: 1px solid var(--cc-border); }
 .wb-session-row { padding-left: 30px; }
-.wb-empty { padding-left: 30px; font-style: italic; color: var(--cc-dimmer); }
+.wb-empty { padding-left: 30px; color: var(--cc-dimmer); font-size: 12.5px; }
 .wb-chevron { background: none; border: 0; color: var(--cc-dim); padding: 0; width: 14px; font: inherit; cursor: pointer; }
 .wb-row-actions { visibility: hidden; display: flex; gap: 6px; }
 .wb-row-actions a { color: var(--cc-dim); text-decoration: none; }
@@ -149,13 +165,16 @@
 .wb-session-row .wb-tag .bi { font-size: 9px; }
 .wb-term-icon.live { color: var(--cc-green); }
 .wb-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; background: var(--cc-dimmer); }
-.wb-dot { width: 7px; height: 7px; }
+/* Travaille : sauge qui respire ; a besoin de vous : terracotta cerclé ; attend vos instructions : anneau sauge. */
 .wb-dot.busy { background: var(--cc-green); box-shadow: 0 0 0 3px var(--cc-green-soft); animation: wb-pulse 1.6s ease-in-out infinite; }
-.wb-dot.idle { background: var(--cc-yellow); }
+.wb-dot.ask { background: var(--cc-accent); box-shadow: 0 0 0 3px var(--cc-accent-soft); }
+.wb-dot.idle { background: transparent; box-shadow: inset 0 0 0 2px var(--cc-green); }
+.wb-dot.pending { background: transparent; box-shadow: inset 0 0 0 2px var(--cc-blue); }
 .wb-dot.done { background: var(--cc-dot-done); }
 .wb-dot.failed { background: var(--cc-red); }
 .wb-dot.stopped { background: var(--cc-dot-stopped); }
-@keyframes wb-pulse { 0%, 100% { box-shadow: 0 0 0 3px var(--cc-green-soft); } 50% { box-shadow: 0 0 0 1px var(--cc-green-soft); opacity: 0.7; } }
+@keyframes wb-pulse { 0%, 100% { box-shadow: 0 0 0 3px var(--cc-green-soft); } 50% { box-shadow: 0 0 0 1px var(--cc-green-soft); } }
+@media (prefers-reduced-motion: reduce) { .wb-dot.busy { animation: none; } }
 .wb-ctx { color: var(--cc-yellow); font-size: 11px; flex: 0 0 auto; }
 .wb-badge {
   background: var(--cc-accent);
@@ -567,10 +586,10 @@
 .wb-brand-actions button { background: none; border: 0; color: var(--cc-dim); padding: 2px 5px; border-radius: 3px; cursor: pointer; font-size: 13px; }
 .wb-brand-actions button:hover { color: var(--cc-fg); background: var(--cc-bg-hover); }
 .wb-search-btn {
-  display: flex; align-items: center; gap: 8px; margin: 8px 12px 2px; padding: 5px 10px;
-  background: var(--cc-bg-elevated); border: 1px solid var(--cc-border); border-radius: 6px; color: var(--cc-dim); font: inherit; cursor: pointer; text-align: left;
+  display: flex; align-items: center; gap: 8px; margin: 2px 12px 8px; padding: 6px 10px;
+  background: var(--cc-bg-elevated); border: 1px solid var(--cc-border); border-radius: var(--cc-radius-sm); color: var(--cc-dimmer); font: inherit; cursor: pointer; text-align: left;
 }
-.wb-search-btn:hover { color: var(--cc-fg); border-color: var(--cc-dim); }
+.wb-search-btn:hover { color: var(--cc-dim); border-color: var(--cc-dimmer); }
 .wb-search-btn kbd { margin-left: auto; font-size: 10.5px; color: var(--cc-dimmer); background: none; border: 1px solid var(--cc-border); border-radius: 3px; padding: 0 4px; }
 .wb-filter { background: none; border: 0; font: inherit; font-size: 11px; text-transform: none; letter-spacing: 0; cursor: pointer; }
 .wb-filter.active { color: var(--cc-accent); }
@@ -578,7 +597,7 @@
 /* ---- Cartes des sessions (et du dossier principal pour les sessions d'avant) --------------------- */
 .wb-project { margin-bottom: 2px; }
 /* L'espace personnel, en tête de l'explorateur, séparé des projets. */
-.wb-project.wb-personal { margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--cc-border); }
+.wb-project.wb-personal { margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid var(--cc-border-soft); }
 /* Bloc « Chats » de l'espace personnel : en-tête cliquable (liste des chats) puis les derniers chats. */
 .wb-chats { margin: 2px 0 4px; }
 .wb-chats-head { color: var(--cc-fg); font-weight: 500; }
@@ -586,12 +605,29 @@
 .wb-chats-head .wb-chats-new { margin-left: auto; visibility: hidden; }
 .wb-chats-head:hover .wb-chats-new, .wb-chats-head.active .wb-chats-new { visibility: visible; }
 .wb-chats-rows .wb-row-label { font-weight: 400; }
-.wb-ws { margin: 2px 8px 4px 10px; border: 1px solid transparent; border-radius: 6px; }
-.wb-ws.active { border-color: var(--cc-border); background: var(--cc-bg-elevated); }
-.wb-ws-head { display: flex; align-items: center; gap: 4px; padding: 3px 6px 3px 8px; }
-.wb-ws-link { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; color: var(--cc-fg); text-decoration: none; }
-.wb-ws-link:hover { color: var(--cc-accent); }
+.wb-ws { margin: 1px 8px 1px 6px; border: 1px solid transparent; border-radius: var(--cc-radius-sm); padding: 2px 0 3px; }
+.wb-ws:hover { background: var(--cc-bg-hover); }
+.wb-ws.active { border-color: var(--cc-border); background: var(--cc-bg-elevated); box-shadow: 0 1px 2px var(--cc-border-soft); }
+.wb-ws-head { display: flex; align-items: center; gap: 4px; padding: 3px 6px 1px 8px; }
+.wb-ws-link { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; color: var(--cc-fg); text-decoration: none; }
+.wb-ws-link:hover { color: var(--cc-fg); }
 .wb-ws-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+/* Ligne de méta d'une carte, en texte : état · tâche · PR · modèle, séparés par des points médians. */
+.wb-ws-meta { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px; min-width: 0; padding: 0 8px 2px 24px; font-size: 11.5px; line-height: 18px; color: var(--cc-dim); white-space: nowrap; }
+/* Chaque morceau garde sa largeur (la ligne passe à la ligne plutôt que de les écraser) ; seul un libellé très long se tronque. */
+.wb-ws-meta > * { flex: 0 0 auto; max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; display: inline-flex; align-items: center; gap: 4px; }
+.wb-ws-meta > .wb-meta-task { max-width: 150px; }
+
+.wb-ws-meta .bi { font-size: 10.5px; flex: 0 0 auto; }
+.wb-meta-state { flex: 0 0 auto; }
+.wb-meta-task, .wb-meta-pr { color: var(--cc-dim); text-decoration: none; background: none; border: 0; padding: 0; font: inherit; cursor: pointer; }
+.wb-meta-task:hover, .wb-meta-pr:hover:not(:disabled) { color: var(--cc-fg); text-decoration: underline; text-underline-offset: 2px; }
+.wb-meta-pr:disabled { cursor: default; }
+.wb-meta-pr.wt-pr-open { color: var(--cc-purple); }
+.wb-meta-pr.wt-pr-merged { color: var(--cc-green); }
+.wb-meta-pr.wt-pr-draft, .wb-meta-pr.wt-pr-pending { color: var(--cc-dimmer); }
+.wb-meta-task.task-done .bi { color: var(--cc-green); }
+.wb-meta-model { color: var(--cc-dimmer); font-family: var(--cc-font-mono); font-size: 10px; line-height: 15px; padding: 0 5px; border: 1px solid var(--cc-border); border-radius: 4px; }
 /* La tête d'une carte tient sur une ligne : la phrase d'état ne passe jamais à la ligne, se montre entière quand elle
    est courte (« travaille ») et se tronque au-delà de 40 % de la largeur ; le nom se tronque sur le reste. */
 .wb-ws-link .wb-state { flex: 0 0 auto; max-width: 40%; }
@@ -603,8 +639,8 @@
 .wb-ws-state.none { background: transparent; border: 1px solid var(--cc-dimmer); }
 .wb-tag { font-size: 10px; color: var(--cc-dimmer); border: 1px solid var(--cc-border); border-radius: 3px; padding: 0 4px; line-height: 1.4; flex: 0 0 auto; }
 .wb-tag.missing { color: var(--cc-yellow); border-color: var(--cc-yellow); }
-.wb-ws-items { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 0 6px 6px 21px; }
-.wb-ws-empty { font-size: 11px; color: var(--cc-dimmer); font-style: italic; }
+.wb-ws-items { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 3px 6px 3px 24px; }
+.wb-ws-empty { font-size: 11.5px; color: var(--cc-dimmer); }
 .wb-empty-link { color: var(--cc-dim); text-decoration: none; }
 .wb-empty-link:hover { color: var(--cc-fg); text-decoration: underline; }
 .wb-ws-chevron { margin-left: auto; }
@@ -1109,11 +1145,11 @@ a.task-mention:hover { background: rgba(var(--cc-accent-rgb), 0.24); color: var(
 .preview-qr-fg { fill: var(--cc-qr-dark); }
 /* Sessions des autres personnes et des agents d'un projet, rangées par propriétaire sous une ligne repliable
    (ownerGroups) : pastille, nom, état, nombre de sessions. Les dossiers du groupe s'affichent dessous. */
-.wb-owner-group { color: var(--cc-dim); font-size: 12px; }
+.wb-owner-group { color: var(--cc-dim); font-size: 12.5px; }
 .wb-owner-group .wb-row-label { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .wb-owner-group .wb-state { flex: 0 0 auto; }
 .wb-owner-group:hover, .wb-owner-group.open { color: var(--cc-fg); }
-.wb-owner-block .wb-ws { margin-left: 18px; }
+.wb-owner-block .wb-ws { margin-left: 14px; }
 /* Tâche bloquée par des dépendances non terminées (TaskBlockedBadge), et listes de tâches liées (TaskRefList). */
 .task-blocked { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 600; white-space: nowrap; color: var(--cc-yellow); }
 .task-stalled { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 600; white-space: nowrap; color: var(--cc-red); }
@@ -1137,12 +1173,12 @@ a.task-mention:hover { background: rgba(var(--cc-accent-rgb), 0.24); color: var(
   .deploy-card .card-body > .d-flex { width: 100%; }
 }
 /* Planification dans la sidebar (scheduleGroups) : une ligne avec l'alarme, les sessions de ses exécutions dessous. */
-.wb-schedule-group { color: var(--cc-dim); font-size: 12px; cursor: pointer; }
+.wb-schedule-group { color: var(--cc-dim); font-size: 12.5px; cursor: pointer; }
 .wb-schedule-group .wb-row-label { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .wb-schedule-group .wb-state { flex: 0 0 auto; }
 .wb-schedule-group:hover, .wb-schedule-group.open { color: var(--cc-fg); }
 .wb-schedule-group .wb-row-actions { margin-left: auto; }
-.wb-schedule-block .wb-ws { margin-left: 18px; }
+.wb-schedule-block .wb-ws { margin-left: 14px; }
 
 /* Section « Favoris » (artefacts épinglés) au-dessus des projets : bornée en hauteur, la liste des projets garde la place. */
 .wb-favorites { max-height: 30vh; overflow-y: auto; padding-bottom: 4px; }
@@ -1152,3 +1188,4 @@ a.task-mention:hover { background: rgba(var(--cc-accent-rgb), 0.24); color: var(
 .wb-fav-icon.wb-fav-page { color: var(--cc-blue); }
 .wb-fav-icon.wb-fav-data { color: var(--cc-red); }
 .wb-fav-icon.wb-fav-slides { color: var(--cc-yellow); }
+.wb-meta-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
