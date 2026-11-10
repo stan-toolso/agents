@@ -9,7 +9,7 @@ import PopMenu, { type MenuItem } from '../components/PopMenu';
 import PageComments from '../components/pages/PageComments';
 import PageData, { refreshLabel } from '../components/pages/PageData';
 import SharePageModal from '../components/pages/SharePageModal';
-import { DELETE_ALL_SHARED_PAGE_COMMENTS, DELETE_SHARED_PAGE, REFRESH_SHARED_PAGE_DATA, REMOVE_SHARED_PAGE_MEMBER, REQUEST_SHARED_PAGE_UPDATE, SET_SHARED_PAGE_HISTORY, SHARED_PAGE, UPDATE_SHARED_PAGE, type SharedPage, type SharedPageAgentHandoff } from '../graphql/misc';
+import { DELETE_ALL_SHARED_PAGE_COMMENTS, DELETE_SHARED_PAGE, DUPLICATE_SHARED_PAGE, REFRESH_SHARED_PAGE_DATA, REMOVE_SHARED_PAGE_MEMBER, REQUEST_SHARED_PAGE_UPDATE, SET_SHARED_PAGE_HISTORY, SHARED_PAGE, UPDATE_SHARED_PAGE, type SharedPage, type SharedPageAgentHandoff } from '../graphql/misc';
 import { useAuth } from '../auth/AuthContext';
 import { formatSize } from '../lib/files';
 import { timeAgo } from '../lib/humanize';
@@ -74,6 +74,7 @@ export default function SharedPagePage() {
   const [setHistory] = useMutation(SET_SHARED_PAGE_HISTORY, { refetchQueries: ['SharedPage'], onError: (e) => void showError(e) });
   const [purgeComments] = useMutation<{ deleteAllSharedPageComments: number }>(DELETE_ALL_SHARED_PAGE_COMMENTS, { refetchQueries: ['SharedPage', 'SharedPageComments', 'SharedPages'], onError: (e) => void showError(e) });
   const [requestUpdate] = useMutation<{ requestSharedPageUpdate: { id: string; name: string } }>(REQUEST_SHARED_PAGE_UPDATE, { onError: (e) => void showError(e) });
+  const [duplicate] = useMutation<{ duplicateSharedPage: { id: string; title: string } }>(DUPLICATE_SHARED_PAGE, { refetchQueries: ['SharedPages', 'Sidebar'], onError: (e) => void showError(e) });
   const [refreshData, { loading: refreshing }] = useMutation(REFRESH_SHARED_PAGE_DATA, { refetchQueries: ['SharedPage', 'SharedPages'], onError: (e) => void showError(e) });
 
   if (loading && !data) return <PageLoading />;
@@ -159,6 +160,27 @@ export default function SharedPagePage() {
     },
     { label: 'Ouvrir dans un onglet', icon: 'bi-box-arrow-up-right', onClick: () => void window.open(viewUrl, '_blank', 'noopener') },
     { label: 'Télécharger le HTML', icon: 'bi-download', onClick: () => void window.open(sharedPageUrl(page.id, version, true), '_self') },
+    // Copie privée (sources de données comprises) ; un artefact de données seulement par qui en voit les requêtes.
+    ...(!user?.isGuest && (page.kind !== 'DATA' || admin)
+      ? [
+          {
+            label: 'Dupliquer',
+            icon: 'bi-copy',
+            onClick: async () => {
+              const title = await prompt({
+                title: page.kind === 'DATA' ? "Dupliquer l'artefact de données" : 'Dupliquer la page',
+                message: `Une copie privée${version && version !== page.version ? ` de la version ${version}` : ''}, à votre nom${page.kind === 'DATA' ? ', avec ses sources de données' : ''} ; ni les personnes avec qui elle est partagée, ni les commentaires, ni l'historique ne suivent.`,
+                defaultValue: `Copie de ${page.title}`,
+                confirmLabel: 'Dupliquer',
+              });
+              if (title === null) return;
+              const res = await duplicate({ variables: { id: page.id, title: title.trim() || null, version } });
+              const copy = res.data?.duplicateSharedPage;
+              if (copy) navigate(`/shared/${copy.id}`);
+            },
+          },
+        ]
+      : []),
     ...(canSendToAgent ? [{ label: "Demander une mise à jour à l'agent", icon: 'bi-robot', separatorBefore: true, onClick: () => void askUpdate() }] : []),
     ...(admin
       ? [

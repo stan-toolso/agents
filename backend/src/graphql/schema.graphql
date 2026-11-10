@@ -3467,6 +3467,8 @@ type Mutation {
   setSharedPageHistory(id: ID!, enabled: Boolean!): SharedPage!
   "Rafraîchit toutes les sources d'un artefact de données, maintenant (propriétaire ou administrateur de Skipper) ; attend la fin."
   refreshSharedPageData(id: ID!): SharedPage!
+  "Duplique un artefact : copie privée de la dernière version (ou de version), avec son type et ses sources de données ; ni membres, ni commentaires, ni historique. Un artefact de données : propriétaire ou administrateur seulement."
+  duplicateSharedPage(id: ID!, title: String, version: Int): SharedPage!
   "Supprime tous les commentaires de la page, réponses comprises (propriétaire ou administrateur de Skipper) ; renvoie le nombre de fils supprimés."
   deleteAllSharedPageComments(id: ID!): Int!
   "Commentaire sur une page que l'on voit : général, ou ancré sur un élément (anchor). version : celle affichée (la dernière par défaut)."

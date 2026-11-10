@@ -125,6 +125,49 @@ export const sharedPageRepository = {
     }
   },
 
+  /**
+   * Copie d'une page : nouvelle page (version 1 = le contenu de `version` de la source) avec le type, le réglage du
+   * rafraîchissement et les sources de données (définition, dernières données et état), dans une même transaction.
+   * Ni les membres, ni le lien ouvert, ni les commentaires, ni l'historique ne suivent.
+   */
+  async duplicate(sourceId: string, version: number, input: { ownerId: string; title: string; description: string | null; projectId: string | null; sessionId: string | null; sourcePath: string | null }): Promise<SharedPage | null> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query<Row>(
+        `INSERT INTO shared_pages (owner_id, title, description, link_access, project_id, session_id, source_path, kind, refresh_minutes, data_refreshed_at)
+         SELECT $2, $3, $4, false, $5, $6, $7, kind, refresh_minutes, data_refreshed_at FROM shared_pages WHERE id = $1 RETURNING *`,
+        [sourceId, input.ownerId, input.title, input.description, input.projectId, input.sessionId, input.sourcePath],
+      );
+      const copy = rows[0];
+      if (!copy) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+      const { rowCount } = await client.query(
+        `INSERT INTO shared_page_versions (page_id, version, html, size, created_by, session_id)
+         SELECT $1, 1, html, size, $2, NULL FROM shared_page_versions WHERE page_id = $3 AND version = $4`,
+        [copy.id, input.ownerId, sourceId, version],
+      );
+      if (!rowCount) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+      await client.query(
+        `INSERT INTO shared_page_sources (page_id, name, kind, config, position, data, row_count, status, error, duration_ms, refreshed_at, attempted_at)
+         SELECT $1, name, kind, config, position, data, row_count, status, error, duration_ms, refreshed_at, attempted_at FROM shared_page_sources WHERE page_id = $2`,
+        [copy.id, sourceId],
+      );
+      await client.query('COMMIT');
+      return toPage(copy);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  },
+
   async update(id: string, patch: { title?: string; description?: string | null; linkAccess?: boolean; agentHandoff?: AgentHandoff; historyEnabled?: boolean; refreshMinutes?: number | null }): Promise<SharedPage | null> {
     const sets = ['updated_at = now()'];
     const params: unknown[] = [id];

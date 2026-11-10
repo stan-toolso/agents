@@ -417,6 +417,15 @@ export const REFRESH_SHARED_PAGE_DATA = gql`
   }
 `;
 
+export const DUPLICATE_SHARED_PAGE = gql`
+  mutation DuplicateSharedPage($id: ID!, $title: String, $version: Int) {
+    duplicateSharedPage(id: $id, title: $title, version: $version) {
+      id
+      title
+    }
+  }
+`;
+
 export const UPDATE_SHARED_PAGE = gql`
   ${SHARED_PAGE_FIELDS}
   mutation UpdateSharedPage($id: ID!, $input: SharedPageInput!) {

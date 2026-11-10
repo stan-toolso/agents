@@ -2270,6 +2270,7 @@ export const resolvers = {
     deleteSharedPage: (_: unknown, args: { id: string }, ctx: Ctx) => sharedPageService.delete(requireUser(ctx).id, args.id),
     setSharedPageHistory: (_: unknown, args: { id: string; enabled: boolean }, ctx: Ctx) => sharedPageService.setHistory(requireUser(ctx), args.id, args.enabled),
     refreshSharedPageData: (_: unknown, args: { id: string }, ctx: Ctx) => artifactDataService.refreshFor(requireUser(ctx), args.id),
+    duplicateSharedPage: (_: unknown, args: { id: string; title?: string | null; version?: number | null }, ctx: Ctx) => sharedPageService.duplicate(requireUser(ctx), args.id, { title: args.title, version: args.version }),
     deleteAllSharedPageComments: (_: unknown, args: { id: string }, ctx: Ctx) => sharedPageService.deleteAllComments(requireUser(ctx), args.id),
     addSharedPageComment: (_: unknown, args: { pageId: string; body: string; anchor?: unknown; version?: number | null }, ctx: Ctx) =>
       sharedPageCommentService.add({ user: requireUser(ctx) }, args.pageId, { body: args.body, anchor: args.anchor, version: args.version }),

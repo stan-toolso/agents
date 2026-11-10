@@ -167,6 +167,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'page.history': "a réglé l'historique de la page",
   'page.comments_purge': 'a supprimé tous les commentaires de la page',
   'page.refresh': "a rafraîchi les données de l'artefact",
+  'page.duplicate': "a dupliqué l'artefact",
   'user.invite': 'a invité dans l’application',
   'user.admin': 'a changé les droits d’administration de',
   'user.super_admin': 'a changé les droits de super administration de',

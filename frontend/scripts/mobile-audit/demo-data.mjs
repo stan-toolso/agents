@@ -944,6 +944,12 @@ export const demoRoot = {
     }
     return mine ?? sharedPageDemo(a.id);
   },
+  duplicateSharedPage: (a) => {
+    const src = sharedPagesDemo.find((pg) => pg.id === a.id) ?? sharedPageDemo(a.id);
+    const copy = { ...src, id: `${src.id}-copie-${sharedPagesDemo.length}`, title: a.title || `Copie de ${src.title}`, version: 1, versions: (src.versions ?? []).slice(0, 1).map((v) => ({ ...v, version: 1 })), linkAccess: false, members: [], comments: [], openComments: 0, createdAt: ago(0), updatedAt: ago(0), viewerAccess: { owner: true, member: false, admin: true } };
+    sharedPagesDemo.unshift(copy);
+    return copy;
+  },
   githubPullRequests: [],
   gitStatus,
   gitLog: (a = {}) => (worksessionOf(a.worksessionId) ? commits : commits.slice(2)).slice(0, a.limit ?? 50),
