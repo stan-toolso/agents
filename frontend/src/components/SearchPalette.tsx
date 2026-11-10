@@ -38,7 +38,7 @@ const PAGES: { to: string; label: string; keywords: string; icon: string }[] = [
   { to: '/sessions', label: 'Sessions', keywords: 'agents conversations', icon: 'bi-chat-dots' },
   { to: '/tasks', label: 'Tâches', keywords: 'tableau todo', icon: 'bi-check2-square' },
   { to: '/vault', label: 'Coffre', keywords: 'secrets identifiants ssh postgres api sites', icon: 'bi-shield-lock' },
-  { to: '/shared', label: 'Pages partagées', keywords: 'html rapports', icon: 'bi-file-earmark-richtext' },
+  { to: '/shared', label: 'Artefacts', keywords: 'pages html rapports données tableaux de bord dashboards', icon: 'bi-collection' },
   { to: '/inbox', label: 'À traiter', keywords: 'file validation demandes pull requests sessions attente', icon: 'bi-inbox' },
   { to: '/requests', label: 'Demandes', keywords: 'permissions questions attente', icon: 'bi-bell' },
   { to: '/welcome', label: 'Premiers pas', keywords: 'onboarding bienvenue assistant comptes claude github gitlab coffre', icon: 'bi-compass' },

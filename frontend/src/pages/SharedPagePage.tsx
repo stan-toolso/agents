@@ -7,13 +7,18 @@ import { useDialogs } from '../components/Dialogs';
 import PageLoading from '../components/PageLoading';
 import PopMenu, { type MenuItem } from '../components/PopMenu';
 import PageComments from '../components/pages/PageComments';
+import PageData, { refreshLabel } from '../components/pages/PageData';
 import SharePageModal from '../components/pages/SharePageModal';
-import { DELETE_ALL_SHARED_PAGE_COMMENTS, DELETE_SHARED_PAGE, REMOVE_SHARED_PAGE_MEMBER, REQUEST_SHARED_PAGE_UPDATE, SET_SHARED_PAGE_HISTORY, SHARED_PAGE, UPDATE_SHARED_PAGE, type SharedPage, type SharedPageAgentHandoff } from '../graphql/misc';
+import { DELETE_ALL_SHARED_PAGE_COMMENTS, DELETE_SHARED_PAGE, REFRESH_SHARED_PAGE_DATA, REMOVE_SHARED_PAGE_MEMBER, REQUEST_SHARED_PAGE_UPDATE, SET_SHARED_PAGE_HISTORY, SHARED_PAGE, UPDATE_SHARED_PAGE, type SharedPage, type SharedPageAgentHandoff } from '../graphql/misc';
 import { useAuth } from '../auth/AuthContext';
 import { formatSize } from '../lib/files';
+import { timeAgo } from '../lib/humanize';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { useTabTitle } from '../workbench/TabsContext';
-import { accessLabel } from './SharedPagesPage';
+import { ARTIFACT_KINDS, accessLabel } from './SharedPagesPage';
+
+/** « il y a 5 min » → « 5 min » pour la pastille de l'en-tête. */
+const timeAgoShort = (iso: string) => timeAgo(iso).replace(/^il y a /, '');
 
 const fmt = (iso: string) => new Date(iso).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -21,7 +26,8 @@ const fmt = (iso: string) => new Date(iso).toLocaleString('fr-FR', { dateStyle: 
  * Lecture d'une page partagée dans un bac à sable. En-tête sur une ligne : titre (cliquer déplie les détails :
  * propriétaire, accès, versions, origine), Commentaires, Partager, et un menu « ⋯ » pour le reste (lien, onglet,
  * téléchargement, renommer, supprimer, quitter). Panneau de commentaires : généraux ou ancrés sur un élément de la
- * page (components/pages/PageComments.tsx).
+ * page (components/pages/PageComments.tsx). Artefact de données : panneau « Données » (components/pages/PageData.tsx)
+ * avec le rafraîchissement et l'état des sources ; le cadre est rechargé à chaque rafraîchissement (clé de l'iframe).
  *
  * Deux adresses : /shared/<id>, la page à part entière (lien partagé, notifications, personnes qui ne voient pas la
  * session), et /sessions/<session>/pages/<id>, la même page ouverte dans le dossier de la session qui l'a publiée
@@ -41,6 +47,7 @@ export default function SharedPagePage() {
   const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(Boolean(focusComment));
+  const [dataOpen, setDataOpen] = useState(false);
   const [picking, setPicking] = useState(false);
   const [details, setDetails] = useState(false);
   const [menuAt, setMenuAt] = useState<{ top: number; right: number } | null>(null);
@@ -53,7 +60,10 @@ export default function SharedPagePage() {
     }
   });
   const frameRef = useRef<HTMLIFrameElement>(null);
-  const openComments_ = useCallback(() => setCommentsOpen(true), []);
+  const openComments_ = useCallback(() => {
+    setCommentsOpen(true);
+    setDataOpen(false);
+  }, []);
   // Le lien d'une notification (?comment=) ouvre le panneau sur le commentaire ; le paramètre est ensuite retiré.
   useEffect(() => {
     if (focusComment) setCommentsOpen(true);
@@ -64,6 +74,7 @@ export default function SharedPagePage() {
   const [setHistory] = useMutation(SET_SHARED_PAGE_HISTORY, { refetchQueries: ['SharedPage'], onError: (e) => void showError(e) });
   const [purgeComments] = useMutation<{ deleteAllSharedPageComments: number }>(DELETE_ALL_SHARED_PAGE_COMMENTS, { refetchQueries: ['SharedPage', 'SharedPageComments', 'SharedPages'], onError: (e) => void showError(e) });
   const [requestUpdate] = useMutation<{ requestSharedPageUpdate: { id: string; name: string } }>(REQUEST_SHARED_PAGE_UPDATE, { onError: (e) => void showError(e) });
+  const [refreshData, { loading: refreshing }] = useMutation(REFRESH_SHARED_PAGE_DATA, { refetchQueries: ['SharedPage', 'SharedPages'], onError: (e) => void showError(e) });
 
   if (loading && !data) return <PageLoading />;
   if (error) return <Alert variant="danger" className="m-3">Erreur : {error.message}</Alert>;
@@ -80,6 +91,20 @@ export default function SharedPagePage() {
   const shared = page.linkAccess || page.members.length > 0;
   const openComments = page.openComments;
   const link = `${window.location.origin}/shared/${page.id}`;
+  // Artefact de données : sources en défaut (pastille du bouton « Données »), rechargement du cadre après un rafraîchissement.
+  const isData = page.kind === 'DATA';
+  const kindDef = ARTIFACT_KINDS[page.kind] ?? ARTIFACT_KINDS.PAGE;
+  const failingSources = isData ? page.sources.filter((s) => s.status === 'error' || s.status === 'skipped').length : 0;
+  const frameKey = `${page.id}:${shown}:${page.dataRefreshedAt ?? ''}`;
+  const toggleComments = () => {
+    setCommentsOpen((o) => !o);
+    setDataOpen(false);
+  };
+  const toggleData = () => {
+    setDataOpen((o) => !o);
+    setCommentsOpen(false);
+    setPicking(false);
+  };
   const mine = page.members.find((m) => m.user.id === user?.id && m.message);
   const noteKey = mine ? `${page.id}:${mine.message!.length}:${mine.message!.slice(0, 40)}` : null;
   const note = mine && noteKey && !hiddenNotes.includes(noteKey) ? mine : null;
@@ -218,13 +243,27 @@ export default function SharedPagePage() {
     <div className="preview-page">
       <div className="sp-head">
         <button type="button" className={`sp-head-title${details ? ' open' : ''}`} onClick={() => setDetails((d) => !d)} title={details ? 'Masquer les détails' : 'Détails de la page (propriétaire, versions, origine)'} aria-expanded={details}>
-          <i className={`bi ${access.icon} sp-head-access`} title={access.text} />
+          <i className={`bi ${isData ? kindDef.icon : access.icon} sp-head-access`} title={isData ? `${kindDef.label} · ${access.text}` : access.text} />
           <span className="sp-head-name">{page.title}</span>
+          {isData && page.dataRefreshedAt && <span className="sp-chip d-none d-md-inline" title={`Données rafraîchies ${new Date(page.dataRefreshedAt).toLocaleString()} · ${refreshLabel(page.refreshMinutes)}`}>{timeAgoShort(page.dataRefreshedAt)}</span>}
           {shown !== page.version && <span className="sp-chip">v{shown}</span>}
           <i className={`bi bi-chevron-${details ? 'up' : 'down'} sp-head-chevron`} />
         </button>
         <div className="sp-head-actions">
-          <button type="button" className={`sp-btn${commentsOpen ? ' on' : ''}`} onClick={() => setCommentsOpen((o) => !o)} title={commentsOpen ? 'Masquer les commentaires' : 'Commentaires : remarques générales ou sur un endroit précis de la page'} aria-pressed={commentsOpen}>
+          {isData && admin && (
+            <button type="button" className="sp-btn" onClick={() => void refreshData({ variables: { id: page.id } })} disabled={refreshing || !page.sources.length} title="Rafraîchir les données maintenant" aria-label="Rafraîchir les données">
+              <i className={`bi bi-arrow-repeat${refreshing ? ' spin' : ''}`} />
+              <span className="sp-btn-label">{refreshing ? 'En cours…' : 'Rafraîchir'}</span>
+            </button>
+          )}
+          {isData && (
+            <button type="button" className={`sp-btn${dataOpen ? ' on' : ''}`} onClick={toggleData} title={dataOpen ? 'Masquer les données' : 'Données : sources, rafraîchissement et état'} aria-pressed={dataOpen}>
+              <i className="bi bi-bar-chart-line" />
+              <span className="sp-btn-label">Données</span>
+              {failingSources > 0 && <span className="pc-count">{failingSources}</span>}
+            </button>
+          )}
+          <button type="button" className={`sp-btn${commentsOpen ? ' on' : ''}`} onClick={toggleComments} title={commentsOpen ? 'Masquer les commentaires' : 'Commentaires : remarques générales ou sur un endroit précis de la page'} aria-pressed={commentsOpen}>
             <i className="bi bi-chat-left-text" />
             <span className="sp-btn-label">Commentaires</span>
             {openComments > 0 && <span className="pc-count">{openComments}</span>}
@@ -259,6 +298,11 @@ export default function SharedPagePage() {
           <span>
             <i className={`bi ${access.icon}`} /> {access.text}
           </span>
+          {isData && (
+            <span title="Artefact de données : la page lit ses chiffres dans des sources rafraîchies par Skipper">
+              <i className={`bi ${kindDef.icon}`} /> {kindDef.label} · {page.dataRefreshedAt ? `mis à jour ${timeAgo(page.dataRefreshedAt)}` : 'pas encore rafraîchi'} · {refreshLabel(page.refreshMinutes)}
+            </span>
+          )}
           {!page.historyEnabled && (
             <span title="Seule la dernière version est consultable">
               <i className="bi bi-eye-slash" /> Historique désactivé
@@ -320,8 +364,8 @@ export default function SharedPagePage() {
           </button>
         </div>
       )}
-      <div className={`sp-body${commentsOpen ? ' with-comments' : ''}${picking ? ' picking' : ''}`}>
-        <iframe ref={frameRef} key={`${page.id}:${shown}`} className="preview-frame" title={page.title} src={viewUrl} sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads" allow="clipboard-write" />
+      <div className={`sp-body${commentsOpen ? ' with-comments' : ''}${dataOpen ? ' with-data' : ''}${picking ? ' picking' : ''}`}>
+        <iframe ref={frameRef} key={frameKey} className="preview-frame" title={page.title} src={viewUrl} sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads" allow="clipboard-write" />
         <PageComments
           page={page}
           version={shown}
@@ -338,6 +382,17 @@ export default function SharedPagePage() {
             if (focusComment) setSearch({}, { replace: true });
           }}
         />
+        {isData && dataOpen && (
+          <PageData
+            page={page}
+            manage={admin}
+            refreshing={refreshing}
+            onRefresh={() => void refreshData({ variables: { id: page.id } })}
+            onSetRefresh={(minutes) => void update({ variables: { id: page.id, input: { refreshMinutes: minutes } } })}
+            onAskAgent={canSendToAgent ? () => void askUpdate() : undefined}
+            onClose={() => setDataOpen(false)}
+          />
+        )}
       </div>
       {sharing && <SharePageModal page={page} onClose={() => setSharing(false)} />}
     </div>

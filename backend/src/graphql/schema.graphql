@@ -2518,6 +2518,50 @@ type SharedPage {
   openComments: Int!
   "Renvoi des commentaires à la session d'origine, réglé par le propriétaire ; OFF pour une page sans session."
   agentHandoff: SharedPageAgentHandoff!
+  "Type d'artefact : page HTML, ou page alimentée par des sources de données rafraîchies par Skipper."
+  kind: ArtifactKind!
+  "Données : intervalle du rafraîchissement automatique en minutes ; null = à la demande."
+  refreshMinutes: Int
+  "Données : dernière tentative de rafraîchissement."
+  dataRefreshedAt: DateTime
+  "Données : les sources (état pour qui voit la page ; requête et script pour le propriétaire ou un administrateur)."
+  sources: [SharedPageSource!]!
+}
+
+"Type d'artefact."
+enum ArtifactKind {
+  "Page HTML autonome."
+  PAGE
+  "Page HTML alimentée par des sources de données (SQL du coffre, scripts) que Skipper rafraîchit."
+  DATA
+}
+
+"Source de données d'un artefact « Données »."
+type SharedPageSource {
+  id: ID!
+  "Clé de Skipper.data dans la page."
+  name: String!
+  "sql ou script."
+  kind: String!
+  "sql : nom de l'élément PostgreSQL du coffre."
+  item: String
+  database: String
+  "sql : la requête (propriétaire ou administrateur seulement)."
+  query: String
+  "script : node, python ou sh."
+  interpreter: String
+  "script : le code (propriétaire ou administrateur seulement)."
+  code: String
+  timeoutSeconds: Int
+  "pending (jamais rafraîchie), ok, error, skipped (non rafraîchie : élément soumis à approbation, projet disparu…)."
+  status: String!
+  error: String
+  rowCount: Int
+  durationMs: Int
+  "Dernier succès."
+  refreshedAt: DateTime
+  "Dernière tentative."
+  attemptedAt: DateTime
 }
 
 "Renvoi des commentaires d'une page partagée à la session qui l'a publiée."
@@ -2595,6 +2639,8 @@ input SharedPageInput {
   description: String
   linkAccess: Boolean
   agentHandoff: SharedPageAgentHandoff
+  "Artefact de données : intervalle du rafraîchissement automatique en minutes (5 à 10080) ; 0 ou null : à la demande."
+  refreshMinutes: Int
 }
 
 input PushSubscriptionInput {
@@ -3419,6 +3465,8 @@ type Mutation {
   deleteSharedPage(id: ID!): Boolean!
   "Active ou désactive l'historique des versions (propriétaire ou administrateur de Skipper) : désactivé, seule la dernière version est listée et servie."
   setSharedPageHistory(id: ID!, enabled: Boolean!): SharedPage!
+  "Rafraîchit toutes les sources d'un artefact de données, maintenant (propriétaire ou administrateur de Skipper) ; attend la fin."
+  refreshSharedPageData(id: ID!): SharedPage!
   "Supprime tous les commentaires de la page, réponses comprises (propriétaire ou administrateur de Skipper) ; renvoie le nombre de fils supprimés."
   deleteAllSharedPageComments(id: ID!): Int!
   "Commentaire sur une page que l'on voit : général, ou ancré sur un élément (anchor). version : celle affichée (la dernière par défaut)."

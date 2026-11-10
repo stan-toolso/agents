@@ -10,6 +10,7 @@ import { SHARE_LOGIN_LINK_DAYS, signInService } from '../auth/signInService.js';
 import { pageShareEmail } from './emails.js';
 import { sharedPageCommentRepository } from './commentRepository.js';
 import { sharedPageRepository } from './repository.js';
+import { parseRefreshMinutes } from './dataSources.js';
 import { AGENT_HANDOFF_MODES, type AgentHandoff, type PublishInput, type SharedPage } from './types.js';
 
 export const MAX_PAGE_BYTES = 10 * 1024 * 1024;
@@ -142,6 +143,7 @@ export const sharedPageService = {
         sourcePath: input.sourcePath ?? null,
         html: input.html,
         createdBy: input.ownerId,
+        kind: input.kind ?? null,
       });
       if (!updated) throw new NotFoundError('Page partagée introuvable');
       return updated;
@@ -155,6 +157,7 @@ export const sharedPageService = {
       sessionId: input.sessionId ?? null,
       sourcePath: input.sourcePath ?? null,
       html: input.html,
+      kind: input.kind ?? 'page',
     });
   },
 
@@ -168,9 +171,13 @@ export const sharedPageService = {
     return { html, version: v };
   },
 
-  async update(userId: string, id: string, input: { title?: string | null; description?: string | null; linkAccess?: boolean | null; agentHandoff?: string | null }): Promise<SharedPage> {
-    await this.getOwned(userId, id);
-    const patch: { title?: string; description?: string | null; linkAccess?: boolean; agentHandoff?: AgentHandoff } = {};
+  async update(userId: string, id: string, input: { title?: string | null; description?: string | null; linkAccess?: boolean | null; agentHandoff?: string | null; refreshMinutes?: number | null }): Promise<SharedPage> {
+    const page = await this.getOwned(userId, id);
+    const patch: { title?: string; description?: string | null; linkAccess?: boolean; agentHandoff?: AgentHandoff; refreshMinutes?: number | null } = {};
+    if (input.refreshMinutes !== undefined) {
+      if (page.kind !== 'data') throw new AppError("Seul un artefact de données se rafraîchit");
+      patch.refreshMinutes = parseRefreshMinutes(input.refreshMinutes);
+    }
     if (input.title != null) patch.title = cleanTitle(input.title);
     if (input.description !== undefined) patch.description = cleanDescription(input.description);
     if (input.linkAccess != null) patch.linkAccess = input.linkAccess;

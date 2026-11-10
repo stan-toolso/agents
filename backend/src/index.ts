@@ -11,6 +11,7 @@ import { handleAttachmentRoute } from './sessions/attachmentRoute.js';
 import { handleTaskAttachmentRoute } from './tasks/attachmentRoute.js';
 import { handleMessageAttachmentRoute } from './conversations/attachmentRoute.js';
 import { handleSharedPageRoute } from './sharedPages/viewRoute.js';
+import { artifactDataService } from './sharedPages/dataService.js';
 import { handlePushActionRoute } from './notifications/pushActions.js';
 import { notificationChannelService } from './notifications/channels.js';
 import { handleFileViewRoute } from './files/viewRoute.js';
@@ -206,6 +207,7 @@ async function main() {
     { name: 'sauvegardes git', start: () => gitServer.startBackgroundBackups(), stop: () => gitServer.stopBackgroundBackups() },
     { name: 'reprise des sessions orphelines', start: () => orphanSweep.start(), stop: () => orphanSweep.stop() },
     { name: 'consolidation du temps CTO', start: () => ctoTimeService.start(), stop: () => ctoTimeService.stop() },
+    { name: 'rafraîchissement des artefacts de données', start: () => artifactDataService.start(), stop: () => artifactDataService.stop() },
   ];
 
   // Origines autorisées à appeler l'API avec le cookie de session : voir origin.ts (aussi appliqué aux WebSockets).

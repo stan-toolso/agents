@@ -1,0 +1,36 @@
+/* Panneau « Données » d'un artefact de données : réglage du rafraîchissement et état des sources. Partage la coque .pc-panel. */
+.pd-panel { gap: 0; }
+.pd-refresh { display: flex; align-items: center; gap: 8px; padding: 10px; border-bottom: 1px solid var(--cc-border); }
+.pd-refresh-text { flex: 1; min-width: 0; font-size: 12.5px; color: var(--cc-dim); line-height: 1.3; }
+.pd-refresh-text strong { color: var(--cc-fg); font-weight: 600; }
+.pd-refresh select { width: auto; font-size: 12.5px; }
+.pd-list { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+.pd-src { border: 1px solid var(--cc-border); border-radius: 10px; background: var(--cc-bg); overflow: hidden; }
+.pd-src-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
+.pd-src-kind { flex: 0 0 auto; width: 26px; height: 26px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 13px; color: var(--cc-dim); background: var(--cc-bg-hover); }
+.pd-src-name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd-src-where { font-size: 12px; color: var(--cc-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd-state { margin-left: auto; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--cc-bg-hover); color: var(--cc-dim); }
+.pd-state.ok { color: var(--cc-green); background: color-mix(in srgb, var(--cc-green) 14%, transparent); }
+.pd-state.error { color: var(--cc-red); background: color-mix(in srgb, var(--cc-red) 14%, transparent); }
+.pd-state.skipped { color: var(--cc-yellow); background: color-mix(in srgb, var(--cc-yellow) 18%, transparent); }
+.pd-src-meta { padding: 0 10px 8px 44px; font-size: 12px; color: var(--cc-dim); display: flex; flex-wrap: wrap; gap: 2px 12px; }
+.pd-src-error { margin: 0 10px 8px 44px; padding: 6px 8px; border-radius: 6px; font-size: 12px; color: var(--cc-red); background: color-mix(in srgb, var(--cc-red) 10%, transparent); white-space: pre-wrap; overflow-wrap: anywhere; }
+.pd-src-error.skipped { color: var(--cc-fg); background: color-mix(in srgb, var(--cc-yellow) 14%, transparent); }
+.pd-src-code { border-top: 1px solid var(--cc-border); }
+.pd-src-code summary { padding: 6px 10px; font-size: 12px; color: var(--cc-dim); cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; }
+.pd-src-code summary::-webkit-details-marker { display: none; }
+.pd-src-code summary .bi-chevron-right { font-size: 10px; transition: transform 0.15s; }
+.pd-src-code[open] summary .bi-chevron-right { transform: rotate(90deg); }
+.pd-src-code pre { margin: 0; padding: 8px 10px 10px; font-size: 11.5px; line-height: 1.45; max-height: 260px; overflow: auto; background: var(--cc-bg-elevated); color: var(--cc-fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.pd-foot { padding: 10px; border-top: 1px solid var(--cc-border); font-size: 12px; color: var(--cc-dim); line-height: 1.4; }
+.pd-foot a, .pd-foot button { font-size: 12px; }
+.pd-empty { padding: 24px 12px; text-align: center; color: var(--cc-dim); font-size: 13px; }
+
+/* Le panneau « Données » occupe la place du panneau des commentaires (jamais les deux) ; sur mobile il remplace le cadre. */
+.bi.spin { display: inline-block; animation: pd-spin 1s linear infinite; }
+@keyframes pd-spin { to { transform: rotate(360deg); } }
+@media (max-width: 767.98px) {
+  .sp-body.with-data .preview-frame { display: none; }
+  .sp-body.with-data .pd-panel { flex: 1 1 auto; width: 100%; border-left: 0; }
+}

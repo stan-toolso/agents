@@ -123,6 +123,33 @@ export interface SharedPage {
   openComments: number;
   /** Renvoi des commentaires à la session d'origine (OFF sans session). */
   agentHandoff: SharedPageAgentHandoff;
+  /** Type d'artefact : page HTML, ou page alimentée par des sources de données rafraîchies par Skipper. */
+  kind: ArtifactKind;
+  /** Données : intervalle du rafraîchissement automatique en minutes ; null = à la demande. */
+  refreshMinutes: number | null;
+  dataRefreshedAt: string | null;
+  sources: SharedPageSource[];
+}
+
+export type ArtifactKind = 'PAGE' | 'DATA';
+
+export interface SharedPageSource {
+  id: string;
+  name: string;
+  kind: 'sql' | 'script';
+  item: string | null;
+  database: string | null;
+  /** Propriétaire ou administrateur seulement. */
+  query: string | null;
+  interpreter: string | null;
+  code: string | null;
+  timeoutSeconds: number | null;
+  status: 'pending' | 'ok' | 'error' | 'skipped';
+  error: string | null;
+  rowCount: number | null;
+  durationMs: number | null;
+  refreshedAt: string | null;
+  attemptedAt: string | null;
 }
 
 /** Renvoi des commentaires à l'agent : désactivé, sur demande (bouton), ou automatique (chaque commentaire). */
@@ -164,6 +191,26 @@ export const SHARED_PAGE_FIELDS = gql`
     linkAccess
     agentHandoff
     historyEnabled
+    kind
+    refreshMinutes
+    dataRefreshedAt
+    sources {
+      id
+      name
+      kind
+      item
+      database
+      query
+      interpreter
+      code
+      timeoutSeconds
+      status
+      error
+      rowCount
+      durationMs
+      refreshedAt
+      attemptedAt
+    }
     version
     createdAt
     updatedAt
@@ -356,6 +403,15 @@ export const PUBLISH_SHARED_PAGE = gql`
   ${SHARED_PAGE_FIELDS}
   mutation PublishSharedPage($projectId: ID!, $worksessionId: ID, $path: String!, $title: String!, $pageId: ID) {
     publishSharedPage(projectId: $projectId, worksessionId: $worksessionId, path: $path, title: $title, pageId: $pageId) {
+      ...SharedPageFields
+    }
+  }
+`;
+
+export const REFRESH_SHARED_PAGE_DATA = gql`
+  ${SHARED_PAGE_FIELDS}
+  mutation RefreshSharedPageData($id: ID!) {
+    refreshSharedPageData(id: $id) {
       ...SharedPageFields
     }
   }
