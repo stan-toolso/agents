@@ -72,6 +72,26 @@ describe.skipIf(!adminUrl)('pages publiées par une session (PostgreSQL)', () =>
     expect((await repo.listForSessions([], alice)).size).toBe(0);
   });
 
+  it('duplique une page : version choisie, type, rafraîchissement et sources (données comprises), sans membres ni lien ouvert', async () => {
+    const s = await session();
+    const src = await repo.create({ ownerId: alice, title: 'Ventes', description: 'Par mois', linkAccess: true, projectId: project, sessionId: s, sourcePath: 'v.html', html: Buffer.from('<p>v1</p>'), kind: 'data' });
+    await repo.addVersion(src.id, { title: 'Ventes', description: null, linkAccess: null, projectId: project, sessionId: s, sourcePath: 'v.html', html: Buffer.from('<p>v2</p>'), createdBy: alice });
+    await repo.update(src.id, { refreshMinutes: 60 });
+    await repo.addMember(src.id, bob, alice);
+    const { dataSourceRepository } = await import('./dataRepository.js');
+    await dataSourceRepository.replace(src.id, [{ name: 'ventes', kind: 'sql', config: { item: 'base', database: null, query: 'SELECT 1' } }]);
+    const [source] = await dataSourceRepository.list(src.id);
+    await dataSourceRepository.saveSuccess(source.id, { columns: ['n'], rows: [{ n: 1 }] }, 1, 12);
+
+    const copy = await repo.duplicate(src.id, 1, { ownerId: bob, title: 'Copie de Ventes', description: 'Par mois', projectId: project, sessionId: null, sourcePath: null });
+    expect(copy).toMatchObject({ ownerId: bob, title: 'Copie de Ventes', version: 1, linkAccess: false, kind: 'data', refreshMinutes: 60, sessionId: null });
+    expect((await repo.content(copy!.id, 1))?.toString()).toBe('<p>v1</p>');
+    expect(await repo.members(copy!.id)).toEqual([]);
+    expect(await dataSourceRepository.dataOf(copy!.id)).toEqual({ ventes: { columns: ['n'], rows: [{ n: 1 }] } });
+    expect((await dataSourceRepository.list(copy!.id))[0]).toMatchObject({ name: 'ventes', status: 'ok', rowCount: 1 });
+    expect(await repo.duplicate(src.id, 9, { ownerId: bob, title: 'X', description: null, projectId: project, sessionId: null, sourcePath: null })).toBeNull();
+  });
+
   it('compte les commentaires non traités de plusieurs pages en une requête', async () => {
     const s = await session();
     const a = await publish('A', s);

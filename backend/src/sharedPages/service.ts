@@ -161,6 +161,36 @@ export const sharedPageService = {
     });
   },
 
+  /**
+   * Duplique un artefact pour la personne : une copie privée dont elle est propriétaire, à partir de la dernière version
+   * (ou de `version`, si l'historique le permet). Le type, le rafraîchissement et les sources de données suivent ; ni
+   * les membres, ni le lien ouvert, ni les commentaires, ni l'historique. Quiconque voit une page peut la dupliquer, sauf
+   * un invité ; un artefact de données seulement par qui en administre les sources (propriétaire ou administrateur de
+   * Skipper : la copie emporte requêtes et scripts, qu'un simple lecteur ne voit pas). La copie garde le projet
+   * d'origine (ses sources tournent dans ce projet, au nom de son nouveau propriétaire) ; la session d'origine
+   * seulement quand on duplique sa propre page.
+   */
+  async duplicate(user: User, id: string, opts: { title?: string | null; version?: number | null } = {}): Promise<SharedPage> {
+    if (user.isGuest) throw new AppError('Un invité ne peut pas dupliquer une page', 'FORBIDDEN');
+    const page = await this.getFor(user.id, id);
+    if (page.kind === 'data' && !this.canManage(page, user)) throw new AppError("Seul le propriétaire d'un artefact de données (ou un administrateur) peut le dupliquer : la copie emporte ses requêtes et ses scripts", 'FORBIDDEN');
+    const version = opts.version ?? page.version;
+    if (!Number.isInteger(version) || version < 1 || version > page.version) throw new NotFoundError('Version introuvable');
+    if (version !== page.version && !page.historyEnabled) throw new NotFoundError("L'historique de cette page est désactivé : seule la dernière version peut être dupliquée");
+    const title = cleanTitle(opts.title?.trim() ? opts.title : `Copie de ${page.title}`.slice(0, 200));
+    const own = page.ownerId === user.id;
+    const copy = await sharedPageRepository.duplicate(page.id, version, {
+      ownerId: user.id,
+      title,
+      description: page.description,
+      projectId: page.projectId,
+      sessionId: own ? page.sessionId : null,
+      sourcePath: own ? page.sourcePath : null,
+    });
+    if (!copy) throw new NotFoundError('Page partagée introuvable');
+    return copy;
+  },
+
   /** Contenu d'une version (la dernière par défaut). */
   async content(page: SharedPage, version?: number | null): Promise<{ html: Buffer; version: number }> {
     const v = version ?? page.version;

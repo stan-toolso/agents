@@ -21,7 +21,7 @@ export const pageUrl = (id: string) => `${config.appUrl}/shared/${id}`;
 /** Paragraphe du prompt système décrivant les artefacts (pages et données) aux agents. */
 export function sharedPagesPrompt(): string {
   return [
-    "Artefacts : pour remettre un rapport, un tableau de bord ou toute page consultable, écris un fichier HTML autonome dans le dossier de travail (styles et scripts en ligne ; scripts externes seulement depuis un CDN) et publie-le avec l'outil `pages.publish` : il renvoie un lien `/shared/<id>`, privé pour la personne qui pilote la session jusqu'à ce qu'elle l'ouvre à d'autres (`anyone_with_link`, ou le bouton Partager). Pour mettre un artefact à jour, publie à nouveau avec `page_id`. `pages.list` liste les artefacts existants. Donne le lien dans ta réponse. Les lecteurs y laissent des commentaires, généraux ou ancrés sur un élément de la page (sélecteur CSS et extrait du texte) : `pages.comments` les lit (les non traités d'abord), `pages.reply` répond dans le fil d'un commentaire, `pages.resolve` le marque traité une fois pris en compte (par exemple après avoir publié une nouvelle version).",
+    "Artefacts : pour remettre un rapport, un tableau de bord ou toute page consultable, écris un fichier HTML autonome dans le dossier de travail (styles et scripts en ligne ; scripts externes seulement depuis un CDN) et publie-le avec l'outil `pages.publish` : il renvoie un lien `/shared/<id>`, privé pour la personne qui pilote la session jusqu'à ce qu'elle l'ouvre à d'autres (`anyone_with_link`, ou le bouton Partager). Pour mettre un artefact à jour, publie à nouveau avec `page_id` ; pour partir d'un artefact existant sans le toucher, `pages.duplicate` en fait une copie privée (sources de données comprises). `pages.list` liste les artefacts existants. Donne le lien dans ta réponse. Les lecteurs y laissent des commentaires, généraux ou ancrés sur un élément de la page (sélecteur CSS et extrait du texte) : `pages.comments` les lit (les non traités d'abord), `pages.reply` répond dans le fil d'un commentaire, `pages.resolve` le marque traité une fois pris en compte (par exemple après avoir publié une nouvelle version).",
     "Artefact de données (`kind: \"data\"`) : une page dont les chiffres viennent de sources que Skipper rafraîchit tout seul, pour un tableau de bord qui reste à jour sans toi. Déclare les sources dans `pages.publish` (`sources`) : `{ name, type: \"sql\", item: <élément PostgreSQL du coffre>, query }` (lecture seule, 5000 lignes au plus : agrège avec GROUP BY et ORDER BY) ou `{ name, type: \"script\", interpreter: node|python|sh, code }` (lancé dans l'environnement du projet, sans identifiant du coffre ; sa sortie standard doit être du JSON). Mets au point la requête avec `vault.sql_query` avant de la déclarer. Dans la page, les données sont disponibles avant tout script sous `window.Skipper` : `Skipper.data.<name>` (`{ columns, rows }` pour une requête SQL — chaque ligne est un objet colonne → valeur, nombres déjà convertis, dates en ISO — ou le JSON du script), `Skipper.meta` (`refreshedAt`, `sources[]` avec `status` et `error`) et `Skipper.ready((data, meta) => …)`. N'écris jamais les chiffres en dur : la page les lit dans `Skipper.data` et se dessine (prévois le cas d'une source en erreur ou vide : `Skipper.meta.sources`). `refresh_minutes` règle le rafraîchissement automatique (60 = toutes les heures ; absent : à la demande, bouton Rafraîchir). À la publication les sources sont exécutées une première fois et leur état renvoyé ; `pages.refresh` les relance, `pages.data` montre les données d'une source (pour vérifier ce que reçoit la page). Un élément du coffre soumis à approbation n'est pas rafraîchi sans une personne : dis-le-lui, elle rafraîchit depuis l'artefact. Pour les graphiques, préfère un SVG dessiné à la main ou une bibliothèque légère depuis un CDN, des couleurs sobres, une grille discrète, des libellés lisibles, et un rendu correct sur téléphone.",
   ].join('\n');
 }
@@ -142,6 +142,19 @@ export function createSharedPagesMcpServer(ctx: SharedPagesMcpContext): McpSdkSe
             else if (Array.isArray(d)) body = `${d.length} élément(s) :\n${d.slice(0, n).map((r) => JSON.stringify(r)).join('\n')}${d.length > n ? `\n… ${d.length - n} de plus` : ''}`;
             else body = JSON.stringify(d, null, 1).slice(0, 8000);
             return `${describeSource(s)}\n${body}`;
+          }),
+      ),
+      tool(
+        'duplicate',
+        "Duplique un artefact (page ou données) : copie privée de sa dernière version, avec son type et ses sources de données, au nom du propriétaire de la session ; ni membres, ni commentaires, ni historique. Publie ensuite tes modifications sur la copie avec pages.publish et son page_id.",
+        {
+          page_id: z.string().describe("Identifiant de l'artefact à dupliquer"),
+          title: z.string().optional().describe('Titre de la copie (défaut : « Copie de … »)'),
+        },
+        async ({ page_id, title }) =>
+          run(async () => {
+            const copy = await sharedPageService.duplicate(await userService.get(owner()), page_id, { title: title ?? null });
+            return [`Copie créée : ${pageUrl(copy.id)}`, `${copy.id} · ${copy.title} · accès : privée (le propriétaire seulement)`].join('\n');
           }),
       ),
       tool('list', 'Liste les pages partagées du propriétaire de la session.', { limit: z.number().int().min(1).max(100).optional() }, async ({ limit }) =>
