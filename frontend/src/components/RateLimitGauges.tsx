@@ -7,6 +7,31 @@ export const rateLimitStatusLabels: Record<string, string> = {
   rejected: 'refusé',
 };
 
+/** Ce que mesure chaque fenêtre, affiché sous sa jauge. */
+const windowHints: Record<string, string> = {
+  five_hour: 'Toute l’utilisation des 5 dernières heures, tous modèles confondus.',
+  seven_day: 'Limite hebdomadaire générale de l’abonnement, tous modèles confondus.',
+  seven_day_overage_included: 'Plafond hebdomadaire propre à Fable, en plus de la limite générale : une fois atteint, Fable n’est plus servi que sur crédits de dépassement.',
+  seven_day_opus: 'Plafond hebdomadaire propre à Opus, en plus de la limite générale.',
+  seven_day_sonnet: 'Plafond hebdomadaire propre à Sonnet, en plus de la limite générale.',
+  overage: 'Crédits de dépassement payants consommés au-delà des limites de l’abonnement.',
+};
+
+/** Raisons pour lesquelles le dépassement payant n'est pas disponible. */
+const overageReasonLabels: Record<string, string> = {
+  overage_not_provisioned: 'non souscrit',
+  org_level_disabled: 'désactivé pour l’organisation',
+  org_level_disabled_until: 'désactivé pour l’organisation jusqu’à nouvel ordre',
+  out_of_credits: 'crédits épuisés',
+  seat_tier_level_disabled: 'désactivé pour ce type de siège',
+  member_level_disabled: 'désactivé pour ce membre',
+  seat_tier_zero_credit_limit: 'plafond à 0 pour ce type de siège',
+  group_zero_credit_limit: 'plafond du groupe à 0',
+  member_zero_credit_limit: 'plafond du membre à 0',
+  org_service_level_disabled: 'désactivé pour ce service',
+  no_limits_configured: 'aucun plafond configuré',
+};
+
 const statusVariant = (status: string) => (status === 'rejected' ? 'danger' : status === 'allowed_warning' ? 'warning' : 'success');
 const meterVariant = (u: number) => (u >= 0.9 ? 'danger' : u >= 0.75 ? 'warning' : undefined);
 
@@ -32,7 +57,7 @@ export function busiestWindow(limits: ClaudeRateLimits): ClaudeRateLimitWindow |
 
 /**
  * Limites d'utilisation de l'abonnement Claude : statut du dernier événement reçu et une jauge par
- * fenêtre (5 h, 7 j, 7 j dépassement inclus...), avec l'heure de réinitialisation.
+ * fenêtre (5 h, 7 j, 7 j Fable...), avec l'heure de réinitialisation.
  */
 export default function RateLimitGauges({ limits }: { limits: ClaudeRateLimits | null }) {
   if (!limits) {
@@ -76,13 +101,18 @@ export default function RateLimitGauges({ limits }: { limits: ClaudeRateLimits |
               {w.resetsAt ? `Réinitialisation ${formatReset(w.resetsAt)}` : 'Réinitialisation inconnue'}
               {stale && ` · relevé ${time(w.observedAt)}`}
             </div>
+            {windowHints[w.type] && (
+              <div className="text-secondary" style={{ fontSize: 12 }}>
+                {windowHints[w.type]}
+              </div>
+            )}
           </div>
         );
       })}
       {limits.overageStatus && (
         <div className="text-secondary" style={{ fontSize: 12 }}>
           Dépassement payant : {rateLimitStatusLabels[limits.overageStatus] ?? limits.overageStatus}
-          {limits.overageDisabledReason && ` (${limits.overageDisabledReason})`}
+          {limits.overageDisabledReason && ` (${overageReasonLabels[limits.overageDisabledReason] ?? limits.overageDisabledReason})`}
           {limits.isUsingOverage && ' · en cours d’utilisation'}
         </div>
       )}
