@@ -1,6 +1,6 @@
 /* Rendu "terminal" inspiré de Claude Code pour la page de session. */
 .cc {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-family: var(--bs-font-monospace);
   font-size: 13px;
   line-height: 1.5;
   background: var(--cc-bg);
@@ -22,7 +22,7 @@
   gap: 12px;
   flex-wrap: wrap;
 }
-.cc-header .cc-title { color: var(--cc-accent); font-weight: 600; }
+.cc-header .cc-title { color: var(--cc-fg); font-weight: 600; }
 .cc-header .cc-meta { color: var(--cc-dim); }
 .cc-header .cc-meta code { color: var(--cc-dim); background: none; padding: 0; font-size: inherit; }
 .cc-actions { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -54,7 +54,7 @@
   color: var(--cc-fg);
   background: transparent;
   border: 1px solid var(--cc-border);
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 2px 10px;
   cursor: pointer;
 }
@@ -78,15 +78,13 @@
 .cc-green { color: var(--cc-green); }
 .cc-accent { color: var(--cc-accent); }
 
-/* Message utilisateur : bloc gris préfixé par > */
+/* Message utilisateur : une citation, filet terracotta et serif (on distingue la consigne du travail de l'agent). */
 .cc-user {
-  background: var(--cc-bg-user);
-  border-left: 3px solid var(--cc-dimmer);
-  padding: 6px 10px;
-  margin: 12px 0;
+  border-left: 2px solid var(--cc-accent);
+  padding: 2px 0 2px 14px;
+  margin: 16px 0;
   color: var(--cc-dim);
 }
-.cc-user::before { content: '> '; color: var(--cc-dim); }
 .cc-user .cc-user-text { color: var(--cc-fg); }
 /* Instruction affichée dès l'envoi, avant sa confirmation par le serveur */
 .cc-user.pending { opacity: 0.75; }
@@ -160,7 +158,10 @@
    de texte. Tout le tour de l'agent tient dans son message : étapes repliées en une ligne discrète, messages, questions.
    Le détail d'une étape déplié garde la chasse fixe du terminal. */
 .cc-transcript.cc-chat { font-family: var(--bs-font-sans-serif); font-size: 13.5px; padding: 14px 20px; }
-.cc-chat-msg { display: flex; gap: 10px; padding: 8px 10px; margin: 2px -10px; border-radius: 6px; }
+.cc-chat-msg { display: flex; gap: 12px; padding: 8px 10px; margin: 2px -10px; border-radius: var(--cc-radius-sm); }
+/* Consigne d'une personne : citation en serif, filet terracotta. */
+.cc-chat-msg.human .cc-chat-body { border-left: 2px solid var(--cc-accent); padding: 1px 0 1px 14px; margin-top: 4px; }
+.cc-chat-msg.human .cc-chat-text { font-family: var(--cc-font-serif); font-size: 15.5px; line-height: 1.55; letter-spacing: -0.005em; }
 .cc-chat-msg:hover { background: var(--cc-bg-hover); }
 .cc-chat-msg.pending { opacity: 0.75; }
 .cc-chat-main { flex: 1; min-width: 0; }
@@ -177,7 +178,7 @@ div.cc-chat-text:not(.cc-md) { white-space: pre-wrap; overflow-wrap: anywhere; }
 /* Le glyphe ⏺ tourne en emoji sur certains systèmes : un simple point de la couleur de l'issue. */
 .cc-chat .cc-group .cc-dot { font-size: 0; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .cc-chat .cc-group .cc-dot.ok { color: var(--cc-dimmer); }
-.cc-chat .cc-group-body, .cc-chat .cc-tool:not(.cc-group) { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace; font-size: 12px; }
+.cc-chat .cc-group-body, .cc-chat .cc-tool:not(.cc-group) { font-family: var(--bs-font-monospace); font-size: 12px; }
 /* Un message de l'agent déplié avec les étapes garde la police de la conversation. */
 .cc-chat .cc-group-body .cc-chat-text { font-family: var(--bs-font-sans-serif); font-size: 13.5px; margin: 4px 0; }
 .cc-chat .cc-thinking { font-size: 12.5px; }
@@ -194,13 +195,14 @@ div.cc-chat-text:not(.cc-md) { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* Demande d'intervention (autorisation, question) : encadré orange, options numérotées */
 .cc-prompt {
-  border: 1px solid var(--cc-accent);
-  border-radius: 6px;
-  padding: 10px 14px;
+  border: 1px solid var(--cc-yellow);
+  border-radius: var(--cc-radius);
+  background: color-mix(in srgb, var(--cc-yellow-soft) 45%, var(--cc-bg-elevated));
+  padding: 12px 16px;
   margin: 10px 16px;
 }
-.cc-prompt .cc-prompt-title { color: var(--cc-accent); font-weight: 600; margin-bottom: 4px; }
-.cc-prompt .cc-prompt-body { color: var(--cc-dim); margin: 4px 0 8px; white-space: pre-wrap; max-height: 200px; overflow: auto; }
+.cc-prompt .cc-prompt-title { color: var(--cc-fg); font-weight: 600; margin-bottom: 4px; }
+.cc-prompt .cc-prompt-body { color: var(--cc-fg); background: var(--cc-bg-elevated); border: 1px solid var(--cc-border-soft); border-radius: var(--cc-radius-sm); padding: 8px 10px; margin: 4px 0 8px; white-space: pre-wrap; max-height: 200px; overflow: auto; }
 .cc-prompt .cc-question { margin: 8px 0 4px; }
 .cc-prompt .cc-option {
   display: block;
@@ -312,16 +314,17 @@ div.cc-chat-text:not(.cc-md) { white-space: pre-wrap; overflow-wrap: anywhere; }
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin: 4px 12px 12px;
+  margin: 4px 16px 16px;
   border: 1px solid var(--cc-border);
-  border-radius: 14px;
+  border-radius: var(--cc-radius);
   padding: 12px 14px 10px;
-  background: var(--cc-bg-user);
+  background: var(--cc-bg-elevated);
+  box-shadow: var(--cc-card-shadow);
   font-family: var(--bs-font-sans-serif);
   font-size: 14px;
   cursor: text;
 }
-.cc-input:focus-within { border-color: var(--cc-dim); }
+.cc-input:focus-within { border-color: rgba(var(--cc-accent-rgb), 0.5); box-shadow: 0 0 0 3px rgba(var(--cc-accent-rgb), 0.12); }
 .cc-input-tools { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; cursor: default; }
 /* Bouton « + » : ouvre le sélecteur de fichiers ; les fichiers peuvent aussi être collés ou déposés. */
 .cc-attach {
@@ -383,7 +386,7 @@ div.cc-chat-text:not(.cc-md) { white-space: pre-wrap; overflow-wrap: anywhere; }
 .cc-prompt { font-family: var(--bs-font-sans-serif); font-size: 13.5px; }
 .cc-prompt .cc-prompt-body { font-family: var(--bs-font-monospace); font-size: 12.5px; }
 .cc-assistant .cc-body { font-family: var(--bs-font-sans-serif); font-size: 13.5px; }
-.cc-user { font-family: var(--bs-font-sans-serif); font-size: 13.5px; }
+.cc-user { font-family: var(--cc-font-serif); font-size: 15px; line-height: 1.55; }
 .cc-toggle { display: flex; justify-content: flex-end; gap: 6px; padding: 4px 16px 0; font-family: var(--bs-font-sans-serif); font-size: 12px; color: var(--cc-dimmer); }
 .cc-toggle label { cursor: pointer; }
 
@@ -499,7 +502,7 @@ div.cc-chat-text:not(.cc-md) { white-space: pre-wrap; overflow-wrap: anywhere; }
 .cc-md li > p { margin: 0; }
 .cc-md h1, .cc-md h2, .cc-md h3, .cc-md h4, .cc-md h5, .cc-md h6 { font-size: inherit; font-weight: 600; margin: 10px 0 4px; color: var(--cc-fg, inherit); }
 .cc-md code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-family: var(--bs-font-monospace);
   font-size: 12.5px;
   color: var(--cc-fg, inherit);
   background: var(--cc-bg-user, var(--bs-tertiary-bg));

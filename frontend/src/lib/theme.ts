@@ -11,7 +11,7 @@ export type Theme = 'light' | 'dark';
 
 const KEY = 'skipper.theme';
 const listeners = new Set<() => void>();
-const META_COLORS: Record<Theme, string> = { dark: '#0f0f0f', light: '#eceef1' };
+const META_COLORS: Record<Theme, string> = { dark: '#14110e', light: '#f6f2ea' };
 
 export function themePreference(): ThemePreference {
   try {

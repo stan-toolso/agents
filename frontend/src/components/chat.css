@@ -1,20 +1,21 @@
 /* Zone de départ d'un chat (tableau de bord, liste des chats) et liste des chats. Couleurs par variables --cc-*. */
 
-.chat-composer { position: relative; margin: 0 0 20px; padding: 18px 16px 14px; border: 1px solid var(--cc-border); border-radius: 10px; background: var(--cc-bg-elevated); }
-.chat-composer.with-greeting { padding-top: 28px; }
+.chat-composer { position: relative; margin: 0 0 24px; padding: 18px 16px 16px; border: 1px solid var(--cc-border); border-radius: var(--cc-radius); background: var(--cc-bg-elevated); box-shadow: var(--cc-card-shadow); }
+.chat-composer.with-greeting { padding-top: 30px; }
 .chat-composer-all { position: absolute; top: 12px; right: 14px; font-size: 13px; color: var(--cc-dim); text-decoration: none; }
 .chat-composer-all:hover { color: var(--cc-accent); }
-.chat-composer-greeting { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 0 0 18px; font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
-.chat-composer-box { margin: 0 auto; max-width: 860px; border-radius: 16px; background: var(--cc-bg); }
+.chat-composer-greeting { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 0 0 20px; font-family: var(--cc-font-serif); font-size: 36px; font-weight: 400; letter-spacing: -0.025em; }
+.chat-composer-greeting em { color: var(--cc-accent); font-style: italic; }
+.chat-composer-box { margin: 0 auto; max-width: 860px; border-radius: 14px; background: var(--cc-bg); }
 .chat-composer-box textarea { min-height: 28px; }
 .chat-composer-spacer { flex: 1; }
 .chat-composer-error { max-width: 860px; margin: 8px auto 0; font-size: 13px; color: var(--cc-red); }
 .chat-composer-suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 14px; }
 .chat-composer-chip {
   border: 1px solid var(--cc-border); border-radius: 999px; background: var(--cc-bg); color: var(--cc-fg);
-  padding: 6px 14px; font-size: 13px; cursor: pointer; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding: 5px 13px; font-size: 12.5px; color: var(--cc-dim); cursor: pointer; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.chat-composer-chip:hover { border-color: var(--cc-dim); background: var(--cc-bg-hover); }
+.chat-composer-chip:hover { border-color: var(--cc-dimmer); background: var(--cc-bg-hover); color: var(--cc-fg); }
 
 /* Page de chat : l'en-tête ne montre pas de dossier de travail. */
 .cc-chat-icon { color: var(--cc-accent); margin-right: 4px; }
@@ -28,7 +29,7 @@
   .chat-composer:not(.with-greeting) .chat-composer-all { display: none; }
   .chat-composer-all { position: static; display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
   .chat-composer-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 10px; }
-  .chat-composer-greeting { justify-content: flex-start; gap: 8px; margin: 0; font-size: 18px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat-composer-greeting { justify-content: flex-start; gap: 8px; margin: 0; font-size: 24px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .chat-composer-greeting svg { display: none; }
   .chat-composer-box { padding: 10px 12px 8px; border-radius: 14px; background: var(--cc-bg-elevated); }
   .chat-composer-box .cc-input-tools { flex-wrap: nowrap; gap: 2px; }
