@@ -118,6 +118,6 @@ describe('rateLimitService', () => {
 
   it("explique un tour refusé d'après le dernier état", () => {
     rateLimitService.record(info(0.12, 0.52, { status: 'rejected', rateLimitType: 'seven_day_overage_included', resetsAt: RESET_7D, overageIncluded: 1 }), now);
-    expect(describeRejection(rateLimitService.current())).toMatch(/^Tour refusé : limite .* fenêtre 7 jours \(dépassement inclus\) \(100 %\)\. Réinitialisation /);
+    expect(describeRejection(rateLimitService.current())).toMatch(/^Tour refusé : limite .* fenêtre 7 jours — Fable \(100 %\)\. Réinitialisation /);
   });
 });

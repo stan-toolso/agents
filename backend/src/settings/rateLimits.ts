@@ -10,7 +10,7 @@ export type RateLimitStatus = 'allowed' | 'allowed_warning' | 'rejected';
 /** Seuils d'utilisation d'une fenêtre qui déclenchent une notification aux administrateurs. */
 export const RATE_LIMIT_THRESHOLDS = [0.75, 0.9] as const;
 
-/** Une fenêtre de limite d'utilisation de l'abonnement Claude (5 h, 7 j, 7 j dépassement inclus...). */
+/** Une fenêtre de limite d'utilisation de l'abonnement Claude (5 h, 7 j, 7 j Fable...). */
 export interface RateLimitWindow {
   type: string;
   /** Part consommée, de 0 à 1 (peut dépasser 1). */
@@ -52,7 +52,8 @@ const windowOrder = ['five_hour', 'seven_day', 'seven_day_overage_included', 'se
 export const rateLimitWindowLabels: Record<string, string> = {
   five_hour: '5 heures',
   seven_day: '7 jours',
-  seven_day_overage_included: '7 jours (dépassement inclus)',
+  // Le CLI l'appelle « Fable limit » : plafond hebdomadaire propre à Fable, qui s'ajoute à la limite 7 jours générale.
+  seven_day_overage_included: '7 jours — Fable',
   seven_day_opus: '7 jours — Opus',
   seven_day_sonnet: '7 jours — Sonnet',
   overage: 'Dépassement',
