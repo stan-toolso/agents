@@ -178,6 +178,8 @@ div.cc-chat-text:not(.cc-md) { white-space: pre-wrap; overflow-wrap: anywhere; }
 .cc-chat .cc-group .cc-dot { font-size: 0; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .cc-chat .cc-group .cc-dot.ok { color: var(--cc-dimmer); }
 .cc-chat .cc-group-body, .cc-chat .cc-tool:not(.cc-group) { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace; font-size: 12px; }
+/* Un message de l'agent déplié avec les étapes garde la police de la conversation. */
+.cc-chat .cc-group-body .cc-chat-text { font-family: var(--bs-font-sans-serif); font-size: 13.5px; margin: 4px 0; }
 .cc-chat .cc-thinking { font-size: 12.5px; }
 /* « L'agent réfléchit… » : l'agent travaille sans écrire (pas de cursor pointer, rien à déplier). */
 .cc-chat .cc-chat-thinking { cursor: default; animation: cc-blink 1.6s ease-in-out infinite; }

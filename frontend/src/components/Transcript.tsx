@@ -663,6 +663,20 @@ interface WorkItem {
   at: string;
 }
 
+/** Longueur à partir de laquelle un message de l'agent n'est plus de la simple narration entre deux outils. */
+const SUBSTANTIAL_TEXT_CHARS = 240;
+
+/**
+ * Message de l'agent qui mérite de rester en vue même au milieu d'un tour : long, ou structuré (plusieurs
+ * paragraphes, liste, bloc de code, tableau). Le 09/11/2026, une réponse complète écrite avant un `tasks.comment`
+ * disparaissait dans « 1 étape · 1 message », seul le court message de fin restant visible.
+ */
+export function isSubstantialText(text: string): boolean {
+  const t = text.trim();
+  if (t.length >= SUBSTANTIAL_TEXT_CHARS) return true;
+  return /\n\s*\n|\n\s*([-*+]|\d+[.)])\s|```|\n\s*\|/.test(t);
+}
+
 /**
  * Étapes de l'agent repliées en une ligne (sans le détail technique) : `⏺ 12 étapes · Read ×4 · Bash ×5`,
  * dépliée au clic. `live` : le tour continue, son dernier appel d'outil reste nommé (avec `…` tant qu'il
@@ -884,7 +898,9 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
                   {stamp()}
                 </div>
               );
-              item = { key, node, pinned: false, text: true, at: e.createdAt };
+              // Une vraie réponse (longue, en paragraphes, en liste…) reste en vue même suivie d'autres étapes ;
+              // seule la narration courte (« Je regarde le code. ») rejoint le groupe replié.
+              item = { key, node, pinned: isSubstantialText(block.text), text: true, at: e.createdAt };
             } else if (block.type === 'tool_use') {
               const name = block.name ?? 'outil';
               const input = block.input ?? {};

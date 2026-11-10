@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '../graphql/operations';
-import Transcript, { ToolPermissionContext, linkSessionIds, nonZeroExit, type ChatParticipants, type ToolPermissionActions } from './Transcript';
+import Transcript, { ToolPermissionContext, isSubstantialText, linkSessionIds, nonZeroExit, type ChatParticipants, type ToolPermissionActions } from './Transcript';
 
 // Le module des adresses de l'API lit window au chargement ; sans navigateur, on le remplace.
 vi.mock('../apollo', () => ({ apiBaseUrl: '' }));
@@ -87,6 +87,31 @@ describe('Transcript', () => {
     expect(out).toContain('3 étapes · 1 message · Read · Bash ×2');
     expect(out).not.toContain('Je regarde le code.');
     expect(out).not.toContain('npm test');
+  });
+
+  it('garde en vue une vraie réponse écrite avant un appel d’outil, ne replie que la narration courte (09/11/2026)', () => {
+    const answer = 'Oui, c’est le meilleur des deux.\n\nCe que cela change :\n\n- 2 To utiles en RAID 1\n- 128 Go de RAM';
+    const events = [
+      ev('instruction', { text: 'Je prends lequel ?' }),
+      text('Je regarde la tâche.'),
+      tool('g1', 'mcp__tasks__get', { id: 'x' }),
+      result('g1', '{}'),
+      text(answer),
+      tool('c1', 'mcp__tasks__comment', { id: 'x', body: 'Serveur retenu' }),
+      result('c1', 'Message posté'),
+      text('C’est noté dans la tâche.'),
+      ev('claude.result', { duration_ms: 1000 }),
+    ];
+    for (const people of [null, { human: { name: 'Alice' }, agent: { name: 'Claude' } }] as (ChatParticipants | null)[]) {
+      const out = html(events, false, people);
+      expect(out).toContain('128 Go de RAM');
+      expect(out).toContain('C’est noté dans la tâche.');
+      expect(out).not.toContain('Je regarde la tâche.');
+      expect(out).toContain('cc-group');
+    }
+    expect(isSubstantialText('Je lance les tests.')).toBe(false);
+    expect(isSubstantialText('a'.repeat(300))).toBe(true);
+    expect(isSubstantialText('Deux points :\n- un\n- deux')).toBe(true);
   });
 
   it('montre chaque étape en mode technique', () => {
