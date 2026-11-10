@@ -815,31 +815,66 @@
 .pr-stage-pending::before { box-shadow: inset 0 0 0 1.5px var(--cc-dimmer); }
 .pr-stage-merged { color: var(--cc-green); --st: var(--cc-green); }
 .pr-stage-cancelled { color: var(--cc-dimmer); text-decoration: line-through; }
-.pr-table .pr-row { cursor: pointer; }
-.pr-table td { vertical-align: middle; }
-/* Le titre garde une largeur lisible : à l'étroit, le tableau défile plutôt que de casser le titre mot par mot. */
-.pr-cell-title { max-width: 420px; min-width: 220px; }
-.pr-cell-title .small { max-width: 100%; }
-.pr-cell-when { min-width: 120px; }
 .pr-toolbar .pr-search { width: 260px; }
 .tracked-pr-item { background: var(--cc-bg-elevated); }
 /* Liens vers les tâches et sessions reliées (fenêtre de détail d'une PR) : un titre long se tronque. */
 .pr-related .btn { max-width: 100%; }
+
+/* ---- Page des PR d'un projet (PullRequestBoard) : une ligne par PR avec ce qui est attendu ------ */
+.prq-intro { max-width: 760px; }
+.prq-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--cc-border); border-radius: 8px; overflow: hidden; }
+.prq-row { position: relative; display: flex; align-items: flex-start; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--cc-border); }
+.prq-row:last-child { border-bottom: 0; }
+.prq-row:hover { background: var(--cc-bg-hover); }
+/* Toute la ligne ouvre la fiche ; liens et boutons passent au-dessus. */
+.prq-open { position: absolute; inset: 0; border: 0; background: transparent; padding: 0; cursor: pointer; z-index: 0; }
+.prq-open:focus-visible { outline: 2px solid var(--cc-accent); outline-offset: -2px; }
+.prq-main { flex: 1 1 auto; min-width: 0; pointer-events: none; }
+.prq-main a, .prq-main button, .prq-side { pointer-events: auto; position: relative; z-index: 1; }
+.prq-title { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.prq-ref { color: var(--cc-dim); font-size: 13px; }
+.prq-name { font-weight: 600; min-width: 0; }
+.prq-meta { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 2px; font-size: 12.5px; color: var(--cc-dim); }
+.prq-meta-item { color: var(--cc-dim); max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; }
+a.prq-meta-item:hover { color: var(--cc-fg); text-decoration: underline; }
+.prq-note { font-size: 12.5px; color: var(--cc-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prq-next { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; font-size: 13px; }
+.prq-step { flex: 0 0 auto; font-family: var(--cc-font-mono); font-size: 10.5px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; padding: 1px 6px; border-radius: 4px; border: 1px solid currentColor; }
+.prq-detail { color: var(--cc-fg); min-width: 0; }
+.prq-tone-you { color: var(--cc-green); }
+.prq-tone-blocked { color: var(--cc-red); }
+.prq-tone-agent, .prq-tone-wait { color: var(--cc-dim); }
+.prq-tone-orphan { color: var(--cc-yellow); }
+.prq-tone-done { color: var(--cc-dim); }
+.prq-side { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
+.prq-sent { font-size: 12.5px; color: var(--cc-green); white-space: nowrap; }
+.prq-row-done .prq-name { font-weight: 500; }
+/* Fiche d'une PR */
+.prq-callout { border: 1px solid var(--cc-border); border-left: 4px solid var(--cc-border); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; background: var(--cc-bg-elevated); }
+.prq-callout-you { border-left-color: var(--cc-green); }
+.prq-callout-blocked { border-left-color: var(--cc-red); }
+.prq-callout-orphan { border-left-color: var(--cc-yellow); }
+.prq-callout-done { border-left-color: var(--cc-green); }
+.prq-callout-kicker { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--cc-dim); }
+.prq-callout-label { font-weight: 600; font-size: 16px; margin-top: 2px; }
+.prq-callout-detail { margin-top: 2px; }
+.prq-callout-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.prq-callout-hint { font-size: 12.5px; color: var(--cc-dim); margin-top: 8px; }
+.prq-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+.prq-facts dt { font-weight: 500; color: var(--cc-dim); font-size: 13px; }
+.prq-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 @media (max-width: 767.98px) {
-  /* Barre d'outils de la page des PR : sélecteur d'étape et boutons sur la première ligne, recherche pleine largeur dessous. */
-  .pr-toolbar .pr-filter-select { flex: 1 1 auto; width: auto; min-width: 0; }
   .pr-toolbar .pr-toolbar-actions { margin-left: 0 !important; }
   .pr-toolbar .pr-search { flex: 1 1 100%; width: auto; order: 3; }
-  /* Tableau des PR : une carte par ligne. Titre (et note, tâche) pleine largeur, puis étape, date et menu sur une ligne. */
-  .pr-table thead { display: none; }
-  .pr-table tr.pr-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 8px 8px; border-bottom: 1px solid var(--cc-border); }
-  .pr-table tr.pr-row:last-child { border-bottom: 0; }
-  .pr-table td { display: block; border: 0; padding: 0; max-width: none !important; box-shadow: none; }
-  .pr-table td.pr-cell-title { flex: 1 1 100%; min-width: 0; }
-  .pr-table td.pr-cell-stage { flex: 0 0 auto; }
-  .pr-table td.pr-cell-stage .small { display: inline; margin-left: 6px; }
-  .pr-table td.pr-cell-when { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .pr-table td.pr-cell-actions { flex: 0 0 auto; margin-left: auto; }
+  /* Une PR par carte : le texte pleine largeur, la demande et le menu dessous, alignés à droite. */
+  .prq-row { flex-wrap: wrap; gap: 8px; }
+  .prq-main { flex: 1 1 100%; }
+  .prq-side { margin-left: auto; }
+  .prq-next { flex-wrap: wrap; gap: 4px 8px; }
+  .prq-meta-item { max-width: 100%; }
+  .prq-facts { grid-template-columns: 1fr; gap: 0; }
+  .prq-facts dd { margin-bottom: 8px; }
+  .prq-callout-actions .btn { flex: 1 1 auto; }
 }
 
 /* ---- Tâches : badges, panneau latéral, commentaires, tableau de bord ------------------------- */
