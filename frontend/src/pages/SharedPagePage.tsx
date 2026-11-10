@@ -8,6 +8,7 @@ import PageLoading from '../components/PageLoading';
 import PopMenu, { type MenuItem } from '../components/PopMenu';
 import PageComments from '../components/pages/PageComments';
 import PageData, { refreshLabel } from '../components/pages/PageData';
+import SlidesBar, { useSlides } from '../components/pages/SlidesBar';
 import SharePageModal from '../components/pages/SharePageModal';
 import { DELETE_ALL_SHARED_PAGE_COMMENTS, DELETE_SHARED_PAGE, DUPLICATE_SHARED_PAGE, REFRESH_SHARED_PAGE_DATA, REMOVE_SHARED_PAGE_MEMBER, REQUEST_SHARED_PAGE_UPDATE, SET_SHARED_PAGE_HISTORY, SHARED_PAGE, UPDATE_SHARED_PAGE, type SharedPage, type SharedPageAgentHandoff } from '../graphql/misc';
 import { useAuth } from '../auth/AuthContext';
@@ -28,6 +29,8 @@ const fmt = (iso: string) => new Date(iso).toLocaleString('fr-FR', { dateStyle: 
  * téléchargement, renommer, supprimer, quitter). Panneau de commentaires : généraux ou ancrés sur un élément de la
  * page (components/pages/PageComments.tsx). Artefact de données : panneau « Données » (components/pages/PageData.tsx)
  * avec le rafraîchissement et l'état des sources ; le cadre est rechargé à chaque rafraîchissement (clé de l'iframe).
+ * Diapositives : barre de navigation (components/pages/SlidesBar.tsx) reliée au lecteur injecté dans la page par
+ * postMessage, mode présentation en plein écran du cadre, export PDF (`print=1` : la page s'imprime, une diapositive par page).
  *
  * Deux adresses : /shared/<id>, la page à part entière (lien partagé, notifications, personnes qui ne voient pas la
  * session), et /sessions/<session>/pages/<id>, la même page ouverte dans le dossier de la session qui l'a publiée
@@ -60,6 +63,14 @@ export default function SharedPagePage() {
     }
   });
   const frameRef = useRef<HTMLIFrameElement>(null);
+  // Même clé que le cadre (recréé à chaque changement) : l'état du lecteur repart avec lui.
+  const slides = useSlides(frameRef, page ? `${page.id}:${page.historyEnabled ? pickedVersion : null}:${page.dataRefreshedAt ?? ''}` : '');
+  // Mode présentation : plein écran du cadre ; le lecteur est prévenu (un clic avance, pas de marge).
+  useEffect(() => {
+    const onChange = () => slides.send({ type: 'present', on: document.fullscreenElement === frameRef.current });
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, [slides]);
   const openComments_ = useCallback(() => {
     setCommentsOpen(true);
     setDataOpen(false);
@@ -97,6 +108,15 @@ export default function SharedPagePage() {
   const kindDef = ARTIFACT_KINDS[page.kind] ?? ARTIFACT_KINDS.PAGE;
   const failingSources = isData ? page.sources.filter((s) => s.status === 'error' || s.status === 'skipped').length : 0;
   const frameKey = `${page.id}:${shown}:${page.dataRefreshedAt ?? ''}`;
+  const isSlides = page.kind === 'SLIDES';
+  const present = () => {
+    const frame = frameRef.current;
+    if (!frame) return;
+    void frame.requestFullscreen?.().then(() => {
+      slides.send({ type: 'present', on: true });
+      slides.send({ type: 'focus' });
+    });
+  };
   const toggleComments = () => {
     setCommentsOpen((o) => !o);
     setDataOpen(false);
@@ -159,6 +179,7 @@ export default function SharedPagePage() {
       },
     },
     { label: 'Ouvrir dans un onglet', icon: 'bi-box-arrow-up-right', onClick: () => void window.open(viewUrl, '_blank', 'noopener') },
+    ...(isSlides ? [{ label: 'Exporter en PDF', icon: 'bi-file-earmark-pdf', onClick: () => void window.open(`${viewUrl}${viewUrl.includes('?') ? '&' : '?'}print=1`, '_blank', 'noopener') }] : []),
     { label: 'Télécharger le HTML', icon: 'bi-download', onClick: () => void window.open(sharedPageUrl(page.id, version, true), '_self') },
     // Copie privée (sources de données comprises) ; un artefact de données seulement par qui en voit les requêtes.
     ...(!user?.isGuest && (page.kind !== 'DATA' || admin)
@@ -265,7 +286,7 @@ export default function SharedPagePage() {
     <div className="preview-page">
       <div className="sp-head">
         <button type="button" className={`sp-head-title${details ? ' open' : ''}`} onClick={() => setDetails((d) => !d)} title={details ? 'Masquer les détails' : 'Détails de la page (propriétaire, versions, origine)'} aria-expanded={details}>
-          <i className={`bi ${isData ? kindDef.icon : access.icon} sp-head-access`} title={isData ? `${kindDef.label} · ${access.text}` : access.text} />
+          <i className={`bi ${page.kind !== 'PAGE' ? kindDef.icon : access.icon} sp-head-access`} title={page.kind !== 'PAGE' ? `${kindDef.label} · ${access.text}` : access.text} />
           <span className="sp-head-name">{page.title}</span>
           {isData && page.dataRefreshedAt && <span className="sp-chip d-none d-md-inline" title={`Données rafraîchies ${new Date(page.dataRefreshedAt).toLocaleString()} · ${refreshLabel(page.refreshMinutes)}`}>{timeAgoShort(page.dataRefreshedAt)}</span>}
           {shown !== page.version && <span className="sp-chip">v{shown}</span>}
@@ -386,8 +407,9 @@ export default function SharedPagePage() {
           </button>
         </div>
       )}
+      {isSlides && <SlidesBar state={slides.state} silent={slides.silent} send={slides.send} onPresent={present} />}
       <div className={`sp-body${commentsOpen ? ' with-comments' : ''}${dataOpen ? ' with-data' : ''}${picking ? ' picking' : ''}`}>
-        <iframe ref={frameRef} key={frameKey} className="preview-frame" title={page.title} src={viewUrl} sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads" allow="clipboard-write" />
+        <iframe ref={frameRef} key={frameKey} className="preview-frame" title={page.title} src={viewUrl} sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads" allow="clipboard-write; fullscreen" />
         <PageComments
           page={page}
           version={shown}

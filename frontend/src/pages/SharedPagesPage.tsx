@@ -38,6 +38,14 @@ export const ARTIFACT_KINDS: Record<ArtifactKind, { label: string; plural: strin
     hint: 'Un tableau de bord dont les chiffres se rafraîchissent tout seuls (SQL du coffre, scripts).',
     prompt: "Crée un tableau de bord (artefact de données, kind: data) qui montre : …\n\nSources : la base « … » du coffre (regarde son schéma avec vault.sql_schema et mets les requêtes au point avec vault.sql_query avant de les déclarer). Rafraîchissement toutes les heures (refresh_minutes: 60). Publie-le avec pages.publish et donne-moi le lien.",
   },
+  SLIDES: {
+    label: 'Diapositives',
+    plural: 'Diapositives',
+    icon: 'bi-easel',
+    className: 'af-kind-slides',
+    hint: 'Une présentation à partir de vos idées, de notes ou d’un document : navigation, grille, plein écran, PDF.',
+    prompt: "Crée une présentation (artefact de diapositives, kind: slides) sur : …\n\nPublic : … Une dizaine de diapositives, une idée par diapositive, sobre et lisible. Publie-la avec pages.publish et donne-moi le lien.",
+  },
 };
 
 /** État d'un artefact de données pour la carte : à jour, en erreur, ou jamais rafraîchi. */
@@ -119,7 +127,7 @@ export default function SharedPagesPage() {
   }, [data, filter, kind, search, user?.id]);
   if (loading && !data) return <PageLoading />;
   if (error) return <Alert variant="danger">Erreur : {error.message}</Alert>;
-  const counts = { PAGE: 0, DATA: 0 } as Record<ArtifactKind, number>;
+  const counts = { PAGE: 0, DATA: 0, SLIDES: 0 } as Record<ArtifactKind, number>;
   for (const p of data?.sharedPages ?? []) counts[p.kind] = (counts[p.kind] ?? 0) + 1;
   const empty =
     guest ? 'Aucun artefact partagé avec vous pour le moment.' : search.trim() ? 'Aucun artefact ne correspond à cette recherche.' : filter === 'mine' ? "Vous n'avez pas encore d'artefact : demandez-en un à un agent, ou partez d'une tuile ci-dessus." : filter === 'shared' ? 'Aucun artefact partagé avec vous.' : 'Aucun artefact pour le moment.';
@@ -142,13 +150,14 @@ export default function SharedPagesPage() {
             ))}
           </div>
         )}
-        {counts.DATA > 0 && (
+        {counts.DATA + counts.SLIDES > 0 && (
           <div className="af-filters" role="tablist" aria-label="Type">
             {(
               [
                 ['all', 'Tous types'],
                 ['PAGE', ARTIFACT_KINDS.PAGE.plural],
                 ['DATA', ARTIFACT_KINDS.DATA.plural],
+                ['SLIDES', ARTIFACT_KINDS.SLIDES.plural],
               ] as [KindFilter, string][]
             ).map(([k, label]) => (
               <button key={k} type="button" role="tab" aria-selected={kind === k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)}>
@@ -167,7 +176,7 @@ export default function SharedPagesPage() {
           <p className="af-section">Créer quelque chose de nouveau</p>
           <div className="af-create">
             {(Object.entries(ARTIFACT_KINDS) as [ArtifactKind, (typeof ARTIFACT_KINDS)[ArtifactKind]][]).map(([k, def]) => (
-              <button key={k} type="button" className={`af-tile${k === 'DATA' ? ' beta' : ''}`} onClick={() => openNewSession({ prompt: def.prompt })} title={`${def.label} : ${def.hint}`}>
+              <button key={k} type="button" className={`af-tile${k !== 'PAGE' ? ' beta' : ''}`} onClick={() => openNewSession({ prompt: def.prompt })} title={`${def.label} : ${def.hint}`}>
                 <div className={`af-tile-art ${def.className}`}>
                   <i className={`bi ${def.icon}`} />
                 </div>

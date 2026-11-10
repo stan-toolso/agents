@@ -125,6 +125,25 @@ http
       res.writeHead(view ? 200 : 404, { ...cors, 'content-type': 'application/json' });
       return res.end(JSON.stringify(view ?? { error: "Ce lien de partage n'existe pas, a expiré ou a été révoqué." }));
     }
+    // Artefact de diapositives de démo : un petit deck avec le vrai lecteur injecté (backend/src/sharedPages/slides-client.js).
+    if (/^\/api\/shared\/page-slides-/.test(url.pathname)) {
+      const mode = url.searchParams.get('print') === '1' ? 'print' : url.searchParams.get('thumb') === '1' ? 'thumb' : 'view';
+      const player = fs.readFileSync(path.join(here, '../../../backend/src/sharedPages/slides-client.js'), 'utf8');
+      const slide = (cls, body) => `<section class="slide ${cls}">${body}</section>`;
+      const deck = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Les trois offres</title><style>
+        body{font-family:system-ui,sans-serif;color:#1b1b1a}section.slide{padding:72px 88px;background:#fff;position:relative}section.slide.dark{background:#1f2a44;color:#fff}
+        h1{font-size:64px;margin:0 0 16px}h2{font-size:46px;margin:0 0 28px}p,li{font-size:28px;line-height:1.4}.kicker{font-size:22px;letter-spacing:.08em;text-transform:uppercase;color:#c8773a;margin-bottom:18px}
+        ul{padding-left:36px;margin:0}li{margin-bottom:14px}.cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:28px}.card{border:1px solid #e3e1da;border-radius:16px;padding:28px}.card h3{font-size:30px;margin:0 0 8px}.price{font-size:44px;font-weight:700;color:#2a78d6}
+      </style></head><body>
+        ${slide('dark', '<div class="kicker">Toolso · novembre 2026</div><h1>Les trois offres</h1><p>Une grille simple pour choisir en deux minutes.</p>')}
+        ${slide('', '<h2>Pourquoi trois offres ?</h2><ul><li>Des besoins très différents selon la taille de l’équipe</li><li>Un prix lisible, sans option cachée</li><li>Passer de l’une à l’autre en un clic</li></ul>')}
+        ${slide('', '<h2>Comparatif</h2><div class="cols"><div class="card"><h3>Solo</h3><div class="price">19 €</div><p>1 projet, 1 agent</p></div><div class="card"><h3>Équipe</h3><div class="price">79 €</div><p>10 projets, agents illimités</p></div><div class="card"><h3>Entreprise</h3><div class="price">Sur devis</div><p>Cellule dédiée, SSO</p></div></div>')}
+        ${slide('dark', '<div class="kicker">Section 02</div><h1>Et ensuite ?</h1>')}
+        ${slide('', '<h2>Prochaines étapes</h2><ul><li>Valider la grille avec les ventes</li><li>Mettre la page tarifs à jour</li><li>Annoncer la nouvelle offre le 1er décembre</li></ul>')}
+        <script data-skipper-slides data-mode="${mode}">${player}</script></body></html>`;
+      res.writeHead(200, { ...cors, 'content-type': 'text/html; charset=utf-8', 'content-security-policy': 'sandbox allow-scripts allow-forms allow-popups allow-modals' });
+      return res.end(deck);
+    }
     if (url.pathname.startsWith('/auth/') || url.pathname.startsWith('/api/')) {
       res.writeHead(200, { ...cors, 'content-type': 'text/html; charset=utf-8' });
       return res.end('<!doctype html><html><body style="font-family:sans-serif;padding:16px"><h1>Aperçu</h1><p>Contenu de la page servie par le backend.</p></body></html>');

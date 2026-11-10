@@ -203,9 +203,9 @@ export function describeTool(rawName: string, input: Record<string, unknown> = {
       if (name.startsWith('mcp__pages__')) {
         const op = name.slice('mcp__pages__'.length);
         const title = str(input, 'title') ?? '';
-        const data = input.kind === 'data';
+        const what = input.kind === 'data' ? "l'artefact de données" : input.kind === 'slides' ? 'les diapositives' : 'la page';
         const verbs: Record<string, [string, string | undefined, string]> = {
-          publish: [data ? `Publication de l'artefact de données « ${title} »` : `Publication de la page « ${title} »`, str(input, 'path'), `publier ${data ? "l'artefact de données" : 'la page'} « ${title} »`],
+          publish: [`Publication ${input.kind === 'data' ? "de l'artefact de données" : input.kind === 'slides' ? 'des diapositives' : 'de la page'} « ${title} »`, str(input, 'path'), `publier ${what} « ${title} »`],
           list: ['Liste des artefacts', undefined, 'lister les artefacts'],
           comments: ["Lecture des commentaires d'un artefact", undefined, "lire les commentaires d'un artefact"],
           reply: ['Réponse à un commentaire', str(input, 'body'), 'répondre à un commentaire'],

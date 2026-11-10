@@ -26,6 +26,7 @@
 /* Teintes par type (page : bleu ; données : rouge), identiques en clair et en sombre via color-mix. */
 .af-kind-page { color: var(--cc-blue); background: color-mix(in srgb, var(--cc-blue) 16%, var(--cc-bg-elevated)); }
 .af-kind-data { color: var(--cc-red); background: color-mix(in srgb, var(--cc-red) 14%, var(--cc-bg-elevated)); }
+.af-kind-slides { color: var(--cc-yellow); background: color-mix(in srgb, var(--cc-yellow) 18%, var(--cc-bg-elevated)); }
 
 /* Cartes */
 .af-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 18px; }

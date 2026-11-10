@@ -10,8 +10,8 @@ export const AGENT_HANDOFF_MODES: readonly AgentHandoff[] = ['off', 'manual', 'a
  * voir dataSources.ts). D'autres types viendront (diapositives…) : ajouter la valeur ici, dans la contrainte CHECK de la
  * migration, dans l'enum GraphQL `ArtifactKind` et dans `ARTIFACT_KINDS` du frontend.
  */
-export type ArtifactKind = 'page' | 'data';
-export const ARTIFACT_KINDS: readonly ArtifactKind[] = ['page', 'data'];
+export type ArtifactKind = 'page' | 'data' | 'slides';
+export const ARTIFACT_KINDS: readonly ArtifactKind[] = ['page', 'data', 'slides'];
 
 /** Page HTML publiée par une personne ou un agent, servie à /shared/<id>, privée par défaut. */
 export interface SharedPage {

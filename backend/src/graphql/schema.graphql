@@ -2534,6 +2534,8 @@ enum ArtifactKind {
   PAGE
   "Page HTML alimentée par des sources de données (SQL du coffre, scripts) que Skipper rafraîchit."
   DATA
+  "Diapositives : un deck HTML (une section par diapositive) lu par le lecteur de Skipper."
+  SLIDES
 }
 
 "Source de données d'un artefact « Données »."

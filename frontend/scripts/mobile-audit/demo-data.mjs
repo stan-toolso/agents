@@ -259,7 +259,8 @@ const dataSourcesDemo = [
   { __typename: 'SharedPageSource', id: 'src-meteo', name: 'meteo', kind: 'script', item: null, database: null, query: null, interpreter: 'node', code: "const r = await fetch('https://api.open-meteo.com/v1/forecast?latitude=45.9&longitude=6.1&daily=temperature_2m_max');\nconsole.log(JSON.stringify(await r.json()));", timeoutSeconds: 60, status: 'ok', error: null, rowCount: null, durationMs: 1210, refreshedAt: ago(12), attemptedAt: ago(12) },
 ];
 S.hebdo.pages.unshift(demoSharedPage('page-data-inscriptions', 'Inscriptions : tableau de bord', U.me, [[U.hugo, null]], { kind: 'DATA', refreshMinutes: 60, dataRefreshedAt: ago(12), sources: dataSourcesDemo, session: S.hebdo, project: P.data, version: 4 }));
-sharedPagesDemo.push(...S.tarifs.pages.slice(0, 1), ...S.hebdo.pages);
+S.tarifs.pages.push(demoSharedPage('page-slides-offres', 'Présentation des trois offres', U.me, [[U.hugo, null]], { kind: 'SLIDES', session: S.tarifs, project: P.site, version: 2 }));
+sharedPagesDemo.push(...S.tarifs.pages.slice(0, 1), ...S.hebdo.pages, S.tarifs.pages[2]);
 
 export const schedules = [
   schedule('sch-rapport-lundi', P.data, 'Rapport du lundi', U.hugo, { allowedTools: ['Bash(npm run report *)'], lastRunAt: ago(60 * 24 * 4) }),
