@@ -30,3 +30,23 @@ export function injectCommentScript(html: string, script = commentClientScript()
   }
   return html + tag;
 }
+
+const DATA_MARKER = 'data-skipper-data';
+
+/** JSON sûr dans un `<script>` en ligne : ni `</script>`, ni séparateurs de ligne Unicode. */
+export const jsonForScript = (v: unknown) => JSON.stringify(v).replace(/</g, '\\u003c').replace(/[\u2028\u2029]/g, (c) => (c === '\u2028' ? '\\u2028' : '\\u2029'));
+
+/**
+ * Artefact de données : les données des sources sont injectées **en tête** de la page (après `<head>`, sinon tout au
+ * début), avant tout script de la page, comme `window.Skipper` : `Skipper.data.<source>` (résultat de la source :
+ * `{ columns, rows }` pour une requête SQL, le JSON produit par un script), `Skipper.meta` (état des sources, date du
+ * rafraîchissement) et `Skipper.ready(fn)` qui appelle `fn(data, meta)` une fois le DOM chargé. Le cadre est en bac à
+ * sable sans origine : la page ne peut rien charger de Skipper elle-même, d'où l'injection.
+ */
+export function injectDataScript(html: string, payload: { data: Record<string, unknown>; meta: unknown }): string {
+  if (html.includes(DATA_MARKER)) return html;
+  const tag = `<script ${DATA_MARKER}>window.Skipper={data:${jsonForScript(payload.data)},meta:${jsonForScript(payload.meta)},ready:function(f){var r=function(){f(window.Skipper.data,window.Skipper.meta)};document.readyState==="loading"?document.addEventListener("DOMContentLoaded",r):r()}};</script>`;
+  const m = /<head(\s[^>]*)?>/i.exec(html);
+  if (m) return html.slice(0, m.index + m[0].length) + tag + html.slice(m.index + m[0].length);
+  return tag + html;
+}

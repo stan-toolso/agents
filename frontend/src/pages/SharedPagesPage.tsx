@@ -1,97 +1,196 @@
-import { useState } from 'react';
-import { Alert, Button, ButtonGroup, Table } from 'react-bootstrap';
+import { useMemo, useState } from 'react';
+import { Alert } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
+import { sharedPageUrl } from '../apollo';
 import { useAuth } from '../auth/AuthContext';
 import PageLoading from '../components/PageLoading';
-import { SHARED_PAGES, type SharedPage } from '../graphql/misc';
+import { useSessionLauncher } from '../components/SessionLauncher';
+import { SHARED_PAGES, type ArtifactKind, type SharedPage } from '../graphql/misc';
 import { timeAgo } from '../lib/humanize';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { useTabTitle } from '../workbench/TabsContext';
+import './artifacts.css';
 
 type Filter = 'all' | 'mine' | 'shared';
+type KindFilter = 'all' | ArtifactKind;
 
-export function accessLabel(page: SharedPage): { icon: string; text: string } {
+export function accessLabel(page: Pick<SharedPage, 'linkAccess' | 'members'>): { icon: string; text: string } {
   if (page.linkAccess) return { icon: 'bi-building', text: 'Toute personne de Skipper avec le lien' };
   if (page.members.length) return { icon: 'bi-people', text: `Partagée avec ${page.members.length} personne${page.members.length > 1 ? 's' : ''}` };
   return { icon: 'bi-lock', text: 'Privée' };
 }
 
-/** Pages partagées : publiées par un agent ou depuis l'explorateur de fichiers, privées jusqu'au partage. */
+/** Types d'artefacts : libellé, icône et teinte. D'autres types viendront (diapositives…) : une entrée ici, une valeur de l'enum ArtifactKind. */
+export const ARTIFACT_KINDS: Record<ArtifactKind, { label: string; plural: string; icon: string; className: string; hint: string; prompt: string }> = {
+  PAGE: {
+    label: 'Page',
+    plural: 'Pages',
+    icon: 'bi-file-earmark-richtext',
+    className: 'af-kind-page',
+    hint: 'Un rapport, une maquette, une note : une page HTML écrite par un agent.',
+    prompt: "Crée une page (artefact) qui présente : …\n\nPublie-la avec pages.publish et donne-moi le lien.",
+  },
+  DATA: {
+    label: 'Données',
+    plural: 'Données',
+    icon: 'bi-bar-chart-line',
+    className: 'af-kind-data',
+    hint: 'Un tableau de bord dont les chiffres se rafraîchissent tout seuls (SQL du coffre, scripts).',
+    prompt: "Crée un tableau de bord (artefact de données, kind: data) qui montre : …\n\nSources : la base « … » du coffre (regarde son schéma avec vault.sql_schema et mets les requêtes au point avec vault.sql_query avant de les déclarer). Rafraîchissement toutes les heures (refresh_minutes: 60). Publie-le avec pages.publish et donne-moi le lien.",
+  },
+};
+
+/** État d'un artefact de données pour la carte : à jour, en erreur, ou jamais rafraîchi. */
+function dataState(page: SharedPage): { className: string; icon: string; text: string } | null {
+  if (page.kind !== 'DATA') return null;
+  const failing = page.sources.filter((s) => s.status === 'error' || s.status === 'skipped').length;
+  if (failing) return { className: 'warn', icon: 'bi-exclamation-circle', text: `${failing} source${failing > 1 ? 's' : ''} en défaut` };
+  if (!page.dataRefreshedAt) return { className: '', icon: 'bi-hourglass', text: 'Pas encore rafraîchi' };
+  return { className: 'live', icon: page.refreshMinutes ? 'bi-arrow-repeat' : 'bi-check2', text: `Données ${timeAgo(page.dataRefreshedAt)}` };
+}
+
+function ArtifactCard({ page, mine }: { page: SharedPage; mine: boolean }) {
+  const kind = ARTIFACT_KINDS[page.kind] ?? ARTIFACT_KINDS.PAGE;
+  const state = dataState(page);
+  const [broken, setBroken] = useState(false);
+  return (
+    <Link to={`/shared/${page.id}`} className="af-card" title={page.description ?? page.title}>
+      <div className={`af-thumb ${kind.className}`}>
+        <div className="af-thumb-inner">
+          {broken ? (
+            <div className="af-thumb-fallback">
+              <i className={`bi ${kind.icon}`} />
+            </div>
+          ) : (
+            // Aperçu réduit de la page elle-même (bac à sable, sans interaction) ; `thumb=1` : l'ouverture n'est pas comptée.
+            <iframe src={`${sharedPageUrl(page.id)}?thumb=1`} title="" aria-hidden tabIndex={-1} loading="lazy" sandbox="allow-scripts" onError={() => setBroken(true)} />
+          )}
+        </div>
+      </div>
+      <div className="af-card-body">
+        <span className={`af-card-icon ${kind.className}`}>
+          <i className={`bi ${kind.icon}`} />
+        </span>
+        <div className="af-card-text">
+          <div className="af-card-title">{page.title}</div>
+          <div className="af-card-sub">
+            <span title={new Date(page.updatedAt).toLocaleString()}>Mis à jour {timeAgo(page.updatedAt)}</span>
+            <span className="sep">·</span>
+            <span>{mine ? 'Vous' : page.owner.name}</span>
+          </div>
+        </div>
+        {page.openComments > 0 && (
+          <span className="af-card-badge comments" title={`${page.openComments} commentaire${page.openComments > 1 ? 's' : ''} à traiter`}>
+            <i className="bi bi-chat-left-text" /> {page.openComments}
+          </span>
+        )}
+        {state && !page.openComments && (
+          <span className={`af-card-badge ${state.className}`} title={state.text}>
+            <i className={`bi ${state.icon}`} />
+            <span className="d-none d-sm-inline">{state.text}</span>
+          </span>
+        )}
+      </div>
+    </Link>
+  );
+}
+
+/**
+ * Artefacts : ce que les agents produisent pour les personnes — pages HTML et tableaux de bord de données — privés
+ * jusqu'au partage. Tuiles de création (une session lancée avec une consigne à compléter), filtres, cartes avec un
+ * aperçu réduit de chaque artefact.
+ */
 export default function SharedPagesPage() {
   const { user } = useAuth();
   // Invité des pages partagées : il ne publie rien, la page ne liste que ce qu'on lui a partagé.
   const guest = Boolean(user?.isGuest);
-  useTabTitle('Pages');
+  useTabTitle('Artefacts');
+  const { openNewSession } = useSessionLauncher();
   const [filter, setFilter] = useState<Filter>('all');
+  const [kind, setKind] = useState<KindFilter>('all');
+  const [search, setSearch] = useState('');
   const { data, loading, error } = usePollingQuery<{ sharedPages: SharedPage[] }>(SHARED_PAGES, { pollInterval: 30_000 });
+  const pages = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return (data?.sharedPages ?? [])
+      .filter((p) => (filter === 'mine' ? p.owner.id === user?.id : filter === 'shared' ? p.owner.id !== user?.id : true))
+      .filter((p) => kind === 'all' || p.kind === kind)
+      .filter((p) => !q || p.title.toLowerCase().includes(q) || (p.description ?? '').toLowerCase().includes(q) || p.owner.name.toLowerCase().includes(q));
+  }, [data, filter, kind, search, user?.id]);
   if (loading && !data) return <PageLoading />;
   if (error) return <Alert variant="danger">Erreur : {error.message}</Alert>;
-  const pages = (data?.sharedPages ?? []).filter((p) => (filter === 'mine' ? p.owner.id === user?.id : filter === 'shared' ? p.owner.id !== user?.id : true));
+  const counts = { PAGE: 0, DATA: 0 } as Record<ArtifactKind, number>;
+  for (const p of data?.sharedPages ?? []) counts[p.kind] = (counts[p.kind] ?? 0) + 1;
+  const empty =
+    guest ? 'Aucun artefact partagé avec vous pour le moment.' : search.trim() ? 'Aucun artefact ne correspond à cette recherche.' : filter === 'mine' ? "Vous n'avez pas encore d'artefact : demandez-en un à un agent, ou partez d'une tuile ci-dessus." : filter === 'shared' ? 'Aucun artefact partagé avec vous.' : 'Aucun artefact pour le moment.';
   return (
-    <>
-      <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
-        <h1 className="h3 mb-0">{guest ? 'Pages partagées avec vous' : 'Pages'}</h1>
-        {!guest && <ButtonGroup size="sm">
-          {(
-            [
-              ['all', 'Toutes'],
-              ['mine', 'Les miennes'],
-              ['shared', 'Partagées avec moi'],
-            ] as [Filter, string][]
-          ).map(([f, label]) => (
-            <Button key={f} variant={filter === f ? 'primary' : 'outline-secondary'} onClick={() => setFilter(f)}>
-              {label}
-            </Button>
-          ))}
-        </ButtonGroup>}
+    <div className="af-page">
+      <div className="af-head">
+        <h1>{guest ? 'Artefacts partagés avec vous' : 'Artefacts'}</h1>
+        {!guest && (
+          <div className="af-filters" role="tablist" aria-label="Qui">
+            {(
+              [
+                ['all', 'Tous'],
+                ['mine', 'Les vôtres'],
+                ['shared', 'Partagés avec vous'],
+              ] as [Filter, string][]
+            ).map(([f, label]) => (
+              <button key={f} type="button" role="tab" aria-selected={filter === f} className={filter === f ? 'on' : ''} onClick={() => setFilter(f)}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+        {counts.DATA > 0 && (
+          <div className="af-filters" role="tablist" aria-label="Type">
+            {(
+              [
+                ['all', 'Tous types'],
+                ['PAGE', ARTIFACT_KINDS.PAGE.plural],
+                ['DATA', ARTIFACT_KINDS.DATA.plural],
+              ] as [KindFilter, string][]
+            ).map(([k, label]) => (
+              <button key={k} type="button" role="tab" aria-selected={kind === k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+        <label className="af-search">
+          <i className="bi bi-search" />
+          <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher" aria-label="Rechercher un artefact" />
+        </label>
       </div>
-      {guest ? (
-        <p className="text-secondary small">Les pages que l'on a partagées avec vous. Ouvrez-en une pour la lire et y laisser des commentaires, généraux ou sur un endroit précis.</p>
-      ) : <p className="text-secondary small">Un agent publie une page quand vous le lui demandez (« publie ce rapport comme page ») ; vous pouvez aussi publier un fichier HTML depuis l'explorateur de fichiers. Une page est privée jusqu'à ce que son propriétaire la partage.</p>}
-      <Table size="sm" hover responsive>
-        <thead>
-          <tr>
-            <th>Titre</th>
-            <th className="d-none d-md-table-cell">Propriétaire</th>
-            <th>Accès</th>
-            <th className="d-none d-md-table-cell">Version</th>
-            <th className="d-none d-md-table-cell">Mise à jour</th>
-          </tr>
-        </thead>
-        <tbody>
-          {pages.length === 0 && (
-            <tr>
-              <td colSpan={5} className="text-secondary fst-italic">
-                {guest ? 'Aucune page partagée avec vous pour le moment.' : filter === 'mine' ? "Vous n'avez pas encore publié de page." : filter === 'shared' ? 'Aucune page partagée avec vous.' : 'Aucune page pour le moment.'}
-              </td>
-            </tr>
-          )}
-          {pages.map((p) => {
-            const access = accessLabel(p);
-            return (
-              <tr key={p.id}>
-                <td style={{ maxWidth: 420 }}>
-                  <Link to={`/shared/${p.id}`}>{p.title}</Link>
-                  {p.openComments > 0 && (
-                    <Link to={`/shared/${p.id}`} className="badge rounded-pill text-bg-secondary ms-2 text-decoration-none" title={`${p.openComments} commentaire${p.openComments > 1 ? 's' : ''} à traiter`}>
-                      <i className="bi bi-chat-left-text me-1" />
-                      {p.openComments}
-                    </Link>
-                  )}
-                  {p.description && <div className="small text-secondary text-truncate">{p.description}</div>}
-                </td>
-                <td className="d-none d-md-table-cell">{p.owner.id === user?.id ? 'Vous' : p.owner.name}</td>
-                <td className="small">
-                  <i className={`bi ${access.icon} me-1 text-secondary`} />
-                  {access.text}
-                </td>
-                <td className="d-none d-md-table-cell">v{p.version}</td>
-                <td className="d-none d-md-table-cell" title={new Date(p.updatedAt).toLocaleString()}>{timeAgo(p.updatedAt)}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </Table>
-    </>
+      {!guest && (
+        <>
+          <p className="af-section">Créer quelque chose de nouveau</p>
+          <div className="af-create">
+            {(Object.entries(ARTIFACT_KINDS) as [ArtifactKind, (typeof ARTIFACT_KINDS)[ArtifactKind]][]).map(([k, def]) => (
+              <button key={k} type="button" className={`af-tile${k === 'DATA' ? ' beta' : ''}`} onClick={() => openNewSession({ prompt: def.prompt })} title={`${def.label} : ${def.hint}`}>
+                <div className={`af-tile-art ${def.className}`}>
+                  <i className={`bi ${def.icon}`} />
+                </div>
+                <div className="af-tile-label">{def.label}</div>
+                <div className="af-tile-hint">{def.hint}</div>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      {guest && <p className="text-secondary small">Les artefacts que l'on a partagés avec vous. Ouvrez-en un pour le lire et y laisser des commentaires, généraux ou sur un endroit précis.</p>}
+      {pages.length === 0 ? (
+        <div className="af-empty">
+          <i className="bi bi-collection" />
+          {empty}
+        </div>
+      ) : (
+        <div className="af-grid">
+          {pages.map((p) => (
+            <ArtifactCard key={p.id} page={p} mine={p.owner.id === user?.id} />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

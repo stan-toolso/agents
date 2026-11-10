@@ -1995,7 +1995,14 @@ lignes au plus). Ouvert aux **lecteurs** du projet (`auditLog`, `auditFacets`).
   et mode d'autorisation ; les règles d'autorisation s'ajoutent. Les connexions ne sont jamais recréées. Tout se fait dans
   une transaction. Test d'aller-retour sur PostgreSQL : `exports/service.db.test.ts`.
 
-## Pages partagées
+## Artefacts : pages et données
+
+Les **artefacts** sont ce que les agents produisent pour les personnes : des **pages** (rapport, maquette,
+note : un fichier HTML) et des **données** (une page dont les chiffres viennent de sources que Skipper
+rafraîchit tout seul). D'autres types viendront (`shared_pages.kind`, enum GraphQL `ArtifactKind`,
+`ARTIFACT_KINDS` côté frontend). La galerie `/shared` (`pages/SharedPagesPage.tsx`) les montre en cartes avec un
+aperçu réduit, des filtres (les vôtres, partagés avec vous, par type) et des tuiles « Créer » qui ouvrent une
+nouvelle session avec une consigne à compléter.
 
 Un agent (outil `pages.publish`) ou l'éditeur de fichiers publie un fichier HTML comme **page**
 (`/shared/:id`, `backend/src/sharedPages/`), privée à son propriétaire jusqu'à ce qu'il la partage avec
@@ -2004,9 +2011,29 @@ version ; la page est servie par `GET /api/shared/:id[?v=N][&download=1]` dans u
 `sandbox` sans `allow-same-origin` : la page ne lit ni les cookies ni l'API), l'accès étant revérifié
 à chaque chargement. Être ajouté à une page envoie une notification.
 
+**Artefact de données** (`kind: data`, table `shared_page_sources`, `sharedPages/dataSources.ts`,
+`dataService.ts`) : l'agent déclare dans `pages.publish` des **sources** (`sources`), chacune une requête SQL en
+lecture seule sur un élément PostgreSQL du coffre (`{ name, type: "sql", item, query }`, 5000 lignes au plus) ou
+un script node, python ou sh lancé dans l'environnement Docker du projet (`{ name, type: "script", interpreter,
+code }`, sortie standard en JSON, sans identifiant du coffre), et un intervalle de **rafraîchissement automatique**
+(`refresh_minutes`, 5 minutes à 7 jours ; absent : à la demande). Les sources sont exécutées **au nom du
+propriétaire** de l'artefact, dans la portée du coffre de son projet, l'une après l'autre, jamais deux fois en même
+temps pour un même artefact ; une source en échec garde ses dernières données. Le planificateur (tâche de
+l'instance meneuse, un passage par minute) rafraîchit les artefacts dont l'échéance est passée et qui ont été
+lus ou modifiés depuis moins de 14 jours (`viewed_at`, noté à l'ouverture ; sinon le rafraîchissement se met en
+veille jusqu'à la prochaine lecture). Un élément du coffre **soumis à approbation** n'est jamais utilisé sans une
+personne : ses sources sont `skipped` en automatique et par les agents, et s'exécutent quand le propriétaire
+clique « Rafraîchir ». À la lecture, les données sont **injectées en tête de la page** (`inject.ts`,
+`injectDataScript`) comme `window.Skipper` : `Skipper.data.<source>` (`{ columns, rows }` pour une requête SQL,
+le JSON d'un script), `Skipper.meta` (`refreshedAt`, état des sources) et `Skipper.ready(fn)` ; la page se
+dessine elle-même à partir de ces données (jamais de chiffres en dur). Outils des agents : `pages.refresh`
+(relance les sources) et `pages.data` (ce que la page reçoit). Interface : bouton **Données** de la page (panneau
+`components/pages/PageData.tsx` : état de chaque source, requête ou script pour le propriétaire et les
+administrateurs, intervalle, « Rafraîchir »), mutation `refreshSharedPageData`, `SharedPageInput.refreshMinutes`.
+
 La page (`pages/SharedPagePage.tsx`) a un en-tête d'une ligne : le titre (cliquer déplie les détails : propriétaire,
-accès, choix de la version, origine), **Commentaires**, **Partager** (propriétaire) et un menu « ⋯ » (copier le lien,
-ouvrir dans un onglet, télécharger, renommer, supprimer, quitter).
+accès, choix de la version, origine), **Données** et **Rafraîchir** (artefact de données), **Commentaires**, **Partager**
+(propriétaire) et un menu « ⋯ » (copier le lien, ouvrir dans un onglet, télécharger, renommer, supprimer, quitter).
 
 **Commentaires** (`backend/src/sharedPages/commentService.ts`, table `shared_page_comments`,
 `components/pages/PageComments.tsx`) : toute personne qui voit la page y laisse des commentaires, **généraux** ou

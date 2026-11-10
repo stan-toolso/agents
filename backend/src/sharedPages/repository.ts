@@ -1,5 +1,5 @@
 import { pool } from '../db/pool.js';
-import type { AgentHandoff, SharedPage, SharedPageMember, SharedPageVersion } from './types.js';
+import type { AgentHandoff, ArtifactKind, SharedPage, SharedPageMember, SharedPageVersion } from './types.js';
 
 interface Row {
   id: string;
@@ -13,6 +13,10 @@ interface Row {
   source_path: string | null;
   agent_handoff: AgentHandoff;
   history_enabled: boolean;
+  kind: ArtifactKind;
+  refresh_minutes: number | null;
+  data_refreshed_at: Date | null;
+  viewed_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -28,6 +32,10 @@ const toPage = (r: Row): SharedPage => ({
   sourcePath: r.source_path,
   agentHandoff: r.agent_handoff ?? 'manual',
   historyEnabled: r.history_enabled ?? true,
+  kind: r.kind ?? 'page',
+  refreshMinutes: r.refresh_minutes ?? null,
+  dataRefreshedAt: r.data_refreshed_at ?? null,
+  viewedAt: r.viewed_at ?? null,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -72,13 +80,13 @@ export const sharedPageRepository = {
   },
 
   /** Crée la page et sa première version dans une même transaction. */
-  async create(input: { ownerId: string; title: string; description: string | null; linkAccess: boolean; projectId: string | null; sessionId: string | null; sourcePath: string | null; html: Buffer }): Promise<SharedPage> {
+  async create(input: { ownerId: string; title: string; description: string | null; linkAccess: boolean; projectId: string | null; sessionId: string | null; sourcePath: string | null; html: Buffer; kind?: ArtifactKind }): Promise<SharedPage> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       const { rows } = await client.query<Row>(
-        `INSERT INTO shared_pages (owner_id, title, description, link_access, project_id, session_id, source_path) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-        [input.ownerId, input.title, input.description, input.linkAccess, input.projectId, input.sessionId, input.sourcePath],
+        `INSERT INTO shared_pages (owner_id, title, description, link_access, project_id, session_id, source_path, kind) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [input.ownerId, input.title, input.description, input.linkAccess, input.projectId, input.sessionId, input.sourcePath, input.kind ?? 'page'],
       );
       await client.query('INSERT INTO shared_page_versions (page_id, version, html, size, created_by, session_id) VALUES ($1, 1, $2, $3, $4, $5)', [rows[0].id, input.html, input.html.length, input.ownerId, input.sessionId]);
       await client.query('COMMIT');
@@ -92,15 +100,15 @@ export const sharedPageRepository = {
   },
 
   /** Nouvelle version (la ligne est verrouillée : deux publications concurrentes se suivent). */
-  async addVersion(pageId: string, input: { title: string; description: string | null | undefined; linkAccess: boolean | null; projectId: string | null; sessionId: string | null; sourcePath: string | null; html: Buffer; createdBy: string }): Promise<SharedPage | null> {
+  async addVersion(pageId: string, input: { title: string; description: string | null | undefined; linkAccess: boolean | null; projectId: string | null; sessionId: string | null; sourcePath: string | null; html: Buffer; createdBy: string; kind?: ArtifactKind | null }): Promise<SharedPage | null> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       const { rows } = await client.query<Row>(
         `UPDATE shared_pages SET version = version + 1, title = $2, description = COALESCE($3, description), link_access = COALESCE($4, link_access),
-                project_id = COALESCE($5, project_id), session_id = $6, source_path = $7, updated_at = now()
+                project_id = COALESCE($5, project_id), session_id = $6, source_path = $7, kind = COALESCE($8, kind), updated_at = now()
          WHERE id = $1 RETURNING *`,
-        [pageId, input.title, input.description ?? null, input.linkAccess, input.projectId, input.sessionId, input.sourcePath],
+        [pageId, input.title, input.description ?? null, input.linkAccess, input.projectId, input.sessionId, input.sourcePath, input.kind ?? null],
       );
       if (!rows[0]) {
         await client.query('ROLLBACK');
@@ -117,7 +125,7 @@ export const sharedPageRepository = {
     }
   },
 
-  async update(id: string, patch: { title?: string; description?: string | null; linkAccess?: boolean; agentHandoff?: AgentHandoff; historyEnabled?: boolean }): Promise<SharedPage | null> {
+  async update(id: string, patch: { title?: string; description?: string | null; linkAccess?: boolean; agentHandoff?: AgentHandoff; historyEnabled?: boolean; refreshMinutes?: number | null }): Promise<SharedPage | null> {
     const sets = ['updated_at = now()'];
     const params: unknown[] = [id];
     if (patch.title !== undefined) sets.push(`title = $${params.push(patch.title)}`);
@@ -125,6 +133,7 @@ export const sharedPageRepository = {
     if (patch.linkAccess !== undefined) sets.push(`link_access = $${params.push(patch.linkAccess)}`);
     if (patch.agentHandoff !== undefined) sets.push(`agent_handoff = $${params.push(patch.agentHandoff)}`);
     if (patch.historyEnabled !== undefined) sets.push(`history_enabled = $${params.push(patch.historyEnabled)}`);
+    if (patch.refreshMinutes !== undefined) sets.push(`refresh_minutes = $${params.push(patch.refreshMinutes)}`);
     const { rows } = await pool.query<Row>(`UPDATE shared_pages SET ${sets.join(', ')} WHERE id = $1 RETURNING *`, params);
     return rows[0] ? toPage(rows[0]) : null;
   },
@@ -170,6 +179,31 @@ export const sharedPageRepository = {
       out.set(r.by_session, list);
     }
     return out;
+  },
+
+  /** Note la dernière ouverture (au plus une écriture toutes les 10 minutes), sans toucher `updated_at`. */
+  async touchViewed(id: string): Promise<void> {
+    await pool.query(`UPDATE shared_pages SET viewed_at = now() WHERE id = $1 AND (viewed_at IS NULL OR viewed_at < now() - interval '10 minutes')`, [id]);
+  },
+
+  async markDataRefreshed(id: string): Promise<void> {
+    await pool.query('UPDATE shared_pages SET data_refreshed_at = now() WHERE id = $1', [id]);
+  },
+
+  /**
+   * Artefacts de données à rafraîchir : intervalle réglé, échéance passée (depuis la dernière tentative), et lus ou
+   * modifiés depuis moins de `idleDays` jours (sinon le rafraîchissement automatique est en veille jusqu'à la prochaine ouverture).
+   */
+  async dueForRefresh(limit: number, idleDays: number): Promise<SharedPage[]> {
+    const { rows } = await pool.query<Row>(
+      `SELECT * FROM shared_pages
+        WHERE kind = 'data' AND refresh_minutes IS NOT NULL AND project_id IS NOT NULL
+          AND (data_refreshed_at IS NULL OR data_refreshed_at <= now() - refresh_minutes * interval '1 minute')
+          AND GREATEST(COALESCE(viewed_at, created_at), updated_at) > now() - $2 * interval '1 day'
+        ORDER BY data_refreshed_at NULLS FIRST LIMIT $1`,
+      [limit, idleDays],
+    );
+    return rows.map(toPage);
   },
 
   async isMember(pageId: string, userId: string): Promise<boolean> {

@@ -5,6 +5,14 @@
 export type AgentHandoff = 'off' | 'manual' | 'auto';
 export const AGENT_HANDOFF_MODES: readonly AgentHandoff[] = ['off', 'manual', 'auto'];
 
+/**
+ * Type d'artefact : `page` (page HTML), `data` (page HTML alimentée par des sources de données que Skipper rafraîchit,
+ * voir dataSources.ts). D'autres types viendront (diapositives…) : ajouter la valeur ici, dans la contrainte CHECK de la
+ * migration, dans l'enum GraphQL `ArtifactKind` et dans `ARTIFACT_KINDS` du frontend.
+ */
+export type ArtifactKind = 'page' | 'data';
+export const ARTIFACT_KINDS: readonly ArtifactKind[] = ['page', 'data'];
+
 /** Page HTML publiée par une personne ou un agent, servie à /shared/<id>, privée par défaut. */
 export interface SharedPage {
   id: string;
@@ -22,6 +30,12 @@ export interface SharedPage {
   agentHandoff: AgentHandoff;
   /** Anciennes versions consultables ; false = seule la dernière version est servie et listée. */
   historyEnabled: boolean;
+  kind: ArtifactKind;
+  /** Données : intervalle du rafraîchissement automatique en minutes ; null = à la demande. */
+  refreshMinutes: number | null;
+  /** Données : dernière tentative de rafraîchissement. */
+  dataRefreshedAt: Date | null;
+  viewedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -55,6 +69,8 @@ export interface PublishInput {
   projectId?: string | null;
   sessionId?: string | null;
   sourcePath?: string | null;
+  /** Type de l'artefact à la création (défaut `page`) ; une nouvelle version peut passer une page en `data`. */
+  kind?: ArtifactKind | null;
 }
 
 /** Élément de la page visé par un commentaire (choisi en cliquant dans la page). */

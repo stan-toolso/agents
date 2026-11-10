@@ -22,6 +22,8 @@ import { mailService, type MailInput } from '../notifications/mail.js';
 import { searchService, type SearchKind } from '../search/service.js';
 import { sharedPageCommentService } from '../sharedPages/commentService.js';
 import { sharedPageService } from '../sharedPages/service.js';
+import { artifactDataService } from '../sharedPages/dataService.js';
+import type { DataSource, ScriptSourceConfig, SqlSourceConfig } from '../sharedPages/dataSources.js';
 import { sharedPageUpdateService } from '../sharedPages/updateRequest.js';
 import { envFileService } from '../envFiles/service.js';
 import type { EnvFile } from '../envFiles/types.js';
@@ -762,6 +764,13 @@ export const resolvers = {
     openComments: async (p: SharedPage, _: unknown, ctx: Ctx) => (await loadersOf(ctx).sharedPageOpenComments(p.id)) ?? 0,
     // Réglage effectif : sans session d'origine, rien ne peut être transmis.
     agentHandoff: (p: SharedPage) => (p.sessionId ? p.agentHandoff.toUpperCase() : 'OFF'),
+    kind: (p: SharedPage) => p.kind.toUpperCase(),
+    sources: async (p: SharedPage, _: unknown, ctx: Ctx) => {
+      if (p.kind !== 'data') return [];
+      const user = requireUser(ctx);
+      const full = sharedPageService.canManage(p, user);
+      return (await artifactDataService.sources(p.id)).map((s) => sourceView(s, full));
+    },
   },
   SharedPageComment: {
     author: (c: SharedPageComment, _: unknown, ctx: Ctx) => userOrNull(ctx, c.authorId),
@@ -2245,7 +2254,7 @@ export const resolvers = {
       const file = await readRawFile(args, args.path);
       return sharedPageService.publish({ ownerId: requireUser(ctx).id, title: args.title, html: file.data, pageId: args.pageId ?? null, projectId: args.projectId, sourcePath: args.path });
     },
-    updateSharedPage: async (_: unknown, args: { id: string; input: { title?: string | null; description?: string | null; linkAccess?: boolean | null; agentHandoff?: string | null } }, ctx: Ctx) => {
+    updateSharedPage: async (_: unknown, args: { id: string; input: { title?: string | null; description?: string | null; linkAccess?: boolean | null; agentHandoff?: string | null; refreshMinutes?: number | null } }, ctx: Ctx) => {
       const user = requireUser(ctx);
       const { agentHandoff, ...input } = args.input;
       if (agentHandoff === 'AUTO') {
@@ -2260,6 +2269,7 @@ export const resolvers = {
     removeSharedPageMember: (_: unknown, args: { id: string; userId: string }, ctx: Ctx) => sharedPageService.removeMember(requireUser(ctx), args.id, args.userId),
     deleteSharedPage: (_: unknown, args: { id: string }, ctx: Ctx) => sharedPageService.delete(requireUser(ctx).id, args.id),
     setSharedPageHistory: (_: unknown, args: { id: string; enabled: boolean }, ctx: Ctx) => sharedPageService.setHistory(requireUser(ctx), args.id, args.enabled),
+    refreshSharedPageData: (_: unknown, args: { id: string }, ctx: Ctx) => artifactDataService.refreshFor(requireUser(ctx), args.id),
     deleteAllSharedPageComments: (_: unknown, args: { id: string }, ctx: Ctx) => sharedPageService.deleteAllComments(requireUser(ctx), args.id),
     addSharedPageComment: (_: unknown, args: { pageId: string; body: string; anchor?: unknown; version?: number | null }, ctx: Ctx) =>
       sharedPageCommentService.add({ user: requireUser(ctx) }, args.pageId, { body: args.body, anchor: args.anchor, version: args.version }),
@@ -2409,3 +2419,26 @@ export const resolvers = {
 
 // Coûts rendus dans l'unité d'affichage (crédits quand la facturation de la cellule est configurée).
 applyCostConversion(resolvers);
+
+/** Source de données telle que l'API la montre : requête et script réservés à qui administre l'artefact. */
+function sourceView(s: DataSource, full: boolean) {
+  const sql = s.kind === 'sql' ? (s.config as SqlSourceConfig) : null;
+  const script = s.kind === 'script' ? (s.config as ScriptSourceConfig) : null;
+  return {
+    id: s.id,
+    name: s.name,
+    kind: s.kind,
+    item: sql?.item ?? null,
+    database: sql?.database ?? null,
+    query: full ? sql?.query ?? null : null,
+    interpreter: script?.interpreter ?? null,
+    code: full ? script?.code ?? null : null,
+    timeoutSeconds: script?.timeoutSeconds ?? null,
+    status: s.status,
+    error: s.error,
+    rowCount: s.rowCount,
+    durationMs: s.durationMs,
+    refreshedAt: s.refreshedAt,
+    attemptedAt: s.attemptedAt,
+  };
+}

@@ -200,6 +200,22 @@ export function describeTool(rawName: string, input: Record<string, unknown> = {
         const [label, action] = verbs[op] ?? [`Chrome : ${op}`, `utiliser votre Chrome (${op})`];
         return { label, action };
       }
+      if (name.startsWith('mcp__pages__')) {
+        const op = name.slice('mcp__pages__'.length);
+        const title = str(input, 'title') ?? '';
+        const data = input.kind === 'data';
+        const verbs: Record<string, [string, string | undefined, string]> = {
+          publish: [data ? `Publication de l'artefact de données « ${title} »` : `Publication de la page « ${title} »`, str(input, 'path'), `publier ${data ? "l'artefact de données" : 'la page'} « ${title} »`],
+          list: ['Liste des artefacts', undefined, 'lister les artefacts'],
+          comments: ["Lecture des commentaires d'un artefact", undefined, "lire les commentaires d'un artefact"],
+          reply: ['Réponse à un commentaire', str(input, 'body'), 'répondre à un commentaire'],
+          resolve: ['Commentaire marqué traité', undefined, 'marquer un commentaire traité'],
+          refresh: ["Rafraîchissement des données d'un artefact", undefined, "rafraîchir les données d'un artefact"],
+          data: [`Lecture des données ${str(input, 'source') ? `de la source « ${str(input, 'source')} »` : "d'un artefact"}`, undefined, "lire les données d'un artefact"],
+        };
+        const [label, detail, action] = verbs[op] ?? [`Artefacts : ${op}`, undefined, `utiliser les artefacts (${op})`];
+        return { label, detail, action };
+      }
       if (name.startsWith('mcp__connections__') || name.startsWith('mcp__vault__')) {
         const op = name.replace(/^mcp__(connections|vault)__/, '');
         const conn = str(input, 'connection') ?? str(input, 'item') ?? '';

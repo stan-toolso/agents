@@ -233,7 +233,7 @@ const demoSharedPage = (id, title, owner, members, extra = {}) => ({
   __typename: 'SharedPage', id, title, description: null, owner, linkAccess: false, version: 1, createdAt: ago(60 * 24), updatedAt: ago(60 * 3),
   members: members.map(([u, message]) => ({ __typename: 'SharedPageMember', user: u, addedBy: owner, addedAt: ago(60 * 20), message })),
   versions: [{ __typename: 'SharedPageVersion', version: 1, size: 18_400, createdBy: owner, createdAt: ago(60 * 24) }],
-  project: null, session: null, sourcePath: null, comments: [], openComments: 0, agentHandoff: 'MANUAL', historyEnabled: true,
+  project: null, session: null, sourcePath: null, comments: [], openComments: 0, agentHandoff: 'MANUAL', historyEnabled: true, kind: 'PAGE', refreshMinutes: null, dataRefreshedAt: null, sources: [],
   viewerAccess: { __typename: 'SharedPageViewerAccess', owner: owner === U.me, member: owner !== U.me, admin: owner === U.me },
   ...extra,
 });
@@ -252,6 +252,13 @@ S.tarifs.pages = [
 S.hebdo.pages = ['Inscriptions de la semaine', 'Camps les plus demandés', 'Désinscriptions', 'Comparatif 2025'].map((t, i) =>
   demoSharedPage(`page-hebdo-${i + 1}`, t, U.hugo, [[U.me, null]], { linkAccess: i === 0, openComments: i === 1 ? 1 : 0, session: S.hebdo, project: P.data }),
 );
+// Artefact de données : sources SQL et script, l'une en erreur, rafraîchi toutes les heures.
+const dataSourcesDemo = [
+  { __typename: 'SharedPageSource', id: 'src-inscriptions', name: 'inscriptions', kind: 'sql', item: 'base', database: null, query: "SELECT date_trunc('day', created_at)::date AS jour, count(*) AS n\nFROM inscriptions\nWHERE created_at > now() - interval '30 days'\nGROUP BY 1 ORDER BY 1", interpreter: null, code: null, timeoutSeconds: null, status: 'ok', error: null, rowCount: 30, durationMs: 412, refreshedAt: ago(12), attemptedAt: ago(12) },
+  { __typename: 'SharedPageSource', id: 'src-camps', name: 'camps', kind: 'sql', item: 'base', database: null, query: 'SELECT camp, count(*) AS n FROM inscriptions GROUP BY 1 ORDER BY 2 DESC LIMIT 8', interpreter: null, code: null, timeoutSeconds: null, status: 'error', error: 'relation « inscriptions_v2 » inexistante', rowCount: 8, durationMs: 35, refreshedAt: ago(60 * 25), attemptedAt: ago(12) },
+  { __typename: 'SharedPageSource', id: 'src-meteo', name: 'meteo', kind: 'script', item: null, database: null, query: null, interpreter: 'node', code: "const r = await fetch('https://api.open-meteo.com/v1/forecast?latitude=45.9&longitude=6.1&daily=temperature_2m_max');\nconsole.log(JSON.stringify(await r.json()));", timeoutSeconds: 60, status: 'ok', error: null, rowCount: null, durationMs: 1210, refreshedAt: ago(12), attemptedAt: ago(12) },
+];
+S.hebdo.pages.unshift(demoSharedPage('page-data-inscriptions', 'Inscriptions : tableau de bord', U.me, [[U.hugo, null]], { kind: 'DATA', refreshMinutes: 60, dataRefreshedAt: ago(12), sources: dataSourcesDemo, session: S.hebdo, project: P.data, version: 4 }));
 sharedPagesDemo.push(...S.tarifs.pages.slice(0, 1), ...S.hebdo.pages);
 
 export const schedules = [
@@ -828,6 +835,7 @@ const sharedPageDemo = (id) => ({
   version: 3,
   historyEnabled: sharedPageState.historyEnabled,
   versions: sharedPageState.historyEnabled ? sharedPageVersionsDemo : sharedPageVersionsDemo.slice(0, 1),
+  kind: 'PAGE', refreshMinutes: null, dataRefreshedAt: null, sources: [],
 });
 
 export const demoRoot = {
@@ -925,6 +933,17 @@ export const demoRoot = {
     return sharedPageDemo(a.id);
   },
   deleteAllSharedPageComments: () => 3,
+  refreshSharedPageData: (a) => {
+    const mine = sharedPagesDemo.find((pg) => pg.id === a.id);
+    if (mine) {
+      mine.dataRefreshedAt = ago(0);
+      for (const src of mine.sources) {
+        src.attemptedAt = mine.dataRefreshedAt;
+        if (src.status === 'ok') src.refreshedAt = mine.dataRefreshedAt;
+      }
+    }
+    return mine ?? sharedPageDemo(a.id);
+  },
   githubPullRequests: [],
   gitStatus,
   gitLog: (a = {}) => (worksessionOf(a.worksessionId) ? commits : commits.slice(2)).slice(0, a.limit ?? 50),

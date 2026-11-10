@@ -130,7 +130,7 @@ const MAIN_MENU: { to: string; label: string; icon: string; title?: string }[] =
   { to: '/sessions', label: 'Sessions', icon: 'bi-chat-dots' },
   { to: '/chats', label: 'Chats', icon: 'bi-chat-left-text', title: 'Chats : conversations légères de votre espace personnel, avec accès à tous vos projets' },
   { to: '/tasks', label: 'Tâches', icon: 'bi-check2-square' },
-  { to: '/shared', label: 'Pages', icon: 'bi-file-earmark-richtext', title: 'Pages partagées' },
+  { to: '/shared', label: 'Artefacts', icon: 'bi-collection', title: 'Artefacts : pages et tableaux de bord publiés par les agents' },
   { to: '/vault', label: 'Coffre', icon: 'bi-shield-lock' },
   { to: '/schedules', label: 'Planifications', icon: 'bi-alarm', title: 'Planifications : une nouvelle session à heures fixes, prochaines échéances et historique' },
   { to: '/workflows', label: 'Workflows', icon: 'bi-diagram-3', title: "Workflows : enchaînements d'appels de modèle, de sessions et de tâches" },

@@ -8,17 +8,22 @@ import type { Project } from '../projects/types.js';
 import type { Session } from '../sessions/types.js';
 import { userService } from '../users/service.js';
 import { sharedPageCommentService } from './commentService.js';
+import { artifactDataService } from './dataService.js';
+import { DATA_LIMITS, describeSource, type DataSource } from './dataSources.js';
 import { sharedPageService } from './service.js';
-import type { SharedPage, SharedPageComment } from './types.js';
+import { ARTIFACT_KINDS, type ArtifactKind, type SharedPage, type SharedPageComment } from './types.js';
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
 const failure = (t: string) => ({ content: [{ type: 'text' as const, text: t }], isError: true });
 
 export const pageUrl = (id: string) => `${config.appUrl}/shared/${id}`;
 
-/** Paragraphe du prompt système décrivant les pages partagées aux agents. */
+/** Paragraphe du prompt système décrivant les artefacts (pages et données) aux agents. */
 export function sharedPagesPrompt(): string {
-  return "Pour remettre un rapport, un tableau de bord ou toute page consultable, écris un fichier HTML autonome dans le dossier de travail (styles et scripts en ligne ; scripts externes seulement depuis un CDN) et publie-le avec l'outil `pages.publish` : il renvoie un lien `/shared/<id>`, privé pour la personne qui pilote la session jusqu'à ce qu'elle l'ouvre à d'autres (`anyone_with_link`, ou le bouton Partager). Pour mettre une page à jour, publie à nouveau avec `page_id`. `pages.list` liste les pages existantes. Donne le lien dans ta réponse. Les lecteurs d'une page y laissent des commentaires, généraux ou ancrés sur un élément de la page (sélecteur CSS et extrait du texte) : `pages.comments` les lit (les non traités d'abord), `pages.reply` répond dans le fil d'un commentaire, `pages.resolve` le marque traité une fois pris en compte (par exemple après avoir publié une nouvelle version).";
+  return [
+    "Artefacts : pour remettre un rapport, un tableau de bord ou toute page consultable, écris un fichier HTML autonome dans le dossier de travail (styles et scripts en ligne ; scripts externes seulement depuis un CDN) et publie-le avec l'outil `pages.publish` : il renvoie un lien `/shared/<id>`, privé pour la personne qui pilote la session jusqu'à ce qu'elle l'ouvre à d'autres (`anyone_with_link`, ou le bouton Partager). Pour mettre un artefact à jour, publie à nouveau avec `page_id`. `pages.list` liste les artefacts existants. Donne le lien dans ta réponse. Les lecteurs y laissent des commentaires, généraux ou ancrés sur un élément de la page (sélecteur CSS et extrait du texte) : `pages.comments` les lit (les non traités d'abord), `pages.reply` répond dans le fil d'un commentaire, `pages.resolve` le marque traité une fois pris en compte (par exemple après avoir publié une nouvelle version).",
+    "Artefact de données (`kind: \"data\"`) : une page dont les chiffres viennent de sources que Skipper rafraîchit tout seul, pour un tableau de bord qui reste à jour sans toi. Déclare les sources dans `pages.publish` (`sources`) : `{ name, type: \"sql\", item: <élément PostgreSQL du coffre>, query }` (lecture seule, 5000 lignes au plus : agrège avec GROUP BY et ORDER BY) ou `{ name, type: \"script\", interpreter: node|python|sh, code }` (lancé dans l'environnement du projet, sans identifiant du coffre ; sa sortie standard doit être du JSON). Mets au point la requête avec `vault.sql_query` avant de la déclarer. Dans la page, les données sont disponibles avant tout script sous `window.Skipper` : `Skipper.data.<name>` (`{ columns, rows }` pour une requête SQL — chaque ligne est un objet colonne → valeur, nombres déjà convertis, dates en ISO — ou le JSON du script), `Skipper.meta` (`refreshedAt`, `sources[]` avec `status` et `error`) et `Skipper.ready((data, meta) => …)`. N'écris jamais les chiffres en dur : la page les lit dans `Skipper.data` et se dessine (prévois le cas d'une source en erreur ou vide : `Skipper.meta.sources`). `refresh_minutes` règle le rafraîchissement automatique (60 = toutes les heures ; absent : à la demande, bouton Rafraîchir). À la publication les sources sont exécutées une première fois et leur état renvoyé ; `pages.refresh` les relance, `pages.data` montre les données d'une source (pour vérifier ce que reçoit la page). Un élément du coffre soumis à approbation n'est pas rafraîchi sans une personne : dis-le-lui, elle rafraîchit depuis l'artefact. Pour les graphiques, préfère un SVG dessiné à la main ou une bibliothèque légère depuis un CDN, des couleurs sobres, une grille discrète, des libellés lisibles, et un rendu correct sur téléphone.",
+  ].join('\n');
 }
 
 async function describeAccess(page: SharedPage): Promise<string> {
@@ -54,15 +59,32 @@ export function createSharedPagesMcpServer(ctx: SharedPagesMcpContext): McpSdkSe
     tools: [
       tool(
         'publish',
-        'Publie un fichier HTML du dossier de travail comme page partagée (nouvelle page, ou nouvelle version avec page_id). Renvoie le lien.',
+        "Publie un fichier HTML du dossier de travail comme artefact (nouvelle page, ou nouvelle version avec page_id). kind: data pour un artefact alimenté par des sources de données rafraîchies par Skipper (sources, refresh_minutes). Renvoie le lien et, pour les données, l'état de chaque source après un premier rafraîchissement.",
         {
           path: z.string().describe('Chemin du fichier .html, relatif au dossier de travail'),
-          title: z.string().describe('Titre de la page'),
+          title: z.string().describe("Titre de l'artefact"),
           description: z.string().optional(),
-          page_id: z.string().optional().describe("Identifiant d'une page existante pour en publier une nouvelle version"),
+          page_id: z.string().optional().describe("Identifiant d'un artefact existant pour en publier une nouvelle version"),
           anyone_with_link: z.boolean().optional().describe("Ouvrir la page à quiconque est connecté et a le lien (sinon privée jusqu'au partage)"),
+          kind: z.enum(['page', 'data']).optional().describe("Type d'artefact : page (défaut) ou data (page alimentée par des sources de données, lues dans window.Skipper.data)"),
+          sources: z
+            .array(
+              z.object({
+                name: z.string().describe('Clé de Skipper.data dans la page : lettre minuscule puis lettres, chiffres, _'),
+                type: z.enum(['sql', 'script']),
+                item: z.string().optional().describe("sql : nom de l'élément PostgreSQL du coffre"),
+                database: z.string().optional().describe("sql : base, pour un élément rattaché à un serveur entier"),
+                query: z.string().optional().describe('sql : la requête (une instruction, lecture seule, 5000 lignes au plus)'),
+                interpreter: z.enum(['node', 'python', 'sh']).optional().describe('script : interpréteur (défaut node)'),
+                code: z.string().optional().describe('script : le code ; sa sortie standard doit être du JSON'),
+                timeout_seconds: z.number().int().min(1).max(DATA_LIMITS.scriptTimeoutSeconds).optional().describe('script : délai (défaut 60 s)'),
+              }),
+            )
+            .optional()
+            .describe("kind data : les sources de données (remplacent celles de la version précédente)"),
+          refresh_minutes: z.number().int().min(0).max(DATA_LIMITS.maxRefreshMinutes).optional().describe("kind data : rafraîchissement automatique toutes les N minutes (5 à 10080) ; 0 ou absent : à la demande"),
         },
-        async ({ path: p, title, description, page_id, anyone_with_link }) =>
+        async ({ path: p, title, description, page_id, anyone_with_link, kind, sources, refresh_minutes }) =>
           run(async () => {
             if (!/\.html?$/i.test(p)) throw new AppError('Seul un fichier HTML (.html) peut être publié');
             const resolved = path.resolve(ctx.cwd, p);
@@ -70,15 +92,56 @@ export function createSharedPagesMcpServer(ctx: SharedPagesMcpContext): McpSdkSe
             const html = await readFile(resolved).catch(() => {
               throw new AppError(`Fichier introuvable : ${p}`);
             });
-            const page = await sharedPageService.publish({ ownerId: owner(), title, description, html, pageId: page_id ?? null, linkAccess: anyone_with_link ?? null, projectId: ctx.project.id, sessionId: ctx.session.id, sourcePath: p });
-            const access = await describeAccess(page);
-            return [
-              page.version > 1 ? `Version ${page.version} publiée : ${pageUrl(page.id)}` : `Page publiée : ${pageUrl(page.id)}`,
-              `${page.id} · ${page.title} · accès : ${access}`,
-              page.linkAccess ? '' : "La personne qui pilote la session peut l'ouvrir à d'autres avec le bouton Partager de la page.",
-            ]
-              .filter(Boolean)
-              .join('\n');
+            if ((sources || refresh_minutes) && kind !== 'data') throw new AppError('sources et refresh_minutes demandent kind: data');
+            const wanted = kind && ARTIFACT_KINDS.includes(kind as ArtifactKind) ? (kind as ArtifactKind) : null;
+            let page = await sharedPageService.publish({ ownerId: owner(), title, description, html, pageId: page_id ?? null, linkAccess: anyone_with_link ?? null, projectId: ctx.project.id, sessionId: ctx.session.id, sourcePath: p, kind: wanted });
+            const lines = [page.version > 1 ? `Version ${page.version} publiée : ${pageUrl(page.id)}` : `${page.kind === 'data' ? 'Artefact de données' : 'Page'} publié${page.kind === 'data' ? '' : 'e'} : ${pageUrl(page.id)}`, `${page.id} · ${page.title} · accès : ${await describeAccess(page)}`];
+            if (page.kind === 'data') {
+              if (sources) await artifactDataService.setSources(page, sources);
+              if (refresh_minutes !== undefined) page = await artifactDataService.setRefresh(page, refresh_minutes);
+              const states = await artifactDataService.refresh(page, 'auto');
+              lines.push(describeRefresh(page, states));
+              if (!states.length) lines.push('Aucune source déclarée : Skipper.data est vide dans la page. Passe `sources` à pages.publish.');
+            }
+            if (!page.linkAccess) lines.push("La personne qui pilote la session peut l'ouvrir à d'autres avec le bouton Partager de la page.");
+            return lines.join('\n');
+          }),
+      ),
+      tool(
+        'refresh',
+        "Rafraîchit maintenant toutes les sources d'un artefact de données et renvoie leur état.",
+        { page_id: z.string().describe("Identifiant de l'artefact") },
+        async ({ page_id }) =>
+          run(async () => {
+            const page = await sharedPageService.getOwned(owner(), page_id);
+            if (page.kind !== 'data') throw new AppError("Cet artefact n'a pas de sources de données");
+            const states = await artifactDataService.refresh(page, 'auto');
+            return describeRefresh(page, states);
+          }),
+      ),
+      tool(
+        'data',
+        "Données actuelles d'une source d'un artefact de données (ce que la page reçoit dans Skipper.data.<source>), tronquées.",
+        {
+          page_id: z.string().describe("Identifiant de l'artefact"),
+          source: z.string().optional().describe('Nom de la source ; absent : état de toutes les sources'),
+          limit: z.number().int().min(1).max(200).optional().describe('Lignes montrées (défaut 20)'),
+        },
+        async ({ page_id, source, limit }) =>
+          run(async () => {
+            const page = await sharedPageService.getOwned(owner(), page_id);
+            if (page.kind !== 'data') throw new AppError("Cet artefact n'a pas de sources de données");
+            const all = await artifactDataService.sourcesWithData(page.id);
+            if (!source) return describeRefresh(page, all);
+            const s = all.find((x) => x.name === source);
+            if (!s) throw new AppError(`Source « ${source} » introuvable (${all.map((x) => x.name).join(', ') || 'aucune source'})`);
+            const d = s.data as { columns?: string[]; rows?: unknown[] } | unknown[] | null;
+            const n = limit ?? 20;
+            let body: string;
+            if (d && typeof d === 'object' && !Array.isArray(d) && Array.isArray(d.rows)) body = `columns: ${JSON.stringify(d.columns)}\nrows (${d.rows.length}) :\n${d.rows.slice(0, n).map((r) => JSON.stringify(r)).join('\n')}${d.rows.length > n ? `\n… ${d.rows.length - n} de plus` : ''}`;
+            else if (Array.isArray(d)) body = `${d.length} élément(s) :\n${d.slice(0, n).map((r) => JSON.stringify(r)).join('\n')}${d.length > n ? `\n… ${d.length - n} de plus` : ''}`;
+            else body = JSON.stringify(d, null, 1).slice(0, 8000);
+            return `${describeSource(s)}\n${body}`;
           }),
       ),
       tool('list', 'Liste les pages partagées du propriétaire de la session.', { limit: z.number().int().min(1).max(100).optional() }, async ({ limit }) =>
@@ -128,6 +191,13 @@ export function createSharedPagesMcpServer(ctx: SharedPagesMcpContext): McpSdkSe
   async function actor() {
     return { user: await userService.get(owner()), sessionId: ctx.session.id };
   }
+}
+
+/** Compte rendu d'un rafraîchissement : une ligne par source, puis le réglage. */
+function describeRefresh(page: SharedPage, states: DataSource[]): string {
+  const lines = states.map((s) => `- ${describeSource(s)}`);
+  lines.push(page.refreshMinutes ? `Rafraîchissement automatique toutes les ${page.refreshMinutes} minute(s) (en veille après ${DATA_LIMITS.idleDays} jours sans lecture).` : 'Rafraîchissement à la demande (bouton Rafraîchir de l’artefact, ou pages.refresh).');
+  return lines.join('\n');
 }
 
 async function authorName(c: SharedPageComment): Promise<string> {

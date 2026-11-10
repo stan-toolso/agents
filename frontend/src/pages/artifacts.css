@@ -1,0 +1,59 @@
+/* Galerie des artefacts (/shared) : tuiles de création, filtres, cartes avec aperçu. Couleurs : variables --cc-* uniquement. */
+.af-page { max-width: 1240px; }
+.af-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+.af-head h1 { margin: 0 auto 0 0; font-size: 26px; font-weight: 650; letter-spacing: -0.01em; }
+.af-filters { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--cc-bg-hover); }
+.af-filters button { border: 0; background: none; color: var(--cc-dim); font: inherit; font-size: 13px; padding: 5px 11px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
+.af-filters button:hover { color: var(--cc-fg); }
+.af-filters button.on { background: var(--cc-bg-elevated); color: var(--cc-fg); box-shadow: 0 1px 2px var(--cc-shadow); }
+.af-search { position: relative; }
+.af-search .bi { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--cc-dimmer); font-size: 13px; }
+.af-search input { height: 32px; width: 200px; padding: 0 10px 0 30px; border-radius: 8px; border: 1px solid var(--cc-border); background: var(--cc-bg-elevated); color: var(--cc-fg); font-size: 13px; }
+.af-search input:focus { outline: 0; border-color: var(--cc-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--cc-accent) 20%, transparent); }
+
+/* Créer */
+.af-section { font-size: 13px; color: var(--cc-dim); margin: 0 0 10px; }
+.af-create { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 28px; }
+.af-tile { width: 200px; align-self: flex-start; display: block; border: 0; background: none; padding: 0; text-align: left; font: inherit; color: var(--cc-fg); cursor: pointer; }
+.af-tile-art { position: relative; height: 112px; border-radius: 14px; overflow: hidden; display: flex; align-items: center; justify-content: center; transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.af-tile:hover .af-tile-art { transform: translateY(-2px); box-shadow: 0 8px 20px -10px var(--cc-shadow); }
+.af-tile-art .bi { font-size: 40px; position: relative; }
+.af-tile-art::before { content: ''; position: absolute; inset: -20% -10%; opacity: 0.22; background: repeating-linear-gradient(135deg, transparent 0 14px, currentColor 14px 15px); mask-image: radial-gradient(ellipse at 30% 40%, #000 0, transparent 70%); }
+.af-tile-label { margin-top: 8px; font-weight: 600; font-size: 14px; }
+.af-tile-hint { font-size: 12px; color: var(--cc-dim); line-height: 1.35; }
+.af-tile.beta .af-tile-art::after { content: 'Nouveau'; position: absolute; top: 8px; left: 8px; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--cc-bg-elevated); color: var(--cc-fg); }
+
+/* Teintes par type (page : bleu ; données : rouge), identiques en clair et en sombre via color-mix. */
+.af-kind-page { color: var(--cc-blue); background: color-mix(in srgb, var(--cc-blue) 16%, var(--cc-bg-elevated)); }
+.af-kind-data { color: var(--cc-red); background: color-mix(in srgb, var(--cc-red) 14%, var(--cc-bg-elevated)); }
+
+/* Cartes */
+.af-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 18px; }
+.af-card { display: flex; flex-direction: column; border: 1px solid var(--cc-border); border-radius: 16px; overflow: hidden; background: var(--cc-bg-elevated); color: inherit; text-decoration: none; transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease; }
+.af-card:hover { color: inherit; text-decoration: none; transform: translateY(-2px); border-color: color-mix(in srgb, var(--cc-fg) 18%, var(--cc-border)); box-shadow: 0 10px 24px -14px var(--cc-shadow); }
+.af-thumb { position: relative; height: 170px; overflow: hidden; padding: 22px 26px 0; }
+.af-thumb-inner { position: relative; height: 100%; border-radius: 10px 10px 0 0; overflow: hidden; background: #fff; box-shadow: 0 6px 18px -8px var(--cc-shadow); }
+.af-thumb iframe { width: 1120px; height: 720px; border: 0; transform: scale(0.25); transform-origin: 0 0; pointer-events: none; background: #fff; display: block; }
+.af-thumb-fallback { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--cc-dimmer); font-size: 28px; }
+.af-card-body { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
+.af-card-icon { flex: 0 0 auto; width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+.af-card-text { min-width: 0; flex: 1; }
+.af-card-title { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.af-card-sub { font-size: 12px; color: var(--cc-dim); display: flex; align-items: center; gap: 6px; min-width: 0; }
+.af-card-sub > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.af-card-sub .sep { color: var(--cc-dimmer); }
+.af-card-badge { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--cc-bg-hover); color: var(--cc-dim); }
+.af-card-badge.live { color: var(--cc-green); background: color-mix(in srgb, var(--cc-green) 14%, transparent); }
+.af-card-badge.warn { color: var(--cc-red); background: color-mix(in srgb, var(--cc-red) 14%, transparent); }
+.af-card-badge.comments { color: var(--cc-accent); background: color-mix(in srgb, var(--cc-accent) 14%, transparent); }
+.af-empty { padding: 48px 12px; text-align: center; color: var(--cc-dim); font-size: 14px; border: 1px dashed var(--cc-border); border-radius: 16px; }
+.af-empty .bi { font-size: 28px; display: block; margin-bottom: 8px; color: var(--cc-dimmer); }
+
+@media (max-width: 767.98px) {
+  .af-head h1 { font-size: 22px; width: 100%; }
+  .af-search input { width: 100%; }
+  .af-search { flex: 1 1 100%; }
+  .af-tile { width: calc(50% - 7px); }
+  .af-grid { grid-template-columns: 1fr; }
+  .af-thumb { height: 140px; padding: 16px 20px 0; }
+}

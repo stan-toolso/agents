@@ -2,7 +2,9 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { authSession, readCookie, SESSION_COOKIE } from '../auth/session.js';
 import { config } from '../config.js';
 import { AppError } from '../errors.js';
-import { INJECT_MAX_BYTES, injectCommentScript } from './inject.js';
+import { artifactDataService } from './dataService.js';
+import { INJECT_MAX_BYTES, injectCommentScript, injectDataScript } from './inject.js';
+import { sharedPageRepository } from './repository.js';
 import { downloadName, sharedPageService } from './service.js';
 
 const ROUTE = /^\/api\/shared\/([0-9a-f-]{36})$/;
@@ -13,6 +15,9 @@ const ROUTE = /^\/api\/shared\/([0-9a-f-]{36})$/;
  * ni son API avec le cookie). Les droits sont revérifiés à chaque chargement. Renvoie false hors route.
  * Hors téléchargement (`download=1`) et sauf `raw=1`, le script des commentaires ancrés est injecté dans la page
  * (voir `inject.ts`) : il dialogue avec l'application par postMessage pour pointer un élément et placer les repères.
+ * Artefact de données : les données de ses sources sont injectées en tête de la page (`window.Skipper`), téléchargement
+ * compris (la page reste lisible hors de Skipper, avec les données du moment) ; l'ouverture est notée (`viewed_at`),
+ * ce qui garde le rafraîchissement automatique en marche.
  */
 export async function handleSharedPageRoute(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const url = new URL(req.url ?? '/', config.apiUrl);
@@ -33,7 +38,19 @@ export async function handleSharedPageRoute(req: IncomingMessage, res: ServerRes
     const content = await sharedPageService.content(page, v ? Number(v) : null);
     const download = url.searchParams.get('download') === '1';
     const raw = download || url.searchParams.get('raw') === '1' || content.html.length > INJECT_MAX_BYTES;
-    const html = raw ? content.html : Buffer.from(injectCommentScript(content.html.toString('utf8')), 'utf8');
+    let html = content.html;
+    if (page.kind === 'data' && content.html.length <= INJECT_MAX_BYTES && url.searchParams.get('raw') !== '1') {
+      const sources = await artifactDataService.sourcesWithData(page.id);
+      const data = Object.fromEntries(sources.map((s) => [s.name, s.data]));
+      const meta = {
+        refreshedAt: page.dataRefreshedAt?.toISOString() ?? null,
+        sources: sources.map((s) => ({ name: s.name, kind: s.kind, status: s.status, error: s.error, rowCount: s.rowCount, refreshedAt: s.refreshedAt?.toISOString() ?? null })),
+      };
+      html = Buffer.from(injectDataScript(html.toString('utf8'), { data, meta }), 'utf8');
+      // Aperçu réduit de la galerie (`thumb=1`) : pas une lecture, le rafraîchissement automatique n'en tient pas compte.
+      if (!download && url.searchParams.get('thumb') !== '1') void sharedPageRepository.touchViewed(page.id).catch(() => undefined);
+    }
+    if (!raw) html = Buffer.from(injectCommentScript(html.toString('utf8')), 'utf8');
     res.writeHead(200, {
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Length': html.length,
