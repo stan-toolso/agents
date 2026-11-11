@@ -1,3 +1,6 @@
+import type { TrackedPullRequest } from '../pullRequests/types.js';
+import type { Task } from '../tasks/types.js';
+
 /** Livraison d'un projet : fusion d'une branche sur la base (« merge ») ou mise en production (« deploy »). */
 export type DeliveryKind = 'merge' | 'deploy';
 export type DeliveryStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'conflict' | 'cancelled';
@@ -33,6 +36,15 @@ export interface Delivery {
   createdAt: Date;
   startedAt: Date | null;
   finishedAt: Date | null;
+}
+
+/** Un déploiement réussi et ce qu'il emporte (écouteurs `deliveryService.onDeployed`). */
+export interface DeployedEvent {
+  delivery: Delivery;
+  /** Pull requests fusionnées que ce déploiement met en production pour la première fois. */
+  pullRequests: TrackedPullRequest[];
+  /** Tâches de ces pull requests. */
+  tasks: Task[];
 }
 
 /** Commande de déploiement d'un projet, lancée sur un serveur SSH du coffre. */

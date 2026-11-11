@@ -28,12 +28,17 @@ export interface AgentTriggers {
   threadFollowed: boolean;
   /** La pull request d'une tâche est fusionnée : l'agent est prévenu (étiquette « à livrer », rapporteur informé…). */
   prMerged: boolean;
+  /**
+   * Un déploiement réussi du projet (lancé par Skipper ou déclaré par une session) : l'agent est prévenu avec les pull
+   * requests et tâches qu'il met en production, et les met à jour selon les conventions du projet (étiquette « livrée »…).
+   */
+  deployed: boolean;
   /** Une tâche passée par une personne à l'étiquette d'état `taskReadyTag` : l'agent démarre dessus. */
   taskReady: boolean;
   taskReadyTag: string | null;
 }
 
-export const DEFAULT_TRIGGERS: AgentTriggers = { taskCreated: false, taskCreatedTag: null, threadFollowed: true, prMerged: false, taskReady: false, taskReadyTag: null };
+export const DEFAULT_TRIGGERS: AgentTriggers = { taskCreated: false, taskCreatedTag: null, threadFollowed: true, prMerged: false, deployed: false, taskReady: false, taskReadyTag: null };
 
 /** Action nommée : une instruction jouée par l'agent, à la demande ou à heures fixes (planification dédiée). */
 export interface AgentAction {
@@ -184,6 +189,7 @@ export const normalizeTriggers = (t: Partial<AgentTriggers> | null | undefined):
   taskCreatedTag: t?.taskCreatedTag?.trim() || null,
   threadFollowed: t?.threadFollowed ?? DEFAULT_TRIGGERS.threadFollowed,
   prMerged: Boolean(t?.prMerged),
+  deployed: Boolean(t?.deployed),
   taskReady: Boolean(t?.taskReady),
   taskReadyTag: t?.taskReadyTag?.trim() || null,
 });

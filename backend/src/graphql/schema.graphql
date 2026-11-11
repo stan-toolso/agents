@@ -4021,6 +4021,8 @@ type AgentTriggers {
   threadFollowed: Boolean!
   "La pull request d'une tâche est fusionnée : l'agent est prévenu."
   prMerged: Boolean!
+  "Un déploiement réussi du projet (lancé par Skipper ou déclaré par une session) : l'agent est prévenu avec les tâches qu'il met en production."
+  deployed: Boolean!
   "Une tâche passée par une personne à l'étiquette d'état taskReadyTag : l'agent démarre dessus."
   taskReady: Boolean!
   taskReadyTag: String
@@ -4123,6 +4125,7 @@ input AgentTriggersInput {
   taskCreatedTag: String
   threadFollowed: Boolean
   prMerged: Boolean
+  deployed: Boolean
   taskReady: Boolean
   taskReadyTag: String
 }

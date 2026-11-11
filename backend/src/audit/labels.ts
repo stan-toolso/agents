@@ -105,6 +105,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'delivery.merge': 'a lancé la livraison de',
   'delivery.deploy': 'a demandé le déploiement',
   'delivery.cancel': 'a annulé la livraison',
+  'delivery.deploy_recorded': 'a déclaré le déploiement',
   'delivery.config': 'a configuré le déploiement du projet',
   'worksession.create': 'a créé le dossier de travail',
   'worksession.rename': 'a renommé le dossier de travail',

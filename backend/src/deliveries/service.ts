@@ -8,7 +8,8 @@ import { gitService, headCommitOf, operationOf } from '../git/service.js';
 import { instanceRegistry } from '../instances/registry.js';
 import { log } from '../log.js';
 import { projectService } from '../projects/service.js';
-import { trackedPullRequestService } from '../pullRequests/service.js';
+import { foreignRepoOf, projectRepoName, trackedPullRequestService } from '../pullRequests/service.js';
+import type { TrackedPullRequest } from '../pullRequests/types.js';
 import { reviewOf } from '../reviews/types.js';
 import { traceSessionEvent } from '../sessions/events.js';
 import { sessionRepository } from '../sessions/repository.js';
@@ -19,7 +20,7 @@ import { vaultService } from '../vault/service.js';
 import { worksessionRepository } from '../worksessions/repository.js';
 import { worksessionPath, worksessionService } from '../worksessions/service.js';
 import { deliveryRepository, isUniqueViolation } from './repository.js';
-import type { Delivery, DeliveryStep, DeployConfig, DeployConfigInput } from './types.js';
+import type { DeployedEvent, Delivery, DeliveryStep, DeployConfig, DeployConfigInput } from './types.js';
 
 /**
  * Livraisons d'un projet (tâche 0f3c4c08) :
@@ -43,6 +44,30 @@ export const NO_CHECKS_GRACE_MS = 2 * 60_000;
 const MAX_ROUNDS = 3;
 /** Taille gardée de la sortie d'une commande de déploiement. */
 const OUTPUT_KEEP = 16 * 1024;
+
+/**
+ * Premier déploiement connu d'un projet : seules les PR fusionnées depuis ce nombre de jours avant lui sont annoncées
+ * (sans quoi le premier déploiement enregistré annoncerait tout l'historique du dépôt).
+ */
+export const DEPLOY_LOOKBACK_DAYS = 7;
+
+/**
+ * Pull requests qu'un déploiement de `branch` peut emporter (avant la vérification par git) : fusionnées sur cette
+ * branche, dans le dépôt du projet, pas encore annoncées par un déploiement, et pas plus anciennes que `since`.
+ */
+export function deployCandidates(prs: TrackedPullRequest[], opts: { branch: string; projectRepo: string; alreadyDeployed: Set<string>; since: Date }): TrackedPullRequest[] {
+  return prs.filter(
+    (pr) =>
+      pr.status === 'merged' &&
+      !opts.alreadyDeployed.has(pr.id) &&
+      pr.baseBranch === opts.branch &&
+      !foreignRepoOf(pr, opts.projectRepo) &&
+      (pr.mergedAt ?? pr.updatedAt) >= opts.since,
+  );
+}
+
+type DeployedListener = (event: DeployedEvent) => Promise<void> | void;
+const deployedListeners = new Map<string, DeployedListener>();
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let pollMs = POLL_MS;
@@ -121,6 +146,9 @@ async function worksessionSession(projectId: string, worksessionId: string): Pro
 }
 
 export const deliveryService = {
+  /** Écoute les déploiements réussis (lancés par Skipper ou déclarés), avec les PR et tâches qu'ils emportent. */
+  onDeployed: (name: string, fn: DeployedListener) => deployedListeners.set(name, fn),
+
   /** Livraisons qui tournent dans cette instance (drainage : on les laisse finir). */
   localCount: () => jobs.size,
 
@@ -422,9 +450,88 @@ export const deliveryService = {
       }
       await step(d, `déployé (${sha!.slice(0, 7)}, ${Math.round(result.durationMs / 1000)} s)`, 'success');
       await deliveryRepository.finish(d.id, 'succeeded', { output });
+      const done = await deliveryRepository.get(d.id);
+      if (done?.status === 'succeeded') await this.afterDeploy(done);
     } catch (err) {
       await fail((err as Error).message);
     }
+  },
+
+  /**
+   * Déclare un déploiement fait hors de Skipper (script lancé par une session, CI, à la main) : il est enregistré comme
+   * un déploiement réussi du projet, puis traité comme ceux que Skipper lance (PR emportées, agents prévenus).
+   * `rev` : SHA (même abrégé) ou branche du dépôt, résolu après un fetch. Renvoie la livraison et l'événement.
+   */
+  async recordDeploy(input: { projectId: string; rev: string; branch?: string | null; note?: string | null; userId: string | null; sessionId?: string | null; gitUserId?: string | null }): Promise<{ delivery: Delivery; event: DeployedEvent }> {
+    const project = await projectService.get(input.projectId);
+    if (!project.gitUrl) throw new AppError("Ce projet n'est pas relié à un dépôt git : impossible de savoir ce qui a été déployé");
+    const rev = input.rev.trim();
+    if (!rev) throw new AppError('Quel commit a été déployé ? Donnez son SHA');
+    const ref: WorkspaceRef = { projectId: input.projectId };
+    await gitService.fetch(ref, input.gitUserId ?? input.userId).catch((err) => log.warn(`[deliveries] fetch avant déclaration de déploiement : ${(err as Error).message}`));
+    const sha = (await gitService.resolveCommit(ref, rev)) ?? (await gitService.resolveCommit(ref, `origin/${rev}`));
+    if (!sha) throw new AppError(`Commit inconnu du dépôt du projet : ${rev} (poussé sur origin ?)`);
+    const branch = input.branch?.trim() || (await deliveryRepository.getConfig(input.projectId))?.branch || project.gitBranch || 'main';
+    const note = input.note?.trim();
+    const d = await deliveryRepository.create({
+      projectId: input.projectId,
+      kind: 'deploy',
+      status: 'succeeded',
+      requestedById: input.userId,
+      sessionId: input.sessionId ?? null,
+      branch,
+      sha,
+      steps: [{ at: new Date().toISOString(), message: `déploiement déclaré (${sha.slice(0, 7)})${note ? ` : ${note}` : ''}`, level: 'success' }],
+    });
+    await auditService
+      .record({ projectId: input.projectId, actor: input.sessionId ? { sessionId: input.sessionId, userId: input.userId } : { userId: input.userId }, action: 'delivery.deploy_recorded', targetType: 'delivery', targetId: d.id, targetLabel: sha.slice(0, 7), details: { branch, note: note ?? null } })
+      .catch(() => undefined);
+    const event = await this.afterDeploy(d);
+    return { delivery: d, event };
+  },
+
+  /**
+   * Après un déploiement réussi : pull requests fusionnées emportées (commit de fusion contenu dans le commit déployé,
+   * vérifié par git ; à défaut, fusionnées avant le déploiement), liées au déploiement pour n'être annoncées qu'une
+   * fois, puis écouteurs prévenus (agents qui suivent les déploiements). Ne lève jamais.
+   */
+  async afterDeploy(d: Delivery): Promise<DeployedEvent> {
+    const event: DeployedEvent = { delivery: d, pullRequests: [], tasks: [] };
+    if (!d.sha) return event;
+    try {
+      const project = await projectService.get(d.projectId);
+      const branch = d.branch || project.gitBranch || 'main';
+      const first = (await deliveryRepository.firstDeployAt(d.projectId)) ?? d.createdAt;
+      const since = new Date(first.getTime() - DEPLOY_LOOKBACK_DAYS * 86_400_000);
+      const merged = await trackedPullRequestService.list({ projectId: d.projectId, status: ['merged'], limit: 500 });
+      const candidates = deployCandidates(merged, { branch, projectRepo: projectRepoName(project), alreadyDeployed: await deliveryRepository.deployedPullRequestIds(d.projectId), since });
+      const ref: WorkspaceRef = { projectId: d.projectId };
+      const included: TrackedPullRequest[] = [];
+      for (const pr of candidates) {
+        const contained = pr.mergeSha ? await gitService.isAncestor(ref, pr.mergeSha, d.sha).catch(() => null) : null;
+        // Commit de fusion inconnu (PR fusionnée à la main, dépôt pas à jour) : la date tranche.
+        if (contained ?? (pr.mergedAt ?? pr.updatedAt) <= (d.finishedAt ?? new Date())) included.push(pr);
+      }
+      await deliveryRepository.linkPullRequests(d.id, included.map((pr) => pr.id));
+      event.pullRequests = included;
+      const taskIds = [...new Set(included.map((pr) => pr.taskId).filter((id): id is string => Boolean(id)))];
+      for (const id of taskIds) {
+        const t = await taskService.get(id).catch(() => null);
+        if (t) event.tasks.push(t);
+      }
+      if (included.length) await deliveryRepository.appendStep(d.id, { at: new Date().toISOString(), message: `emporte ${included.length} pull request${included.length > 1 ? 's' : ''} : ${included.map((pr) => (pr.number != null ? `#${pr.number}` : pr.title)).join(', ')}`, level: 'info' });
+    } catch (err) {
+      log.error(`[deliveries] pull requests du déploiement ${d.id}`, err);
+      return event;
+    }
+    for (const [name, fn] of deployedListeners) {
+      try {
+        await fn(event);
+      } catch (err) {
+        log.error(`[deliveries] écouteur « ${name} » du déploiement ${d.id}`, err);
+      }
+    }
+    return event;
   },
 
   /** Annule une livraison en attente, ou en cours tant qu'elle attend la CI (pas une commande de déploiement lancée). */

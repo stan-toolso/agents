@@ -73,6 +73,8 @@ export interface NewDelivery {
   branch?: string | null;
   instanceId?: string | null;
   steps?: DeliveryStep[];
+  /** Commit livré ou déployé, connu dès la création (déploiement déclaré). */
+  sha?: string | null;
 }
 
 export type DeliveryPatch = Partial<Pick<Delivery, 'status' | 'sessionId' | 'taskId' | 'branch' | 'prNumber' | 'prUrl' | 'sha' | 'output' | 'error' | 'startedAt' | 'finishedAt'>>;
@@ -94,10 +96,12 @@ const COLUMNS: Record<keyof DeliveryPatch, string> = {
 export const deliveryRepository = {
   async create(d: NewDelivery): Promise<Delivery> {
     const running = d.status === 'running';
+    // Une livraison créée déjà terminée (déploiement déclaré) commence et finit maintenant.
+    const finished = !running && d.status !== 'queued';
     const { rows } = await pool.query<Row>(
-      `INSERT INTO deliveries (project_id, kind, status, requested_by_id, session_id, worksession_id, task_id, branch, instance_id, steps, started_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, ${running ? 'now()' : 'NULL'}) RETURNING *`,
-      [d.projectId, d.kind, d.status, d.requestedById, d.sessionId ?? null, d.worksessionId ?? null, d.taskId ?? null, d.branch ?? null, d.instanceId ?? null, toJson(d.steps ?? [])],
+      `INSERT INTO deliveries (project_id, kind, status, requested_by_id, session_id, worksession_id, task_id, branch, instance_id, steps, sha, started_at, finished_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, ${running || finished ? 'now()' : 'NULL'}, ${finished ? 'now()' : 'NULL'}) RETURNING *`,
+      [d.projectId, d.kind, d.status, d.requestedById, d.sessionId ?? null, d.worksessionId ?? null, d.taskId ?? null, d.branch ?? null, d.instanceId ?? null, toJson(d.steps ?? []), d.sha ?? null],
     );
     return toDelivery(rows[0]);
   },
@@ -198,6 +202,28 @@ export const deliveryRepository = {
   async projectsWithQueuedDeploy(): Promise<string[]> {
     const { rows } = await pool.query<{ project_id: string }>(`SELECT DISTINCT project_id FROM deliveries WHERE kind = 'deploy' AND status = 'queued'`);
     return rows.map((r) => r.project_id);
+  },
+
+  /** Pull requests du projet déjà emportées par un déploiement réussi (annoncées une seule fois). */
+  async deployedPullRequestIds(projectId: string): Promise<Set<string>> {
+    const { rows } = await pool.query<{ pull_request_id: string }>(
+      `SELECT DISTINCT dp.pull_request_id FROM delivery_pull_requests dp JOIN deliveries d ON d.id = dp.delivery_id
+        WHERE d.project_id = $1 AND d.kind = 'deploy' AND d.status = 'succeeded'`,
+      [projectId],
+    );
+    return new Set(rows.map((r) => r.pull_request_id));
+  },
+
+  /** Date du premier déploiement réussi du projet (null : aucun encore). */
+  async firstDeployAt(projectId: string): Promise<Date | null> {
+    const { rows } = await pool.query<{ at: Date | null }>(`SELECT min(created_at) AS at FROM deliveries WHERE project_id = $1 AND kind = 'deploy' AND status = 'succeeded'`, [projectId]);
+    return rows[0]?.at ?? null;
+  },
+
+  /** Pull requests emportées par un déploiement. */
+  async linkPullRequests(deliveryId: string, pullRequestIds: string[]): Promise<void> {
+    if (!pullRequestIds.length) return;
+    await pool.query(`INSERT INTO delivery_pull_requests (delivery_id, pull_request_id) SELECT $1, unnest($2::uuid[]) ON CONFLICT DO NOTHING`, [deliveryId, pullRequestIds]);
   },
 
   async getConfig(projectId: string): Promise<DeployConfig | null> {

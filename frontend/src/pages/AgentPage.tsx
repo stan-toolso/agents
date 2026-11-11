@@ -89,7 +89,7 @@ function ProfileForm({ agent }: { agent: Agent }) {
             inheritContext,
             defaults,
             allowedModels,
-            triggers: { taskCreated: triggers.taskCreated, taskCreatedTag: triggers.taskCreatedTag, threadFollowed: triggers.threadFollowed, prMerged: triggers.prMerged, taskReady: triggers.taskReady, taskReadyTag: triggers.taskReadyTag },
+            triggers: { taskCreated: triggers.taskCreated, taskCreatedTag: triggers.taskCreatedTag, threadFollowed: triggers.threadFollowed, prMerged: triggers.prMerged, deployed: triggers.deployed, taskReady: triggers.taskReady, taskReadyTag: triggers.taskReadyTag },
             actions: actions.map((a) => ({ key: a.key || null, label: a.label, instruction: a.instruction, cron: a.cron || null, timezone: a.timezone || null })),
           },
         },
@@ -263,6 +263,7 @@ function ProfileForm({ agent }: { agent: Agent }) {
               )}
               <Form.Check type="switch" id="trg-thread" className="mt-2" checked={triggers.threadFollowed} onChange={(e) => setTrigger('threadFollowed', e.target.checked)} label="Suit les fils où il est intervenu : une réponse humaine lui revient comme instruction" />
               <Form.Check type="switch" id="trg-merged" className="mt-2" checked={triggers.prMerged} onChange={(e) => setTrigger('prMerged', e.target.checked)} label="Est prévenu quand la pull request d'une tâche est fusionnée" />
+              <Form.Check type="switch" id="trg-deployed" className="mt-2" checked={triggers.deployed} onChange={(e) => setTrigger('deployed', e.target.checked)} label="Est prévenu quand un déploiement met des tâches en production" />
               <Form.Check type="switch" id="trg-ready" className="mt-2" checked={triggers.taskReady} onChange={(e) => setTrigger('taskReady', e.target.checked)} label="Démarre sur une tâche qu'une personne passe à l'étiquette d'état…" />
               {triggers.taskReady && <Form.Control size="sm" className="mt-1 ms-4" style={{ maxWidth: 320 }} value={triggers.taskReadyTag ?? ''} onChange={(e) => setTrigger('taskReadyTag', e.target.value || null)} placeholder="prête" />}
             </Card.Body>
