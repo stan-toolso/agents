@@ -6,6 +6,7 @@ import { createSdkMcpServer, tool, type McpSdkServerConfigWithInstance } from '@
 import { z } from 'zod';
 import { inScope, targetProject, withProjectParam, type ProjectScope } from '../personal/scope.js';
 import type { Project } from '../projects/types.js';
+import { deliveryService } from '../deliveries/service.js';
 import { describeCi, pullRequestService, type MergeMethod } from '../git/pullRequests.js';
 import type { MergeApproval } from '../pullRequests/mergeApproval.js';
 import { localCheck, localCheckRefusal } from '../pullRequests/localCheck.js';
@@ -29,8 +30,9 @@ const failure = (t: string) => ({ content: [{ type: 'text' as const, text: t }],
  * personne qui pilote la session (au moins membre) l'accepte implicitement (`implicitMergeApprover`).
  * `request_approval` y est aussi : il ne fait que poser une demande d'accord à un administrateur (ou constater l'accord
  * implicite de la personne qui a demandé le travail), sans rien exécuter. `ci_status` ne fait que lire l'état de la CI.
+ * `deploy_record` ne fait qu'enregistrer un déploiement déjà fait (et prévenir les agents qui suivent les déploiements).
  */
-export const TASKS_FREE_TOOLS = ['list', 'get', 'create', 'update', 'claim', 'release', 'comment', 'react', 'people', 'request_approval', 'pr_list', 'pr_register', 'pr_update', 'pr_merge', 'ci_status'].map((t) => `mcp__tasks__${t}`);
+export const TASKS_FREE_TOOLS = ['list', 'get', 'create', 'update', 'claim', 'release', 'comment', 'react', 'people', 'request_approval', 'pr_list', 'pr_register', 'pr_update', 'pr_merge', 'ci_status', 'deploy_record'].map((t) => `mcp__tasks__${t}`);
 
 /** Ce que le provider de la session fournit au serveur `tasks`. */
 export interface TasksMcpOptions {
@@ -355,6 +357,28 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
             const ci = await pullRequestService.ciStatus(project.id, account?.userId ?? s.ownerId, target);
             const lines = ci.checks.map((c) => `- ${c.name} : ${c.state}${c.url ? ` (${c.url})` : ''}`);
             return [`${target} @ ${ci.sha.slice(0, 7)} : ${describeCi(ci)}`, ...lines].join('\n');
+          }),
+      ),
+
+      tool(
+        'deploy_record',
+        "Déclare un déploiement en production que tu viens de faire hors du bouton « Livrer » de Skipper (script de déploiement lancé par SSH, CI, etc.), une fois qu'il a réussi : Skipper l'inscrit dans les livraisons du projet, retrouve les pull requests fusionnées que ce commit met en production pour la première fois et prévient les agents qui suivent les déploiements (le Product Manager met alors à jour les tâches concernées). N'enregistre rien d'autre : n'appelle pas cet outil pour un déploiement raté ou seulement prévu.",
+        {
+          sha: z.string().describe('Commit déployé (SHA complet ou abrégé) ; une branche est acceptée (son dernier commit sur origin), mais le SHA réellement déployé est préférable'),
+          branch: z.string().optional().describe('Branche déployée ; défaut : celle du déploiement configuré, sinon la branche principale du projet'),
+          note: z.string().optional().describe('Précision courte (« front seulement », serveur visé…)'),
+        },
+        async ({ sha, branch, note }) =>
+          run(async () => {
+            const s = await sessionContext();
+            const accounts = await agentService.accountsForSession(s);
+            const account = accounts ? await gitAccountFor(accounts, project.gitUrl) : null;
+            const { delivery, event } = await deliveryService.recordDeploy({ projectId: project.id, rev: sha, branch, note, userId: s.requestedById ?? s.ownerId ?? null, sessionId, gitUserId: account?.userId ?? s.ownerId });
+            const prs = event.pullRequests.map((pr) => `- ${pr.number != null ? `#${pr.number}` : 'PR'} ${pr.title}${pr.taskId ? ` (tâche ${pr.taskId})` : ''}`);
+            return [
+              `Déploiement de ${delivery.sha!.slice(0, 7)} (${delivery.branch}) enregistré (livraison ${delivery.id}).`,
+              prs.length ? `Pull requests mises en production pour la première fois :\n${prs.join('\n')}` : 'Aucune pull request suivie nouvellement mise en production.',
+            ].join('\n');
           }),
       ),
 

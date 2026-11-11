@@ -16,6 +16,7 @@ export interface AgentTriggers {
   taskCreatedTag: string | null;
   threadFollowed: boolean;
   prMerged: boolean;
+  deployed: boolean;
   taskReady: boolean;
   taskReadyTag: string | null;
 }
@@ -165,6 +166,7 @@ export const AGENT_FIELDS = gql`
       taskCreatedTag
       threadFollowed
       prMerged
+      deployed
       taskReady
       taskReadyTag
     }
@@ -305,6 +307,7 @@ export const AGENT_TEMPLATES = gql`
         taskCreatedTag
         threadFollowed
         prMerged
+        deployed
         taskReady
         taskReadyTag
       }

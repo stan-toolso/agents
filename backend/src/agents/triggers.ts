@@ -2,6 +2,8 @@ import type { Actor } from '../context/types.js';
 import { describeMessageAttachments, messageAttachmentsAsInstruction } from '../conversations/attachments.js';
 import { channelRef, conversationService, threadTitle } from '../conversations/service.js';
 import type { ConversationChange } from '../conversations/types.js';
+import { deliveryService } from '../deliveries/service.js';
+import type { DeployedEvent } from '../deliveries/types.js';
 import { log } from '../log.js';
 import { trackedPullRequestService } from '../pullRequests/service.js';
 import type { TrackedPullRequest } from '../pullRequests/types.js';
@@ -203,10 +205,39 @@ export async function onPullRequestMerged(pr: TrackedPullRequest): Promise<void>
   }
 }
 
+/**
+ * Un déploiement réussi du projet (lancé par Skipper ou déclaré par une session) : les agents qui suivent les
+ * déploiements sont prévenus, une seule fois par déploiement, avec les pull requests et tâches qu'il met en production.
+ * Ce qu'ils en font (étiquette « livrée », rapporteur prévenu…) relève des consignes du projet, pas du code. L'agent
+ * dont la session a déclaré le déploiement n'est pas rappelé (il sait ce qu'il vient de faire).
+ */
+export async function onDeployed(event: DeployedEvent): Promise<void> {
+  const d = event.delivery;
+  if (!event.tasks.length) return;
+  const agents = (await agentRepository.listActive([d.projectId])).filter((a) => a.triggers.deployed);
+  if (!agents.length) return;
+  const declaredBy = d.sessionId ? ((await sessionRepository.findByIds([d.sessionId]))[0]?.ownerId ?? null) : null;
+  const prLines = event.pullRequests.map((pr) => {
+    const task = pr.taskId ? event.tasks.find((t) => t.id === pr.taskId) : undefined;
+    return `- ${pr.number != null ? `#${pr.number}` : 'PR'} « ${pr.title} »${task ? ` → ${taskLink(task)}, ${task.status}${task.statusTag ? ` · « ${task.statusTag} »` : ''}` : ' (sans tâche)'}`;
+  });
+  const text = [
+    `[Déploiement] Le commit ${d.sha?.slice(0, 7) ?? '?'}${d.branch ? ` (${d.branch})` : ''} vient d'être mis en production. Il emporte pour la première fois ${event.pullRequests.length > 1 ? `ces ${event.pullRequests.length} pull requests fusionnées` : 'cette pull request fusionnée'} :`,
+    ...prLines,
+    '',
+    "Mets à jour ces tâches selon tes instructions (étiquette d'état, rapporteur prévenu dans le fil…), sans toucher à celles qui sont déjà à jour.",
+  ].join('\n');
+  for (const agent of agents) {
+    if (declaredBy === agent.id) continue;
+    await summonQuietly(agent, { requestedById: d.requestedById, text }, 'déploiement');
+  }
+}
+
 /** Branche les déclencheurs (au démarrage du serveur). */
 export function registerAgentTriggers(): void {
   taskService.onTaskCreated('agents', onTaskCreated);
   taskService.onTaskChanged('agents', onTaskChanged);
   trackedPullRequestService.onMerged('agents', onPullRequestMerged);
+  deliveryService.onDeployed('agents', onDeployed);
   conversationService.onChanged('agents', onConversationChanged);
 }

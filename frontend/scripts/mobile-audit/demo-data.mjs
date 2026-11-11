@@ -106,7 +106,7 @@ const agent = (id, u, p, kind, emoji, color, description) => {
   const a = {
     __typename: 'Agent', id, user: u, name: u.name, project: p, kind, avatar: { __typename: 'AgentAvatar', emoji, color }, description,
     instructions: description, taskFolder: true, defaults: {}, contextFolder: null, enabled: true, archivedAt: null, canManage: true,
-    triggers: { __typename: 'AgentTriggers', taskCreated: kind === 'PRODUCT_MANAGER', taskCreatedTag: null, threadFollowed: true, prMerged: false, taskReady: kind === 'DEVELOPER', taskReadyTag: null },
+    triggers: { __typename: 'AgentTriggers', taskCreated: kind === 'PRODUCT_MANAGER', taskCreatedTag: null, threadFollowed: true, prMerged: false, deployed: kind === 'PRODUCT_MANAGER', taskReady: kind === 'DEVELOPER', taskReadyTag: null },
     actions: kind === 'PRODUCT_MANAGER' ? [{ __typename: 'AgentAction', key: 'release', label: 'Préparer une release', instruction: 'Prépare une release.', cron: null, timezone: null, schedule: null }] : [], managers: [],
     stats: () => ({ __typename: 'AgentStats', activeSessions: sessions.filter((s) => s.owner === u && !s.archivedAt).length, sessions: 14, tasks: 9, monthCostUsd: 18.4, totalCostUsd: 61.2, lastActivityAt: ago(12) }),
     sessions: () => sessions.filter((s) => s.owner === u),

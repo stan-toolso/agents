@@ -79,6 +79,7 @@ export function describeTool(rawName: string, input: Record<string, unknown> = {
           people: ['Consultation des personnes et sessions mentionnables', 'consulter qui peut être mentionné'],
           pr_list: ['Consultation des pull requests suivies', 'consulter les pull requests suivies'],
           ci_status: [`Lecture de l'état de la CI${str(input, 'ref') ? ` de ${str(input, 'ref')}` : ''}`, "lire l'état de la CI"],
+          deploy_record: [`Déclaration du déploiement${str(input, 'sha') ? ` de ${str(input, 'sha')?.slice(0, 7)}` : ''}`, 'déclarer un déploiement'],
           pr_open: [`Ouverture de la pull request « ${title ?? ''} » sur GitHub (branche poussée avec votre compte)`, `ouvrir la pull request « ${title ?? ''} » sur GitHub`],
           pr_merge: [`Fusion de la pull request ${str(input, 'pr') ?? str(input, 'id') ?? ''} avec votre compte`, `fusionner la pull request ${str(input, 'pr') ?? str(input, 'id') ?? ''}${str(input, 'title') ? ` « ${str(input, 'title')} »` : ''} avec votre compte, à votre nom`],
           pr_close: [`Fermeture sans fusion de la pull request ${str(input, 'id') ?? ''} avec votre compte`, `fermer sans la fusionner la pull request ${str(input, 'id') ?? ''}`],

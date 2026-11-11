@@ -18,6 +18,11 @@ const m = vi.hoisted(() => ({
   exitCode: 0,
   events: [] as Array<[string, string]>,
   busy: false,
+  // Déploiements : PR fusionnées suivies, liens PR ↔ déploiement, commits contenus dans le commit déployé.
+  trackedPrs: [] as Array<Record<string, unknown>>,
+  links: [] as Array<[string, string]>,
+  contained: new Set<string>(),
+  deployedEvents: [] as Array<{ delivery: Delivery; pullRequests: Array<{ id: string }>; tasks: Array<{ id: string }> }>,
 }));
 
 const unique = () => Object.assign(new Error('duplicate key'), { code: '23505' });
@@ -40,14 +45,14 @@ vi.mock('./repository.js', () => {
         branch: d.branch ?? null,
         prNumber: null,
         prUrl: null,
-        sha: null,
+        sha: (d as { sha?: string | null }).sha ?? null,
         steps: d.steps ?? [],
         output: null,
         error: null,
         instanceId: d.instanceId ?? null,
         createdAt: new Date(),
         startedAt: d.status === 'running' ? new Date() : null,
-        finishedAt: null,
+        finishedAt: d.status === 'succeeded' ? new Date() : null,
       };
       m.deliveries.push(row);
       return { ...row };
@@ -88,6 +93,11 @@ vi.mock('./repository.js', () => {
       return orphans.map((o) => ({ id: o.id, projectId: o.projectId, kind: o.kind, sessionId: o.sessionId }));
     },
     projectsWithQueuedDeploy: async () => [...new Set(m.deliveries.filter((x) => x.kind === 'deploy' && x.status === 'queued').map((x) => x.projectId))],
+    firstDeployAt: async (projectId: string) => m.deliveries.filter((x) => x.projectId === projectId && x.kind === 'deploy' && x.status === 'succeeded').map((x) => x.createdAt).sort((a, b) => a.getTime() - b.getTime())[0] ?? null,
+    deployedPullRequestIds: async () => new Set(m.links.map(([, prId]) => prId)),
+    linkPullRequests: async (deliveryId: string, ids: string[]) => {
+      for (const id of ids) m.links.push([deliveryId, id]);
+    },
     getConfig: async () => m.config,
     setConfig: async () => m.config,
     deleteConfig: async () => undefined,
@@ -121,6 +131,9 @@ vi.mock('../git/service.js', () => ({
     mergeBase: async () => undefined,
     invalidate: () => undefined,
     push: async () => '',
+    fetch: async () => undefined,
+    resolveCommit: async (_ref: unknown, rev: string) => (rev.replace('origin/', '').startsWith('dead') ? null : rev.length === 40 ? rev : rev.padEnd(40, '0')),
+    isAncestor: async (_ref: unknown, ancestor: string) => m.contained.has(ancestor),
   },
   headCommitOf: async () => 'abc1234def',
   operationOf: async () => m.operation,
@@ -151,7 +164,10 @@ vi.mock('../git/pullRequests.js', () => {
   };
 });
 vi.mock('../pullRequests/service.js', () => ({
+  projectRepoName: () => 'acme/app',
+  foreignRepoOf: (pr: { repo: string }, projectRepo: string) => (pr.repo && pr.repo.toLowerCase() !== projectRepo.toLowerCase() ? { owner: 'x', name: 'y' } : null),
   trackedPullRequestService: {
+    list: async () => m.trackedPrs,
     recordGithub: async () => ({}),
     open: async () => {
       m.opened++;
@@ -177,7 +193,10 @@ vi.mock('../vault/ssh.js', () => ({
   },
 }));
 
-const { checksAction, deliveryService, normalizeDeployConfig, renderDeployCommand, setDeliveryTimingsForTests } = await import('./service.js');
+const { checksAction, deliveryService, deployCandidates, normalizeDeployConfig, renderDeployCommand, setDeliveryTimingsForTests } = await import('./service.js');
+deliveryService.onDeployed('test', (e) => {
+  m.deployedEvents.push(e as never);
+});
 
 const pr = (over: Record<string, unknown> = {}) => ({ state: 'OPEN' as const, isDraft: false, checksState: 'SUCCESS', checks: [], mergeable: 'MERGEABLE', ...over });
 const ok = { state: 'SUCCESS', checks: [{ name: 'Tests', state: 'SUCCESS', url: null }] };
@@ -185,7 +204,7 @@ const pending = { state: 'PENDING', checks: [{ name: 'Tests', state: 'PENDING', 
 const red = { state: 'FAILURE', checks: [{ name: 'Tests', state: 'FAILURE', url: null }] };
 
 beforeEach(() => {
-  Object.assign(m, { deliveries: [], config: null, seq: 0, operation: null, changes: [], openPrs: [], prStates: [{ checksState: 'SUCCESS' }], ciStates: [ok], merged: [], opened: 0, conflicts: [], commands: [], exitCode: 0, events: [], busy: false });
+  Object.assign(m, { deliveries: [], config: null, seq: 0, operation: null, changes: [], openPrs: [], prStates: [{ checksState: 'SUCCESS' }], ciStates: [ok], merged: [], opened: 0, conflicts: [], commands: [], exitCode: 0, events: [], busy: false, trackedPrs: [], links: [], contained: new Set(), deployedEvents: [] });
   setDeliveryTimingsForTests({ pollMs: 1, graceMs: 20 });
 });
 
@@ -358,5 +377,55 @@ describe('Déploiement', () => {
     await expect(deliveryService.cancel('old', 'u1')).rejects.toThrow(/ne peut plus/);
     await deliveryService.recover(['i1']);
     expect(m.deliveries[0].status).toBe('failed');
+  });
+});
+
+describe('Pull requests mises en production', () => {
+  const now = Date.now();
+  const tracked = (over: Record<string, unknown> = {}) => ({ id: 'pr1', number: 236, title: 'Statut des PR', taskId: 't1', repo: 'acme/app', baseBranch: 'main', status: 'merged', mergeSha: 'aaa111', mergedAt: new Date(now - 3_600_000), updatedAt: new Date(now - 3_600_000), ...over });
+
+  it('deployCandidates : fusionnées sur la branche déployée, dans le dépôt du projet, pas encore annoncées, pas trop anciennes', () => {
+    const prs = [
+      tracked(),
+      tracked({ id: 'open', status: 'open' }),
+      tracked({ id: 'other-branch', baseBranch: 'develop' }),
+      tracked({ id: 'foreign', repo: 'acme/lib' }),
+      tracked({ id: 'done' }),
+      tracked({ id: 'old', mergedAt: new Date(now - 30 * 86_400_000) }),
+    ] as never[];
+    const out = deployCandidates(prs, { branch: 'main', projectRepo: 'acme/app', alreadyDeployed: new Set(['done']), since: new Date(now - 7 * 86_400_000) });
+    expect(out.map((pr: { id: string }) => pr.id)).toEqual(['pr1']);
+  });
+
+  it('un déploiement déclaré est enregistré réussi, emporte les PR contenues dans le commit et prévient les écouteurs une seule fois', async () => {
+    m.trackedPrs = [tracked(), tracked({ id: 'pr2', number: 240, taskId: 't2', mergeSha: 'bbb222' })];
+    m.contained = new Set(['aaa111']);
+    const { delivery, event } = await deliveryService.recordDeploy({ projectId: 'p', rev: 'abc1234', note: 'front seulement', userId: 'u1', sessionId: 's1' });
+    expect(delivery).toMatchObject({ kind: 'deploy', status: 'succeeded', sha: 'abc1234'.padEnd(40, '0'), branch: 'main', sessionId: 's1' });
+    expect(delivery.steps[0].message).toContain('front seulement');
+    expect(event.pullRequests.map((pr) => pr.id)).toEqual(['pr1']);
+    expect(event.tasks.map((t) => t.id)).toEqual(['t1']);
+    expect(m.links).toEqual([[delivery.id, 'pr1']]);
+    expect(m.deployedEvents).toHaveLength(1);
+    // Déploiement suivant : pr1 déjà annoncée, pr2 désormais contenue.
+    m.contained = new Set(['aaa111', 'bbb222']);
+    const next = await deliveryService.recordDeploy({ projectId: 'p', rev: 'def5678', userId: 'u1' });
+    expect(next.event.pullRequests.map((pr) => pr.id)).toEqual(['pr2']);
+  });
+
+  it('refuse un commit inconnu du dépôt', async () => {
+    await expect(deliveryService.recordDeploy({ projectId: 'p', rev: 'deadbee', userId: 'u1' })).rejects.toThrow(/inconnu/);
+    expect(m.deliveries).toHaveLength(0);
+  });
+
+  it('un déploiement lancé par Skipper prévient aussi les écouteurs', async () => {
+    m.config = { projectId: 'p', vaultItem: 'skipper-1', command: 'deploy.sh --ref {sha}', branch: null, timeoutMinutes: 30, updatedById: null, updatedAt: new Date() };
+    m.trackedPrs = [tracked()];
+    m.contained = new Set(['aaa111']);
+    await deliveryService.requestDeploy('p', 'u1');
+    await deliveryService.settle();
+    expect(m.deliveries[0].status).toBe('succeeded');
+    expect(m.deployedEvents).toHaveLength(1);
+    expect(m.deployedEvents[0].pullRequests.map((pr) => pr.id)).toEqual(['pr1']);
   });
 });

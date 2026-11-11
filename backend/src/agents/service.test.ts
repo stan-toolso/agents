@@ -56,7 +56,7 @@ const agent = (over: Partial<Agent> = {}): Agent =>
     gitlabDelegateReadOnly: true,
     gitlabDelegatePullRequests: false,
     allowedModels: [],
-    triggers: { taskCreated: true, taskCreatedTag: null, threadFollowed: true, prMerged: false, taskReady: false, taskReadyTag: null },
+    triggers: { taskCreated: true, taskCreatedTag: null, threadFollowed: true, prMerged: false, deployed: false, taskReady: false, taskReadyTag: null },
     actions: [],
     enabled: true,
     archivedAt: null,

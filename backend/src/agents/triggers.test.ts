@@ -20,9 +20,10 @@ vi.mock('../pullRequests/service.js', () => ({ trackedPullRequestService: prs })
 vi.mock('../tasks/service.js', () => ({ taskService: tasks }));
 vi.mock('../users/repository.js', () => ({ userRepository: users }));
 vi.mock('../conversations/service.js', () => ({ conversationService: conversations, channelRef: () => '#general', threadTitle: () => 'Quoi de neuf ?' }));
+vi.mock('../deliveries/service.js', () => ({ deliveryService: { onDeployed: () => undefined } }));
 vi.mock('../log.js', () => ({ log: { info: () => undefined, warn: () => undefined, error: () => undefined } }));
 
-const { agentFeedTargets, onConversationChanged, onTaskCreated, onTaskChanged, onPullRequestMerged } = await import('./triggers.js');
+const { agentFeedTargets, onConversationChanged, onDeployed, onTaskCreated, onTaskChanged, onPullRequestMerged } = await import('./triggers.js');
 
 const agent = (over: Partial<Agent> = {}): Agent =>
   ({
@@ -32,7 +33,7 @@ const agent = (over: Partial<Agent> = {}): Agent =>
     kind: 'product_manager',
     enabled: true,
     archivedAt: null,
-    triggers: { taskCreated: true, taskCreatedTag: null, threadFollowed: true, prMerged: true, taskReady: false, taskReadyTag: null },
+    triggers: { taskCreated: true, taskCreatedTag: null, threadFollowed: true, prMerged: true, deployed: true, taskReady: false, taskReadyTag: null },
     ...over,
   }) as unknown as Agent;
 
@@ -181,6 +182,38 @@ describe('onPullRequestMerged', () => {
     expect(service.summon).toHaveBeenCalledWith('a1', expect.objectContaining({ taskId: 't1', text: expect.stringContaining('#12') }));
     (service.summon as ReturnType<typeof vi.fn>).mockClear();
     await onPullRequestMerged({ id: 'pr2', taskId: null } as never);
+    expect(service.summon).not.toHaveBeenCalled();
+  });
+});
+
+describe('onDeployed', () => {
+  const event = (over: Record<string, unknown> = {}) =>
+    ({
+      delivery: { id: 'd1', projectId: 'p1', sha: 'abcdef1234567', branch: 'main', requestedById: 'u1', sessionId: null },
+      pullRequests: [{ id: 'pr1', number: 237, title: 'Design', taskId: 't1' }],
+      tasks: [task({ statusTag: 'à livrer', status: 'done' } as Partial<Task>)],
+      ...over,
+    }) as never;
+
+  it('convoque une fois, sans tâche, les agents qui suivent les déploiements, avec les PR et tâches mises en production', async () => {
+    await onDeployed(event());
+    expect(service.summon).toHaveBeenCalledTimes(1);
+    const [id, opts] = (service.summon as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(id).toBe('a1');
+    expect(opts.taskId).toBeUndefined();
+    expect(opts.requestedById).toBe('u1');
+    expect(opts.text).toContain('[Déploiement] Le commit abcdef1 (main)');
+    expect(opts.text).toContain('#237 « Design » → la tâche t1 (« Export CSV »), done · « à livrer »');
+  });
+
+  it("ne convoque ni sans tâche emportée, ni l'agent éteint, ni celui dont la session a déclaré le déploiement", async () => {
+    await onDeployed(event({ tasks: [], pullRequests: [] }));
+    repo.listActive = vi.fn(async () => [agent({ triggers: { ...agent().triggers, deployed: false } })]);
+    await onDeployed(event());
+    expect(service.summon).not.toHaveBeenCalled();
+    repo.listActive = vi.fn(async () => [agent()]);
+    sessions.findByIds = vi.fn(async () => [{ id: 's1', ownerId: 'a1' }]);
+    await onDeployed(event({ delivery: { id: 'd1', projectId: 'p1', sha: 'abc1234', branch: 'main', requestedById: null, sessionId: 's1' } }));
     expect(service.summon).not.toHaveBeenCalled();
   });
 });

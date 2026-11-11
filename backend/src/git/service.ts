@@ -482,6 +482,21 @@ export const gitService = {
   },
 
   /** `actorId` : personne qui agit, dont le compte GitHub authentifie l'accès au dépôt distant. */
+  /** Commit complet d'une révision (SHA abrégé, branche, origin/main…) ; null si elle est inconnue du dépôt. */
+  async resolveCommit(ref: WorkspaceRef, rev: string): Promise<string | null> {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._\/-]*$/.test(rev)) throw new AppError(`Révision invalide : ${rev}`);
+    const cwd = await resolveRoot(ref);
+    const { stdout, code } = await gitRaw(['rev-parse', '--verify', '-q', `${rev}^{commit}`], cwd);
+    return code === 0 && stdout.trim() ? stdout.trim() : null;
+  },
+
+  /** `ancestor` est-il contenu dans `descendant` ? null si l'un des deux commits est inconnu du dépôt. */
+  async isAncestor(ref: WorkspaceRef, ancestor: string, descendant: string): Promise<boolean | null> {
+    const cwd = await resolveRoot(ref);
+    const { code } = await gitRaw(['merge-base', '--is-ancestor', ancestor, descendant], cwd);
+    return code === 0 ? true : code === 1 ? false : null;
+  },
+
   async fetch(ref: WorkspaceRef, actorId?: string | null): Promise<void> {
     const cwd = await resolveRoot(ref);
     await git(['fetch', '--prune', 'origin'], cwd, await authOf(ref, actorId));
