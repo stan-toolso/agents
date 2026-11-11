@@ -237,7 +237,7 @@ describe('sessions inactives', () => {
     expect(await sessionService.endIdleSessions(Date.now() + 31 * 60_000)).toEqual([a.id]);
     await settle();
     expect(session(a.id).status).toBe('completed');
-    expect(eventsOf(a.id).some((e) => e.payload.reason === 'idle_timeout')).toBe(true);
+    expect(eventsOf(a.id).some((e) => e.payload.reason === 'idle_timeout')).toBe(false);
     expect(notifications.notify).not.toHaveBeenCalled();
     expect(session(b.id).status).toBe('running');
   });

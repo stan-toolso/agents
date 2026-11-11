@@ -177,7 +177,7 @@ async function interruptSession(id: string, reason: InterruptionReason): Promise
 
 /**
  * « Reprise » d'une session interrompue alors qu'elle attendait des instructions : aucun tour n'est lancé (il réécrirait
- * tout le contexte, cache expiré, pour un « Prêt » sans travail). Elle passe à « terminée », comme après `idle_timeout` :
+ * tout le contexte, cache expiré, pour un « Prêt » sans travail). Elle passe à « terminée », comme après le délai d'inactivité :
  * sa conversation est conservée et le prochain message la relance. Null si elle n'est plus interrompue.
  */
 async function settleIdleInterrupted(id: string, message: string, reason: string): Promise<Session | null> {
@@ -1205,18 +1205,14 @@ export const sessionService = {
 
   /**
    * Termine les sessions garées (sans processus depuis le drainage d'une instance) restées sans instruction plus
-   * longtemps que le délai d'inactivité, comme `endIdleSessions` le fait pour les sessions de l'instance.
+   * longtemps que le délai d'inactivité, comme `endIdleSessions` le fait pour les sessions de l'instance. Fin
+   * silencieuse : seul « Session terminée » apparaît dans le fil.
    */
   async endParkedIdle(now = Date.now()): Promise<string[]> {
     const minutes = serverSettings.current.idleSessionTimeoutMinutes;
     if (!minutes || stopping) return [];
     const ended: string[] = [];
     for (const session of await sessionRepository.listParkedBefore(new Date(now - minutes * 60_000))) {
-      await emitEvent(session.id, 'system', {
-        message: `Session terminée après ${formatWait(now - (session.parkedAt?.getTime() ?? now))} sans instruction, pour libérer sa place et sa mémoire. Envoyez un message pour la reprendre.`,
-        notice: true,
-        reason: 'idle_timeout',
-      });
       if (await endParked(session.id, 'completed')) ended.push(session.id);
     }
     return ended;
@@ -1433,7 +1429,8 @@ export const sessionService = {
 
   /**
    * Termine proprement les sessions qui attendent des instructions depuis plus que le délai d'inactivité
-   * (réglage du serveur) : leur place et leur mémoire reviennent aux autres. Un message les relance.
+   * (réglage du serveur) : leur place et leur mémoire reviennent aux autres. Un message les relance. Fin silencieuse :
+   * pas d'avertissement dans le fil, seul « Session terminée » y apparaît (que la session tourne ou non change peu).
    */
   async endIdleSessions(now = Date.now()): Promise<string[]> {
     const minutes = serverSettings.current.idleSessionTimeoutMinutes;
@@ -1443,11 +1440,6 @@ export const sessionService = {
       if (now - since < minutes * 60_000 || !running.has(id) || endedForIdle.has(id)) continue;
       try {
         endedForIdle.add(id);
-        await emitEvent(id, 'system', {
-          message: `Session terminée après ${formatWait(now - since)} sans instruction, pour libérer sa place et sa mémoire. Envoyez un message pour la reprendre.`,
-          notice: true,
-          reason: 'idle_timeout',
-        });
         await this.end(id);
         ended.push(id);
       } catch (err) {
