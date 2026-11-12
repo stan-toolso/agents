@@ -22,6 +22,13 @@ export function DeliveryStatusBadge({ status }: { status: Delivery['status'] }) 
 const lastStep = (d: Delivery) => d.steps[d.steps.length - 1]?.message ?? null;
 
 /**
+ * Dernière livraison montrée à côté du bouton de la session : un échec ou un conflit reste affiché jusqu'à la livraison
+ * suivante (sinon il passe inaperçu : il arrive en arrière-plan, après le clic) ; une réussite, une heure.
+ */
+const showLatest = (d: Delivery) =>
+  d.status === 'FAILED' || d.status === 'CONFLICT' || (d.status === 'SUCCEEDED' && Date.now() - new Date(d.finishedAt ?? d.createdAt).getTime() < 3_600_000);
+
+/**
  * Bouton « Livrer » d'une session ou d'une tâche : fusionne la base dans la branche, pousse, ouvre ou reprend la PR,
  * attend la CI verte puis fusionne avec le compte de la personne ; un administrateur peut demander ensuite le
  * déploiement du projet. Affiche la livraison en cours du dossier (relevée toutes les 10 s).
@@ -95,6 +102,12 @@ export function DeliverButton({ projectId, sessionId, taskId, worksessionId, bra
             Annuler
           </Button>
         ))}
+      {latest && !active && look === 'cc' && showLatest(latest) && (
+        <Link to={`/projects/${projectId}/deliveries`} className={`delivery-last delivery-last-${latest.status.toLowerCase()}`} title={latest.error ?? lastStep(latest) ?? undefined}>
+          <i className={`bi ${latest.status === 'SUCCEEDED' ? 'bi-check-circle' : 'bi-exclamation-triangle'}`} aria-hidden /> Livraison {DELIVERY_STATUS_LABELS[latest.status]?.label ?? latest.status.toLowerCase()}
+          {latest.error && latest.status !== 'CONFLICT' ? ` : ${latest.error}` : ''}
+        </Link>
+      )}
       {latest && !active && look === 'bootstrap' && (
         <span className="ms-2 text-secondary small" title={latest.error ?? undefined}>
           Dernière livraison <DeliveryStatusBadge status={latest.status} /> {timeAgo(latest.createdAt)}
