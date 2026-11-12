@@ -3,7 +3,7 @@ import { WIDGETS, catalogFor } from './catalog.js';
 import { defaultLayout } from './defaults.js';
 import { LAYOUT_LIMITS, applyOps, diffLayouts, parseLayout, parseParams } from './layout.js';
 import { parseScope } from './scope.js';
-import { REGIONS } from './types.js';
+import { REGIONS, SCOPE_KINDS } from './types.js';
 
 const P = '11111111-2222-4333-8444-555555555555';
 
@@ -17,6 +17,14 @@ describe('catalogue', () => {
       for (const r of w.regions) expect(REGIONS).toContain(r);
       for (const p of w.params) expect(p.key).toMatch(/^[a-zA-Z][a-zA-Z0-9]*$/);
     }
+  });
+
+  it('le catalogue renseigne tous les champs non nuls du schéma GraphQL (CockpitWidget)', () => {
+    for (const kind of SCOPE_KINDS)
+      for (const w of catalogFor(kind)) {
+        expect(typeof w.singleton, `${kind} ${w.key}`).toBe('boolean');
+        expect(Array.isArray(w.params), `${kind} ${w.key}`).toBe(true);
+      }
   });
 
   it('les agencements par défaut sont valides pour leur portée', () => {

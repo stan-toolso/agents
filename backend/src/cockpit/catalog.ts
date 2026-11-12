@@ -82,5 +82,6 @@ export function widgetDef(key: string): WidgetDef | null {
 
 /** Les blocs natifs qui ont un sens dans une portée. */
 export function catalogFor(kind: ScopeKind): WidgetDef[] {
-  return WIDGETS.filter((w) => w.scopes.includes(kind));
+  // `singleton` est facultatif dans les définitions mais non nul dans le schéma GraphQL (CockpitWidget.singleton: Boolean!).
+  return WIDGETS.filter((w) => w.scopes.includes(kind)).map((w) => ({ ...w, singleton: Boolean(w.singleton) }));
 }
