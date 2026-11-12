@@ -100,7 +100,7 @@ export default function ProjectVaultPage() {
   const { confirm, showError } = useDialogs();
   const { data, loading, error } = usePollingQuery<{ project: VaultProject | null; vaultGoogleAvailable: boolean }>(VAULT_PROJECT, { variables: { id }, pollInterval: 15_000 });
   const { data: mineData } = useQuery<{ vaultItems: VaultItem[] }>(VAULT_ITEMS);
-  const { data: projectsData } = useQuery<{ projects: Project[] }>(PROJECTS);
+  const { data: projectsData } = useQuery<{ projects: Project[] }>(PROJECTS, { variables: { includePersonal: true } });
   const project = data?.project;
   useTabTitle(project ? `Coffre · ${project.name}` : null);
   const [editing, setEditing] = useState<VaultItem | null | 'new'>(null);
@@ -116,7 +116,7 @@ export default function ProjectVaultPage() {
         item,
         access: (
           <span className="d-inline-flex gap-1 align-items-center flex-wrap">
-            {via === 'OWN' ? <Badge bg="secondary">élément du projet</Badge> : link?.scope === 'PROJECT' ? <Badge bg="warning" text="dark">tous les agents</Badge> : <Badge bg="info" text="dark">sessions de {link?.user?.id === user?.id ? 'moi' : (link?.user?.name ?? '?')}</Badge>}
+            {via === 'OWN' ? <Badge bg="secondary">élément du projet</Badge> : link?.scope === 'PROJECT' ? <Badge bg="warning" text="dark">tous les agents</Badge> : !link ? <Badge bg="info" text="dark" title="Votre espace personnel : vos sessions y ont tout votre coffre personnel">mes sessions</Badge> : <Badge bg="info" text="dark">sessions de {link.user?.id === user?.id ? 'moi' : (link.user?.name ?? '?')}</Badge>}
             {!forAgents && <Badge bg="dark" title="Jamais offert aux agents du projet : géré ici, utilisé par les réglages et les agents à appel direct">réservé à Skipper</Badge>}
             {via !== 'OWN' && <span className="text-secondary">{item.ownerProject ? `projet ${item.ownerProject.name}` : item.ownerUser?.id === user?.id ? 'personnel' : item.ownerUser?.name}</span>}
           </span>

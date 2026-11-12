@@ -630,7 +630,7 @@ function AgentLinksTab({ item, links, projects }: { item: VaultItem; links: Vaul
   const candidates = projects.filter((p) => p.id !== ownerProjectId && p.myRole !== 'VIEWER');
   const chosen = candidates.find((p) => p.id === projectId);
   const canProjectScope = item.myPermission === 'MANAGE' && chosen?.myRole === 'ADMIN';
-  const copyTargets = projects.filter((p) => p.id !== ownerProjectId && p.myRole === 'ADMIN');
+  const copyTargets = projects.filter((p) => p.id !== ownerProjectId && p.myRole === 'ADMIN' && !p.isPersonal);
   useEffect(() => {
     if (!canProjectScope) setScope('PERSONAL');
   }, [canProjectScope]);
@@ -682,7 +682,7 @@ function AgentLinksTab({ item, links, projects }: { item: VaultItem; links: Vaul
           <option value="">Projet…</option>
           {candidates.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.name}
+              {p.isPersonal ? 'Mon espace personnel' : p.name}
             </option>
           ))}
         </Form.Select>
