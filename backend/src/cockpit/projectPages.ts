@@ -26,7 +26,7 @@ export interface ProjectTabs {
 }
 
 /** Clés des onglets natifs (copie de `TABS` de frontend/src/components/ProjectHeader.tsx : à tenir identiques). */
-export const PROJECT_TAB_KEYS = ['overview', 'conversations', 'repo', 'tasks', 'artifacts', 'agents', 'pullRequests', 'deliveries', 'context', 'vault', 'env', 'schedules', 'workflows', 'history', 'usage', 'audit', 'settings'] as const;
+export const PROJECT_TAB_KEYS = ['overview', 'conversations', 'repo', 'files', 'tasks', 'artifacts', 'agents', 'pullRequests', 'deliveries', 'context', 'vault', 'env', 'schedules', 'workflows', 'history', 'usage', 'audit', 'settings'] as const;
 const NEVER_HIDDEN = new Set(['overview', 'settings']);
 const LIMITS = { pages: 12, title: 60, slug: 40 };
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
