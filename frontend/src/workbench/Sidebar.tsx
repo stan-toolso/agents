@@ -24,6 +24,7 @@ import { useDeletions } from './useDeletions';
 import { useTabs } from './TabsContext';
 import { SubagentsCount, initialsOf, sessionDotClass } from './WorkspaceTabs';
 import { attachedElsewhere, mineFirst, openItemsOf, ownerGroups, participates, runLabel, scheduleGroups, sessionGroups, subagentsSummary, workspaceState, type ScheduleGroup, type SessionNode, type SidebarProject, type SidebarSession, type OwnerGroup, type SidebarTerminal, type Workspace } from './workspaces';
+import { leaveProjectWindow, openFullSkipper, projectWindowId } from '../lib/projectWindow';
 
 const EXPANDED_KEY = 'skipper.workbench.expanded';
 const FILTER_KEY = 'skipper.workbench.sessionFilter';
@@ -135,11 +136,11 @@ const FAVORITE_KINDS: Record<FavoriteSharedPage['kind'], { icon: string; label: 
  * Section « Favoris » : les artefacts que la personne a mis en favori (étoile de la galerie ou de la page), dans
  * l'ordre d'ajout ; repliable. Rien tant qu'il n'y a pas de favori. Menu de chaque ligne : ouvrir, retirer.
  */
-function FavoritesSection({ expanded, onToggle }: { expanded: boolean; onToggle: () => void }) {
+function FavoritesSection({ expanded, onToggle, projectId }: { expanded: boolean; onToggle: () => void; /** Fenêtre dédiée à un projet : seulement ses artefacts. */ projectId: string | null }) {
   const location = useLocation();
   const toggleFavorite = useFavoriteToggle();
   const { data } = usePollingQuery<{ favoriteSharedPages: FavoriteSharedPage[] }>(FAVORITE_SHARED_PAGES, { pollInterval: 60_000 });
-  const favorites = data?.favoriteSharedPages ?? [];
+  const favorites = (data?.favoriteSharedPages ?? []).filter((f) => !projectId || f.project?.id === projectId);
   if (!favorites.length) return null;
   return (
     <div className="wb-favorites-block">
@@ -148,7 +149,7 @@ function FavoritesSection({ expanded, onToggle }: { expanded: boolean; onToggle:
           <i className={`bi bi-chevron-${expanded ? 'down' : 'right'}`} style={{ fontSize: 9 }} /> Favoris
           {!expanded && <span className="wb-fav-count">{favorites.length}</span>}
         </button>
-        <Link to="/shared" className="wb-section-action" title="Tous les artefacts">
+        <Link to={projectId ? `/projects/${projectId}/artifacts` : '/shared'} className="wb-section-action" title="Tous les artefacts">
           <i className="bi bi-collection" />
         </Link>
       </div>
@@ -188,6 +189,22 @@ const MAIN_MENU: MenuEntry[] = [
   { to: '/', label: 'Accueil', icon: 'bi-house', title: 'Tableau de bord' },
   { to: '/inbox', label: 'À traiter', icon: 'bi-inbox', title: 'À traiter : demandes, sessions en attente et pull requests à fusionner, tous projets' },
   { to: '/tasks', label: 'Tâches', icon: 'bi-check2-square', title: 'Tâches de tous vos projets' },
+];
+/** Fenêtre dédiée à un projet : l'essentiel, limité au projet (les pages globales n'y existent pas). */
+const projectMenu = (id: string): MenuEntry[] => [
+  { to: `/projects/${id}`, label: 'Accueil', icon: 'bi-house', title: 'Tableau de bord du projet' },
+  { to: '/inbox', label: 'À traiter', icon: 'bi-inbox', title: 'À traiter : demandes, sessions en attente et pull requests à fusionner du projet' },
+  { to: `/projects/${id}/tasks`, label: 'Tâches', icon: 'bi-check2-square', title: 'Tâches du projet' },
+  { to: `/projects/${id}/conversations`, label: 'Conversations', icon: 'bi-chat-square-text', title: 'Canaux de conversation du projet' },
+];
+/** Pages du projet rangées dans le menu du compte d'une fenêtre dédiée au projet. */
+const projectMorePages = (id: string): MenuItem[] => [
+  { label: 'Historique des sessions', icon: 'bi-clock-history', to: `/projects/${id}/history` },
+  { label: 'Artefacts', icon: 'bi-collection', to: `/projects/${id}/artifacts` },
+  { label: 'Pull requests', icon: 'bi-git', to: `/projects/${id}/pull-requests` },
+  { label: 'Coffre', icon: 'bi-shield-lock', to: `/projects/${id}/vault` },
+  { label: 'Planifications', icon: 'bi-alarm', to: `/projects/${id}/schedules` },
+  { label: 'Workflows', icon: 'bi-diagram-3', to: `/projects/${id}/workflows` },
 ];
 /** Pages moins fréquentes, rangées dans le menu du compte (bas de la sidebar). */
 const MORE_PAGES: MenuItem[] = [
@@ -720,7 +737,15 @@ function UserBlock() {
   const { available: installable, install } = useInstallApp();
   const [open, setOpen] = useState(false);
   if (!user) return null;
-  const items: MenuItem[] = [
+  const items: MenuItem[] = projectWindowId
+    ? [
+        { label: 'Ouvrir tout Skipper', icon: 'bi-box-arrow-up-right', onClick: () => openFullSkipper() },
+        { label: 'Afficher tout Skipper dans cette fenêtre', icon: 'bi-window', onClick: leaveProjectWindow },
+        ...projectMorePages(projectWindowId).map((m, i) => ({ ...m, separatorBefore: i === 0 })),
+        { label: 'Paramètres', icon: 'bi-gear', to: '/settings', separatorBefore: true },
+        { label: 'Se déconnecter', icon: 'bi-box-arrow-right', separatorBefore: true, onClick: () => void logout() },
+      ]
+    : [
     ...(user.isGuest ? [] : MORE_PAGES),
     ...(installable ? [{ label: "Installer l'application", icon: 'bi-phone', onClick: install, separatorBefore: !user.isGuest }] : []),
     ...(user.isAdmin ? [{ label: 'Utilisateurs', icon: 'bi-people', to: '/users', separatorBefore: !installable && !user.isGuest }] : []),
@@ -773,7 +798,7 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   const { data } = usePollingQuery<{ projects: SidebarProject[]; chats: SidebarSession[] }>(SIDEBAR, { variables: { open }, pollInterval: 5000, fetchPolicy: 'cache-and-network' });
   const chats = data?.chats ?? [];
   const { data: prData } = usePollingQuery<{ projects: { id: string; worksessions: { id: string; trackedPullRequest: PullRequestRef | null }[] }[] }>(SIDEBAR_PULL_REQUESTS, { variables: { open }, pollInterval: 60_000 });
-  const { data: inboxData } = usePollingQuery<{ inboxCounts: { total: number } }>(INBOX_COUNTS, { pollInterval: 5000 });
+  const { data: inboxData } = usePollingQuery<{ inboxCounts: { total: number } }>(INBOX_COUNTS, { variables: { projectId: projectWindowId }, pollInterval: 5000 });
   const inboxTotal = inboxData?.inboxCounts.total ?? 0;
   const prByWorksession = useMemo(() => new Map((prData?.projects ?? []).flatMap((p) => p.worksessions.map((w) => [w.id, w.trackedPullRequest] as const))), [prData]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>(loadExpanded);
@@ -802,6 +827,13 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
       }
       return next;
     });
+
+  // Fenêtre dédiée à un projet : la sidebar ne montre que lui, toujours déplié.
+  const windowProject = projectWindowId ? (data?.projects.find((p) => p.id === projectWindowId) ?? null) : null;
+  const shownProjects = projectWindowId ? (windowProject ? [windowProject] : []) : (data?.projects ?? []);
+  useEffect(() => {
+    if (windowProject) document.title = `${windowProject.name} · Skipper`;
+  }, [windowProject?.name]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeProjectId = location.pathname.match(/^\/projects\/([^/]+)/)?.[1] ?? (activeKey ? workspaces.get(activeKey)?.projectId : undefined);
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -840,11 +872,23 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   return (
     <aside className="wb-sidebar">
       <div className="wb-brand">
-        <Link to="/" title="Tableau de bord">
-          <Logo size={18} />
-          Skipper
-        </Link>
+        {projectWindowId ? (
+          <Link to={`/projects/${projectWindowId}`} title="Fenêtre dédiée au projet : tableau de bord du projet" className="wb-brand-project">
+            <Logo size={18} />
+            <span className="wb-brand-name">{windowProject?.name ?? 'Projet'}</span>
+          </Link>
+        ) : (
+          <Link to="/" title="Tableau de bord">
+            <Logo size={18} />
+            Skipper
+          </Link>
+        )}
         <span className="wb-brand-actions">
+          {projectWindowId && (
+            <button type="button" className="wb-plus" title="Ouvrir tout Skipper (tous les projets) dans un nouvel onglet" aria-label="Ouvrir tout Skipper" onClick={() => openFullSkipper('/')}>
+              <i className="bi bi-box-arrow-up-right" />
+            </button>
+          )}
           <button type="button" className="wb-plus" title="Raccourcis clavier (?)" onClick={openHelp}>
             <i className="bi bi-keyboard" />
           </button>
@@ -862,7 +906,7 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
       </button>
 
       <nav className="wb-menu" aria-label="Navigation principale">
-        {MAIN_MENU.map((m) => (
+        {(projectWindowId ? projectMenu(projectWindowId) : MAIN_MENU).map((m) => (
           <NavLink key={m.to} to={m.to} end={m.to !== '/inbox'} className="wb-menu-item" title={m.title ?? m.label}>
             <i className={`bi ${m.icon} wb-icon`} />
             <span className="wb-menu-label">{m.label}</span>
@@ -875,12 +919,16 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
         ))}
       </nav>
 
-      {!user?.isGuest && <FavoritesSection expanded={expanded.favorites ?? true} onToggle={() => toggle('favorites', true)} />}
+      {!user?.isGuest && <FavoritesSection projectId={projectWindowId} expanded={expanded.favorites ?? true} onToggle={() => toggle('favorites', true)} />}
 
       <div className="wb-section-title">
-        <Link to="/projects" className="wb-section-link" title="Tous les projets">
-          Projets
-        </Link>
+        {projectWindowId ? (
+          <span className="wb-section-link">Sessions</span>
+        ) : (
+          <Link to="/projects" className="wb-section-link" title="Tous les projets">
+            Projets
+          </Link>
+        )}
         <button
           type="button"
           className="wb-section-action wb-filter"
@@ -889,9 +937,11 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
         >
           <i className={`bi ${filter === 'mine' ? 'bi-person' : 'bi-people'}`} /> {filter === 'mine' ? 'Les miennes' : 'Tout le monde'}
         </button>
-        <Link to="/projects/new" className="wb-section-action" title="Nouveau projet">
-          <i className="bi bi-plus-lg" />
-        </Link>
+        {!projectWindowId && (
+          <Link to="/projects/new" className="wb-section-action" title="Nouveau projet">
+            <i className="bi bi-plus-lg" />
+          </Link>
+        )}
       </div>
 
       <div className="wb-explorer" ref={explorerRef}>
@@ -900,18 +950,20 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
             <Spinner animation="border" size="sm" className="me-2" /> chargement des projets…
           </div>
         )}
-        {[...(data?.projects ?? [])]
+        {[...shownProjects]
           .sort((a, b) => Number(b.isPersonal) - Number(a.isPersonal))
           .map((p) => {
-          const open = expanded[p.id] ?? projectDefaultOpen(p);
+          const open = projectWindowId ? true : (expanded[p.id] ?? projectDefaultOpen(p));
           const list = workspaces.ofProject(p.id);
           const collapsedPending = !open ? p.sessions.filter((s) => participates(s, userId)).reduce((n, s) => n + s.pendingRequestCount, 0) : 0;
           return (
             <div key={p.id} className={`wb-project${p.isPersonal ? ' wb-personal' : ''}`}>
               <div className={`wb-row wb-project-row${p.id === activeProjectId ? ' active' : ''}`}>
-                <button type="button" className="wb-chevron" onClick={() => toggle(p.id, projectDefaultOpen(p))} title={open ? 'Replier' : 'Déplier'}>
-                  <i className={`bi bi-chevron-${open ? 'down' : 'right'}`} style={{ fontSize: 10 }} />
-                </button>
+                {!projectWindowId && (
+                  <button type="button" className="wb-chevron" onClick={() => toggle(p.id, projectDefaultOpen(p))} title={open ? 'Replier' : 'Déplier'}>
+                    <i className={`bi bi-chevron-${open ? 'down' : 'right'}`} style={{ fontSize: 10 }} />
+                  </button>
+                )}
                 <Link to={`/projects/${p.id}`} className="wb-row-label" title={p.isPersonal ? 'Mon espace personnel : mes sessions, chats et tâches, avec accès à tous mes projets' : 'Ouvrir le projet'}>
                   <i className={`bi ${p.isPersonal ? 'bi-person-circle' : 'bi-folder2'} wb-icon`} /> {p.isPersonal ? 'Mon espace' : p.name}
                 </Link>
@@ -932,7 +984,7 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
                   {menuFor === p.id && (
                     <AddMenu
                       projectId={p.id}
-                      project={{ id: p.id, name: p.name, canManage: p.myRole === 'ADMIN', paths: [...p.sessions.map((s) => `/sessions/${s.id}`), ...p.terminals.map((t) => `/terminals/${t.id}`)] }}
+                      project={{ id: p.id, name: p.name, canManage: p.myRole === 'ADMIN', isPersonal: p.isPersonal, paths: [...p.sessions.map((s) => `/sessions/${s.id}`), ...p.terminals.map((t) => `/terminals/${t.id}`)] }}
                       onClose={() => setMenuFor(null)}
                     />
                   )}
@@ -1018,7 +1070,15 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
             </div>
           );
         })}
-        {data && data.projects.length === 0 && (
+        {data && projectWindowId && !windowProject && (
+          <div className="wb-row wb-empty">
+            Ce projet n'existe plus ou vous n'y avez plus accès.{' '}
+            <button type="button" className="btn btn-link btn-sm p-0 align-baseline" onClick={leaveProjectWindow}>
+              Afficher tout Skipper
+            </button>
+          </div>
+        )}
+        {data && !projectWindowId && data.projects.length === 0 && (
           <div className="wb-row wb-empty">
             Aucun projet. <Link to="/projects">Créer le premier</Link>
           </div>

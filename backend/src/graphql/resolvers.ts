@@ -228,6 +228,18 @@ const guardMessage = async (ctx: Ctx, id: string) => {
 };
 const guardFolder = async (ctx: Ctx, id: string, min: ProjectRole) => requireProject(ctx, (await contextService.getFolder(id)).projectId, min);
 const guardInstruction = async (ctx: Ctx, id: string, min: ProjectRole) => requireProject(ctx, (await contextService.getInstruction(id)).projectId, min);
+/** Périmètre des notifications de la personne ; avec projectId (fenêtre dédiée à un projet), celles de ce projet seulement. */
+const notificationScope = async (ctx: Ctx, projectId?: string | null) => {
+  const user = requireUser(ctx);
+  if (projectId) await requireProject(ctx, projectId);
+  return { projectIds: projectId ? [projectId] : await accessibleProjectIds(ctx), admin: user.isAdmin, userId: user.id, onlyProjectId: projectId ?? undefined };
+};
+/** Projets de la file « À traiter » : tous ceux de la personne, ou un seul (fenêtre dédiée à un projet). */
+const inboxProjectIds = async (ctx: Ctx, projectId?: string | null) => {
+  if (!projectId) return accessibleProjectIds(ctx);
+  await requireProject(ctx, projectId);
+  return [projectId];
+};
 
 type GqlStatus = Uppercase<SessionStatus>;
 type GqlRequestStatus = Uppercase<RequestStatus>;
@@ -1161,11 +1173,12 @@ export const resolvers = {
       const others = (await Promise.all(extra.map((id) => projectService.get(id).catch(() => null)))).filter((p): p is Project => Boolean(p) && !isPersonalProject(p!));
       return [...mine, ...others].sort((a, b) => a.name.localeCompare(b.name));
     },
-    search: async (_: unknown, args: { query: string; kinds?: SearchKind[] | null; limit?: number | null }, ctx: Ctx) => {
+    search: async (_: unknown, args: { query: string; kinds?: SearchKind[] | null; limit?: number | null; projectId?: string | null }, ctx: Ctx) => {
       const user = requireUser(ctx);
       const memberProjectIds = await accessibleProjectIds(ctx);
-      const projectIds = user.isSuperAdmin ? (await projectService.list()).map((p) => p.id) : memberProjectIds;
-      return { query: args.query, groups: await searchService.search({ userId: user.id, memberProjectIds, projectIds }, args.query, args.kinds, args.limit) };
+      if (args.projectId) await requireProject(ctx, args.projectId);
+      const projectIds = args.projectId ? [args.projectId] : user.isSuperAdmin ? (await projectService.list()).map((p) => p.id) : memberProjectIds;
+      return { query: args.query, groups: await searchService.search({ userId: user.id, memberProjectIds, projectIds, onlyProjectId: args.projectId ?? undefined }, args.query, args.kinds, args.limit) };
     },
     sessionOwners: async (_: unknown, args: { projectId?: string | null }, ctx: Ctx) => {
       if (args.projectId) await requireProject(ctx, args.projectId);
@@ -1397,9 +1410,9 @@ export const resolvers = {
       await guardWorksession(ctx, args.id, 'viewer');
       return worksessionService.get(args.id);
     },
-    notifications: async (_: unknown, args: { unreadOnly?: boolean | null; limit?: number | null }, ctx: Ctx) =>
-      notificationService.list({ unreadOnly: args.unreadOnly ?? false, limit: args.limit ?? undefined, projectIds: await accessibleProjectIds(ctx), admin: requireUser(ctx).isAdmin, userId: requireUser(ctx).id }),
-    unreadNotificationCount: async (_: unknown, __: unknown, ctx: Ctx) => notificationService.countUnread({ projectIds: await accessibleProjectIds(ctx), admin: requireUser(ctx).isAdmin, userId: requireUser(ctx).id }),
+    notifications: async (_: unknown, args: { unreadOnly?: boolean | null; limit?: number | null; projectId?: string | null }, ctx: Ctx) =>
+      notificationService.list({ unreadOnly: args.unreadOnly ?? false, limit: args.limit ?? undefined, ...(await notificationScope(ctx, args.projectId)) }),
+    unreadNotificationCount: async (_: unknown, args: { projectId?: string | null }, ctx: Ctx) => notificationService.countUnread(await notificationScope(ctx, args.projectId)),
     billingStatement: (_: unknown, args: { month?: string | null }, ctx: Ctx) => billingService.statement(args.month, requireAdmin(ctx).isSuperAdmin),
     billingSettings: async (_: unknown, __: unknown, ctx: Ctx) => {
       requireSuperAdmin(ctx);
@@ -1421,8 +1434,8 @@ export const resolvers = {
       await requireProject(ctx, args.projectId);
       return conversationService.resolve(args.projectId, args.slug).catch(() => null);
     },
-    inbox: async (_: unknown, __: unknown, ctx: Ctx) => inboxService.build(await accessibleProjectIds(ctx)),
-    inboxCounts: async (_: unknown, __: unknown, ctx: Ctx) => inboxService.counts(await accessibleProjectIds(ctx)),
+    inbox: async (_: unknown, args: { projectId?: string | null }, ctx: Ctx) => inboxService.build(await inboxProjectIds(ctx, args.projectId)),
+    inboxCounts: async (_: unknown, args: { projectId?: string | null }, ctx: Ctx) => inboxService.counts(await inboxProjectIds(ctx, args.projectId)),
     unreadMessagesByProject: async (_: unknown, __: unknown, ctx: Ctx) => {
       const user = requireUser(ctx);
       const projects = await projectService.listForUser(user.id, { includePersonal: false });
@@ -2075,7 +2088,7 @@ export const resolvers = {
       else requireUser(ctx);
       return notificationService.markRead(args.id);
     },
-    markAllNotificationsRead: async (_: unknown, __: unknown, ctx: Ctx) => notificationService.markAllRead({ projectIds: await accessibleProjectIds(ctx), admin: requireUser(ctx).isAdmin, userId: requireUser(ctx).id }),
+    markAllNotificationsRead: async (_: unknown, args: { projectId?: string | null }, ctx: Ctx) => notificationService.markAllRead(await notificationScope(ctx, args.projectId)),
     createTask: async (_: unknown, { input }: { input: GqlTaskInput & { projectId: string; title: string } }, ctx: Ctx) => {
       await requireProject(ctx, input.projectId, 'member');
       return taskService.create(input.projectId, { ...toTaskInput(input), title: input.title }, actorOf(requireUser(ctx)));

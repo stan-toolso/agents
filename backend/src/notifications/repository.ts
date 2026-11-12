@@ -43,7 +43,9 @@ function scopeWhere(scope: NotificationScope): { where: string[]; params: unknow
   if (!scope.admin) general.push('NOT admins_only');
   const clauses = [`(${general.join(' AND ')})`];
   if (scope.userId) clauses.push(`user_id = $${params.push(scope.userId)}`);
-  return { where: [`(${clauses.join(' OR ')})`], params };
+  const where = [`(${clauses.join(' OR ')})`];
+  if (scope.onlyProjectId) where.push(`project_id = $${params.push(scope.onlyProjectId)}`);
+  return { where, params };
 }
 
 export const notificationRepository = {

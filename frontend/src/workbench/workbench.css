@@ -578,6 +578,9 @@
 /* ---- Sidebar : en-tête, recherche, filtre ----------------------------------------------------- */
 .wb-brand { display: flex; align-items: center; justify-content: space-between; }
 .wb-brand-actions { display: inline-flex; gap: 2px; }
+/* Fenêtre dédiée à un projet : le nom du projet à la place de « Skipper », sur une ligne. */
+.wb-brand a.wb-brand-project { min-width: 0; flex: 1 1 auto; margin-right: 6px; }
+.wb-brand-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .wb-brand-actions button { background: none; border: 0; color: var(--cc-dim); padding: 2px 5px; border-radius: 3px; cursor: pointer; font-size: 13px; }
 .wb-brand-actions button:hover { color: var(--cc-fg); background: var(--cc-bg-hover); }
 .wb-search-btn {
