@@ -539,6 +539,21 @@ export const gitService = {
     }
   },
 
+  /**
+   * Commits de la branche courante absents de sa branche de base, après un fetch (`actorId` : compte qui authentifie) ;
+   * null sans branche de base. 0 : la branche est déjà contenue dans la base (déjà fusionnée), rien à proposer.
+   */
+  async aheadOfBase(ref: WorkspaceRef, actorId?: string | null): Promise<{ baseBranch: string; ahead: number } | null> {
+    const cwd = await resolveRoot(ref);
+    const project = await projectService.get(ref.projectId);
+    if (project.gitUrl) await git(['fetch', '--prune', 'origin'], cwd, await authOf(ref, actorId));
+    const baseBranch = await resolveBaseBranch(cwd, project.gitBranch);
+    if (!baseBranch) return null;
+    const { stdout, code } = await gitRaw(['rev-list', '--count', `${baseBranch}..HEAD`], cwd);
+    if (code !== 0) return null;
+    return { baseBranch, ahead: Number(stdout.trim() || 0) };
+  },
+
   /** Abandonne l'opération en cours (merge, rebase, cherry-pick, revert) : le dossier revient à son état d'avant. */
   async abortOperation(ref: WorkspaceRef): Promise<void> {
     const cwd = await resolveRoot(ref);

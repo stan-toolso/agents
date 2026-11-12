@@ -41,6 +41,8 @@ const icons: Record<string, string> = {
   'schedule.failed': 'bi-alarm',
   'workflow.run': 'bi-diagram-3',
   'workflow.failed': 'bi-diagram-3',
+  'delivery.succeeded': 'bi-rocket-takeoff',
+  'delivery.failed': 'bi-rocket-takeoff',
 };
 
 const BROWSER_KEY = 'skipper.notifications.browser';

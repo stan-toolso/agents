@@ -7,6 +7,7 @@ import { pullRequestService, type PullRequest } from '../git/pullRequests.js';
 import { gitService, headCommitOf, operationOf } from '../git/service.js';
 import { instanceRegistry } from '../instances/registry.js';
 import { log } from '../log.js';
+import { notificationService } from '../notifications/service.js';
 import { projectService } from '../projects/service.js';
 import { foreignRepoOf, projectRepoName, trackedPullRequestService } from '../pullRequests/service.js';
 import type { TrackedPullRequest } from '../pullRequests/types.js';
@@ -133,6 +134,40 @@ async function step(d: Pick<Delivery, 'id' | 'sessionId' | 'kind'>, message: str
   if (d.sessionId) await traceSessionEvent(d.sessionId, 'system', { message: `${d.kind === 'deploy' ? 'Déploiement' : 'Livraison'} : ${message}`, delivery: { id: d.id, level } });
 }
 
+/**
+ * Notification de fin d'une livraison (cloche, push, canaux) pour la personne qui l'a demandée et celles qui ont rejoint
+ * le lot : sans elle, un échec en arrière-plan passe inaperçu (le bouton ne montre qu'une info-bulle).
+ */
+export function deliveryNotice(d: Delivery): { type: string; title: string; message: string | null } | null {
+  const sha = d.sha ? ` (${d.sha.slice(0, 7)})` : '';
+  const pr = d.prNumber ? `pull request #${d.prNumber}` : null;
+  if (d.kind === 'deploy') {
+    if (d.status === 'succeeded') return { type: 'delivery.succeeded', title: `Mise en production réussie${sha}`, message: d.branch ? `Branche ${d.branch}` : null };
+    if (d.status === 'failed') return { type: 'delivery.failed', title: 'Mise en production échouée', message: d.error };
+    return null;
+  }
+  const branch = d.branch ?? 'la branche';
+  if (d.status === 'succeeded') return { type: 'delivery.succeeded', title: `Livraison réussie : ${branch}`, message: pr ? `${pr} fusionnée${sha}` : null };
+  if (d.status === 'conflict') return { type: 'delivery.failed', title: `Livraison arrêtée : conflit sur ${branch}`, message: "Résolution confiée à l'agent de la session ; relancez « Livrer » une fois la résolution poussée." };
+  if (d.status === 'failed') return { type: 'delivery.failed', title: `Livraison échouée : ${branch}`, message: d.error };
+  return null;
+}
+
+/** Termine une livraison (sauf si elle a été annulée entre-temps) et prévient les personnes concernées. */
+async function finish(id: string, status: Delivery['status'], patch: Parameters<typeof deliveryRepository.finish>[2] = {}): Promise<Delivery | null> {
+  const d = await deliveryRepository.finish(id, status, patch);
+  if (d) notifyEnd(d);
+  return d;
+}
+
+function notifyEnd(d: Delivery): void {
+  const notice = deliveryNotice(d);
+  if (!notice) return;
+  const link = d.sessionId ? `/sessions/${d.sessionId}` : `/projects/${d.projectId}/deliveries`;
+  const people = [...new Set([d.requestedById, ...(d.joinedByIds ?? [])].filter((u): u is string => Boolean(u)))];
+  for (const userId of people) void notificationService.notify({ ...notice, link, projectId: d.projectId, sessionId: d.sessionId, userId, payload: { deliveryId: d.id, kind: d.kind, status: d.status } });
+}
+
 /** La livraison a-t-elle été annulée (ou terminée ailleurs) ? */
 const stillActive = async (id: string) => {
   const d = await deliveryRepository.get(id);
@@ -212,6 +247,11 @@ export const deliveryService = {
     if (status.changes.length) throw new AppError(`${status.changes.length} fichier(s) non commité(s) dans ce dossier : commitez-les (ou demandez à l'agent de le faire) avant de livrer`);
     if (!status.branch) throw new AppError('HEAD détaché : rien à livrer');
 
+    // Rien à proposer : la branche est déjà contenue dans la base (déjà fusionnée). Refusé tout de suite plutôt qu'en
+    // échec quelques secondes plus tard, en arrière-plan, quand la forge refuse d'ouvrir une PR vide.
+    const ahead = await gitService.aheadOfBase(ref, input.userId);
+    if (ahead && ahead.ahead === 0) throw new AppError(`Rien à livrer : la branche « ${status.branch} » est déjà contenue dans ${ahead.baseBranch.replace(/^origin\//, '')} (déjà fusionnée ?)`);
+
     let d: Delivery;
     try {
       d = await deliveryRepository.create({ projectId, kind: 'merge', status: 'running', requestedById: input.userId, sessionId, worksessionId, taskId, branch: status.branch, instanceId: instanceRegistry.id });
@@ -230,7 +270,7 @@ export const deliveryService = {
     const ref: WorkspaceRef = { projectId: d.projectId, worksessionId: d.worksessionId };
     const fail = async (message: string) => {
       await step(d, message, 'error');
-      await deliveryRepository.finish(d.id, 'failed', { error: message });
+      await finish(d.id, 'failed', { error: message });
     };
     try {
       const project = await projectService.get(d.projectId);
@@ -245,7 +285,7 @@ export const deliveryService = {
         if (await operationOf(cwd)) {
           const msg = "conflit en fusionnant la branche de base : résolution confiée à l'agent de la session ; relancez « Livrer » une fois la résolution poussée";
           await step(d, msg, 'warn');
-          await deliveryRepository.finish(d.id, 'conflict', { error: 'Conflit avec la branche de base' });
+          await finish(d.id, 'conflict', { error: 'Conflit avec la branche de base' });
           await requestGitConflictResolution(ref, userId, { delivery: true }).catch((err) => step(d, `l'agent n'a pas pu être saisi du conflit : ${(err as Error).message}`, 'error'));
           return;
         }
@@ -291,7 +331,7 @@ export const deliveryService = {
         if (decision.action === 'fail') return fail(decision.reason);
         if (decision.action === 'done') {
           await step(d, decision.reason, 'success');
-          await deliveryRepository.finish(d.id, 'succeeded');
+          await finish(d.id, 'succeeded');
           return;
         }
         if (decision.action === 'rebase') {
@@ -307,7 +347,7 @@ export const deliveryService = {
           await trackedPullRequestService.markMerged(d.projectId, result.pullRequest, result.sha, { type: 'human', userId });
           for (const w of result.warnings) await step(d, w, 'warn');
           await step(d, `pull request #${pr.number} fusionnée${result.sha ? ` (${result.sha.slice(0, 7)})` : ''}`, 'success');
-          await deliveryRepository.finish(d.id, 'succeeded', { sha: result.sha ?? undefined });
+          await finish(d.id, 'succeeded', { sha: result.sha ?? undefined });
         } catch (err) {
           const message = (err as Error).message;
           // La base a bougé entre la lecture et la fusion : on refusionne et on réattend la CI.
@@ -387,7 +427,7 @@ export const deliveryService = {
   async runDeploy(d: Delivery): Promise<void> {
     const fail = async (message: string) => {
       await step(d, message, 'error');
-      await deliveryRepository.finish(d.id, 'failed', { error: message });
+      await finish(d.id, 'failed', { error: message });
     };
     try {
       const config = await deliveryRepository.getConfig(d.projectId);
@@ -449,7 +489,7 @@ export const deliveryService = {
         return fail(`la commande a échoué (code ${result.exitCode ?? `signal ${result.signal}`}, ${Math.round(result.durationMs / 1000)} s)`);
       }
       await step(d, `déployé (${sha!.slice(0, 7)}, ${Math.round(result.durationMs / 1000)} s)`, 'success');
-      await deliveryRepository.finish(d.id, 'succeeded', { output });
+      await finish(d.id, 'succeeded', { output });
       const done = await deliveryRepository.get(d.id);
       if (done?.status === 'succeeded') await this.afterDeploy(done);
     } catch (err) {
@@ -552,7 +592,11 @@ export const deliveryService = {
    */
   async recover(liveInstanceIds: string[]): Promise<void> {
     const orphans = await deliveryRepository.failOrphans(liveInstanceIds, "Interrompue : l'instance du serveur qui la menait s'est arrêtée (vérifier le résultat avant de relancer)");
-    for (const o of orphans) if (o.sessionId) await traceSessionEvent(o.sessionId, 'system', { message: "Livraison interrompue : l'instance du serveur qui la menait s'est arrêtée", delivery: { id: o.id, level: 'error' } });
+    for (const o of orphans) {
+      if (o.sessionId) await traceSessionEvent(o.sessionId, 'system', { message: "Livraison interrompue : l'instance du serveur qui la menait s'est arrêtée", delivery: { id: o.id, level: 'error' } });
+      const d = await deliveryRepository.get(o.id).catch(() => null);
+      if (d) notifyEnd(d);
+    }
     if (orphans.length) log.warn(`[deliveries] ${orphans.length} livraison(s) interrompue(s) par l'arrêt d'une instance`);
     for (const projectId of await deliveryRepository.projectsWithQueuedDeploy()) await this.pump(projectId);
   },
