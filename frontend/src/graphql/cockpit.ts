@@ -218,6 +218,7 @@ export const PROJECT_TABS = gql`
   query ProjectTabs($id: ID!) {
     project(id: $id) {
       id
+      gitUrl
       tabs
       pages {
         id

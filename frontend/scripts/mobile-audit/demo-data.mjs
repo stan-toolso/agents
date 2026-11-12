@@ -220,6 +220,8 @@ const S = {
   hebdo: session('s-rapport-hebdo', P.data, 'Rapport du lundi · 03/11 08:00', { owner: U.hugo, model: 'claude-sonnet-5-5', status: 'COMPLETED', age: 60 * 24 * 4, updated: 60 * 24 * 4 - 12, cost: 2.1 }),
   revueBases: session('s-revue-bases-0711', P.site, 'Revue des bases · 07/11 12:35', { activity: 'BUSY', age: 12, updated: 0, cost: 0.31, model: 'claude-sonnet-5-5' }),
   revueBasesHier: session('s-revue-bases-0611', P.site, 'Revue des bases · 06/11 12:35', { status: 'COMPLETED', age: 60 * 24, updated: 60 * 24 - 9, cost: 0.27, model: 'claude-sonnet-5-5' }),
+  // Session de travail de l'espace personnel (projet sans dépôt git) : son explorateur montre aussi le dossier du projet.
+  budget: session('s-budget-camp', P.perso, 'Budget du camp d’été', { status: 'COMPLETED', age: 60 * 30, updated: 60 * 29, cost: 0.61 }),
   chat1: session('c-idees-blog', P.perso, 'Idées d’articles pour le blog', { kind: 'CHAT', age: 60 * 2, updated: 50, cost: 0.08 }),
   chat2: session('c-compte-rendu', P.perso, 'Résumé du comité de pilotage', { kind: 'CHAT', age: 60 * 26, updated: 60 * 25, cost: 0.05 }),
   chat3: session('c-mail-client', P.perso, 'Réponse à un client mécontent', { kind: 'CHAT', age: 60 * 50, updated: 60 * 49, cost: 0.03 }),
@@ -928,6 +930,19 @@ const sharedPageDemo = (id) => ({
   kind: 'PAGE', refreshMinutes: null, dataRefreshedAt: null, sources: [],
 });
 
+/** Arborescence factice de l'explorateur (dossier d'une session, dossier principal du projet). */
+const DEMO_TREE = {
+  session: { '': [['resultat-camp.html', 'file', 3200]] },
+  project: {
+    '': [['previsionnel', 'dir'], ['factures', 'dir'], ['notes.md', 'file', 920]],
+    previsionnel: [['model3.js', 'file', 1840], ['build3.js', 'file', 29684], ['Previsionnel_2026-2027.xlsx', 'file', 71186]],
+    factures: [],
+  },
+};
+function demoFiles(root, dir) {
+  return (DEMO_TREE[root][dir] ?? []).map(([name, kind, size]) => ({ __typename: 'FileEntry', name, path: dir ? `${dir}/${name}` : name, kind, size: size ?? null, modifiedAt: ago(60 * 24 * 36) }));
+}
+
 export const demoRoot = {
   usageReport,
   auditLog,
@@ -1026,6 +1041,9 @@ export const demoRoot = {
   deployConfig: (a) => deployConfigs[a.projectId] ?? null,
   ciStatus: (a) => ({ __typename: 'CiStatus', ref: a.ref ?? 'main', sha: '9b1e3d0a2c4f', state: 'SUCCESS', verdict: 'success', checks: [{ __typename: 'PullRequestCheck', name: 'Tests', state: 'SUCCESS', url: null }, { __typename: 'PullRequestCheck', name: 'Typecheck et build', state: 'SUCCESS', url: null }] }),
   worksession: (a) => sessions.map((s) => s.worksession).find((w) => w?.id === a.id) ?? null,
+  // Explorateur de fichiers : un dossier de session presque vide, des fichiers dans le dossier principal.
+  workspaceEntries: (a = {}) => demoFiles(a.worksessionId ? 'session' : 'project', a.path ?? ''),
+  workspaceFile: (a) => ({ __typename: 'FileContent', path: a.path, name: a.path.split('/').pop(), size: 1840, modifiedAt: ago(60 * 24 * 36), binary: false, content: `// ${a.path}\nconst hypotheses = { hausse: 0.02, effectifs: 64 };\nmodule.exports = { hypotheses };\n` }),
   vaultItems: (a = {}) => vaultItems.filter((v) => !a.kind || v.kind === a.kind),
   vaultItem: (a) => byId(vaultItems, a.id),
   vaultShareCandidates: [U.hugo, U.lea],

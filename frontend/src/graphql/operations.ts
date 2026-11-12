@@ -2036,6 +2036,7 @@ export const SESSION_WORKSPACE = gql`
         name
         slug
         workspacePath
+        gitUrl
       }
       worksession {
         id

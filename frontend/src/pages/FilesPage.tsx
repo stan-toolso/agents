@@ -9,7 +9,7 @@ import FileEditor from '../components/FileEditor';
 import PageLoading from '../components/PageLoading';
 import { useDialogs } from '../components/Dialogs';
 import { CREATE_WORKSPACE_ENTRY, DELETE_WORKSPACE_ENTRY, GIT_STATUS, RENAME_WORKSPACE_ENTRY, WORKSPACE_ENTRIES, type FileEntry, type GitStatus } from '../graphql/operations';
-import { fileIcon, filesUrl, formatSize, useWorkspaceFromRoute, type FilesTarget, type WorkspaceRef } from '../lib/files';
+import { PROJECT_ROOT_PREFIX, fileIcon, filesUrl, formatSize, resolveFilePath, useWorkspaceFromRoute, type FilesTarget, type WorkspaceRef } from '../lib/files';
 import { usePageVisible } from '../lib/usePageVisible';
 import { useGitTarget } from '../workbench/GitTargetContext';
 import { useTabTitle } from '../workbench/TabsContext';
@@ -20,8 +20,12 @@ interface TreeActions {
   deleteEntry: (entry: FileEntry) => void;
 }
 
-/** Contenu d'un dossier, chargé à l'ouverture ; chaque sous-dossier est un autre DirTree. */
-function DirTree({ wsRef, path, depth, expanded, toggle, actions, active, onOpen }: { wsRef: WorkspaceRef; path: string; depth: number; expanded: Set<string>; toggle: (p: string) => void; actions: TreeActions; active: string; onOpen: (p: string) => void }) {
+/**
+ * Contenu d'un dossier, chargé à l'ouverture ; chaque sous-dossier est un autre DirTree. `path` est relatif au dossier
+ * `wsRef` ; `prefix` (dossier principal vu depuis une session : « @projet ») préfixe les chemins de l'explorateur
+ * (dépliage, fichier actif, URL, actions).
+ */
+function DirTree({ wsRef, prefix = '', path, depth, expanded, toggle, actions, active, onOpen }: { wsRef: WorkspaceRef; prefix?: string; path: string; depth: number; expanded: Set<string>; toggle: (p: string) => void; actions: TreeActions; active: string; onOpen: (p: string) => void }) {
   const { data, loading, error } = useQuery<{ workspaceEntries: FileEntry[] }>(WORKSPACE_ENTRIES, { variables: { ...wsRef, path } });
   if (loading && !data)
     return (
@@ -30,14 +34,14 @@ function DirTree({ wsRef, path, depth, expanded, toggle, actions, active, onOpen
       </div>
     );
   // Racine d'un dossier de travail supprimé (onglet restauré) : la page entière dit qu'il n'existe plus.
-  if (depth === 0 && isGoneError(error)) return <GoneNotice what="Ce dossier de travail" />;
+  if (depth === 0 && !prefix && isGoneError(error)) return <GoneNotice what="Ce dossier de travail" />;
   if (error)
     return (
       <div className="fx-row text-danger" style={{ paddingLeft: 14 + depth * 16 }}>
         {error.message}
       </div>
     );
-  const entries = data?.workspaceEntries ?? [];
+  const entries = (data?.workspaceEntries ?? []).map((e) => ({ ...e, rel: e.path, path: prefix ? `${prefix}/${e.path}` : e.path }));
   if (!entries.length)
     return (
       <div className="fx-row fx-muted" style={{ paddingLeft: 14 + depth * 16 }}>
@@ -79,7 +83,7 @@ function DirTree({ wsRef, path, depth, expanded, toggle, actions, active, onOpen
                 <span className="fx-name">{e.name}</span>
                 {rowActions}
               </div>
-              {open && <DirTree wsRef={wsRef} path={e.path} depth={depth + 1} expanded={expanded} toggle={toggle} actions={actions} active={active} onOpen={onOpen} />}
+              {open && <DirTree wsRef={wsRef} prefix={prefix} path={e.rel} depth={depth + 1} expanded={expanded} toggle={toggle} actions={actions} active={active} onOpen={onOpen} />}
             </div>
           );
         }
@@ -102,6 +106,32 @@ function DirTree({ wsRef, path, depth, expanded, toggle, actions, active, onOpen
         );
       })}
     </>
+  );
+}
+
+/**
+ * Dossier principal du projet dans l'explorateur d'une session (projet sans dépôt git) : la session y a accès, et c'est
+ * là que sont les fichiers du projet, son propre dossier étant vide au départ. Replié par défaut.
+ */
+function ProjectRoot({ projectRoot, path, expanded, toggle, actions, active, onOpen }: { projectRoot: WorkspaceRef; path: string | null; expanded: Set<string>; toggle: (p: string) => void; actions: TreeActions; active: string; onOpen: (p: string) => void }) {
+  const open = expanded.has(PROJECT_ROOT_PREFIX);
+  return (
+    <div className="fx-root">
+      <div className="fx-row fx-dir fx-root-row" style={{ paddingLeft: 14 }} onClick={() => toggle(PROJECT_ROOT_PREFIX)} title={`Dossier du projet${path ? ` : ${path}` : ''} (la session y a accès)`}>
+        <i className={`bi bi-chevron-${open ? 'down' : 'right'} fx-chevron`} />
+        <i className="bi bi-archive fx-icon" />
+        <span className="fx-name">Dossier du projet</span>
+        <span className="fx-actions" onClick={(ev) => ev.stopPropagation()}>
+          <button type="button" title="Nouveau fichier ici" onClick={() => actions.createEntry(PROJECT_ROOT_PREFIX, 'file')}>
+            <i className="bi bi-file-earmark-plus" />
+          </button>
+          <button type="button" title="Nouveau dossier ici" onClick={() => actions.createEntry(PROJECT_ROOT_PREFIX, 'dir')}>
+            <i className="bi bi-folder-plus" />
+          </button>
+        </span>
+      </div>
+      {open && <DirTree wsRef={projectRoot} prefix={PROJECT_ROOT_PREFIX} path="" depth={1} expanded={expanded} toggle={toggle} actions={actions} active={active} onOpen={onOpen} />}
+    </div>
   );
 }
 
@@ -235,19 +265,23 @@ export default function FilesPage() {
   if (isGoneError(error) || (!error && !info)) return <GoneNotice what="Ce dossier de travail" />;
   if (error) return <Alert variant="danger">Erreur : {error.message}</Alert>;
   if (!info || !wsRef || !urlRef) return null;
+  // Chemin de l'explorateur → dossier (session ou dossier principal du projet) et chemin relatif.
+  const at = (p: string) => resolveFilePath(info, p);
+  const where = (dir: string) => (dir === PROJECT_ROOT_PREFIX ? 'À la racine du dossier du projet' : dir ? <>Dans <code>{dir}</code></> : 'À la racine du dossier de travail');
 
   const actions: TreeActions = {
     createEntry: async (dir, kind) => {
       const name = await prompt({
         title: kind === 'dir' ? 'Nouveau dossier' : 'Nouveau fichier',
-        message: dir ? <>Dans <code>{dir}</code></> : 'À la racine du dossier de travail',
+        message: where(dir),
         placeholder: kind === 'dir' ? 'nom-du-dossier' : 'nom-du-fichier.ext',
         confirmLabel: 'Créer',
       });
       if (!name) return;
       setActionError(null);
       const p = dir ? `${dir}/${name}` : name;
-      await createEntry({ variables: { ...wsRef, path: p, kind } });
+      const target = at(p);
+      await createEntry({ variables: { ...target.ref, path: target.rel, kind } });
       if (dir && !expanded.has(dir)) toggle(dir);
       if (kind === 'file') openFile(p);
     },
@@ -257,7 +291,8 @@ export default function FilesPage() {
       setActionError(null);
       const parent = entry.path.includes('/') ? entry.path.slice(0, entry.path.lastIndexOf('/')) : '';
       const newPath = parent ? `${parent}/${name}` : name;
-      await renameEntry({ variables: { ...wsRef, path: entry.path, newPath } });
+      const from = at(entry.path);
+      await renameEntry({ variables: { ...from.ref, path: from.rel, newPath: at(newPath).rel } });
       if (open.includes(entry.path)) {
         const next = open.map((p) => (p === entry.path ? newPath : p));
         setOpen(next);
@@ -279,7 +314,8 @@ export default function FilesPage() {
       });
       if (!ok) return;
       setActionError(null);
-      await deleteEntry({ variables: { ...wsRef, path: entry.path } });
+      const target = at(entry.path);
+      await deleteEntry({ variables: { ...target.ref, path: target.rel } });
       const gone = open.filter((p) => p === entry.path || p.startsWith(`${entry.path}/`));
       if (gone.length) {
         const next = open.filter((p) => !gone.includes(p));
@@ -342,7 +378,11 @@ export default function FilesPage() {
       ) : (
         <div className="fx-split">
           <div className="fx-tree">
+            {info.projectRoot && <div className="fx-section">Dossier de la session</div>}
             <DirTree wsRef={wsRef} path="" depth={0} expanded={expanded} toggle={toggle} actions={actions} active={filePath} onOpen={openFile} />
+            {info.projectRoot && (
+              <ProjectRoot projectRoot={info.projectRoot} path={info.projectPath} expanded={expanded} toggle={toggle} actions={actions} active={filePath} onOpen={openFile} />
+            )}
           </div>
           <div className="fx-main">
             {open.length > 0 && (
@@ -368,7 +408,7 @@ export default function FilesPage() {
               </div>
             )}
             {filePath ? (
-              <FileEditor key={`${wsKey}:${filePath}`} wsRef={wsRef} path={filePath} refreshKey={refreshKey} onDirty={(d) => setDirty((prev) => (prev[filePath] === d ? prev : { ...prev, [filePath]: d }))} />
+              <FileEditor key={`${wsKey}:${filePath}`} wsRef={at(filePath).ref} path={at(filePath).rel} refreshKey={refreshKey} onDirty={(d) => setDirty((prev) => (prev[filePath] === d ? prev : { ...prev, [filePath]: d }))} />
             ) : (
               <div className="fx-empty">
                 <i className="bi bi-file-earmark-text" />

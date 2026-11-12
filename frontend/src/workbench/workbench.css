@@ -403,6 +403,10 @@
 .fx-row:hover .fx-actions { display: inline-flex; }
 .fx-actions button { background: none; border: 0; color: var(--cc-dim); padding: 0 4px; font-size: 12px; cursor: pointer; }
 .fx-actions button:hover { color: var(--cc-accent); }
+/* Explorateur d'une session d'un projet sans dépôt git : son dossier, puis le dossier principal du projet. */
+.fx-section { padding: 4px 14px 2px; color: var(--cc-dimmer); font-family: var(--bs-body-font-family); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.fx-root { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--cc-border); }
+.fx-root-row .fx-name { font-weight: 600; }
 
 /* Éditeur de fichier */
 .fe-page { display: flex; flex-direction: column; height: 100%; background: var(--cc-bg); }

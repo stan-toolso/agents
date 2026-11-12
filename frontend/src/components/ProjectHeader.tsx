@@ -9,12 +9,13 @@ import { usePollingQuery } from '../lib/usePollingQuery';
 import { useSessionLauncher } from './SessionLauncher';
 import { openProjectWindow, projectWindowId } from '../lib/projectWindow';
 
-export type ProjectTab = 'overview' | 'conversations' | 'chats' | 'repo' | 'tasks' | 'artifacts' | 'agents' | 'pullRequests' | 'deliveries' | 'context' | 'vault' | 'env' | 'schedules' | 'workflows' | 'history' | 'audit' | 'usage' | 'settings' | `page:${string}`;
+export type ProjectTab = 'overview' | 'conversations' | 'chats' | 'repo' | 'files' | 'tasks' | 'artifacts' | 'agents' | 'pullRequests' | 'deliveries' | 'context' | 'vault' | 'env' | 'schedules' | 'workflows' | 'history' | 'audit' | 'usage' | 'settings' | `page:${string}`;
 
 export const TABS: { key: ProjectTab; label: string; path: string; icon: string; title?: string; absolute?: boolean }[] = [
   { key: 'overview', label: 'Tableau de bord', path: '', icon: 'bi-speedometer2', title: 'Ce qui attend une réponse, l’équipe au travail, le flux des tâches et la consommation du projet' },
   { key: 'conversations', label: 'Conversations', path: '/conversations', icon: 'bi-chat-left-text', title: 'Canaux de conversation d’équipe : mentionnez les personnes et les agents du projet, qui répondent dans le fil' },
   { key: 'repo', label: 'Dépôt', path: '/repo', icon: 'bi-code-square', title: 'Dépôt git : branches, commits et fichiers ; dépôt hébergé par Skipper et ses sauvegardes' },
+  { key: 'files', label: 'Fichiers', path: '/files', icon: 'bi-folder2-open', title: 'Dossier du projet sur le serveur : parcourir, lire et modifier ses fichiers (projets sans dépôt git ; ceux d’un dépôt se lisent dans Dépôt)' },
   { key: 'tasks', label: 'Tâches', path: '/tasks', icon: 'bi-check2-square' },
   { key: 'artifacts', label: 'Artefacts', path: '/artifacts', icon: 'bi-collection', title: 'Artefacts du projet : pages, tableaux de bord et diapositives publiés par les agents ; en créer un, en mettre en favori' },
   { key: 'agents', label: 'Agents', path: '/agents', icon: 'bi-robot', title: 'Agents du projet (Product Manager, Developer…) : membres qui ne sont pas des personnes, avec leurs comptes, instructions et déclencheurs' },
@@ -50,7 +51,7 @@ const GUEST_TABS: typeof TABS = TABS.filter((t) => t.key === 'conversations');
 const PERSONAL_TABS: typeof TABS = [
   { key: 'overview', label: 'Aperçu', path: '', icon: 'bi-person-circle' },
   { key: 'chats', label: 'Chats', path: '/chats', icon: 'bi-chat-left-text', title: 'Conversations légères, sans dossier de travail, avec accès à tous vos projets', absolute: true },
-  ...TABS.filter((t) => t.key === 'tasks' || t.key === 'artifacts' || t.key === 'schedules' || t.key === 'context' || t.key === 'vault' || t.key === 'env' || t.key === 'history'),
+  ...TABS.filter((t) => t.key === 'files' || t.key === 'tasks' || t.key === 'artifacts' || t.key === 'schedules' || t.key === 'context' || t.key === 'vault' || t.key === 'env' || t.key === 'history'),
 ];
 
 export interface ProjectHeaderProject {
@@ -74,8 +75,10 @@ export default function ProjectHeader({ project, active, actions }: { project: P
   const personal = Boolean(project.isPersonal);
   // Onglets masqués, ordre et pages personnalisées : une requête légère, partagée par toutes les pages du projet (cache).
   // Pas pour un invité (ces champs lui sont fermés) : il n'a que les conversations.
-  const { data: tabsData } = useQuery<{ project: { id: string; tabs: ProjectTabsSetting | null; pages: ProjectPageInfo[] } | null }>(PROJECT_TABS, { variables: { id: project.id }, skip: personal || guest, fetchPolicy: 'cache-first' });
-  const tabs = personal ? PERSONAL_TABS : guest ? GUEST_TABS : effectiveTabs(TABS, tabsData?.project?.tabs, tabsData?.project?.pages ?? []);
+  const { data: tabsData } = useQuery<{ project: { id: string; gitUrl: string | null; tabs: ProjectTabsSetting | null; pages: ProjectPageInfo[] } | null }>(PROJECT_TABS, { variables: { id: project.id }, skip: personal || guest, fetchPolicy: 'cache-first' });
+  // « Fichiers » : seulement pour un projet sans dépôt git (sinon « Dépôt » montre les fichiers, et le checkout principal n'est pas où l'on travaille).
+  const projectTabs = tabsData?.project && !tabsData.project.gitUrl ? TABS : TABS.filter((t) => t.key !== 'files');
+  const tabs = personal ? PERSONAL_TABS : guest ? GUEST_TABS : effectiveTabs(projectTabs, tabsData?.project?.tabs, tabsData?.project?.pages ?? []);
   return (
     <>
       <div className="d-flex align-items-start justify-content-between flex-wrap gap-2 mb-2">
