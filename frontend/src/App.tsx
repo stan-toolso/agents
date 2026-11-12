@@ -20,6 +20,9 @@ const ConversationsPage = lazy(() => import('./pages/ConversationsPage'));
 import TaskPage from './pages/TaskPage';
 import PersonalSpaceRedirect from './pages/PersonalSpaceRedirect';
 import PageLoading from './components/PageLoading';
+import ProjectWindowNotice from './components/ProjectWindowNotice';
+import { projectWindowId, projectWindowRoute } from './lib/projectWindow';
+import { useTabs } from './workbench/TabsContext';
 
 // Pages chargées à la demande (découpage du bundle) : éditeurs CodeMirror (fichiers, contexte), terminal xterm,
 // graphe des workflows (xyflow, dagre) et pages rarement ouvertes restent hors du bundle principal, que
@@ -57,6 +60,15 @@ const GuestLayout = lazy(() => import('./components/GuestLayout'));
 
 /** Routes des pages ; `location` est celle de l'onglet rendu (figée pour un onglet caché). */
 function PageRoutes({ location, isAdmin }: { location: Location; isAdmin: boolean }) {
+  const { workspaces } = useTabs();
+  // Fenêtre dédiée à un projet : une page d'un autre projet (ou la session d'un autre projet) ne s'y affiche pas.
+  if (projectWindowId) {
+    const route = projectWindowRoute(location.pathname, projectWindowId);
+    const wsKey = workspaces.keyOf(location.pathname);
+    const ws = wsKey ? workspaces.get(wsKey) : undefined;
+    const otherSession = Boolean(ws) && ws!.projectId !== projectWindowId;
+    if ((route && 'foreign' in route) || otherSession) return <ProjectWindowNotice pathname={location.pathname} search={location.search} />;
+  }
   return (
     <Suspense fallback={<PageLoading className="p-3" />}>
       <Routes location={location}>

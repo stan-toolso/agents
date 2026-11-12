@@ -40,6 +40,8 @@ export interface SearchScope {
   memberProjectIds: string[];
   /** Projets interrogés (tous pour un super administrateur). */
   projectIds: string[];
+  /** Fenêtre dédiée à un projet : les éléments du coffre se limitent à ceux de ce projet (projectIds ne contient alors que lui). */
+  onlyProjectId?: string;
 }
 
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
@@ -115,7 +117,7 @@ export const searchService = {
         const items = await vaultService.listAccessible(scope.userId);
         const q = normalize(query.trim());
         const ws = q.split(/\s+/).filter(Boolean);
-        const matching = items.filter((i) => ws.every((w) => normalize(`${i.name} ${i.description} ${JSON.stringify(i.settings)}`).includes(w)));
+        const matching = items.filter((i) => (!scope.onlyProjectId || i.ownerProjectId === scope.onlyProjectId) && ws.every((w) => normalize(`${i.name} ${i.description} ${JSON.stringify(i.settings)}`).includes(w)));
         const rank = (name: string) => (!q ? 2 : normalize(name).startsWith(q) ? 0 : normalize(name).includes(q) ? 1 : 2);
         matching.sort((a, b) => rank(a.name) - rank(b.name) || b.updatedAt.getTime() - a.updatedAt.getTime());
         if (!matching.length) return null;

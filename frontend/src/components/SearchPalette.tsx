@@ -7,6 +7,7 @@ import type { SearchHit } from '../graphql/operations';
 import { canAutoFocus } from '../lib/device';
 import { timeAgo } from '../lib/humanize';
 import { useShortcut } from '../lib/useShortcut';
+import { projectWindowId } from '../lib/projectWindow';
 
 interface State {
   openSearch: () => void;
@@ -97,7 +98,7 @@ function Palette({ onClose }: { onClose: () => void }) {
   }, [text]);
   const kinds = filter === 'ALL' || filter === 'PAGES' ? null : [filter];
   const limit = filter === 'ALL' ? (query ? 6 : 5) : expanded ? 50 : 15;
-  const { data, previousData, loading } = useQuery<{ search: { groups: { kind: Kind; total: number; hits: SearchHit[] }[] } }>(SEARCH, { variables: { query, kinds, limit }, skip: filter === 'PAGES', fetchPolicy: 'cache-and-network', nextFetchPolicy: 'cache-first' });
+  const { data, previousData, loading } = useQuery<{ search: { groups: { kind: Kind; total: number; hits: SearchHit[] }[] } }>(SEARCH, { variables: { query, kinds, limit, projectId: projectWindowId }, skip: filter === 'PAGES', fetchPolicy: 'cache-and-network', nextFetchPolicy: 'cache-first' });
   const groups = (data ?? previousData)?.search.groups ?? [];
   const pages = useMemo(() => {
     if (!query && filter !== 'PAGES') return [];

@@ -11,6 +11,7 @@ import { useTabs, type Tab, type TabKind } from './TabsContext';
 import { useGitPanel } from './GitTargetContext';
 import { useRenameSession, type RenamableSession } from './RenameSession';
 import type { WorkspaceIndex } from './workspaces';
+import { projectWindowId } from '../lib/projectWindow';
 
 /** Session ou chat affiché par un onglet (renommable par double-clic ou clic droit), sinon null. */
 function renamableOf(tab: Tab, workspaces: WorkspaceIndex): RenamableSession | null {
@@ -211,7 +212,7 @@ export default function TabBar({ onToggleSidebar, sidebarOpen = false, sidebarCo
   }, [activeKey, tabs.length]);
 
   // Sur mobile la sidebar est un tiroir fermé : le compteur « À traiter » se voit sur le bouton menu.
-  const { data: inboxData } = usePollingQuery<{ inboxCounts: { total: number } }>(INBOX_COUNTS, { pollInterval: 5000, skip: !onToggleSidebar });
+  const { data: inboxData } = usePollingQuery<{ inboxCounts: { total: number } }>(INBOX_COUNTS, { variables: { projectId: projectWindowId }, pollInterval: 5000, skip: !onToggleSidebar });
   const inboxTotal = inboxData?.inboxCounts.total ?? 0;
 
   return (

@@ -33,4 +33,6 @@ export interface NotificationScope {
   admin?: boolean;
   /** Personne connectée : voit aussi les notifications qui lui sont adressées, jamais celles adressées à d'autres. */
   userId?: string;
+  /** Fenêtre d'un projet : seulement les notifications de ce projet (ni celles d'autres projets, ni celles sans projet). */
+  onlyProjectId?: string;
 }

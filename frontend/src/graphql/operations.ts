@@ -1961,8 +1961,8 @@ export const TASK_LAUNCH_TARGETS = gql`
 `;
 
 export const NOTIFICATIONS = gql`
-  query Notifications($limit: Int) {
-    notifications(limit: $limit) {
+  query Notifications($limit: Int, $projectId: ID) {
+    notifications(limit: $limit, projectId: $projectId) {
       id
       type
       title
@@ -1975,7 +1975,7 @@ export const NOTIFICATIONS = gql`
         name
       }
     }
-    unreadNotificationCount
+    unreadNotificationCount(projectId: $projectId)
   }
 `;
 
@@ -1989,8 +1989,8 @@ export const MARK_NOTIFICATION_READ = gql`
 `;
 
 export const MARK_ALL_NOTIFICATIONS_READ = gql`
-  mutation MarkAllNotificationsRead {
-    markAllNotificationsRead
+  mutation MarkAllNotificationsRead($projectId: ID) {
+    markAllNotificationsRead(projectId: $projectId)
   }
 `;
 
@@ -2838,8 +2838,8 @@ export interface Inbox {
 
 /** Compteurs seuls, sondés par la sidebar (badge de « À traiter »). */
 export const INBOX_COUNTS = gql`
-  query InboxCounts {
-    inboxCounts {
+  query InboxCounts($projectId: ID) {
+    inboxCounts(projectId: $projectId) {
       requests
       failedSessions
       interruptedSessions
@@ -2855,8 +2855,8 @@ export const INBOX = gql`
   ${REQUEST_FIELDS}
   ${TRACKED_PULL_REQUEST_FIELDS}
   ${TASK_FIELDS}
-  query Inbox {
-    inbox {
+  query Inbox($projectId: ID) {
+    inbox(projectId: $projectId) {
       generatedAt
       counts {
         requests
