@@ -27,6 +27,9 @@ export interface CockpitState {
   /** Version vue par la personne la dernière fois (pour signaler un changement fait ailleurs). */
   changedElsewhere: CockpitLayoutData | null;
   acknowledge: () => void;
+  /** Avertissements du dernier enregistrement (artefact invisible pour l'équipe…). */
+  warnings: string[];
+  clearWarnings: () => void;
 }
 
 const EMPTY: WidgetDef[] = [];
@@ -39,6 +42,7 @@ export function useCockpit(scope: string | null): CockpitState {
   const [editing, setEditing] = useState(false);
   const [seenVersion, setSeenVersion] = useState<number | null>(null);
   const [changedElsewhere, setChangedElsewhere] = useState<CockpitLayoutData | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [update, { loading: saving }] = useMutation<{ updateCockpitLayout: CockpitLayoutData }>(UPDATE_COCKPIT_LAYOUT);
   const [resetMutation] = useMutation<{ resetCockpitLayout: CockpitLayoutData }>(RESET_COCKPIT_LAYOUT);
   const [restoreMutation] = useMutation<{ restoreCockpitLayout: CockpitLayoutData }>(RESTORE_COCKPIT_LAYOUT);
@@ -78,7 +82,10 @@ export function useCockpit(scope: string | null): CockpitState {
       try {
         const res = await update({ variables: { scope, layout: draft, note: note ?? null } });
         const saved = res.data?.updateCockpitLayout;
-        if (saved) setSeenVersion(saved.version);
+        if (saved) {
+          setSeenVersion(saved.version);
+          setWarnings(saved.warnings ?? []);
+        }
         setEditing(false);
         setDraftState(null);
       } catch (err) {
@@ -132,5 +139,7 @@ export function useCockpit(scope: string | null): CockpitState {
     restore,
     changedElsewhere,
     acknowledge: () => setChangedElsewhere(null),
+    warnings,
+    clearWarnings: () => setWarnings([]),
   };
 }

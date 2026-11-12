@@ -2498,6 +2498,8 @@ type SharedPage {
   owner: User!
   "Visible par quiconque est connecté et a le lien."
   linkAccess: Boolean!
+  "Visible par tout membre du projet d'origine (sauf les invités) : nécessaire pour l'épingler dans un tableau de bord partagé."
+  projectAccess: Boolean!
   version: Int!
   createdAt: DateTime!
   updatedAt: DateTime!
@@ -2648,6 +2650,8 @@ input SharedPageInput {
   title: String
   description: String
   linkAccess: Boolean
+  "Ouvrir (ou fermer) l'artefact aux membres de son projet."
+  projectAccess: Boolean
   agentHandoff: SharedPageAgentHandoff
   "Artefact de données : intervalle du rafraîchissement automatique en minutes (5 à 10080) ; 0 ou null : à la demande."
   refreshMinutes: Int
@@ -4627,6 +4631,26 @@ type CockpitLayout {
   updatedBy: User
   "Blocs natifs qu'on peut placer dans cette portée."
   catalog: [CockpitWidget!]!
+  "Les artefacts épinglés dans l'agencement, vus par la personne connectée (viewable false : hors de portée pour elle)."
+  artifacts: [CockpitArtifact!]!
+  "Avertissements du dernier enregistrement (artefact non visible par l'équipe…)."
+  warnings: [String!]!
+}
+
+"Un artefact épinglé dans un agencement, tel que la personne connectée le voit."
+type CockpitArtifact {
+  id: ID!
+  "La personne connectée peut l'ouvrir."
+  viewable: Boolean!
+  title: String
+  kind: ArtifactKind
+  version: Int
+  dataRefreshedAt: DateTime
+  linkAccess: Boolean
+  projectAccess: Boolean
+  owner: User
+  "La personne connectée administre l'artefact (propriétaire ou administrateur de Skipper)."
+  canManage: Boolean!
 }
 
 type CockpitLayoutVersion {
@@ -4655,4 +4679,6 @@ extend type Mutation {
   resetCockpitLayout(scope: String!): CockpitLayout!
   "Remet une ancienne version en tête (nouvelle version)."
   restoreCockpitLayout(scope: String!, version: Int!): CockpitLayout!
+  "Épingle un artefact dans une portée (bloc artefact en fin de région ; nouvelle version)."
+  pinArtifactToCockpit(scope: String!, artifactId: ID!, region: String, title: String): CockpitLayout!
 }

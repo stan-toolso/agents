@@ -109,6 +109,22 @@ export interface ResolvedLayout {
   updatedById: string | null;
   /** La personne peut modifier cet agencement. */
   canEdit: boolean;
+  /** Avertissements du dernier enregistrement (artefact invisible pour l'équipe…). */
+  warnings?: string[];
+}
+
+/** Un artefact épinglé, tel que la personne le voit (viewable false : rien d'autre n'est révélé). */
+export interface CockpitArtifactView {
+  id: string;
+  viewable: boolean;
+  title: string | null;
+  kind: string | null;
+  version: number | null;
+  dataRefreshedAt: Date | null;
+  linkAccess: boolean | null;
+  projectAccess: boolean | null;
+  ownerId: string | null;
+  canManage: boolean;
 }
 
 export interface LayoutVersion {

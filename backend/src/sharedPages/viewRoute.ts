@@ -3,11 +3,24 @@ import { authSession, readCookie, SESSION_COOKIE } from '../auth/session.js';
 import { config } from '../config.js';
 import { AppError } from '../errors.js';
 import { artifactDataService } from './dataService.js';
-import { INJECT_MAX_BYTES, injectCommentScript, injectDataScript, injectSlidesScript } from './inject.js';
+import { embedStyle, parseEmbedTheme } from '../cockpit/embedTheme.js';
+import { projectService } from '../projects/service.js';
+import { INJECT_MAX_BYTES, injectCommentScript, injectDataScript, injectEmbed, injectSlidesScript } from './inject.js';
 import { sharedPageRepository } from './repository.js';
 import { downloadName, sharedPageService } from './service.js';
 
 const ROUTE = /^\/api\/shared\/([0-9a-f-]{36})$/;
+
+/** Paramètres d'un bloc (JSON dans l'URL) : un objet, 4 Ko au plus ; sinon vide. */
+function parseParams(raw: string | null): Record<string, unknown> {
+  if (!raw || raw.length > 4096) return {};
+  try {
+    const v = JSON.parse(raw) as unknown;
+    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
 
 /**
  * GET /api/shared/<id>[?v=N][&download=1] : contenu HTML d'une page partagée, servi dans un bac à sable
@@ -58,7 +71,22 @@ export async function handleSharedPageRoute(req: IncomingMessage, res: ServerRes
       const mode = url.searchParams.get('print') === '1' ? 'print' : url.searchParams.get('thumb') === '1' ? 'thumb' : 'view';
       html = Buffer.from(injectSlidesScript(html.toString('utf8'), mode), 'utf8');
     }
-    if (!raw) html = Buffer.from(injectCommentScript(html.toString('utf8')), 'utf8');
+    // Bloc d'un tableau de bord (`embed=1`) : style du thème, contexte du bloc et script d'intégration ; pas de commentaires
+    // (on commente depuis la page entière). Les paramètres du bloc arrivent en JSON (`params`), bornés.
+    const embed = !raw && url.searchParams.get('embed') === '1';
+    if (embed) {
+      const theme = parseEmbedTheme(url.searchParams.get('theme'));
+      const project = page.projectId ? await projectService.get(page.projectId).catch(() => null) : null;
+      const context = {
+        scope: (url.searchParams.get('scope') ?? '').slice(0, 120),
+        params: parseParams(url.searchParams.get('params')),
+        viewer: { id: user.id, name: user.name },
+        project: project ? { id: project.id, name: project.name } : null,
+        artifact: { id: page.id, version: content.version, kind },
+        theme,
+      };
+      html = Buffer.from(injectEmbed(html.toString('utf8'), { style: embedStyle(theme), context }), 'utf8');
+    } else if (!raw) html = Buffer.from(injectCommentScript(html.toString('utf8')), 'utf8');
     res.writeHead(200, {
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Length': html.length,

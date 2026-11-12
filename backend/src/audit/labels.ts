@@ -162,6 +162,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'conversation.update': 'a modifié le canal',
   'conversation.archive': 'a archivé ou rouvert le canal',
   'cockpit.update': "a modifié l'agencement du tableau de bord",
+  'cockpit.pin': "a épinglé un artefact dans le tableau de bord",
   'cockpit.reset': "a réinitialisé l'agencement du tableau de bord",
   'cockpit.restore': "a restauré une version de l'agencement du tableau de bord",
   'page.publish': 'a publié la page',

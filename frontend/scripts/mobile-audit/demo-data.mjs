@@ -230,7 +230,7 @@ const scheduleRun = (id, s, status, startedMin, over = {}) => ({
 });
 // Pages partagées : une à moi (fenêtre « Partager »), une partagée avec moi avec un message (bandeau du message).
 const demoSharedPage = (id, title, owner, members, extra = {}) => ({
-  __typename: 'SharedPage', id, title, description: null, owner, linkAccess: false, version: 1, createdAt: ago(60 * 24), updatedAt: ago(60 * 3),
+  __typename: 'SharedPage', id, title, description: null, owner, linkAccess: false, projectAccess: false, version: 1, createdAt: ago(60 * 24), updatedAt: ago(60 * 3),
   members: members.map(([u, message]) => ({ __typename: 'SharedPageMember', user: u, addedBy: owner, addedAt: ago(60 * 20), message })),
   versions: [{ __typename: 'SharedPageVersion', version: 1, size: 18_400, createdBy: owner, createdAt: ago(60 * 24), kind: extra.kind ?? 'PAGE', refreshMinutes: extra.refreshMinutes ?? null, sourceCount: extra.kind === 'DATA' ? (extra.sources ?? []).length : null }],
   project: null, session: null, sourcePath: null, comments: [], openComments: 0, agentHandoff: 'MANUAL', historyEnabled: true, kind: 'PAGE', refreshMinutes: null, dataRefreshedAt: null, sources: [], favorite: false,
@@ -741,6 +741,13 @@ const cockpitLayout = (scope) => {
     __typename: 'CockpitLayout', scope, kind, projectId: kind === 'project' ? scope.replace(/^project:/, '') : null,
     layout: st?.layout ?? cockpitDefault(scope), version: st?.version ?? 0, isDefault: !st?.layout, canEdit: true,
     updatedAt: st ? ago(0) : null, updatedBy: st ? U.me : null, catalog: COCKPIT_CATALOG.filter((w) => w.scopes.includes(kind)),
+    artifacts: (st?.layout ?? cockpitDefault(scope)).blocks.filter((b) => b.kind === 'artifact').map((b) => {
+      const pg = sharedPagesDemo.find((x) => x.id === b.artifact);
+      return pg
+        ? { __typename: 'CockpitArtifact', id: pg.id, viewable: true, title: pg.title, kind: pg.kind, version: pg.version, dataRefreshedAt: pg.dataRefreshedAt, linkAccess: pg.linkAccess, projectAccess: pg.projectAccess, owner: pg.owner, canManage: pg.owner === U.me }
+        : { __typename: 'CockpitArtifact', id: b.artifact, viewable: false, title: null, kind: null, version: null, dataRefreshedAt: null, linkAccess: null, projectAccess: null, owner: null, canManage: false };
+    }),
+    warnings: st?.warnings ?? [],
   };
 };
 
@@ -875,6 +882,7 @@ const sharedPageDemo = (id) => ({
   description: null,
   owner: U.me,
   linkAccess: true,
+  projectAccess: false,
   members: [],
   project: P.site,
   session: S.tarifs,
@@ -930,6 +938,16 @@ export const demoRoot = {
     const v = (cockpitState.layouts.get(a.scope)?.version ?? 0) + 1;
     cockpitState.layouts.set(a.scope, { layout: null, version: v });
     cockpitState.versions.push({ __typename: 'CockpitLayoutVersion', scope: a.scope, version: v, layout: cockpitDefault(a.scope), reset: true, author: U.me, sessionId: null, note: null, createdAt: ago(0) });
+    return cockpitLayout(a.scope);
+  },
+  pinArtifactToCockpit: (a) => {
+    const cur = cockpitState.layouts.get(a.scope)?.layout ?? cockpitDefault(a.scope);
+    const pg = sharedPagesDemo.find((x) => x.id === a.artifactId);
+    const layout = { v: 1, blocks: [...cur.blocks, { id: `b${cockpitState.versions.length + 1}`, kind: 'artifact', artifact: a.artifactId, region: a.region ?? 'full', ...(a.title ? { title: a.title } : {}) }] };
+    const v = (cockpitState.layouts.get(a.scope)?.version ?? 0) + 1;
+    const warnings = a.scope !== 'home' && pg && !pg.linkAccess && !pg.projectAccess ? [`« ${pg.title} » n'est ouvert ni aux membres du projet ni par le lien : les autres membres ne le verront pas.`] : [];
+    cockpitState.layouts.set(a.scope, { layout, version: v, warnings });
+    cockpitState.versions.push({ __typename: 'CockpitLayoutVersion', scope: a.scope, version: v, layout, reset: false, author: U.me, sessionId: null, note: 'Artefact épinglé', createdAt: ago(0) });
     return cockpitLayout(a.scope);
   },
   restoreCockpitLayout: (a) => {

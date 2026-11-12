@@ -803,6 +803,12 @@ export const resolvers = {
     projectId: (r: ResolvedLayout) => r.scope.projectId,
     updatedBy: (r: ResolvedLayout) => (r.updatedById ? userRepository.findById(r.updatedById) : null),
     catalog: (r: ResolvedLayout) => cockpitService.catalog(r.scope.kind),
+    artifacts: (r: ResolvedLayout, _: unknown, ctx: Ctx) => cockpitService.artifactsFor(requireUser(ctx), r.layout),
+    warnings: (r: ResolvedLayout) => r.warnings ?? [],
+  },
+  CockpitArtifact: {
+    owner: (a: { ownerId: string | null }) => (a.ownerId ? userRepository.findById(a.ownerId) : null),
+    kind: (a: { kind: string | null }) => (a.kind ? a.kind.toUpperCase() : null),
   },
   CockpitLayoutVersion: {
     author: (v: { authorId: string | null }) => (v.authorId ? userRepository.findById(v.authorId) : null),
@@ -2282,7 +2288,7 @@ export const resolvers = {
       const file = await readRawFile(args, args.path);
       return sharedPageService.publish({ ownerId: requireUser(ctx).id, title: args.title, html: file.data, pageId: args.pageId ?? null, projectId: args.projectId, sourcePath: args.path });
     },
-    updateSharedPage: async (_: unknown, args: { id: string; input: { title?: string | null; description?: string | null; linkAccess?: boolean | null; agentHandoff?: string | null; refreshMinutes?: number | null } }, ctx: Ctx) => {
+    updateSharedPage: async (_: unknown, args: { id: string; input: { title?: string | null; description?: string | null; linkAccess?: boolean | null; projectAccess?: boolean | null; agentHandoff?: string | null; refreshMinutes?: number | null } }, ctx: Ctx) => {
       const user = requireUser(ctx);
       const { agentHandoff, ...input } = args.input;
       if (agentHandoff === 'AUTO') {
@@ -2302,6 +2308,7 @@ export const resolvers = {
     updateCockpitLayout: async (_: unknown, args: { scope: string; layout: unknown; note?: string | null }, ctx: Ctx) => (await cockpitService.update(requireUser(ctx), args.scope, { layout: args.layout, note: args.note })).result,
     resetCockpitLayout: (_: unknown, args: { scope: string }, ctx: Ctx) => cockpitService.reset(requireUser(ctx), args.scope),
     restoreCockpitLayout: (_: unknown, args: { scope: string; version: number }, ctx: Ctx) => cockpitService.restore(requireUser(ctx), args.scope, args.version),
+    pinArtifactToCockpit: async (_: unknown, args: { scope: string; artifactId: string; region?: string | null; title?: string | null }, ctx: Ctx) => (await cockpitService.pin(requireUser(ctx), args.scope, { artifactId: args.artifactId, region: args.region, title: args.title })).result,
     duplicateSharedPage: (_: unknown, args: { id: string; title?: string | null; version?: number | null }, ctx: Ctx) => sharedPageService.duplicate(requireUser(ctx), args.id, { title: args.title, version: args.version }),
     deleteAllSharedPageComments: (_: unknown, args: { id: string }, ctx: Ctx) => sharedPageService.deleteAllComments(requireUser(ctx), args.id),
     addSharedPageComment: (_: unknown, args: { pageId: string; body: string; anchor?: unknown; version?: number | null }, ctx: Ctx) =>

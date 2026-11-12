@@ -1,16 +1,23 @@
-import { useQuery } from '@apollo/client';
+import { useMutation, useQuery } from '@apollo/client';
 import { useState } from 'react';
 import { Badge, Button, Form, Modal, Nav, Spinner } from 'react-bootstrap';
 import { useSessionLauncher } from '../components/SessionLauncher';
 import TagsInput from '../components/TagsInput';
-import { COCKPIT_LAYOUT_HISTORY, type CockpitLayoutVersion } from '../graphql/cockpit';
+import { COCKPIT_LAYOUT_HISTORY, COCKPIT_PINNABLE_PAGES, OPEN_PAGE_TO_PROJECT, type CockpitLayoutVersion, type PinnablePage } from '../graphql/cockpit';
 import { timeAgo } from '../lib/humanize';
 import type { CockpitContext } from './registry';
 import { REGION_LABELS, newBlockId, type Block, type BlockParams, type Layout, type Region, type WidgetDef, type WidgetParam } from './types';
 
 /** Fenêtres du mode « Personnaliser » : catalogue (ajouter un bloc), réglages d'un bloc, historique des versions. */
 
-type Pane = 'builtin' | 'agent';
+type Pane = 'builtin' | 'artifacts' | 'agent';
+
+/** Icônes des types d'artefacts (copie volontaire de ARTIFACT_KINDS de pages/SharedPagesPage, page chargée à la demande). */
+const KIND_ICONS: Record<string, { icon: string; label: string }> = {
+  PAGE: { icon: 'bi-file-earmark-richtext', label: 'Page' },
+  DATA: { icon: 'bi-bar-chart-line', label: 'Données' },
+  SLIDES: { icon: 'bi-easel', label: 'Diapositives' },
+};
 
 export function AddBlockModal({ region, catalog, layout, ctx, scope, onClose, onAdd }: { region: Region; catalog: WidgetDef[]; layout: Layout; ctx: CockpitContext; scope: string; onClose: () => void; onAdd: (block: Block) => void }) {
   const [pane, setPane] = useState<Pane>('builtin');
@@ -33,6 +40,7 @@ export function AddBlockModal({ region, catalog, layout, ctx, scope, onClose, on
       <Modal.Body>
         <Nav variant="underline" activeKey={pane} onSelect={(k) => setPane((k as Pane) ?? 'builtin')} className="mb-3">
           <Nav.Item><Nav.Link eventKey="builtin">Blocs Skipper</Nav.Link></Nav.Item>
+          {region !== 'tiles' && <Nav.Item><Nav.Link eventKey="artifacts">Artefacts</Nav.Link></Nav.Item>}
           <Nav.Item><Nav.Link eventKey="agent">Demander à un agent</Nav.Link></Nav.Item>
         </Nav>
         {pane === 'builtin' && (
@@ -53,6 +61,7 @@ export function AddBlockModal({ region, catalog, layout, ctx, scope, onClose, on
             {items.length === 0 && <div className="text-secondary small">Aucun bloc natif ne se place dans cette région.</div>}
           </div>
         )}
+        {pane === 'artifacts' && <ArtifactsPane projectId={projectId} shared={ctx.kind === 'project'} layout={layout} onAdd={(page) => onAdd({ id: newBlockId(), kind: 'artifact', artifact: page.id, region, title: page.title })} />}
         {pane === 'agent' && (
           <div>
             <p className="small text-secondary">
@@ -200,5 +209,46 @@ export function HistoryModal({ scope, canEdit, onRestore, onClose }: { scope: st
         </ul>
       </Modal.Body>
     </Modal>
+  );
+}
+
+/** Artefacts épinglables : ceux du projet (ou les miens et mes favoris sur l'accueil), avec leur visibilité pour l'équipe. */
+function ArtifactsPane({ projectId, shared, layout, onAdd }: { projectId: string | null; shared: boolean; layout: Layout; onAdd: (page: PinnablePage) => void }) {
+  const { data, loading } = useQuery<{ sharedPages: PinnablePage[] }>(COCKPIT_PINNABLE_PAGES, { variables: { projectId }, fetchPolicy: 'cache-and-network' });
+  const [open, { loading: opening }] = useMutation(OPEN_PAGE_TO_PROJECT, { refetchQueries: ['CockpitPinnablePages'] });
+  const pages = data?.sharedPages ?? [];
+  const pinned = new Set(layout.blocks.filter((b): b is Extract<Block, { kind: 'artifact' }> => b.kind === 'artifact').map((b) => b.artifact));
+  if (loading && !data) return <div className="text-secondary small"><Spinner animation="border" size="sm" /> Artefacts…</div>;
+  if (!pages.length) return <div className="text-secondary small">Aucun artefact {projectId ? 'dans ce projet' : 'à vous'} pour l’instant : demandez-en un à un agent (onglet « Demander à un agent »), ou publiez une page.</div>;
+  return (
+    <div className="ck-catalog">
+      {pages.map((p) => {
+        const kind = KIND_ICONS[p.kind] ?? KIND_ICONS.PAGE;
+        const hidden = shared && !p.linkAccess && !p.projectAccess;
+        return (
+          <div key={p.id} className="ck-catalog-item ck-artifact-item">
+            <button type="button" className="ck-catalog-pick" onClick={() => onAdd(p)} title={pinned.has(p.id) ? 'Déjà épinglé (ajouter une seconde fois, avec d’autres paramètres)' : 'Épingler cet artefact'}>
+              <div className="t">
+                <i className={`bi ${kind.icon}`} />
+                {p.title}
+                {pinned.has(p.id) && <Badge bg="secondary" pill>épinglé</Badge>}
+              </div>
+              <div className="d">{kind.label} · {p.owner.name} · {timeAgo(p.updatedAt)}</div>
+            </button>
+            {hidden && (
+              <div className="ck-artifact-warn">
+                <i className="bi bi-eye-slash me-1" />
+                Pas visible par l’équipe.
+                {p.viewerAccess.admin && (
+                  <button type="button" className="btn btn-link btn-sm p-0 ms-1" disabled={opening} onClick={() => void open({ variables: { id: p.id } })}>
+                    Ouvrir aux membres du projet
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }

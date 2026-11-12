@@ -1,4 +1,5 @@
 import { AppError } from '../errors.js';
+import { sharedPageService } from '../sharedPages/service.js';
 import { userService } from '../users/service.js';
 import type { User } from '../users/types.js';
 import { catalogFor } from './catalog.js';
@@ -6,7 +7,7 @@ import { defaultLayout } from './defaults.js';
 import { applyOps, parseLayout } from './layout.js';
 import { cockpitRepository, type LayoutRow } from './repository.js';
 import { parseScope } from './scope.js';
-import type { Block, Layout, LayoutVersion, ResolvedLayout, Scope, ScopeKind, WidgetDef } from './types.js';
+import type { Block, CockpitArtifactView, Layout, LayoutVersion, Region, ResolvedLayout, Scope, ScopeKind, WidgetDef } from './types.js';
 
 /**
  * Agencements du cockpit : résolution (enregistré, sinon le défaut), enregistrement versionné, réinitialisation,
@@ -78,8 +79,43 @@ export interface UpdateInput {
   sessionId?: string | null;
 }
 
+/**
+ * Les artefacts épinglés d'un agencement partagé doivent être visibles par l'équipe. On vérifie que la personne qui
+ * enregistre les voit (sinon refus : on n'épingle pas ce qu'on ne voit pas) et on avertit quand l'artefact n'est ouvert
+ * ni au projet ni par le lien : les autres membres verraient « artefact non partagé avec vous ».
+ */
+async function checkArtifacts(user: User, scope: Scope, layout: Layout): Promise<string[]> {
+  const warnings: string[] = [];
+  for (const b of layout.blocks) {
+    if (b.kind !== 'artifact') continue;
+    const page = await sharedPageService.getFor(user.id, b.artifact).catch(() => null);
+    if (!page) throw new AppError(`Artefact ${b.artifact} introuvable, ou non partagé avec vous`, 'VALIDATION');
+    if (scope.kind !== 'home' && !page.linkAccess && !page.projectAccess) warnings.push(`« ${page.title} » n'est ouvert ni aux membres du projet ni par le lien : les autres membres ne le verront pas (ouvrez-le aux membres du projet depuis l'artefact, ou avec updateSharedPage { projectAccess: true }).`);
+    else if (scope.kind !== 'home' && page.projectAccess && page.projectId !== scope.projectId && !page.linkAccess) warnings.push(`« ${page.title} » est ouvert aux membres d'un autre projet : les membres de celui-ci ne le verront pas tous.`);
+  }
+  return warnings;
+}
+
 export const cockpitService = {
   catalog: (kind: ScopeKind): WidgetDef[] => catalogFor(kind),
+
+  /** Les artefacts épinglés, tels que la personne les voit (un artefact hors de portée n'est pas révélé). */
+  async artifactsFor(user: User, layout: Layout): Promise<CockpitArtifactView[]> {
+    const ids = [...new Set(layout.blocks.filter((b): b is Extract<Block, { kind: 'artifact' }> => b.kind === 'artifact').map((b) => b.artifact))];
+    return Promise.all(
+      ids.map(async (id) => {
+        const page = await sharedPageService.getFor(user.id, id).catch(() => null);
+        if (!page) return { id, viewable: false, title: null, kind: null, version: null, dataRefreshedAt: null, linkAccess: null, projectAccess: null, ownerId: null, canManage: false };
+        return { id, viewable: true, title: page.title, kind: page.kind, version: page.version, dataRefreshedAt: page.dataRefreshedAt, linkAccess: page.linkAccess, projectAccess: page.projectAccess, ownerId: page.ownerId, canManage: sharedPageService.canManage(page, user) };
+      }),
+    );
+  },
+
+  /** Épingle un artefact en fin de région (bloc artefact), en une opération. */
+  async pin(user: User, key: string, input: { artifactId: string; region?: string | null; title?: string | null; sessionId?: string | null }): Promise<{ result: ResolvedLayout; before: Layout }> {
+    const region = (input.region ?? 'full') as Region;
+    return this.update(user, key, { ops: [{ op: 'add', block: { kind: 'artifact', artifact: input.artifactId, region, title: input.title ?? undefined } }], note: 'Artefact épinglé', sessionId: input.sessionId });
+  },
 
   async resolve(user: User, key: string): Promise<ResolvedLayout> {
     const a = await access(user, key);
@@ -95,8 +131,9 @@ export const cockpitService = {
     if (input.ops !== undefined && input.ops !== null) layout = applyOps(current.layout, input.ops, a.scope.kind);
     else if (input.layout !== undefined && input.layout !== null) layout = parseLayout(input.layout, a.scope.kind);
     else throw new AppError("Rien à enregistrer : passez l'agencement complet (layout) ou des opérations (ops)", 'VALIDATION');
+    const warnings = await checkArtifacts(user, a.scope, layout);
     const row = await cockpitRepository.save({ scope: a.scope, userId: user.id, layout, snapshot: layout, authorId: user.id, sessionId: input.sessionId ?? null, note: input.note?.trim() || null });
-    return { result: resolved(a, row), before: current.layout };
+    return { result: { ...resolved(a, row), warnings }, before: current.layout };
   },
 
   /** Retour au défaut : l'agencement enregistré est effacé (l'historique le garde). */

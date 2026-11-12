@@ -1360,9 +1360,19 @@ note)`, `resetCockpitLayout(scope)`, `restoreCockpitLayout(scope, version)` (aud
 Agents (`cockpit/mcp.ts`, outils `cockpit.get` et `cockpit.history` libres ; `update`, `reset` et `restore` soumis à
 l'autorisation de la personne, mémorisable) : `get` renvoie l'agencement et le catalogue de la portée (`project` =
 le projet de la session, `home` = l'accueil du propriétaire de la session), `update` applique des opérations ou un
-agencement complet et décrit ce qui a changé. Les blocs **artefacts** (une page de l'agent dans un cadre), les
-paramètres filtrants avancés, le pilotage des tâches et la fiche d'agent composables, les pages personnalisées et
-les sources `graphql` vivantes sont les lots suivants du document de conception.
+agencement complet et décrit ce qui a changé.
+
+**Blocs artefacts** : un artefact (page, données, diapositives) s'épingle dans un agencement (`{ kind: "artifact",
+artifact: <id>, region, title?, params?, height?, pollSeconds? }` ; volet « Artefacts » du catalogue, « Épingler dans un
+tableau de bord » du menu d'un artefact, mutation `pinArtifactToCockpit`). Il est servi dans un cadre en bac à sable par
+la route de lecture en mode **`embed=1`** (`sharedPages/viewRoute.ts`, `injectEmbed` de `inject.ts`) : variables du
+thème `--cc-*` (`cockpit/embedTheme.ts`), `Skipper.context` (personne, projet, portée, paramètres du bloc, thème),
+`Skipper.onContext`, et trois actions vers l'hôte exécutées par l'interface (`Skipper.navigate`, `Skipper.openSession`,
+`Skipper.summon`), plus `sharedPages/widget-client.js` qui mesure la hauteur (le bloc suit son contenu). Le cadre est
+rechargé quand les données de l'artefact changent. Épingler ne donne aucun droit : chaque personne voit le bloc si elle
+voit l'artefact ; pour l'équipe, l'artefact s'ouvre **aux membres du projet** (`SharedPage.projectAccess`, « Partager »
+› Accès général) et le serveur avertit sinon (`CockpitLayout.warnings`). Lots suivants de la conception : sources
+`graphql` vivantes, paramètres avancés, pilotage des tâches et fiche d'agent composables, pages personnalisées.
 
 ## Lancer des sessions
 
@@ -2038,7 +2048,7 @@ nouvelle session avec une consigne à compléter.
 
 Un agent (outil `pages.publish`) ou l'éditeur de fichiers publie un fichier HTML comme **page**
 (`/shared/:id`, `backend/src/sharedPages/`), privée à son propriétaire jusqu'à ce qu'il la partage avec
-des personnes ou l'ouvre à toute personne connectée disposant du lien. Chaque publication crée une
+des personnes, l'ouvre aux membres de son projet d'origine (`projectAccess`, jamais aux invités) ou à toute personne connectée disposant du lien. Chaque publication crée une
 version ; la page est servie par `GET /api/shared/:id[?v=N][&download=1]` dans un bac à sable (CSP
 `sandbox` sans `allow-same-origin` : la page ne lit ni les cookies ni l'API), l'accès étant revérifié
 à chaque chargement. Être ajouté à une page envoie une notification.

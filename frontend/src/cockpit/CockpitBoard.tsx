@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Button, Col, Row } from 'react-bootstrap';
+import { Alert, Button, Col, Row } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import { timeAgo } from '../lib/humanize';
 import { AddBlockModal, BlockSettingsModal, HistoryModal } from './CockpitEditor';
 import { WIDGETS, type CockpitContext } from './registry';
+import { ArtifactWidget } from './widgets/artifact';
 import { REGIONS, REGION_LABELS, addBlock, blocksOf, moveBlock, patchBlock, removeBlock, setBlockRegion, type Block, type Layout, type Region, type WidgetDef } from './types';
 import type { CockpitState } from './useCockpit';
 import './cockpit.css';
@@ -19,6 +20,7 @@ export default function CockpitBoard({ cockpit, ctx, scopeLabel }: { cockpit: Co
   const [settings, setSettings] = useState<Block | null>(null);
   const [history, setHistory] = useState(false);
   if (!layout) return null;
+  const warnings = cockpit.warnings;
   const change = (next: Layout) => cockpit.setDraft(next);
   const defs = new Map(catalog.map((w) => [w.key, w]));
 
@@ -27,7 +29,7 @@ export default function CockpitBoard({ cockpit, ctx, scopeLabel }: { cockpit: Co
     const available = block.kind === 'builtin' ? (entry ? !entry.available || entry.available(ctx) : false) : true;
     if (!editing && !available) return null;
     let body: React.ReactNode;
-    if (block.kind === 'artifact') body = <div className="ck-unknown">Bloc artefact : disponible dans une prochaine version de Skipper.</div>;
+    if (block.kind === 'artifact') body = <ArtifactWidget block={block} info={cockpit.data?.artifacts.find((a) => a.id === block.artifact)} ctx={ctx} scope={cockpit.data?.scope ?? ''} />;
     else if (!entry) body = <div className="ck-unknown">Bloc « {block.widget} » inconnu de cette version de l’interface (rechargez la page).</div>;
     else if (!available) body = <div className="ck-unavailable">{defs.get(block.widget)?.label ?? block.widget} : rien à montrer ici pour vous (masqué hors édition).</div>;
     else {
@@ -102,6 +104,13 @@ export default function CockpitBoard({ cockpit, ctx, scopeLabel }: { cockpit: Co
             </Button>
           </div>
         </div>
+      )}
+      {warnings.length > 0 && (
+        <Alert variant="warning" className="py-2 small" dismissible onClose={cockpit.clearWarnings}>
+          {warnings.map((w) => (
+            <div key={w}>{w}</div>
+          ))}
+        </Alert>
       )}
       {!editing && cockpit.changedElsewhere && (
         <div className="ck-updated">
