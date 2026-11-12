@@ -36,7 +36,7 @@ export function AddBlockModal({ region, catalog, layout, ctx, scope, onClose, on
   const projectId = ctx.kind === 'project' ? ctx.project?.project.id ?? null : null;
   const askAgent = () => {
     const where = ctx.kind === 'project' ? `du tableau de bord du projet « ${ctx.project?.project.name ?? ''} »` : 'de mon accueil';
-    const prompt = `Configure l'agencement ${where} (portée \`${scope}\`, outils du serveur MCP \`cockpit\`).\n\nDemande : ${wish.trim() || '…'}\n\nRegarde d'abord \`cockpit.get\` (agencement actuel et catalogue des blocs natifs). Préfère un bloc natif paramétré quand il répond au besoin ; place le bloc dans la région « ${REGION_LABELS[region].toLowerCase()} ». Enregistre avec \`cockpit.update\` (une note de version qui dit ce qui change), puis dis-moi ce que tu as modifié.`;
+    const prompt = `Configure l'agencement ${where} (portée \`${scope}\`, outils du serveur MCP \`cockpit\`).\n\nDemande : ${wish.trim() || '…'}\n\nRegarde d'abord \`cockpit.get\` (agencement actuel et catalogue des blocs natifs). Préfère un bloc natif paramétré quand il répond au besoin ; place le bloc dans la région « ${REGION_LABELS[region].toLowerCase()} »${region === 'tiles' ? ' (un artefact en tuile est un indicateur : une grande valeur et une ligne de détail, le titre du bloc sert de libellé)' : ''}. Enregistre avec \`cockpit.update\` (une note de version qui dit ce qui change), puis dis-moi ce que tu as modifié.`;
     if (pm) {
       summon({ variables: { id: pm.id, text: prompt } })
         .then((res) => {
@@ -58,7 +58,7 @@ export function AddBlockModal({ region, catalog, layout, ctx, scope, onClose, on
       <Modal.Body>
         <Nav variant="underline" activeKey={pane} onSelect={(k) => setPane((k as Pane) ?? 'builtin')} className="mb-3">
           <Nav.Item><Nav.Link eventKey="builtin">Blocs Skipper</Nav.Link></Nav.Item>
-          {region !== 'tiles' && <Nav.Item><Nav.Link eventKey="artifacts">Artefacts</Nav.Link></Nav.Item>}
+          <Nav.Item><Nav.Link eventKey="artifacts">Artefacts</Nav.Link></Nav.Item>
           <Nav.Item><Nav.Link eventKey="agent">Demander à un agent</Nav.Link></Nav.Item>
         </Nav>
         {pane === 'builtin' && (

@@ -78,10 +78,10 @@ describe('parseLayout', () => {
     expect(() => parseLayout({ blocks: Array.from({ length: LAYOUT_LIMITS.maxBlocks + 1 }, () => ({ kind: 'builtin', widget: 'text' })) }, 'home')).toThrow(/Au plus/);
   });
 
-  it('accepte un bloc artefact hors des tuiles, avec hauteur et sondage bornés', () => {
+  it('accepte un bloc artefact dans toute région, avec hauteur et sondage bornés', () => {
     const l = parseLayout({ blocks: [{ kind: 'artifact', artifact: P.toUpperCase(), region: 'side', height: 10, pollSeconds: 1, params: { a: 1 }, title: ' CA ' }] }, 'project');
     expect(l.blocks[0]).toMatchObject({ kind: 'artifact', artifact: P, region: 'side', height: LAYOUT_LIMITS.minHeight, pollSeconds: LAYOUT_LIMITS.minPollSeconds, params: { a: 1 }, title: 'CA' });
-    expect(() => parseLayout({ blocks: [{ kind: 'artifact', artifact: P, region: 'tiles' }] }, 'project')).toThrow(/tuiles/);
+    expect(parseLayout({ blocks: [{ kind: 'artifact', artifact: P, region: 'tiles', title: 'CA du mois' }] }, 'project').blocks[0]).toMatchObject({ kind: 'artifact', region: 'tiles' });
     expect(() => parseLayout({ blocks: [{ kind: 'artifact', artifact: 'x', region: 'main' }] }, 'project')).toThrow(/artefact invalide/);
   });
 

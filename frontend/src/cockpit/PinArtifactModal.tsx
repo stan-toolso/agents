@@ -57,7 +57,7 @@ export default function PinArtifactModal({ page, onClose }: { page: { id: string
               <Form.Group className="mb-3">
                 <Form.Label className="small mb-1">Région</Form.Label>
                 <Form.Select size="sm" value={region} onChange={(e) => setRegion(e.target.value as Region)}>
-                  {(['full', 'main', 'side'] as Region[]).map((r) => (
+                  {(['full', 'main', 'side', 'tiles'] as Region[]).map((r) => (
                     <option key={r} value={r}>{REGION_LABELS[r]}</option>
                   ))}
                 </Form.Select>
