@@ -12,6 +12,8 @@ import { sameLayout, type Layout, type WidgetDef } from './types';
  */
 export interface CockpitState {
   data: CockpitLayoutData | null;
+  /** Échec du chargement de l'agencement (sans agencement à afficher, la page le montre au lieu d'attendre indéfiniment). */
+  error: string | null;
   layout: Layout | null;
   catalog: WidgetDef[];
   canEdit: boolean;
@@ -37,7 +39,7 @@ const EMPTY: WidgetDef[] = [];
 /** `fallback` : agencement affiché, non modifiable, quand il n'y a pas de portée (ex. pilotage de tous les projets). */
 export function useCockpit(scope: string | null, fallback: Layout | null = null): CockpitState {
   const { showError, confirm } = useDialogs();
-  const { data } = usePollingQuery<{ cockpitLayout: CockpitLayoutData }>(COCKPIT_LAYOUT, { variables: { scope: scope ?? '' }, skip: !scope, pollInterval: 30_000, fetchPolicy: 'cache-and-network' });
+  const { data, error } = usePollingQuery<{ cockpitLayout: CockpitLayoutData }>(COCKPIT_LAYOUT, { variables: { scope: scope ?? '' }, skip: !scope, pollInterval: 30_000, fetchPolicy: 'cache-and-network' });
   const current = data?.cockpitLayout ?? null;
   const [draft, setDraftState] = useState<Layout | null>(null);
   const [editing, setEditing] = useState(false);
@@ -128,6 +130,7 @@ export function useCockpit(scope: string | null, fallback: Layout | null = null)
 
   return {
     data: current,
+    error: error?.message ?? null,
     layout: editing && draft ? draft : current?.layout ?? (scope ? null : fallback),
     catalog: current?.catalog ?? EMPTY,
     canEdit: Boolean(current?.canEdit),
