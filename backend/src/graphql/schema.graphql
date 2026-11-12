@@ -106,6 +106,10 @@ type ProjectImportReport {
 type Project {
   id: ID!
   name: String!
+  "Pages personnalisées (onglets de plus), par position."
+  pages: [ProjectPage!]!
+  "Onglets natifs masqués et ordre des onglets : { hidden: [...], order: [...] }."
+  tabs: JSON!
   "Nom du dossier du projet dans WORKSPACES_ROOT (fixé à la création)."
   slug: String!
   description: String
@@ -4684,4 +4688,23 @@ extend type Mutation {
   restoreCockpitLayout(scope: String!, version: Int!): CockpitLayout!
   "Épingle un artefact dans une portée (bloc artefact en fin de région ; nouvelle version)."
   pinArtifactToCockpit(scope: String!, artifactId: ID!, region: String, title: String): CockpitLayout!
+  "Crée une page personnalisée du projet (onglet de plus, portée project:<id>:page:<slug>) ; membres et administrateurs."
+  createProjectPage(projectId: ID!, title: String!, icon: String, slug: String): ProjectPage!
+  updateProjectPage(id: ID!, title: String, icon: String, position: Int): ProjectPage!
+  deleteProjectPage(id: ID!): Boolean!
+  "Onglets natifs masqués et ordre des onglets du projet (administrateurs)."
+  updateProjectTabs(projectId: ID!, tabs: JSON!): Project!
+}
+
+"Page personnalisée d'un projet : un onglet de plus, dont le contenu est un agencement du cockpit."
+type ProjectPage {
+  id: ID!
+  projectId: ID!
+  "Identifiant dans l'URL (/projects/<id>/p/<slug>) et dans la portée page:<slug>."
+  slug: String!
+  title: String!
+  "Icône Bootstrap (bi-…)."
+  icon: String
+  position: Int!
+  createdAt: DateTime!
 }

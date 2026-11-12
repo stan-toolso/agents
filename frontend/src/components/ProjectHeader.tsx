@@ -1,14 +1,17 @@
 import type { ReactNode } from 'react';
 import { Badge, Button, Nav } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
+import { useQuery } from '@apollo/client';
 import { PROJECT_UNREAD_MESSAGES } from '../graphql/conversations';
+import { PROJECT_TABS, type ProjectPageInfo, type ProjectTabsSetting } from '../graphql/cockpit';
+import { effectiveTabs } from '../lib/projectTabs';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { useSessionLauncher } from './SessionLauncher';
 import { openProjectWindow, projectWindowId } from '../lib/projectWindow';
 
-export type ProjectTab = 'overview' | 'conversations' | 'chats' | 'repo' | 'tasks' | 'artifacts' | 'agents' | 'pullRequests' | 'deliveries' | 'context' | 'vault' | 'env' | 'schedules' | 'workflows' | 'history' | 'audit' | 'usage' | 'settings';
+export type ProjectTab = 'overview' | 'conversations' | 'chats' | 'repo' | 'tasks' | 'artifacts' | 'agents' | 'pullRequests' | 'deliveries' | 'context' | 'vault' | 'env' | 'schedules' | 'workflows' | 'history' | 'audit' | 'usage' | 'settings' | `page:${string}`;
 
-const TABS: { key: ProjectTab; label: string; path: string; icon: string; title?: string; absolute?: boolean }[] = [
+export const TABS: { key: ProjectTab; label: string; path: string; icon: string; title?: string; absolute?: boolean }[] = [
   { key: 'overview', label: 'Tableau de bord', path: '', icon: 'bi-speedometer2', title: 'Ce qui attend une réponse, l’équipe au travail, le flux des tâches et la consommation du projet' },
   { key: 'conversations', label: 'Conversations', path: '/conversations', icon: 'bi-chat-left-text', title: 'Canaux de conversation d’équipe : mentionnez les personnes et les agents du projet, qui répondent dans le fil' },
   { key: 'repo', label: 'Dépôt', path: '/repo', icon: 'bi-code-square', title: 'Dépôt git : branches, commits et fichiers ; dépôt hébergé par Skipper et ses sauvegardes' },
@@ -65,7 +68,9 @@ export default function ProjectHeader({ project, active, actions }: { project: P
   const { openNewSession } = useSessionLauncher();
   const canWrite = project.myRole === 'ADMIN' || project.myRole === 'MEMBER';
   const personal = Boolean(project.isPersonal);
-  const tabs = personal ? PERSONAL_TABS : TABS;
+  // Onglets masqués, ordre et pages personnalisées : une requête légère, partagée par toutes les pages du projet (cache).
+  const { data: tabsData } = useQuery<{ project: { id: string; tabs: ProjectTabsSetting | null; pages: ProjectPageInfo[] } | null }>(PROJECT_TABS, { variables: { id: project.id }, skip: personal, fetchPolicy: 'cache-first' });
+  const tabs = personal ? PERSONAL_TABS : effectiveTabs(TABS, tabsData?.project?.tabs, tabsData?.project?.pages ?? []);
   return (
     <>
       <div className="d-flex align-items-start justify-content-between flex-wrap gap-2 mb-2">
