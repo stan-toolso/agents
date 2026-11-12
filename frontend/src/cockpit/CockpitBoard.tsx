@@ -119,7 +119,7 @@ export default function CockpitBoard({ cockpit, ctx, scopeLabel, columns = [7, 5
             Tableau de bord mis à jour {cockpit.changedElsewhere.updatedAt ? timeAgo(cockpit.changedElsewhere.updatedAt) : ''} par {cockpit.changedElsewhere.updatedBy?.name ?? 'quelqu’un'}
             {cockpit.changedElsewhere.updatedBy?.id && <> (<Link to={`/projects/${cockpit.changedElsewhere.projectId ?? ''}/audit`}>journal</Link>)</>}.
           </span>
-          {cockpit.canEdit && <button type="button" className="btn btn-link btn-sm p-0" onClick={() => setHistory(true)}>Historique</button>}
+          <button type="button" className="btn btn-link btn-sm p-0" onClick={() => setHistory(true)}>Voir les changements</button>
           <button type="button" className="btn btn-link btn-sm p-0 text-secondary" onClick={cockpit.acknowledge}>Fermer</button>
         </div>
       )}

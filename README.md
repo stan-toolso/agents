@@ -1390,6 +1390,12 @@ inutiles (jamais le tableau de bord ni les réglages), les ordonner, créer, ren
 (administrateurs) ; outils `cockpit.pages_list`, `page_create`, `page_update`, `page_delete`, `tabs`. L'export d'un projet
 emporte onglets, pages et agencements partagés (sans les blocs artefacts, propres au serveur d'origine).
 
+**La boucle avec les agents** : le volet « Demander à un agent » du catalogue confie la demande au Product Manager du
+projet s'il en a un (`summonAgent`, session ouverte), sinon à une session neuve pré-remplie ; le modèle Product Manager
+est responsable du tableau de bord et de ses pages (section d'instructions, action « Revoir le tableau de bord du
+projet »). Le bandeau « Tableau de bord mis à jour par … » ouvre l'historique, qui montre à chaque version les blocs
+ajoutés, retirés ou réglés, et permet de restaurer.
+
 ## Lancer des sessions
 
 **Depuis l'interface.** « Nouvelle session » (sidebar, pages Projets, Sessions, projet, accueil) ouvre la

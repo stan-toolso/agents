@@ -111,3 +111,14 @@ export function patchBlock(layout: Layout, id: string, patch: Partial<Block>): L
 }
 
 export const sameLayout = (a: Layout, b: Layout) => JSON.stringify(a) === JSON.stringify(b);
+
+/** Ce qui change entre deux agencements (historique, bandeau « mis à jour par … »). */
+export function diffLayouts(before: Layout, after: Layout): { added: Block[]; removed: Block[]; changed: Block[] } {
+  const b = new Map(before.blocks.map((x) => [x.id, x]));
+  const a = new Map(after.blocks.map((x) => [x.id, x]));
+  return {
+    added: after.blocks.filter((x) => !b.has(x.id)),
+    removed: before.blocks.filter((x) => !a.has(x.id)),
+    changed: after.blocks.filter((x) => b.has(x.id) && JSON.stringify(b.get(x.id)) !== JSON.stringify(x)),
+  };
+}
