@@ -144,6 +144,19 @@ http
       res.writeHead(200, { ...cors, 'content-type': 'text/html; charset=utf-8', 'content-security-policy': 'sandbox allow-scripts allow-forms allow-popups allow-modals' });
       return res.end(deck);
     }
+    // Artefact de données en tuile (démo) : un indicateur compact qui annonce sa hauteur comme widget-client.js.
+    if (/^\/api\/shared\/page-data-ca/.test(url.pathname)) {
+      const tile = url.searchParams.get('region') === 'tiles';
+      const dark = url.searchParams.get('theme') === 'dark';
+      const html = `<!doctype html><html lang="fr" data-region="${tile ? 'tiles' : ''}"><head><meta charset="utf-8"><style>
+        :root{--cc-fg:${dark ? '#ecebe6' : '#1b1b1a'};--cc-dim:${dark ? '#a3a199' : '#6b6a64'}}html,body{margin:0;background:transparent;color:var(--cc-fg);font-family:system-ui,sans-serif}
+        .v{font-size:30px;font-weight:500;line-height:1.05;letter-spacing:-.04em;font-variant-numeric:tabular-nums}.v small{font-size:13px;letter-spacing:0;color:var(--cc-dim);margin-left:6px}.s{font-size:12px;color:var(--cc-dim);margin-top:4px}
+        html:not([data-region="tiles"]) body{padding:12px 14px}
+      </style></head><body><div class="v">14 245 €<small>HT</small></div><div class="s">−6,9 % vs octobre · réel 5 232 € au 11/11</div>
+        <script>parent.postMessage({skipperWidget:1,type:'size',height:document.documentElement.scrollHeight},'*')</script></body></html>`;
+      res.writeHead(200, { ...cors, 'content-type': 'text/html; charset=utf-8' });
+      return res.end(html);
+    }
     if (url.pathname.startsWith('/auth/') || url.pathname.startsWith('/api/')) {
       res.writeHead(200, { ...cors, 'content-type': 'text/html; charset=utf-8' });
       return res.end('<!doctype html><html><body style="font-family:sans-serif;padding:16px"><h1>Aperçu</h1><p>Contenu de la page servie par le backend.</p></body></html>');

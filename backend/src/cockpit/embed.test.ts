@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { injectDataScript, injectEmbed, widgetClientScript } from '../sharedPages/inject.js';
-import { EMBED_THEMES, embedStyle, parseEmbedTheme } from './embedTheme.js';
+import { EMBED_THEMES, embedStyle, parseEmbedRegion, parseEmbedTheme } from './embedTheme.js';
 
 describe('thème des blocs', () => {
   it('a les mêmes variables en clair et en sombre', () => {
@@ -9,6 +9,13 @@ describe('thème des blocs', () => {
     expect(parseEmbedTheme('autre')).toBe('light');
     expect(embedStyle('dark')).toContain('--cc-accent:#e5865f');
     expect(embedStyle('light')).toContain('color-scheme:light');
+  });
+
+  it('transmet la région du bloc si elle est connue', () => {
+    expect(parseEmbedRegion('tiles')).toBe('tiles');
+    expect(parseEmbedRegion('side')).toBe('side');
+    expect(parseEmbedRegion('ailleurs')).toBeNull();
+    expect(parseEmbedRegion(null)).toBeNull();
   });
 });
 
@@ -21,6 +28,11 @@ describe('injectEmbed', () => {
     expect(out).toContain('window.Skipper.context={"scope":"project:x"');
     expect(out).toContain('<script data-skipper-widget>console.log(1)</script></body>');
     expect(injectEmbed(out, { style: '', context: ctx }, 'x')).toBe(out);
+  });
+  it('pose data-region sur <html> pour qu’une page en tuile se dessine compacte', () => {
+    const out = injectEmbed('<html><head></head><body></body></html>', { style: '', context: { ...ctx, region: 'tiles' } }, 'x');
+    expect(out).toContain('"region":"tiles"');
+    expect(out).toContain('document.documentElement.setAttribute("data-region"');
   });
   it('se place après le script des données, qui crée window.Skipper', () => {
     const html = injectDataScript('<html><head></head><body></body></html>', { data: { n: 1 }, meta: {} });

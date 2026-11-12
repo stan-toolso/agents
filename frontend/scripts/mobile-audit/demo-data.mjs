@@ -265,6 +265,8 @@ S.hebdo.pages.unshift(demoSharedPage('page-data-inscriptions', 'Inscriptions : t
 S.hebdo.pages[0].versions = [4, 3, 2, 1].map((v) => ({ __typename: 'SharedPageVersion', version: v, size: 21_000 - v * 600, createdBy: U.me, createdAt: ago(60 * 24 * (5 - v)), kind: v === 1 ? 'PAGE' : 'DATA', refreshMinutes: v >= 3 ? 60 : null, sourceCount: v === 1 ? null : v === 2 ? 2 : 3 }));
 S.tarifs.pages.push(demoSharedPage('page-slides-offres', 'Présentation des trois offres', U.me, [[U.hugo, null]], { kind: 'SLIDES', session: S.tarifs, project: P.site, version: 2 }));
 sharedPagesDemo.push(...S.tarifs.pages.slice(0, 1), ...S.hebdo.pages, S.tarifs.pages[2]);
+// Artefact de données épinglé en tuile du tableau de bord du site (servi compact par le serveur factice : /api/shared/page-data-ca).
+sharedPagesDemo.push(demoSharedPage('page-data-ca', 'Chiffre d’affaires projeté', U.me, [], { kind: 'DATA', refreshMinutes: 360, dataRefreshedAt: ago(30), project: P.site, projectAccess: true, version: 1 }));
 // Favoris (section « Favoris » de la sidebar) : le tableau de bord des inscriptions et la présentation des offres.
 for (const pg of sharedPagesDemo) if (pg.id === 'page-data-inscriptions' || pg.id === 'page-slides-offres') pg.favorite = true;
 
@@ -744,6 +746,8 @@ const COCKPIT_CATALOG = [
   ...[['tile.active', 'Sessions en cours', 'tiles'], ['tile.sessions', 'Sessions au total', 'tiles'], ['tile.tasks', 'Tâches touchées', 'tiles'], ['tile.cost', 'Consommation', 'tiles'], ['sessions', 'Sessions', 'main'], ['tasks', 'Tâches', 'side']].map(([k, l, r]) => ckWidget(`agent.${k}`, l, `Bloc « ${l} » de la fiche d’un agent.`, ['agent'], r, r === 'tiles' ? ['tiles'] : ['main', 'side', 'full'], true, r === 'tiles' ? [] : [ckLimit(20, 50)])),
 ];
 const cockpitState = { layouts: new Map(), versions: [] };
+// Le tableau de bord du site a une tuile artefact (CA projeté du mois) après les tuiles natives.
+cockpitState.layouts.set('project:p-site', { layout: { v: 1, blocks: [...COCKPIT_PROJECT.blocks.filter((b) => b.region === 'tiles'), { id: 'd-ca', kind: 'artifact', artifact: 'page-data-ca', region: 'tiles', title: 'CA projeté du mois' }, ...COCKPIT_PROJECT.blocks.filter((b) => b.region !== 'tiles')] }, version: 1 });
 const projectPagesDemo = [{ __typename: 'ProjectPage', id: 'pp-1', projectId: 'p-site', slug: 'reporting', title: 'Reporting', icon: 'bi-graph-up', position: 0, createdAt: ago(60 * 24 * 3) }];
 const projectTabsDemo = new Map([['p-site', { hidden: ['workflows'], order: [] }]]);
 const cockpitKind = (scope) => (scope.startsWith('home') ? 'home' : scope.endsWith(':tasks') ? 'tasks' : scope.startsWith('agent:') ? 'agent' : scope.includes(':page:') ? 'page' : 'project');

@@ -38,7 +38,7 @@ export default function CockpitBoard({ cockpit, ctx, scopeLabel, columns = [7, 5
     }
     if (!editing) return <div key={block.id} className="ck-block-view">{body}</div>;
     const def = block.kind === 'builtin' ? defs.get(block.widget) : null;
-    const regions = def ? def.regions : REGIONS.filter((r) => r !== 'tiles');
+    const regions = def ? def.regions : [...REGIONS];
     const same = blocksOf(layout, block.region);
     const i = same.indexOf(block);
     const name = block.title || def?.label || (block.kind === 'artifact' ? 'Artefact' : block.widget);

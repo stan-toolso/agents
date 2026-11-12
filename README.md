@@ -1374,10 +1374,13 @@ personne qui pilote et `cockpit.schema` décrit les champs disponibles (mise au 
 artifact: <id>, region, title?, params?, height?, pollSeconds? }` ; volet « Artefacts » du catalogue, « Épingler dans un
 tableau de bord » du menu d'un artefact, mutation `pinArtifactToCockpit`). Il est servi dans un cadre en bac à sable par
 la route de lecture en mode **`embed=1`** (`sharedPages/viewRoute.ts`, `injectEmbed` de `inject.ts`) : variables du
-thème `--cc-*` (`cockpit/embedTheme.ts`), `Skipper.context` (personne, projet, portée, paramètres du bloc, thème),
+thème `--cc-*` (`cockpit/embedTheme.ts`), `Skipper.context` (personne, projet, portée, région, paramètres du bloc, thème),
 `Skipper.onContext`, et trois actions vers l'hôte exécutées par l'interface (`Skipper.navigate`, `Skipper.openSession`,
 `Skipper.summon`), plus `sharedPages/widget-client.js` qui mesure la hauteur (le bloc suit son contenu). Le cadre est
-rechargé quand les données de l'artefact changent. Épingler ne donne aucun droit : chaque personne voit le bloc si elle
+rechargé quand les données de l'artefact changent. Un artefact se place dans toute région, **tuiles comprises** : il y
+prend l'habit d'une tuile native (libellé = titre du bloc, lien « Ouvrir », hauteur bornée à 160 px) et la page, prévenue
+par `Skipper.context.region` et `html[data-region="tiles"]`, ne montre qu'un indicateur (une grande valeur, une ligne de
+détail) ; c'est ainsi qu'on met en tuile un chiffre qu'aucun bloc natif ne donne (chiffre d'affaires, inscriptions…). Épingler ne donne aucun droit : chaque personne voit le bloc si elle
 voit l'artefact ; pour l'équipe, l'artefact s'ouvre **aux membres du projet** (`SharedPage.projectAccess`, « Partager »
 › Accès général) et le serveur avertit sinon (`CockpitLayout.warnings`). **Pages personnalisées et onglets** (`cockpit/projectPages.ts`, table `project_pages` et colonne `projects.tabs`, migration
 `20261112T2050`) : une page personnalisée est un onglet de plus dans l'en-tête du projet (`/projects/<id>/p/<slug>`,
