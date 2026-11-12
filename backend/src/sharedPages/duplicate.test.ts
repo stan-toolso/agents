@@ -18,7 +18,8 @@ vi.mock('./repository.js', () => ({
     },
   },
 }));
-vi.mock('../users/repository.js', () => ({ userRepository: { findById: async () => null, findByEmail: async () => null } }));
+// Les personnes du test sont membres d'un projet (compte non restreint) : la duplication n'est refusée qu'à l'invité des pages.
+vi.mock('../users/repository.js', () => ({ userRepository: { findById: async () => null, findByEmail: async () => null, hasFullMembership: async () => true } }));
 vi.mock('../users/service.js', () => ({ userService: {} }));
 vi.mock('../notifications/mail.js', () => ({ mailService: {} }));
 vi.mock('../notifications/service.js', () => ({ notificationService: {} }));
