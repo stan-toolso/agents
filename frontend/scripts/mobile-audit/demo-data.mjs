@@ -449,7 +449,8 @@ const channel = (p, slug, name, topic, extra = {}) => {
     __typename: 'Conversation', id: `c-${p.id}-${slug}`, slug, name, topic, archivedAt: null, createdAt: ago(60 * 24 * 40), lastMessageAt: null, lastReadAt: ago(60 * 24 * 3),
     project: p, unreadCount: 0, messageCount: () => messages.filter((m) => m.conversationId === c.id).length,
     mentionables: () => [...people, ...agents.map((a) => a.user)].map((u) => ({ __typename: 'TaskMentionable', kind: 'user', id: u.id, label: u.name, detail: u.kind === 'AGENT' ? 'agent' : u.email, text: `@${u.name}` })),
-    messages: () => messages.filter((m) => m.conversationId === c.id),
+    // Du plus ancien au plus récent, comme le backend (les séparateurs de jour et le repère « Nouveaux messages » en dépendent).
+    messages: () => messages.filter((m) => m.conversationId === c.id).sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0)),
     ...extra,
   };
   conversations.push(c);
