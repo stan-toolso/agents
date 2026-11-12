@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { User } from '../users/types.js';
 
 const P = '11111111-2222-4333-8444-555555555555';
+const A = '22222222-2222-4333-8444-555555555555';
 const { store, userService } = vi.hoisted(() => ({
   store: { rows: new Map<string, any>(), versions: [] as any[], roles: new Map<string, string | null>(), personal: false },
   userService: {
@@ -10,11 +11,13 @@ const { store, userService } = vi.hoisted(() => ({
   },
 }));
 vi.mock('../users/service.js', () => ({ userService }));
+vi.mock('../agents/repository.js', () => ({ agentRepository: { findById: async (id: string) => (id === A ? { id: A, projectId: P } : null) } }));
+vi.mock('../sharedPages/service.js', () => ({ sharedPageService: { getFor: async () => null, canManage: () => false } }));
 vi.mock('./repository.js', () => ({
   cockpitRepository: {
-    find: async (scope: { key: string; kind: string }, userId: string) => store.rows.get(scope.kind === 'home' ? `${scope.key}|${userId}` : scope.key) ?? null,
+    find: async (scope: { key: string; kind: string; cell?: boolean }, userId: string) => store.rows.get(scope.kind === 'home' && !scope.cell ? `${scope.key}|${userId}` : scope.key) ?? null,
     save: async (input: any) => {
-      const k = input.scope.kind === 'home' ? `${input.scope.key}|${input.userId}` : input.scope.key;
+      const k = input.scope.kind === 'home' && !input.scope.cell ? `${input.scope.key}|${input.userId}` : input.scope.key;
       const prev = store.rows.get(k);
       const row = { id: k, scope: input.scope.key, user_id: null, project_id: input.scope.projectId, layout: input.layout, version: (prev?.version ?? 0) + 1, updated_by: input.authorId, updated_at: new Date() };
       store.rows.set(k, row);
@@ -87,7 +90,33 @@ describe('cockpitService', () => {
 
   it('refuse un enregistrement sans layout ni ops, et une portée réservée', async () => {
     await expect(cockpitService.update(alice, 'home', {})).rejects.toThrow(/Rien à enregistrer/);
-    await expect(cockpitService.resolve(alice, `project:${P}:tasks`)).rejects.toThrow(/pas encore/);
+    await expect(cockpitService.resolve(alice, `project:${P}:page:x`)).rejects.toThrow(/pas encore/);
+  });
+
+  it('la fiche d’un agent suit les droits de son projet ; le pilotage a son défaut', async () => {
+    await expect(cockpitService.resolve(alice, `agent:${A}`)).rejects.toThrow(/accès/);
+    store.roles.set(P, 'viewer');
+    const r = await cockpitService.resolve(alice, `agent:${A}`);
+    expect(r).toMatchObject({ canEdit: false, isDefault: true });
+    expect(r.layout.blocks.some((b) => b.kind === 'builtin' && b.widget === 'agent.sessions')).toBe(true);
+    await expect(cockpitService.resolve(alice, `agent:${P}`)).rejects.toThrow(/introuvable/);
+    const t = await cockpitService.resolve(alice, `project:${P}:tasks`);
+    expect(t.layout.blocks.some((b) => b.kind === 'builtin' && b.widget === 'pilot.watchlist')).toBe(true);
+  });
+
+  it('l’accueil par défaut de la cellule : réservé aux administrateurs, hérité par qui n’a rien réglé', async () => {
+    await expect(cockpitService.update(alice, 'home:default', { ops: [{ op: 'remove', id: 'd-projects-table' }] })).rejects.toThrow(/administrateurs/);
+    const admin = { id: 'root', isAdmin: true } as User;
+    await cockpitService.update(admin, 'home:default', { ops: [{ op: 'remove', id: 'd-projects-table' }] });
+    const bob = await cockpitService.resolve({ id: 'bob' } as User, 'home');
+    expect(bob.isDefault).toBe(true);
+    expect(bob.layout.blocks.some((b) => b.id === 'd-projects-table')).toBe(false);
+    // Un réglage propre l'emporte ; la réinitialisation revient au défaut de la cellule.
+    await cockpitService.update({ id: 'bob' } as User, 'home', { ops: [{ op: 'remove', id: 'd-usage-card' }] });
+    expect((await cockpitService.resolve({ id: 'bob' } as User, 'home')).layout.blocks.some((b) => b.id === 'd-usage-card')).toBe(false);
+    const back = await cockpitService.reset({ id: 'bob' } as User, 'home');
+    expect(back.layout.blocks.some((b) => b.id === 'd-usage-card')).toBe(true);
+    expect(back.layout.blocks.some((b) => b.id === 'd-projects-table')).toBe(false);
   });
 });
 

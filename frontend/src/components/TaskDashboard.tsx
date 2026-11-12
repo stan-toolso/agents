@@ -1,4 +1,9 @@
 import { useMemo, useState, type ReactNode } from 'react';
+import { useAuth } from '../auth/AuthContext';
+import CockpitBoard, { CustomizeButton } from '../cockpit/CockpitBoard';
+import type { CockpitContext } from '../cockpit/registry';
+import { useCockpit } from '../cockpit/useCockpit';
+import { DEFAULT_TASKS_LAYOUT } from '../cockpit/widgets/pilot';
 import { Button, ButtonGroup } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import type { Task } from '../graphql/operations';
@@ -32,8 +37,8 @@ import '../pages/dashboard.css';
 
 const PERIOD_KEY = 'skipper.tasks.dashboard.weeks';
 const DEFAULT_WEEKS = 8;
-const longDate = (d: Date) => d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-const fmt1 = (n: number) => n.toLocaleString('fr-FR', { maximumFractionDigits: 1 });
+export const longDate = (d: Date) => d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+export const fmt1 = (n: number) => n.toLocaleString('fr-FR', { maximumFractionDigits: 1 });
 
 export interface TaskDashboardProps {
   /** Toutes les tâches du périmètre filtré, terminées et annulées comprises. */
@@ -42,15 +47,18 @@ export interface TaskDashboardProps {
   onEdit: (t: Task) => void;
   onTag: (tag: string) => void;
   targets: Map<string, LaunchTarget>;
+  /** Projet de la page : la vue est alors l'agencement `project:<id>:tasks` (composable) ; sans projet, l'agencement par défaut. */
+  projectId?: string | null;
 }
 
 /**
  * Vue « pilotage » des tâches, pensée pour qui suit l'avancement d'un projet : indicateurs clés, avancement cumulé et
  * prévision de fin du reste à faire, flux créées / terminées par semaine, répartition de la charge, puis ce qui demande
  * un regard (retards, blocages, en cours sans activité), ce qui est en cours, ce qu'il faudrait lancer ensuite et ce qui
- * vient d'être terminé. Les calculs sont dans lib/taskStats.ts.
+ * vient d'être terminé. Les calculs sont dans lib/taskStats.ts ; les blocs dans cockpit/widgets/pilot.tsx, rendus depuis
+ * l'agencement de la portée `project:<id>:tasks` (bouton « Personnaliser », outil `cockpit`).
  */
-export default function TaskDashboard({ tasks, showProject, onEdit, onTag, targets }: TaskDashboardProps) {
+export default function TaskDashboard({ tasks, showProject, onEdit, onTag, targets, projectId = null }: TaskDashboardProps) {
   const [weeks, setWeeks] = useState(() => {
     try {
       const n = Number(localStorage.getItem(PERIOD_KEY));
@@ -71,31 +79,9 @@ export default function TaskDashboard({ tasks, showProject, onEdit, onTag, targe
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const now = useMemo(() => new Date(), [tasks]);
   const stats = useMemo(() => dashboardStats(tasks, now, weeks), [tasks, now, weeks]);
-  const open = useMemo(() => tasks.filter(isOpen), [tasks]);
-  const inProgress = useMemo(
-    () =>
-      tasks
-        .filter((t) => t.status === 'IN_PROGRESS')
-        .sort((a, b) => sessionRank(a) - sessionRank(b) || PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || a.updatedAt.localeCompare(b.updatedAt)),
-    [tasks],
-  );
-  const watch = useMemo(() => watchlist(tasks, now), [tasks, now]);
-  const aging = useMemo(() => agingWip(tasks, now), [tasks, now]);
-  const ageOf = useMemo(() => new Map(aging.map((a) => [a.task.id, a.age])), [aging]);
-  const next = useMemo(() => nextTasks(tasks, 8), [tasks]);
-  const recentDone = useMemo(
-    () =>
-      tasks
-        .filter((t) => t.status === 'DONE' && t.completedAt)
-        .sort((a, b) => b.completedAt!.localeCompare(a.completedAt!))
-        .slice(0, 8),
-    [tasks],
-  );
-  const priorities = useMemo(() => byPriority(open), [open]);
-  const assignees = useMemo(() => byAssignee(open), [open]);
-  const doneDelta = stats.doneWeek - stats.donePrevWeek;
-  const net = stats.createdPeriod - stats.donePeriod - stats.cancelledPeriod;
-  const projectOf = (t: Task) => (showProject ? `${t.project.name} · ` : '');
+  const { user, costUnit } = useAuth();
+  const cockpit = useCockpit(projectId ? `project:${projectId}:tasks` : null, DEFAULT_TASKS_LAYOUT);
+  const ctx: CockpitContext = { kind: 'tasks', viewer: user, showCostTile: costUnit === 'CREDIT' || Boolean(user?.isSuperAdmin), home: null, project: null, tasks: { tasks, stats, now, weeks, showProject, onEdit, onTag, targets }, refetch: ['Tasks'] };
 
   return (
     <div className="task-dash">
@@ -111,274 +97,18 @@ export default function TaskDashboard({ tasks, showProject, onEdit, onTag, targe
         <span>
           du {shortDate(stats.buckets[0].start)} à aujourd’hui · {tasks.length} tâche{tasks.length > 1 ? 's' : ''} dans le périmètre filtré
         </span>
+        <span className="ms-auto">
+          <CustomizeButton cockpit={cockpit} />
+        </span>
       </div>
-
-      <section className="dash-section">
-        <div className="dash-tiles">
-          <Tile icon="bi-check2-square" label="Ouvertes" value={stats.open} sub={`${stats.todo} à faire · ${stats.inProgress} en cours${stats.important ? ` · ${stats.important} urgente${stats.important > 1 ? 's' : ''} ou haute${stats.important > 1 ? 's' : ''}` : ''}`} />
-          <Tile
-            icon="bi-cpu"
-            label="En cours"
-            value={stats.inProgress}
-            alert={stats.blocked > 0}
-            sub={
-              stats.inProgress === 0
-                ? 'Aucune tâche en cours'
-                : [
-                    stats.working ? `${stats.working} agent${stats.working > 1 ? 's' : ''} au travail` : null,
-                    stats.waiting ? `${stats.waiting} en attente d’instructions` : null,
-                    stats.unattended ? `${stats.unattended} sans agent actif` : null,
-                    stats.blocked ? `${stats.blocked} bloquée${stats.blocked > 1 ? 's' : ''}` : null,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')
-            }
-          />
-          <Tile
-            icon="bi-check2-circle"
-            label="Terminées sur 7 jours"
-            value={stats.doneWeek}
-            sub={
-              <>
-                <span className={doneDelta > 0 ? 'task-dash-good' : doneDelta < 0 ? 'task-dash-bad' : ''}>
-                  {doneDelta > 0 ? '+' : ''}
-                  {doneDelta}
-                </span>{' '}
-                par rapport aux 7 jours précédents ({stats.donePrevWeek})
-              </>
-            }
-          />
-          <Tile icon="bi-exclamation-triangle" label="En retard" value={stats.overdue} alert={stats.overdue > 0} sub={stats.dueSoon ? `${stats.dueSoon} échéance${stats.dueSoon > 1 ? 's' : ''} dans les 7 jours` : 'Aucune échéance dans les 7 jours'} />
-          <Tile
-            icon="bi-speedometer2"
-            label="Débit"
-            value={fmt1(stats.throughput.mean)}
-            unit="/ sem."
-            sub={`${stats.throughput.min} à ${stats.throughput.max} terminées par semaine sur ${stats.throughput.weeks} semaine${stats.throughput.weeks > 1 ? 's' : ''} révolue${stats.throughput.weeks > 1 ? 's' : ''}`}
-          />
-          <Tile
-            icon="bi-stopwatch"
-            label="Délai de traitement"
-            value={stats.leadTime.count ? formatDays(stats.leadTime.median) : '—'}
-            sub={stats.leadTime.count ? `Médiane · 85 % des tâches en moins de ${formatDays(stats.leadTime.p85)} (${stats.leadTime.count} terminée${stats.leadTime.count > 1 ? 's' : ''} sur la période)` : 'Aucune tâche terminée sur la période'}
-            title="Temps entre la création d’une tâche et sa fin, pour les tâches terminées sur la période"
-          />
-          <Tile
-            icon="bi-arrow-repeat"
-            label="Cycle time"
-            value={stats.cycleTime.count ? formatDays(stats.cycleTime.median) : '—'}
-            alert={stats.agingOverP85 > 0}
-            sub={
-              stats.cycleTime.count
-                ? `Médiane · 85 % en moins de ${formatDays(stats.cycleTime.p85)}${stats.agingOverP85 ? ` · ${stats.agingOverP85} en cours depuis plus longtemps` : ''}`
-                : 'Aucune tâche terminée sur la période'
-            }
-            title="Temps entre le passage en cours d’une tâche et sa fin, pour les tâches terminées sur la période"
-          />
-          <Tile
-            icon="bi-calendar-check"
-            label="Fin estimée du reste à faire"
-            date
-            value={stats.open === 0 ? 'Rien à faire' : stats.forecastDates ? shortDate(stats.forecastDates.p50) : '—'}
-            alert={stats.open > 0 && !stats.forecast}
-            sub={
-              stats.open === 0
-                ? 'Toutes les tâches sont terminées'
-                : stats.forecastDates
-                  ? `Une chance sur deux · 85 % de chances avant le ${shortDate(stats.forecastDates.p85)} · à périmètre constant`
-                  : 'Pas de base de prévision : aucune tâche terminée sur la période'
-            }
-            title="Simulation de Monte-Carlo sur le débit hebdomadaire observé : dates auxquelles 50 % puis 85 % des scénarios ont écoulé les tâches ouvertes"
-          />
-          <Tile
-            icon="bi-arrow-left-right"
-            label="Flux net sur la période"
-            value={
-              <span className={net > 0 ? 'task-dash-bad' : net < 0 ? 'task-dash-good' : ''}>
-                {net > 0 ? '+' : ''}
-                {net}
-              </span>
-            }
-            sub={`${stats.createdPeriod} créée${stats.createdPeriod > 1 ? 's' : ''}, ${stats.donePeriod} terminée${stats.donePeriod > 1 ? 's' : ''}, ${stats.cancelledPeriod} annulée${stats.cancelledPeriod > 1 ? 's' : ''} : le reste à faire ${net > 0 ? 'grandit' : net < 0 ? 'diminue' : 'est stable'}`}
-          />
-        </div>
-      </section>
-
-      <div className="task-dash-grid2">
-        <div className="task-dash-card">
-          <h3>Avancement cumulé</h3>
-          <div className="hint">Périmètre (tâches créées, non annulées) et tâches terminées, jour par jour ; en pointillé, la projection au débit moyen.</div>
-          <BurnupChart stats={stats} now={now} />
-        </div>
-        <div className="task-dash-card">
-          <h3>Flux par semaine</h3>
-          <div className="hint">Tâches créées et terminées chaque semaine ; la semaine en cours est incomplète.</div>
-          <ThroughputChart buckets={stats.buckets} />
-        </div>
-      </div>
-
-      <div className="task-dash-grid2">
-        <div className="task-dash-card">
-          <h3>Flux cumulé</h3>
-          <div className="hint">Tâches à faire, en cours et terminées à la fin de chaque jour (hors annulées) : une bande « en cours » qui s’élargit signale un encours qui s’accumule.</div>
-          <FlowChart points={stats.flow} />
-        </div>
-        <div className="task-dash-card">
-          <h3>Vieillissement des tâches en cours</h3>
-          <div className="hint">Temps depuis le passage en cours, comparé au cycle time des tâches terminées sur la période.</div>
-          <AgingBars items={aging} median={stats.cycleTime.count ? stats.cycleTime.median : null} p85={stats.cycleTime.count ? stats.cycleTime.p85 : null} />
-        </div>
-      </div>
-
-      <div className="task-dash-grid2">
-        <div className="task-dash-card">
-          <h3>Ouvertes par priorité</h3>
-          <Bars rows={priorities} />
-        </div>
-        <div className="task-dash-card">
-          <h3>Charge par responsable</h3>
-          <Bars rows={assignees} empty="Aucune tâche ouverte." />
-        </div>
-      </div>
-
-      <div className="task-dash-grid2 task-dash-lists">
-        <section className="dash-section">
-          <h2 className="dash-section-title">
-            <span>À surveiller ({watch.length})</span>
-          </h2>
-          <ul className="dash-list">
-            {watch.slice(0, 10).map(({ task: t, reason, detail }) => (
-              <Item key={t.id} task={t} icon={WATCH_ICONS[reason].icon} iconClass={WATCH_ICONS[reason].cls} meta={`${projectOf(t)}${WATCH_LABELS[reason]} · ${detail}`} side={<TaskPriorityBadge priority={t.priority} short />} />
-            ))}
-            {watch.length > 10 && <li className="empty">… et {watch.length - 10} autre{watch.length - 10 > 1 ? 's' : ''}.</li>}
-            {watch.length === 0 && <li className="empty">Rien à signaler : pas de retard, de blocage ni de tâche en cours laissée sans suite.</li>}
-          </ul>
-        </section>
-
-        <section className="dash-section">
-          <h2 className="dash-section-title">
-            <span>En cours ({inProgress.length})</span>
-          </h2>
-          <ul className="dash-list">
-            {inProgress.slice(0, 10).map((t) => {
-              const state = sessionState(t);
-              return (
-                <Item
-                  key={t.id}
-                  task={t}
-                  icon={state.icon}
-                  iconClass={state.cls}
-                  meta={
-                    <>
-                      {projectOf(t)}
-                      {t.statusTag && (
-                        <>
-                          <TaskStatusBadge status={t.status} statusTag={t.statusTag} />{' '}
-                        </>
-                      )}
-                      {state.label}
-                      {t.session && (
-                        <>
-                          {' '}
-                          <Link to={`/sessions/${t.session.id}`}>{t.session.name}</Link>
-                        </>
-                      )}
-                      {t.assignee && (
-                        <>
-                          {' · '}
-                          <PersonChip person={t.assignee} />
-                        </>
-                      )}
-                      {' · mise à jour '}
-                      {timeAgo(t.updatedAt)}
-                    </>
-                  }
-                  side={
-                    <>
-                      <span className="age" title={`En cours depuis le ${new Date(now.getTime() - (ageOf.get(t.id) ?? 0) * DAY).toLocaleDateString()} · créée le ${new Date(t.createdAt).toLocaleDateString()}`}>
-                        depuis {formatDays(ageOf.get(t.id) ?? 0)}
-                      </span>
-                      <TaskPriorityBadge priority={t.priority} short />
-                    </>
-                  }
-                />
-              );
-            })}
-            {inProgress.length > 10 && <li className="empty">… et {inProgress.length - 10} autre{inProgress.length - 10 > 1 ? 's' : ''}.</li>}
-            {inProgress.length === 0 && <li className="empty">Aucune tâche en cours.</li>}
-          </ul>
-        </section>
-
-        <section className="dash-section">
-          <h2 className="dash-section-title">
-            <span>Prochaines à lancer</span>
-            <span className="fw-normal text-lowercase" style={{ letterSpacing: 0, textTransform: 'none' }}>
-              par priorité puis échéance
-            </span>
-          </h2>
-          <ul className="dash-list">
-            {next.map((t) => (
-              <Item
-                key={t.id}
-                task={t}
-                icon="bi-play-circle"
-                meta={
-                  <>
-                    {projectOf(t)}
-                    {t.dueDate && <>pour le {new Date(`${t.dueDate}T00:00:00`).toLocaleDateString()} · </>}
-                    créée {timeAgo(t.createdAt)}
-                    {t.assignee && (
-                      <>
-                        {' · '}
-                        <PersonChip person={t.assignee} />
-                      </>
-                    )}
-                    {t.tags.length > 0 && (
-                      <>
-                        {' '}
-                        <TaskTags tags={t.tags} onSelect={onTag} />
-                      </>
-                    )}
-                  </>
-                }
-                side={
-                  <>
-                    <TaskPriorityBadge priority={t.priority} short />
-                    <TaskActions task={t} target={targets.get(t.project.id)} onEdit={() => onEdit(t)} compact />
-                  </>
-                }
-              />
-            ))}
-            {next.length === 0 && <li className="empty">Rien à lancer : aucune tâche à faire.</li>}
-          </ul>
-        </section>
-
-        <section className="dash-section">
-          <h2 className="dash-section-title">
-            <span>Terminées récemment</span>
-          </h2>
-          <ul className="dash-list">
-            {recentDone.map((t) => (
-              <Item
-                key={t.id}
-                task={t}
-                icon="bi-check2"
-                iconClass="good"
-                meta={`${projectOf(t)}terminée ${timeAgo(t.completedAt!)} · délai ${formatDays((new Date(t.completedAt!).getTime() - new Date(t.createdAt).getTime()) / DAY)}${t.startedAt ? ` · cycle ${formatDays(Math.max(0, new Date(t.completedAt!).getTime() - new Date(t.startedAt).getTime()) / DAY)}` : ''}`}
-                side={<TaskPriorityBadge priority={t.priority} short />}
-              />
-            ))}
-            {recentDone.length === 0 && <li className="empty">Aucune tâche terminée.</li>}
-          </ul>
-        </section>
-      </div>
+      <CockpitBoard cockpit={cockpit} ctx={ctx} scopeLabel="le pilotage des tâches" columns={[6, 6]} />
     </div>
   );
 }
 
-const PRIORITY_RANK = { URGENT: 0, HIGH: 1, MEDIUM: 2, LOW: 3 } as const;
+export const PRIORITY_RANK = { URGENT: 0, HIGH: 1, MEDIUM: 2, LOW: 3 } as const;
 
-const WATCH_ICONS: Record<WatchReason, { icon: string; cls: string }> = {
+export const WATCH_ICONS: Record<WatchReason, { icon: string; cls: string }> = {
   overdue: { icon: 'bi-exclamation-triangle', cls: 'bad' },
   blocked: { icon: 'bi-sign-stop', cls: 'bad' },
   urgent_idle: { icon: 'bi-lightning-charge', cls: 'warn' },
@@ -387,15 +117,15 @@ const WATCH_ICONS: Record<WatchReason, { icon: string; cls: string }> = {
 };
 
 /** État de la session en charge d'une tâche en cours : au travail, en attente, ou sans agent actif. */
-function sessionState(t: Task): { icon: string; cls: string; label: string } {
+export function sessionState(t: Task): { icon: string; cls: string; label: string } {
   if (t.session?.status === 'RUNNING' && t.session.activity === 'BUSY') return { icon: 'bi-cpu', cls: 'busy', label: 'Agent au travail :' };
   if (t.session?.status === 'RUNNING') return { icon: 'bi-hourglass-split', cls: 'warn', label: 'Agent en attente :' };
   if (t.session) return { icon: 'bi-pause-circle', cls: '', label: 'Session arrêtée :' };
   return { icon: 'bi-person-workspace', cls: '', label: 'Sans session' };
 }
-const sessionRank = (t: Task) => (t.session?.status === 'RUNNING' && t.session.activity === 'BUSY' ? 0 : hasRunningSession(t) ? 1 : 2);
+export const sessionRank = (t: Task) => (t.session?.status === 'RUNNING' && t.session.activity === 'BUSY' ? 0 : hasRunningSession(t) ? 1 : 2);
 
-function Tile({ icon, label, value, unit, sub, alert, title, date }: { icon: string; label: string; value: ReactNode; unit?: string; sub?: ReactNode; alert?: boolean; title?: string; date?: boolean }) {
+export function Tile({ icon, label, value, unit, sub, alert, title, date }: { icon: string; label: string; value: ReactNode; unit?: string; sub?: ReactNode; alert?: boolean; title?: string; date?: boolean }) {
   return (
     <div className={`dash-tile${alert ? ' alert' : ''}`} title={title}>
       <div className="dash-tile-label">
@@ -410,7 +140,7 @@ function Tile({ icon, label, value, unit, sub, alert, title, date }: { icon: str
   );
 }
 
-function Item({ task, icon, iconClass = '', meta, side }: { task: Task; icon: string; iconClass?: string; meta: ReactNode; side?: ReactNode }) {
+export function Item({ task, icon, iconClass = '', meta, side }: { task: Task; icon: string; iconClass?: string; meta: ReactNode; side?: ReactNode }) {
   return (
     <li>
       <span className={`icon ${iconClass}`}>
@@ -428,7 +158,7 @@ function Item({ task, icon, iconClass = '', meta, side }: { task: Task; icon: st
 }
 
 /** Barres horizontales empilées (en cours en accent, à faire en gris), sur une même échelle. */
-function Bars({ rows, empty = 'Aucune tâche.' }: { rows: Breakdown[]; empty?: string }) {
+export function Bars({ rows, empty = 'Aucune tâche.' }: { rows: Breakdown[]; empty?: string }) {
   const max = Math.max(1, ...rows.map((r) => r.todo + r.inProgress));
   if (rows.every((r) => r.todo + r.inProgress === 0)) return <div className="hint mt-2">{empty}</div>;
   return (
@@ -466,7 +196,7 @@ function Bars({ rows, empty = 'Aucune tâche.' }: { rows: Breakdown[]; empty?: s
  * Vieillissement des tâches en cours : une barre par tâche (âge depuis le passage en cours), les plus anciennes
  * d'abord, avec les repères médiane et p85 du cycle time ; au-delà du p85, la barre passe en alerte.
  */
-function AgingBars({ items, median, p85, max = 10 }: { items: AgingItem<Task>[]; median: number | null; p85: number | null; max?: number }) {
+export function AgingBars({ items, median, p85, max = 10 }: { items: AgingItem<Task>[]; median: number | null; p85: number | null; max?: number }) {
   if (items.length === 0) return <div className="hint mt-2">Aucune tâche en cours.</div>;
   const shown = items.slice(0, max);
   const scale = Math.max(1, shown[0].age, p85 ?? 0) * 1.05;
@@ -542,7 +272,7 @@ function Tooltip({ x, width, children }: { x: number; width: number; children: R
   );
 }
 
-function BurnupChart({ stats, now }: { stats: DashboardStats; now: Date }) {
+export function BurnupChart({ stats, now }: { stats: DashboardStats; now: Date }) {
   const [ref, width] = useElementWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const pts = stats.burnup;
@@ -698,7 +428,7 @@ function BurnupChart({ stats, now }: { stats: DashboardStats; now: Date }) {
   );
 }
 
-function ThroughputChart({ buckets }: { buckets: WeekBucket[] }) {
+export function ThroughputChart({ buckets }: { buckets: WeekBucket[] }) {
   const [ref, width] = useElementWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const height = 190;
@@ -808,7 +538,7 @@ function ThroughputChart({ buckets }: { buckets: WeekBucket[] }) {
 }
 
 /** Flux cumulé : trois aires empilées (terminées en bas, en cours, à faire en haut), un point par jour. */
-function FlowChart({ points }: { points: FlowPoint[] }) {
+export function FlowChart({ points }: { points: FlowPoint[] }) {
   const [ref, width] = useElementWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const height = 190;

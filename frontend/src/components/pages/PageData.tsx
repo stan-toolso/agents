@@ -27,17 +27,18 @@ const STATE: Record<SharedPageSource['status'], { label: string; icon: string }>
   skipped: { label: 'Non rafraîchie', icon: 'bi-pause-circle' },
   pending: { label: 'Jamais rafraîchie', icon: 'bi-hourglass' },
   inactive: { label: 'Modifiée depuis', icon: 'bi-clock-history' },
+  live: { label: 'Vivante', icon: 'bi-lightning-charge' },
 };
 
 function SourceCard({ s, full }: { s: SharedPageSource; full: boolean }) {
   const st = STATE[s.status];
-  const where = s.kind === 'sql' ? `${s.item ?? '?'}${s.database ? ` · ${s.database}` : ''}` : `script ${s.interpreter ?? ''}`;
-  const code = s.kind === 'sql' ? s.query : s.code;
+  const where = s.kind === 'sql' ? `${s.item ?? '?'}${s.database ? ` · ${s.database}` : ''}` : s.kind === 'graphql' ? 'API de Skipper · droits de la personne qui regarde' : `script ${s.interpreter ?? ''}`;
+  const code = s.kind === 'script' ? s.code : s.query;
   return (
     <div className="pd-src">
       <div className="pd-src-head">
-        <span className="pd-src-kind" title={s.kind === 'sql' ? 'Requête SQL (coffre)' : "Script lancé dans l'environnement du projet"}>
-          <i className={`bi ${s.kind === 'sql' ? 'bi-database' : 'bi-terminal'}`} />
+        <span className="pd-src-kind" title={s.kind === 'sql' ? 'Requête SQL (coffre)' : s.kind === 'graphql' ? "Requête GraphQL sur l'API de Skipper, exécutée à chaque lecture avec les droits de la personne qui regarde" : "Script lancé dans l'environnement du projet"}>
+          <i className={`bi ${s.kind === 'sql' ? 'bi-database' : s.kind === 'graphql' ? 'bi-lightning-charge' : 'bi-terminal'}`} />
         </span>
         <span className="pd-src-name" title={`Skipper.data.${s.name}`}>
           {s.name}
@@ -59,9 +60,10 @@ function SourceCard({ s, full }: { s: SharedPageSource; full: boolean }) {
       {full && code && (
         <details className="pd-src-code">
           <summary>
-            <i className="bi bi-chevron-right" /> {s.kind === 'sql' ? 'Requête' : 'Script'}
+            <i className="bi bi-chevron-right" /> {s.kind === 'script' ? 'Script' : 'Requête'}
           </summary>
           <pre>{code}</pre>
+          {s.kind === 'graphql' && s.variables && Object.keys(s.variables).length > 0 && <pre>{`variables : ${JSON.stringify(s.variables, null, 1)}`}</pre>}
         </details>
       )}
     </div>

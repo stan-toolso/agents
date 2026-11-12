@@ -8,6 +8,9 @@ import { useDialogs } from '../components/Dialogs';
 import PageLoading from '../components/PageLoading';
 import { AGENT, AGENT_ACTIVITY, DELETE_AGENT, SET_AGENT_DELEGATION, SET_AGENT_ENABLED, SET_AGENT_MANAGERS, UPDATE_AGENT, agentKindLabels, type Agent, type AgentActionInput, type AgentActivityData, type AgentKind, type AgentManagerRole } from '../graphql/agents';
 import { useAuth } from '../auth/AuthContext';
+import CockpitBoard, { CustomizeButton } from '../cockpit/CockpitBoard';
+import type { CockpitContext } from '../cockpit/registry';
+import { useCockpit } from '../cockpit/useCockpit';
 import { PROJECT_MEMBERS, PROVIDERS, type ProjectMember, type Provider } from '../graphql/operations';
 import { formatCost, sessionStatusLabels, taskStatusLabels, timeAgo } from '../lib/humanize';
 import { usePollingQuery } from '../lib/usePollingQuery';
@@ -487,90 +490,28 @@ function ManagersCard({ agent }: { agent: Agent }) {
   );
 }
 
+/** Onglet Activité : l'agencement `agent:<id>` (tuiles, sessions, tâches), composable par ses gestionnaires et l'agent lui-même. */
 function ActivitySection({ agent }: { agent: Agent }) {
   const { data, loading } = usePollingQuery<AgentActivityData>(AGENT_ACTIVITY, { variables: { id: agent.id, limit: 50 }, pollInterval: 10_000 });
-  const s = agent.stats;
-  const sessions = data?.agent?.sessions ?? [];
-  const tasks = data?.agent?.tasks ?? [];
+  const { user, costUnit } = useAuth();
+  const cockpit = useCockpit(`agent:${agent.id}`);
+  const ctx: CockpitContext = {
+    kind: 'agent',
+    viewer: user,
+    showCostTile: costUnit === 'CREDIT' || Boolean(user?.isSuperAdmin),
+    home: null,
+    project: null,
+    agent: { agent, sessions: data?.agent?.sessions ?? [], tasks: data?.agent?.tasks ?? [], loading },
+    refetch: ['AgentActivity', 'Agent'],
+  };
   return (
     <>
-      <div className="agent-stat-tiles">
-        <div className="agent-stat-tile">
-          <div className="value">{s.activeSessions}</div>
-          <div className="label">session{s.activeSessions > 1 ? 's' : ''} en cours</div>
+      {!cockpit.editing && (
+        <div className="d-flex justify-content-end mb-2">
+          <CustomizeButton cockpit={cockpit} />
         </div>
-        <div className="agent-stat-tile">
-          <div className="value">{s.sessions}</div>
-          <div className="label">sessions au total</div>
-        </div>
-        <div className="agent-stat-tile">
-          <div className="value">{s.tasks}</div>
-          <div className="label">tâches touchées</div>
-        </div>
-        <div className="agent-stat-tile">
-          <div className="value">{formatCost(s.monthCostUsd)}</div>
-          <div className="label">ce mois · {formatCost(s.totalCostUsd)} au total</div>
-        </div>
-      </div>
-      <Row className="g-3">
-        <Col lg={7}>
-          <Card>
-            <Card.Header>Sessions</Card.Header>
-            <Card.Body className="p-0">
-              {loading && !data ? (
-                <div className="p-3 small text-secondary">Chargement…</div>
-              ) : sessions.length === 0 ? (
-                <div className="p-3 small text-secondary">Aucune session pour le moment.</div>
-              ) : (
-                <Table size="sm" hover className="mb-0 align-middle table-stack">
-                  <tbody>
-                    {sessions.map((x) => (
-                      <tr key={x.id}>
-                        <td>
-                          <Link to={`/sessions/${x.id}`}>{x.name}</Link>
-                          {x.requestedBy && <div className="small text-secondary">demandée par {x.requestedBy.name}</div>}
-                          {x.tasks.length > 0 && <div className="small text-secondary">{x.tasks.map((t) => t.title).join(' · ')}</div>}
-                        </td>
-                        <td className="small text-nowrap">{sessionStatusLabels[x.status] ?? x.status}</td>
-                        <td className="small text-end text-nowrap">{x.costUsd > 0 ? formatCost(x.costUsd) : null}</td>
-                        <td className="small text-secondary text-nowrap" title={new Date(x.updatedAt).toLocaleString('fr-FR')}>
-                          {timeAgo(x.updatedAt)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </Table>
-              )}
-            </Card.Body>
-          </Card>
-        </Col>
-        <Col lg={5}>
-          <Card>
-            <Card.Header>Tâches</Card.Header>
-            <Card.Body className="p-0">
-              {tasks.length === 0 ? (
-                <div className="p-3 small text-secondary">Aucune tâche touchée pour le moment.</div>
-              ) : (
-                <Table size="sm" hover className="mb-0 align-middle">
-                  <tbody>
-                    {tasks.map((t) => (
-                      <tr key={t.id}>
-                        <td>
-                          <Link to={`/tasks/${t.id}`}>{t.title}</Link>
-                        </td>
-                        <td className="small text-nowrap">
-                          {taskStatusLabels[t.status] ?? t.status}
-                          {t.statusTag && <span className="text-secondary"> · {t.statusTag}</span>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </Table>
-              )}
-            </Card.Body>
-          </Card>
-        </Col>
-      </Row>
+      )}
+      {cockpit.layout ? <CockpitBoard cockpit={cockpit} ctx={ctx} scopeLabel={`la fiche de ${agent.name}`} /> : <div className="small text-secondary">Chargement…</div>}
     </>
   );
 }

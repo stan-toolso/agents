@@ -34,7 +34,8 @@ export interface CockpitState {
 
 const EMPTY: WidgetDef[] = [];
 
-export function useCockpit(scope: string | null): CockpitState {
+/** `fallback` : agencement affiché, non modifiable, quand il n'y a pas de portée (ex. pilotage de tous les projets). */
+export function useCockpit(scope: string | null, fallback: Layout | null = null): CockpitState {
   const { showError, confirm } = useDialogs();
   const { data } = usePollingQuery<{ cockpitLayout: CockpitLayoutData }>(COCKPIT_LAYOUT, { variables: { scope: scope ?? '' }, skip: !scope, pollInterval: 30_000, fetchPolicy: 'cache-and-network' });
   const current = data?.cockpitLayout ?? null;
@@ -125,7 +126,7 @@ export function useCockpit(scope: string | null): CockpitState {
 
   return {
     data: current,
-    layout: editing && draft ? draft : current?.layout ?? null,
+    layout: editing && draft ? draft : current?.layout ?? (scope ? null : fallback),
     catalog: current?.catalog ?? EMPTY,
     canEdit: Boolean(current?.canEdit),
     editing,

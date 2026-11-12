@@ -62,6 +62,45 @@ const PERSONAL: Layout = {
   ],
 };
 
+/** Vue pilotage des tâches : tuiles d'indicateurs, graphiques deux par deux (colonnes 6/6), puis listes. */
+const TASKS: Layout = {
+  v: 1,
+  blocks: [
+    b('pilot.tile.open', 'tiles'),
+    b('pilot.tile.in_progress', 'tiles'),
+    b('pilot.tile.done_week', 'tiles'),
+    b('pilot.tile.overdue', 'tiles'),
+    b('pilot.tile.throughput', 'tiles'),
+    b('pilot.tile.lead_time', 'tiles'),
+    b('pilot.tile.cycle_time', 'tiles'),
+    b('pilot.tile.forecast', 'tiles'),
+    b('pilot.tile.net_flow', 'tiles'),
+    b('pilot.burnup', 'main'),
+    b('pilot.flow', 'main'),
+    b('pilot.by_priority', 'main'),
+    b('pilot.watchlist', 'main'),
+    b('pilot.next', 'main'),
+    b('pilot.throughput', 'side'),
+    b('pilot.aging', 'side'),
+    b('pilot.by_assignee', 'side'),
+    b('pilot.in_progress', 'side'),
+    b('pilot.done', 'side'),
+  ],
+};
+
+/** Fiche d'un agent, onglet Activité : quatre tuiles, ses sessions, ses tâches. */
+const AGENT: Layout = {
+  v: 1,
+  blocks: [
+    b('agent.tile.active', 'tiles'),
+    b('agent.tile.sessions', 'tiles'),
+    b('agent.tile.tasks', 'tiles'),
+    b('agent.tile.cost', 'tiles'),
+    b('agent.sessions', 'main'),
+    b('agent.tasks', 'side'),
+  ],
+};
+
 export interface DefaultOptions {
   /** Projet = espace personnel d'une personne. */
   personal?: boolean;
@@ -75,6 +114,10 @@ export function defaultLayout(scope: Pick<Scope, 'kind'>, opts: DefaultOptions =
       return clone(HOME);
     case 'project':
       return clone(opts.personal ? PERSONAL : PROJECT);
+    case 'tasks':
+      return clone(TASKS);
+    case 'agent':
+      return clone(AGENT);
     default:
       return { v: 1, blocks: [] };
   }

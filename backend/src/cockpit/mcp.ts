@@ -4,9 +4,13 @@ import { auditService } from '../audit/service.js';
 import { AppError } from '../errors.js';
 import type { Project } from '../projects/types.js';
 import { userRepository } from '../users/repository.js';
+import { getExecutableSchema } from './schemaRegistry.js';
+import { GRAPHQL_LIMITS, checkGraphqlQuery, checkGraphqlVariables, resolveVariables } from './graphqlSource.js';
+import { runGraphql } from './liveSources.js';
+import { describeSchema } from './schemaDoc.js';
 import { describeBlock, describeCatalog, diffLayouts } from './layout.js';
 import { cockpitService } from './service.js';
-import { projectScopeKey } from './scope.js';
+import { projectScopeKey, tasksScopeKey } from './scope.js';
 import type { Layout, ResolvedLayout } from './types.js';
 import { REGION_LABELS, REGIONS } from './types.js';
 
@@ -14,12 +18,12 @@ const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
 const failure = (t: string) => ({ content: [{ type: 'text' as const, text: t }], isError: true });
 
 /** Outils libres du serveur `cockpit` : lecture seule. Modifier un agencement passe par l'autorisation de la personne. */
-export const COCKPIT_FREE_TOOLS = ['mcp__cockpit__get', 'mcp__cockpit__history'];
+export const COCKPIT_FREE_TOOLS = ['mcp__cockpit__get', 'mcp__cockpit__history', 'mcp__cockpit__query', 'mcp__cockpit__schema'];
 
 /** Paragraphe du prompt système qui présente le cockpit composable aux agents. */
 export function cockpitPromptSummary(): string {
   return [
-    "Cockpit configurable (serveur MCP `cockpit`) : le tableau de bord du projet et l'accueil de la personne qui pilote sont des agencements de blocs par région (tuiles, colonne principale, colonne latérale, pleine largeur). `cockpit.get` (portée `project` ou `home`) montre l'agencement actuel et le catalogue des blocs natifs disponibles avec leurs paramètres ; `cockpit.update` le modifie par opérations (`ops` : add, remove, move, set) ou par un agencement complet (`layout`), en créant une version ; `cockpit.reset` revient au défaut ; `cockpit.history` et `cockpit.restore` consultent et restaurent les versions. Préfère un bloc natif paramétré (étiquettes, nombre de semaines…) quand il répond au besoin. Sinon, construis un **bloc artefact** : une page HTML (`pages.publish`, le plus souvent un artefact de données) conçue pour un cadre — pas d'en-tête, largeur fluide, hauteur au contenu, couleurs par `var(--cc-fg)`, `var(--cc-dim)`, `var(--cc-accent)`, `var(--cc-border)`, `var(--cc-bg-elevated)` (variables du thème injectées par Skipper, clair comme sombre), un seul sujet — puis épingle-la avec `cockpit.update` (`{ op: 'add', block: { kind: 'artifact', artifact: <id>, region: 'side' | 'main' | 'full', title, params } }`). Dans le cadre, la page reçoit `Skipper.context` (`viewer`, `project`, `scope`, `params` du bloc, `theme`) en plus de `Skipper.data`, et peut appeler `Skipper.navigate('/tasks/<id>')`, `Skipper.openSession({ prompt })` ou `Skipper.summon({ agent, text })` : l'interface exécute l'action après confirmation de la personne. Un artefact épinglé dans le tableau de bord du projet doit être ouvert aux membres du projet (`updateSharedPage { projectAccess: true }` par son propriétaire, ou le bouton Partager) : l'outil avertit sinon. Modifier le tableau de bord du projet change ce que voit toute l'équipe : fais-le sur demande ou avec accord, dis ce que tu as changé, et pas en silence.",
+    "Cockpit configurable (serveur MCP `cockpit`) : le tableau de bord du projet (`project`), la vue pilotage des tâches (`tasks`), la fiche d'un agent (`agent:<id>`) et l'accueil de la personne qui pilote (`home`) sont des agencements de blocs par région (tuiles, colonne principale, colonne latérale, pleine largeur). `cockpit.get` (portée `project` ou `home`) montre l'agencement actuel et le catalogue des blocs natifs disponibles avec leurs paramètres ; `cockpit.update` le modifie par opérations (`ops` : add, remove, move, set) ou par un agencement complet (`layout`), en créant une version ; `cockpit.reset` revient au défaut ; `cockpit.history` et `cockpit.restore` consultent et restaurent les versions ; `cockpit.query` exécute une requête GraphQL de lecture avec les droits de la personne qui pilote (pour mettre au point une source `graphql` d'artefact : les données de Skipper, tâches, sessions, PR, livraisons, consommation, vues par la personne qui regarde) et `cockpit.schema` montre les champs disponibles. Préfère un bloc natif paramétré (étiquettes, nombre de semaines…) quand il répond au besoin. Sinon, construis un **bloc artefact** : une page HTML (`pages.publish`, le plus souvent un artefact de données) conçue pour un cadre — pas d'en-tête, largeur fluide, hauteur au contenu, couleurs par `var(--cc-fg)`, `var(--cc-dim)`, `var(--cc-accent)`, `var(--cc-border)`, `var(--cc-bg-elevated)` (variables du thème injectées par Skipper, clair comme sombre), un seul sujet — puis épingle-la avec `cockpit.update` (`{ op: 'add', block: { kind: 'artifact', artifact: <id>, region: 'side' | 'main' | 'full', title, params } }`). Dans le cadre, la page reçoit `Skipper.context` (`viewer`, `project`, `scope`, `params` du bloc, `theme`) en plus de `Skipper.data`, et peut appeler `Skipper.navigate('/tasks/<id>')`, `Skipper.openSession({ prompt })` ou `Skipper.summon({ agent, text })` : l'interface exécute l'action après confirmation de la personne. Un artefact épinglé dans le tableau de bord du projet doit être ouvert aux membres du projet (`updateSharedPage { projectAccess: true }` par son propriétaire, ou le bouton Partager) : l'outil avertit sinon. Modifier le tableau de bord du projet change ce que voit toute l'équipe : fais-le sur demande ou avec accord, dis ce que tu as changé, et pas en silence.",
   ].join('\n');
 }
 
@@ -69,9 +73,10 @@ export function createCockpitMcpServer(ctx: CockpitMcpContext): McpSdkServerConf
   const key = (scope: string | undefined) => {
     const s = (scope ?? 'project').trim().toLowerCase();
     if (s === 'project' || s === 'projet') return projectScopeKey(ctx.project.id);
+    if (s === 'tasks' || s === 'taches' || s === 'tâches' || s === 'pilotage') return tasksScopeKey(ctx.project.id);
     return s;
   };
-  const scopeParam = z.string().optional().describe("Portée : « project » (tableau de bord du projet de la session, défaut), « home » (accueil de la personne qui pilote), ou une clé complète (project:<id>)");
+  const scopeParam = z.string().optional().describe("Portée : « project » (tableau de bord du projet de la session, défaut), « tasks » (vue pilotage des tâches du projet), « home » (accueil du propriétaire de la session), « home:default » (accueil par défaut de toute la cellule, administrateurs), « agent:<id> » (onglet Activité de la fiche d'un agent), ou une clé complète (project:<id>)");
   const audit = (action: string, r: ResolvedLayout, details: Record<string, unknown>) =>
     r.scope.projectId ? auditService.record({ projectId: r.scope.projectId, actor: { sessionId: ctx.sessionId }, action, targetType: 'cockpit', targetId: r.scope.key, targetLabel: r.scope.key, details: { version: r.version, ...details } }) : Promise.resolve();
 
@@ -142,6 +147,31 @@ export function createCockpitMcpServer(ctx: CockpitMcpContext): McpSdkServerConf
           const authors = new Map((await userRepository.findByIds([...new Set(versions.map((v) => v.authorId).filter((x): x is string => Boolean(x)))])).map((a) => [a.id, a.name]));
           return versions.map((v) => `- v${v.version} · ${v.createdAt.toISOString()} · ${v.authorId ? authors.get(v.authorId) ?? 'inconnu' : 'Skipper'}${v.sessionId ? ' (session d’agent)' : ''}${v.reset ? ' · réinitialisation' : ''}${v.note ? ` · ${v.note}` : ''} · ${v.layout.blocks.length} bloc(s)`).join('\n');
         }),
+      ),
+      tool(
+        'query',
+        "Exécute une requête GraphQL de lecture sur l'API de Skipper avec les droits de la personne qui pilote la session : pour mettre au point une source `graphql` d'un artefact (même bornes : une opération query, pas d'introspection, 8 niveaux, 80 champs). Les variables acceptent les valeurs modèles ({{project.id}}, {{viewer.id}}, {{now-7d}}…).",
+        {
+          query: z.string().describe('La requête (opération query)'),
+          variables: z.object({}).catchall(z.any()).optional().describe('Variables, valeurs modèles admises'),
+          limit: z.number().int().min(1).max(200).optional().describe('Éléments montrés par liste (défaut 20)'),
+        },
+        async ({ query, variables, limit }) =>
+          run(async () => {
+            const u = await user();
+            const vars = resolveVariables(checkGraphqlVariables(variables), { project: { id: ctx.project.id, name: ctx.project.name }, viewer: { id: u.id, name: u.name }, params: {} });
+            const r = await runGraphql(checkGraphqlQuery(query), vars, u);
+            const n = limit ?? 20;
+            const trim = (v: unknown): unknown => (Array.isArray(v) ? [...v.slice(0, n).map(trim), ...(v.length > n ? [`… ${v.length - n} de plus`] : [])] : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, trim(x)])) : v);
+            const body = JSON.stringify(trim(r.data), null, 1);
+            return [`${r.status === 'ok' ? 'OK' : 'Erreur'} en ${r.durationMs} ms${r.error ? ` · ${r.error}` : ''}`, `variables résolues : ${JSON.stringify(vars)}`, body.length > 12_000 ? `${body.slice(0, 12_000)}\n… (tronqué)` : body].join('\n');
+          }),
+      ),
+      tool(
+        'schema',
+        "Le schéma GraphQL de Skipper pour écrire une source : sans argument, les champs de lecture de la racine (Query) avec leurs arguments ; avec `type`, la définition d'un type (ex. Task, Session, ProjectDashboard).",
+        { type: z.string().optional().describe('Nom d’un type à détailler ; absent : les champs de Query') },
+        async ({ type }) => run(async () => describeSchema(getExecutableSchema(), type ?? null, GRAPHQL_LIMITS)),
       ),
       tool('restore', "Restaure une version de l'historique (nouvelle version en tête).", { scope: scopeParam, version: z.number().int().min(1).describe('Numéro de la version à restaurer') }, async ({ scope, version }) =>
         run(async () => {

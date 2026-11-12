@@ -30,6 +30,8 @@ export interface Scope {
   agentId: string | null;
   /** Page personnalisée (portée « page »). */
   slug: string | null;
+  /** Défaut de la cellule pour tout le monde (`home:default`) : partagé, réservé aux administrateurs de Skipper. */
+  cell?: boolean;
 }
 
 export type BlockParams = Record<string, unknown>;

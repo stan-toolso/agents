@@ -706,6 +706,12 @@ const gitStatus = (a) => {
 const ckBlock = (widget, region, params) => ({ id: `d-${widget.replace(/[._]/g, '-')}`, kind: 'builtin', widget, region, ...(params ? { params } : {}) });
 const COCKPIT_HOME = { v: 1, blocks: [ckBlock('tile.requests', 'tiles'), ckBlock('tile.agents', 'tiles'), ckBlock('tile.tasks', 'tiles'), ckBlock('tile.usage', 'tiles'), ckBlock('list.todo', 'main'), ckBlock('list.running_sessions', 'main'), ckBlock('list.attention_tasks', 'main'), ckBlock('list.pull_requests', 'main'), ckBlock('usage.card', 'side'), ckBlock('list.activity', 'side'), ckBlock('projects.table', 'full')] };
 const COCKPIT_PROJECT = { v: 1, blocks: [ckBlock('tile.requests', 'tiles'), ckBlock('tile.agents', 'tiles'), ckBlock('tile.tasks', 'tiles'), ckBlock('tile.usage', 'tiles'), ckBlock('tile.pull_requests', 'tiles'), ckBlock('channel', 'main'), ckBlock('list.todo', 'main'), ckBlock('list.team', 'main'), ckBlock('list.attention_tasks', 'main'), ckBlock('tasks.stages', 'side'), ckBlock('tasks.weekly', 'side'), ckBlock('list.upcoming', 'side'), ckBlock('list.activity', 'side'), ckBlock('usage.top_sessions', 'side')] };
+const COCKPIT_TASKS = { v: 1, blocks: [
+  ...['open', 'in_progress', 'done_week', 'overdue', 'throughput', 'lead_time', 'cycle_time', 'forecast', 'net_flow'].map((k) => ckBlock(`pilot.tile.${k}`, 'tiles')),
+  ...['burnup', 'flow', 'by_priority', 'watchlist', 'next'].map((k) => ckBlock(`pilot.${k}`, 'main')),
+  ...['throughput', 'aging', 'by_assignee', 'in_progress', 'done'].map((k) => ckBlock(`pilot.${k}`, 'side')),
+] };
+const COCKPIT_AGENT = { v: 1, blocks: [ckBlock('agent.tile.active', 'tiles'), ckBlock('agent.tile.sessions', 'tiles'), ckBlock('agent.tile.tasks', 'tiles'), ckBlock('agent.tile.cost', 'tiles'), ckBlock('agent.sessions', 'main'), ckBlock('agent.tasks', 'side')] };
 const COCKPIT_PERSONAL = { v: 1, blocks: [ckBlock('tile.requests', 'tiles'), ckBlock('tile.agents', 'tiles'), ckBlock('tile.tasks', 'tiles'), ckBlock('tile.usage', 'tiles'), ckBlock('list.todo', 'main'), ckBlock('list.attention_tasks', 'main'), ckBlock('tasks.stages', 'side'), ckBlock('list.upcoming', 'side'), ckBlock('list.activity', 'side'), ckBlock('usage.top_sessions', 'side')] };
 const ckParam = (key, label, type, extra = {}) => ({ __typename: 'CockpitWidgetParam', key, label, type, description: null, min: null, max: null, options: null, default: null, ...extra });
 const ckLimit = (d, max = 20) => ckParam('limit', 'Nombre de lignes', 'int', { min: 1, max, default: d });
@@ -730,16 +736,19 @@ const COCKPIT_CATALOG = [
   ckWidget('usage.card', 'Consommation', 'Consommation par jour, limites Claude, sessions coûteuses.', ['home', 'project'], 'side', ['main', 'side', 'full'], true),
   ckWidget('projects.table', 'Projets', 'Une ligne par projet.', ['home'], 'full', ['main', 'side', 'full'], true),
   ckWidget('channel', 'Canal #général', 'Le canal général du projet.', ['project'], 'main', ['main', 'side', 'full'], true, [ckLimit(6, 20)]),
-  ckWidget('text', 'Texte', 'Un texte libre en Markdown.', ['home', 'project'], 'main', ['main', 'side', 'full'], false, [ckParam('markdown', 'Texte (Markdown)', 'markdown', { default: '' })]),
+  ckWidget('text', 'Texte', 'Un texte libre en Markdown.', ['home', 'project', 'tasks', 'agent'], 'main', ['main', 'side', 'full'], false, [ckParam('markdown', 'Texte (Markdown)', 'markdown', { default: '' })]),
+  ...[['open', 'Ouvertes'], ['in_progress', 'En cours'], ['done_week', 'Terminées sur 7 jours'], ['overdue', 'En retard'], ['throughput', 'Débit'], ['lead_time', 'Délai de traitement'], ['cycle_time', 'Cycle time'], ['forecast', 'Fin estimée du reste à faire'], ['net_flow', 'Flux net sur la période']].map(([k, l]) => ckWidget(`pilot.tile.${k}`, l, `Indicateur « ${l} » du pilotage.`, ['tasks'], 'tiles', ['tiles'], true)),
+  ...[['burnup', 'Avancement cumulé', 'main'], ['throughput', 'Flux par semaine', 'side'], ['flow', 'Flux cumulé', 'main'], ['aging', 'Vieillissement des tâches en cours', 'side'], ['by_priority', 'Ouvertes par priorité', 'main'], ['by_assignee', 'Charge par responsable', 'side'], ['watchlist', 'À surveiller', 'main'], ['in_progress', 'En cours', 'side'], ['next', 'Prochaines à lancer', 'main'], ['done', 'Terminées récemment', 'side']].map(([k, l, r]) => ckWidget(`pilot.${k}`, l, `Bloc « ${l} » du pilotage.`, ['tasks'], r, ['main', 'side', 'full'], true, k === 'watchlist' || k === 'in_progress' || k === 'next' || k === 'done' ? [ckLimit(10, 30)] : [])),
+  ...[['tile.active', 'Sessions en cours', 'tiles'], ['tile.sessions', 'Sessions au total', 'tiles'], ['tile.tasks', 'Tâches touchées', 'tiles'], ['tile.cost', 'Consommation', 'tiles'], ['sessions', 'Sessions', 'main'], ['tasks', 'Tâches', 'side']].map(([k, l, r]) => ckWidget(`agent.${k}`, l, `Bloc « ${l} » de la fiche d’un agent.`, ['agent'], r, r === 'tiles' ? ['tiles'] : ['main', 'side', 'full'], true, r === 'tiles' ? [] : [ckLimit(20, 50)])),
 ];
 const cockpitState = { layouts: new Map(), versions: [] };
-const cockpitKind = (scope) => (scope === 'home' ? 'home' : 'project');
-const cockpitDefault = (scope) => (scope === 'home' ? COCKPIT_HOME : byId(allProjects, scope.replace(/^project:/, ''))?.isPersonal ? COCKPIT_PERSONAL : COCKPIT_PROJECT);
+const cockpitKind = (scope) => (scope.startsWith('home') ? 'home' : scope.endsWith(':tasks') ? 'tasks' : scope.startsWith('agent:') ? 'agent' : 'project');
+const cockpitDefault = (scope) => { const k = cockpitKind(scope); return k === 'home' ? COCKPIT_HOME : k === 'tasks' ? COCKPIT_TASKS : k === 'agent' ? COCKPIT_AGENT : byId(allProjects, scope.replace(/^project:/, ''))?.isPersonal ? COCKPIT_PERSONAL : COCKPIT_PROJECT; };
 const cockpitLayout = (scope) => {
   const st = cockpitState.layouts.get(scope);
   const kind = cockpitKind(scope);
   return {
-    __typename: 'CockpitLayout', scope, kind, projectId: kind === 'project' ? scope.replace(/^project:/, '') : null,
+    __typename: 'CockpitLayout', scope, kind, projectId: kind === 'project' || kind === 'tasks' ? scope.replace(/^project:/, '').replace(/:tasks$/, '') : null,
     layout: st?.layout ?? cockpitDefault(scope), version: st?.version ?? 0, isDefault: !st?.layout, canEdit: true,
     updatedAt: st ? ago(0) : null, updatedBy: st ? U.me : null, catalog: COCKPIT_CATALOG.filter((w) => w.scopes.includes(kind)),
     artifacts: (st?.layout ?? cockpitDefault(scope)).blocks.filter((b) => b.kind === 'artifact').map((b) => {

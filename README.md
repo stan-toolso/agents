@@ -1342,12 +1342,19 @@ agents (serveur MCP `cockpit`). Conception : `docs/conception/cockpit-configurab
 a son composant dans `frontend/src/cockpit/registry.tsx`), `defaults.ts` (les agencements par défaut, identiques aux
 pages d'avant : rien ne change tant que personne n'enregistre), `layout.ts` (validation d'un agencement et application
 d'opérations `add` / `remove` / `move` / `set`, pur et testé), `scope.ts` (portées : `home` propre à chaque personne,
-`project:<id>` partagé par l'équipe ; `project:<id>:tasks`, `agent:<id>` et `project:<id>:page:<slug>` réservées),
+`home:default` l'accueil par défaut de toute la cellule que les administrateurs règlent et dont hérite qui n'a rien réglé,
+`project:<id>` partagé par l'équipe, `project:<id>:tasks` la vue pilotage des tâches, `agent:<id>` l'onglet Activité de la
+fiche d'un agent ; `project:<id>:page:<slug>` réservée),
 `repository.ts` et `service.ts` (tables `cockpit_layouts` et `cockpit_layout_versions`, migration
 `20261112T1941_cockpit_layouts` : chaque enregistrement crée une version, la réinitialisation garde l'historique ;
 lecture avec le rôle lecteur, écriture avec le rôle membre ; un bloc qu'une version plus récente du catalogue ne
 connaît plus est ignoré à la lecture). Un bloc natif est masqué quand il n'a rien à montrer à la personne (tuile de
 consommation sans crédits, canal d'un espace personnel) ; le mode édition le signale au lieu de le cacher.
+
+Les blocs de la vue pilotage (`cockpit/widgets/pilot.tsx` : tuiles d'indicateurs, graphiques, répartitions et listes,
+calculs de `lib/taskStats.ts`) et de la fiche d'un agent (`widgets/agent.tsx`) sont rendus par `TaskDashboard` et
+l'onglet Activité d'`AgentPage` depuis leur agencement, colonnes 6/6 pour le pilotage ; sans projet (pilotage de tous les
+projets), l'agencement par défaut, non modifiable.
 
 Interface (`frontend/src/cockpit/`) : `useCockpit(scope)` (agencement relu toutes les 30 s, brouillon pendant l'édition,
 bandeau « mis à jour par … » quand un agent ou un autre membre l'a changé), `CockpitBoard` (rendu des régions ; en
@@ -1360,7 +1367,8 @@ note)`, `resetCockpitLayout(scope)`, `restoreCockpitLayout(scope, version)` (aud
 Agents (`cockpit/mcp.ts`, outils `cockpit.get` et `cockpit.history` libres ; `update`, `reset` et `restore` soumis à
 l'autorisation de la personne, mémorisable) : `get` renvoie l'agencement et le catalogue de la portée (`project` =
 le projet de la session, `home` = l'accueil du propriétaire de la session), `update` applique des opérations ou un
-agencement complet et décrit ce qui a changé.
+agencement complet et décrit ce qui a changé ; `cockpit.query` exécute une requête GraphQL de lecture avec les droits de la
+personne qui pilote et `cockpit.schema` décrit les champs disponibles (mise au point d'une source `graphql`).
 
 **Blocs artefacts** : un artefact (page, données, diapositives) s'épingle dans un agencement (`{ kind: "artifact",
 artifact: <id>, region, title?, params?, height?, pollSeconds? }` ; volet « Artefacts » du catalogue, « Épingler dans un
@@ -1371,8 +1379,7 @@ thème `--cc-*` (`cockpit/embedTheme.ts`), `Skipper.context` (personne, projet, 
 `Skipper.summon`), plus `sharedPages/widget-client.js` qui mesure la hauteur (le bloc suit son contenu). Le cadre est
 rechargé quand les données de l'artefact changent. Épingler ne donne aucun droit : chaque personne voit le bloc si elle
 voit l'artefact ; pour l'équipe, l'artefact s'ouvre **aux membres du projet** (`SharedPage.projectAccess`, « Partager »
-› Accès général) et le serveur avertit sinon (`CockpitLayout.warnings`). Lots suivants de la conception : sources
-`graphql` vivantes, paramètres avancés, pilotage des tâches et fiche d'agent composables, pages personnalisées.
+› Accès général) et le serveur avertit sinon (`CockpitLayout.warnings`). Lot suivant de la conception : pages personnalisées et onglets d'un projet.
 
 ## Lancer des sessions
 
@@ -2058,7 +2065,12 @@ version ; la page est servie par `GET /api/shared/:id[?v=N][&download=1]` dans u
 lecture seule sur un élément PostgreSQL du coffre (`{ name, type: "sql", item, query }`, 5000 lignes au plus) ou
 un script node, python ou sh lancé dans l'environnement Docker du projet (`{ name, type: "script", interpreter,
 code }`, sortie standard en JSON, sans identifiant du coffre), et un intervalle de **rafraîchissement automatique**
-(`refresh_minutes`, 5 minutes à 7 jours ; absent : à la demande). Les sources sont exécutées **au nom du
+(`refresh_minutes`, 5 minutes à 7 jours ; absent : à la demande), ou une **source `graphql`** (`{ name, type: "graphql", query,
+variables }`) : une requête de lecture sur l'API de Skipper, **vivante**, exécutée à chaque lecture de la page avec les droits
+de la personne qui regarde (`cockpit/liveSources.ts` : même schéma et même contexte que l'API, une opération `query`,
+pas d'introspection, 8 niveaux et 80 champs au plus, cache de 15 s par personne et variables), jamais rafraîchie en base ;
+variables modèles `{{project.id}}`, `{{viewer.id}}`, `{{params.<clé>}}` (paramètres du bloc quand la page est épinglée
+dans un tableau de bord), `{{now}}`, `{{now-7d}}` (`cockpit/graphqlSource.ts`). Les sources SQL et scripts sont exécutées **au nom du
 propriétaire** de l'artefact, dans la portée du coffre de son projet, l'une après l'autre, jamais deux fois en même
 temps pour un même artefact ; une source en échec garde ses dernières données. Le planificateur (tâche de
 l'instance meneuse, un passage par minute) rafraîchit les artefacts dont l'échéance est passée et qui ont été
