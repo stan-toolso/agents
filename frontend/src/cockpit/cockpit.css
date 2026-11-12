@@ -58,6 +58,7 @@
 .ck-history .v { font-family: var(--cc-font-mono); color: var(--cc-dim); width: 36px; flex: none; }
 .ck-history .main { flex: 1; min-width: 0; }
 .ck-history .meta { font-size: 12px; color: var(--cc-dim); }
+.ck-history .ck-history-diff { font-family: var(--cc-font-mono); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 @media (max-width: 767.98px) {
   .ck-toolbar select { max-width: 80px; }
