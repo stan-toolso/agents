@@ -2947,8 +2947,8 @@ type Query {
   users: [User!]!
   "Projets de la sidebar : ceux de l'utilisateur, plus, pour un super administrateur, ceux des éléments ouverts dans ses onglets."
   sidebarProjects(open: OpenItemsInput): [Project!]!
-  "Recherche globale ; requête vide = objets les plus récents. limit = résultats par type (défaut 8, 50 au plus)."
-  search(query: String!, kinds: [SearchKind!], limit: Int): SearchResults!
+  "Recherche globale ; requête vide = objets les plus récents. limit = résultats par type (défaut 8, 50 au plus) ; projectId : seulement ce projet (fenêtre dédiée à un projet)."
+  search(query: String!, kinds: [SearchKind!], limit: Int, projectId: ID): SearchResults!
   "Propriétaires des sessions actives des projets de l'utilisateur (ou d'un projet)."
   sessionOwners(projectId: ID): [User!]!
   "Sessions archivées d'un projet, les plus récemment archivées d'abord ; search cherche dans le nom, la consigne et la conversation."
@@ -3077,14 +3077,15 @@ type Query {
   "État de la CI d'une branche ou d'un commit du dépôt du projet (GitHub) ; défaut : branche principale."
   ciStatus(projectId: ID!, ref: String): CiStatus
   pullRequest(id: ID!): TrackedPullRequest
-  notifications(unreadOnly: Boolean = false, limit: Int): [Notification!]!
-  unreadNotificationCount: Int!
+  "projectId : seulement les notifications de ce projet (fenêtre dédiée à un projet)."
+  notifications(unreadOnly: Boolean = false, limit: Int, projectId: ID): [Notification!]!
+  unreadNotificationCount(projectId: ID): Int!
   "Tableau de bord de l'utilisateur connecté."
   dashboard: Dashboard!
   "File « À traiter » : ce qui attend une action humaine, tous projets confondus."
-  inbox: Inbox!
-  "Compteurs seuls de la file « À traiter » (légers : sondés par la sidebar)."
-  inboxCounts: InboxCounts!
+  inbox(projectId: ID): Inbox!
+  "Compteurs seuls de la file « À traiter » (légers : sondés par la sidebar) ; projectId : ce projet seulement."
+  inboxCounts(projectId: ID): InboxCounts!
   "Messages non lus des canaux, par projet dont je suis membre (hors espace personnel), pour le bouton Messages de la barre du haut."
   unreadMessagesByProject: [ProjectUnreadMessages!]!
   "Tâches, tous projets confondus (par défaut : ouvertes). assignee / reporter : texte cherché dans le nom ou l'e-mail ; mine : tâches dont le responsable a mon e-mail ; tag : tâches portant cette étiquette (sans tenir compte de la casse)."
@@ -3339,8 +3340,8 @@ type Mutation {
   cancelRequest(id: ID!): Request!
 
   markNotificationRead(id: ID!): Notification!
-  "Renvoie le nombre de notifications marquées."
-  markAllNotificationsRead: Int!
+  "Renvoie le nombre de notifications marquées ; projectId : celles de ce projet seulement."
+  markAllNotificationsRead(projectId: ID): Int!
   createTask(input: CreateTaskInput!): Task!
   updateTask(id: ID!, input: UpdateTaskInput!): Task!
   deleteTask(id: ID!): Boolean!

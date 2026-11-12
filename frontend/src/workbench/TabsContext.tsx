@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { SIDEBAR } from '../graphql/operations';
+import { projectWindowId, projectWindowRoute } from '../lib/projectWindow';
 import { withoutTabs } from './tabList';
 import { EMPTY_INDEX, WorkspaceIndex, openItemsOf, workspaceTitle, type SidebarProject } from './workspaces';
 
@@ -83,7 +84,8 @@ interface TabsState {
 }
 
 const TabsContext = createContext<TabsState | null>(null);
-const STORAGE_KEY = 'skipper.workbench.tabs';
+// La fenêtre dédiée à un projet a ses propres onglets : elle ne touche pas à ceux de Skipper complet.
+const STORAGE_KEY = projectWindowId ? `skipper.workbench.tabs:project:${projectWindowId}` : 'skipper.workbench.tabs';
 const REOPEN_MAX = 20;
 
 /** Clé d'un chemin hors index : les fichiers d'un projet vont dans son onglet Fichiers, ceux d'une session (et son navigateur) dans l'onglet de la session. */
@@ -218,6 +220,12 @@ export function TabsProvider({ children }: { children: ReactNode }) {
   // Chaque navigation ouvre (ou réactive) l'onglet correspondant ; les onglets déjà ouverts sont rangés dans leur dossier.
   useEffect(() => {
     const url = location.pathname + location.search;
+    // Fenêtre d'un projet : une page globale cède la place à celle du projet, sans laisser d'onglet derrière elle.
+    const route = projectWindowId ? projectWindowRoute(location.pathname, projectWindowId) : null;
+    if (route && 'redirect' in route) {
+      navigate(route.redirect + location.search, { replace: true });
+      return;
+    }
     setTabs((prev) => {
       const grouped = groupTabs(prev, workspaces, location.pathname);
       const key = resolveKey(location.pathname);
@@ -227,7 +235,7 @@ export function TabsProvider({ children }: { children: ReactNode }) {
       const { title, kind } = ws ? { title: workspaceTitle(ws), kind: 'workspace' as TabKind } : describeRoute(key);
       return [...grouped, { key, url, title, kind }];
     });
-  }, [location.pathname, location.search, workspaces, resolveKey]);
+  }, [location.pathname, location.search, workspaces, resolveKey, navigate]);
 
   useEffect(() => {
     try {

@@ -7,6 +7,7 @@ import { usePollingQuery } from '../lib/usePollingQuery';
 import { useShortcut } from '../lib/useShortcut';
 import { useTabs } from './TabsContext';
 import '../pages/conversations.css';
+import { projectWindowId } from '../lib/projectWindow';
 
 const OPEN_KEY = 'skipper.messages.open';
 const PROJECT_KEY = 'skipper.messages.project';
@@ -100,7 +101,8 @@ export default function MessagesButton() {
     write(OPEN_KEY, v ? '1' : '0');
   };
   const { data } = usePollingQuery<UnreadData>(UNREAD_MESSAGES_BY_PROJECT, { pollInterval: open ? 10_000 : 30_000 });
-  const projects = useMemo(() => [...(data?.unreadMessagesByProject ?? [])].sort((a, b) => a.project.name.localeCompare(b.project.name)), [data]);
+  // Fenêtre dédiée à un projet : seulement ses canaux.
+  const projects = useMemo(() => [...(data?.unreadMessagesByProject ?? [])].filter((p) => !projectWindowId || p.project.id === projectWindowId).sort((a, b) => a.project.name.localeCompare(b.project.name)), [data]);
   const total = projects.reduce((n, p) => n + p.count, 0);
   const [chosen, setChosen] = useState<string | null>(() => read(PROJECT_KEY));
 

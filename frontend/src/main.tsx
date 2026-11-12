@@ -8,6 +8,8 @@ import './theme.css';
 import { apolloClient } from './apollo';
 import App from './App';
 import { setupServiceWorker } from './lib/pwa';
+// Fenêtre dédiée à un projet : lue (et retirée de l'adresse) avant que le routeur ne lise l'adresse.
+import './lib/projectWindow';
 
 setupServiceWorker();
 

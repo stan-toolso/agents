@@ -578,6 +578,9 @@
 /* ---- Sidebar : en-tête, recherche, filtre ----------------------------------------------------- */
 .wb-brand { display: flex; align-items: center; justify-content: space-between; }
 .wb-brand-actions { display: inline-flex; gap: 2px; }
+/* Fenêtre dédiée à un projet : le nom du projet à la place de « Skipper », sur une ligne. */
+.wb-brand a.wb-brand-project { min-width: 0; flex: 1 1 auto; margin-right: 6px; }
+.wb-brand-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .wb-brand-actions button { background: none; border: 0; color: var(--cc-dim); padding: 2px 5px; border-radius: 3px; cursor: pointer; font-size: 13px; }
 .wb-brand-actions button:hover { color: var(--cc-fg); background: var(--cc-bg-hover); }
 .wb-search-btn {
@@ -1216,6 +1219,11 @@ a.task-mention:hover { background: rgba(var(--cc-accent-rgb), 0.24); color: var(
 /* ---- Livraisons (bouton « Livrer », page Livraisons d'un projet) ---------------------------------------------- */
 .delivery-spinner { width: 0.75rem; height: 0.75rem; border-width: 0.12em; vertical-align: -0.1em; }
 .delivery-row { cursor: pointer; }
+.delivery-last { display: inline-flex; align-items: center; gap: 0.3rem; max-width: 22rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.8rem; text-decoration: none; color: var(--cc-dim); }
+.delivery-last:hover { text-decoration: underline; }
+.delivery-last-succeeded { color: var(--cc-green); }
+.delivery-last-failed { color: var(--cc-red); }
+.delivery-last-conflict { color: var(--cc-yellow); }
 .delivery-last-step, .delivery-table td:first-child .text-truncate { max-width: 15rem; }
 .delivery-detail > td { background: var(--cc-bg-elevated); }
 .delivery-steps { padding-left: 1.2rem; }
@@ -1225,6 +1233,7 @@ a.task-mention:hover { background: rgba(var(--cc-accent-rgb), 0.24); color: var(
 .delivery-output { max-height: 20rem; overflow: auto; white-space: pre-wrap; background: var(--cc-bg); border: 1px solid var(--cc-border); border-radius: 4px; padding: 0.5rem; color: var(--cc-dim); }
 @media (max-width: 767.98px) {
   .delivery-last-step, .delivery-table td:first-child .text-truncate { max-width: 10rem; }
+  .delivery-last { max-width: 12rem; }
   .deploy-card .card-body > .d-flex { width: 100%; }
 }
 /* Planification dans la sidebar (scheduleGroups) : une ligne avec l'alarme, les sessions de ses exécutions dessous. */

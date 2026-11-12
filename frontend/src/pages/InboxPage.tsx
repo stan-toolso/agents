@@ -12,6 +12,7 @@ import { timeAgo } from '../lib/humanize';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { useTabTitle } from '../workbench/TabsContext';
 import './dashboard.css';
+import { projectWindowId } from '../lib/projectWindow';
 
 const KIND_LABELS: Record<InboxKind, string> = { request: 'Demandes', session: 'Sessions', task: 'Tâches sans agent', pullRequest: 'Pull requests' };
 
@@ -29,7 +30,7 @@ const REASONS: Record<SessionReason, { icon: string; text: string }> = {
  */
 export default function InboxPage() {
   useTabTitle('À traiter');
-  const { data, loading, error, refetch } = usePollingQuery<{ inbox: Inbox }>(INBOX, { pollInterval: 5000, fetchPolicy: 'cache-and-network' });
+  const { data, loading, error, refetch } = usePollingQuery<{ inbox: Inbox }>(INBOX, { variables: { projectId: projectWindowId }, pollInterval: 5000, fetchPolicy: 'cache-and-network' });
   const [projectId, setProjectId] = useState('');
   const [kind, setKind] = useState<InboxKind | ''>('');
   const inbox = data?.inbox;

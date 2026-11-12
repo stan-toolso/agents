@@ -6,6 +6,7 @@ import { useSessionLauncher } from '../components/SessionLauncher';
 import { CREATE_TERMINAL, STOP_SESSION } from '../graphql/operations';
 import { useRenameSession } from './RenameSession';
 import { useDeletions } from './useDeletions';
+import { openProjectWindow, projectWindowId } from '../lib/projectWindow';
 import type { SessionStatus } from '../graphql/operations';
 
 /** Session dont le menu est ouvert, avec l'identifiant technique de son dossier (pour y ouvrir un terminal). */
@@ -25,6 +26,8 @@ export interface AddMenuProject {
   canManage: boolean;
   /** Chemins des onglets à fermer si le projet est supprimé. */
   paths: string[];
+  /** Espace personnel : pas de fenêtre dédiée. */
+  isPersonal?: boolean;
 }
 
 /**
@@ -114,6 +117,23 @@ export default function AddMenu({ projectId, project, session, onClose }: { proj
   }
   return (
     <div className="wb-pop" onClick={(e) => e.stopPropagation()}>
+      {/* Fenêtre dédiée au projet : seulement depuis Skipper complet, et pas pour l'espace personnel (ses chats couvrent tous les projets). */}
+      {!projectWindowId && project && !project.isPersonal && (
+        <>
+          <button
+            type="button"
+            className="wb-pop-item"
+            title="Ouvre une fenêtre où tout se limite à ce projet : sidebar, notifications, messages, recherche"
+            onClick={() => {
+              onClose();
+              openProjectWindow(projectId);
+            }}
+          >
+            <i className="bi bi-window-plus wb-icon" /> Ouvrir dans une nouvelle fenêtre
+          </button>
+          <div className="wb-pop-sep" />
+        </>
+      )}
       <Link to={`/projects/${projectId}/files`} className="wb-pop-item" onClick={onClose}>
         <i className="bi bi-folder2-open wb-icon" /> Fichiers
       </Link>

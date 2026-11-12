@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { PROJECT_UNREAD_MESSAGES } from '../graphql/conversations';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { useSessionLauncher } from './SessionLauncher';
+import { openProjectWindow, projectWindowId } from '../lib/projectWindow';
 
 export type ProjectTab = 'overview' | 'conversations' | 'chats' | 'repo' | 'tasks' | 'artifacts' | 'agents' | 'pullRequests' | 'deliveries' | 'context' | 'vault' | 'env' | 'schedules' | 'workflows' | 'history' | 'audit' | 'usage' | 'settings';
 
@@ -73,7 +74,7 @@ export default function ProjectHeader({ project, active, actions }: { project: P
             <Link to="/" className="small">
               ← Tableau de bord
             </Link>
-          ) : (
+          ) : projectWindowId ? null : (
             <Link to="/projects" className="small">
               ← Projets
             </Link>
@@ -85,6 +86,11 @@ export default function ProjectHeader({ project, active, actions }: { project: P
           {canWrite && (
             <Button size="sm" onClick={() => openNewSession({ projectId: project.id })}>
               <i className="bi bi-plus-lg me-1" /> Nouvelle session
+            </Button>
+          )}
+          {!personal && !projectWindowId && (
+            <Button size="sm" variant="outline-secondary" onClick={() => openProjectWindow(project.id)} title="Ouvrir dans une nouvelle fenêtre dédiée à ce projet : sidebar, notifications, messages et recherche limités au projet" aria-label="Ouvrir dans une nouvelle fenêtre">
+              <i className="bi bi-window-plus" />
             </Button>
           )}
           {project.myRole === 'ADMIN' && (

@@ -42,6 +42,8 @@ const KNOWN_TYPES = [
   'schedule.failed',
   'workflow.run',
   'workflow.failed',
+  'delivery.succeeded',
+  'delivery.failed',
   'context.created',
   'page.shared',
   'page.commented',

@@ -39,10 +39,15 @@ a.dash-tile:hover { border-color: var(--cc-dimmer); color: inherit; }
   letter-spacing: -0.015em;
   color: var(--cc-fg);
 }
-.dash-section-title a { font-family: var(--cc-font-sans); font-weight: 400; letter-spacing: 0; font-size: 12px; color: var(--cc-dim); text-decoration: none; }
+.dash-section-title a { font-family: var(--cc-font-sans); font-weight: 400; letter-spacing: 0; font-size: 12px; color: var(--cc-dim); text-decoration: none; white-space: nowrap; flex-shrink: 0; }
 .dash-section-title a:hover { color: var(--cc-accent); }
 .dash-section-title > span + span, .dash-section-title small, .dash-section-title .badge { font-family: var(--cc-font-sans); font-size: 12px; font-weight: 400; letter-spacing: 0; }
 .dash-section-title .badge { font-size: 11px; font-weight: 600; }
+.dash-channel-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-channel-name .hash { color: var(--cc-dimmer); font-weight: 400; margin-right: 1px; }
+.dash-section-title:has(+ .dash-section-hint) { margin-bottom: 2px; }
+.dash-section-hint { margin: 0 0 10px; font-size: 12.5px; color: var(--cc-dim); }
+.dash-section-hint b { font-weight: 500; color: var(--cc-fg); }
 
 .dash-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--cc-border); border-radius: var(--cc-radius); background: var(--cc-bg-elevated); box-shadow: var(--cc-card-shadow); overflow: hidden; }
 .dash-list li { display: flex; align-items: center; gap: 12px; padding: 11px 16px; border-top: 1px solid var(--cc-border-soft); min-width: 0; }

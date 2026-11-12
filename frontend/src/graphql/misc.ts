@@ -2,8 +2,8 @@ import { gql } from '@apollo/client';
 import { USER_FIELDS } from './operations';
 
 export const SEARCH = gql`
-  query Search($query: String!, $kinds: [SearchKind!], $limit: Int) {
-    search(query: $query, kinds: $kinds, limit: $limit) {
+  query Search($query: String!, $kinds: [SearchKind!], $limit: Int, $projectId: ID) {
+    search(query: $query, kinds: $kinds, limit: $limit, projectId: $projectId) {
       query
       groups {
         kind
@@ -455,7 +455,7 @@ export const SHARED_PAGE_VERSION_SOURCES = gql`
 `;
 
 /** Artefacts en favori de la personne : section « Favoris » de la sidebar. */
-export type FavoriteSharedPage = Pick<SharedPage, 'id' | 'title' | 'kind' | 'openComments'>;
+export type FavoriteSharedPage = Pick<SharedPage, 'id' | 'title' | 'kind' | 'openComments'> & { project?: { id: string } | null };
 export const FAVORITE_SHARED_PAGES = gql`
   query FavoriteSharedPages {
     favoriteSharedPages {
@@ -464,6 +464,9 @@ export const FAVORITE_SHARED_PAGES = gql`
       kind
       openComments
       favorite
+      project {
+        id
+      }
     }
   }
 `;

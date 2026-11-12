@@ -8,6 +8,7 @@ import { OS_HINTS, osPlatform, pushSupported, subscribePush, unsubscribePush } f
 import { onPushNavigate } from '../lib/pwa';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { useShortcut } from '../lib/useShortcut';
+import { projectWindowId } from '../lib/projectWindow';
 
 const icons: Record<string, string> = {
   'request.created': 'bi-hand-index-thumb',
@@ -41,6 +42,8 @@ const icons: Record<string, string> = {
   'schedule.failed': 'bi-alarm',
   'workflow.run': 'bi-diagram-3',
   'workflow.failed': 'bi-diagram-3',
+  'delivery.succeeded': 'bi-rocket-takeoff',
+  'delivery.failed': 'bi-rocket-takeoff',
 };
 
 const BROWSER_KEY = 'skipper.notifications.browser';
@@ -68,7 +71,7 @@ export default function NotificationBell() {
   const client = useApolloClient();
   const [open, setOpen] = useState(false);
   const [ring, setRing] = useState(false);
-  const { data, refetch } = usePollingQuery<{ notifications: AppNotification[]; unreadNotificationCount: number }>(NOTIFICATIONS, { variables: { limit: 30 }, pollInterval: 3000 });
+  const { data, refetch } = usePollingQuery<{ notifications: AppNotification[]; unreadNotificationCount: number }>(NOTIFICATIONS, { variables: { limit: 30, projectId: projectWindowId }, pollInterval: 3000 });
   const [markRead] = useMutation(MARK_NOTIFICATION_READ, { onCompleted: () => refetch() });
   const [markAllRead] = useMutation(MARK_ALL_NOTIFICATIONS_READ, { onCompleted: () => refetch() });
   const [subscribe] = useMutation(SUBSCRIBE_PUSH);
@@ -229,7 +232,7 @@ export default function NotificationBell() {
           <div className="wb-notif-head">
             <span>Notifications</span>
             {unread > 0 && (
-              <button type="button" onClick={() => markAllRead()}>
+              <button type="button" onClick={() => markAllRead({ variables: { projectId: projectWindowId } })}>
                 Tout marquer comme lu
               </button>
             )}

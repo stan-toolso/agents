@@ -18,6 +18,8 @@ const m = vi.hoisted(() => ({
   exitCode: 0,
   events: [] as Array<[string, string]>,
   busy: false,
+  ahead: 1,
+  notices: [] as Array<{ type: string; title: string; userId: string; link: string }>,
   // Déploiements : PR fusionnées suivies, liens PR ↔ déploiement, commits contenus dans le commit déployé.
   trackedPrs: [] as Array<Record<string, unknown>>,
   links: [] as Array<[string, string]>,
@@ -123,12 +125,14 @@ vi.mock('../sessions/events.js', () => ({
     m.events.push([sessionId, payload.message]);
   },
 }));
+vi.mock('../notifications/service.js', () => ({ notificationService: { notify: async (n: { type: string; title: string; userId: string; link: string }) => void m.notices.push(n) } }));
 vi.mock('../reviews/types.js', () => ({ reviewOf: () => null }));
 vi.mock('../tasks/service.js', () => ({ taskService: { get: async (id: string) => ({ id, projectId: 'p', branch: 'task/x' }), list: async () => [{ id: 't1', branch: 'task/x' }] } }));
 vi.mock('../git/service.js', () => ({
   gitService: {
     status: async () => ({ branch: 'task/x', operation: m.operation, changes: m.changes.map((p) => ({ path: p })) }),
     mergeBase: async () => undefined,
+    aheadOfBase: async () => ({ baseBranch: 'origin/main', ahead: m.ahead }),
     invalidate: () => undefined,
     push: async () => '',
     fetch: async () => undefined,
@@ -204,7 +208,7 @@ const pending = { state: 'PENDING', checks: [{ name: 'Tests', state: 'PENDING', 
 const red = { state: 'FAILURE', checks: [{ name: 'Tests', state: 'FAILURE', url: null }] };
 
 beforeEach(() => {
-  Object.assign(m, { deliveries: [], config: null, seq: 0, operation: null, changes: [], openPrs: [], prStates: [{ checksState: 'SUCCESS' }], ciStates: [ok], merged: [], opened: 0, conflicts: [], commands: [], exitCode: 0, events: [], busy: false, trackedPrs: [], links: [], contained: new Set(), deployedEvents: [] });
+  Object.assign(m, { deliveries: [], config: null, seq: 0, operation: null, changes: [], openPrs: [], prStates: [{ checksState: 'SUCCESS' }], ciStates: [ok], merged: [], opened: 0, conflicts: [], commands: [], exitCode: 0, events: [], busy: false, ahead: 1, notices: [], trackedPrs: [], links: [], contained: new Set(), deployedEvents: [] });
   setDeliveryTimingsForTests({ pollMs: 1, graceMs: 20 });
 });
 
@@ -307,6 +311,23 @@ describe('Livrer', () => {
     await deliveryService.settle();
     expect(m.deliveries[0].status).toBe('cancelled');
     expect(m.merged).toEqual([]);
+  });
+
+  it('refuse tout de suite une branche déjà contenue dans la base (rien à livrer)', async () => {
+    m.ahead = 0;
+    await expect(deliveryService.deliver({ sessionId: 's1', userId: 'u1' })).rejects.toThrow(/Rien à livrer.*task\/x.*déjà contenue dans main/);
+    expect(m.deliveries).toEqual([]);
+  });
+
+  it('prévient la personne à la fin : réussie, échouée ou arrêtée sur un conflit', async () => {
+    await deliveryService.deliver({ sessionId: 's1', userId: 'u1' });
+    await deliveryService.settle();
+    expect(m.notices).toEqual([expect.objectContaining({ type: 'delivery.succeeded', userId: 'u1', link: '/sessions/s1', title: 'Livraison réussie : task/x' })]);
+    m.notices = [];
+    m.prStates = [{ checksState: 'FAILURE', checks: [{ name: 'Tests', state: 'FAILURE', url: null }] }];
+    await deliveryService.deliver({ sessionId: 's1', userId: 'u1' });
+    await deliveryService.settle();
+    expect(m.notices).toEqual([expect.objectContaining({ type: 'delivery.failed', title: 'Livraison échouée : task/x' })]);
   });
 
   it('demande le déploiement une fois fusionnée', async () => {
