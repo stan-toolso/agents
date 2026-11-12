@@ -3,7 +3,7 @@ import { WIDGETS, catalogFor } from './catalog.js';
 import { defaultLayout } from './defaults.js';
 import { LAYOUT_LIMITS, applyOps, diffLayouts, parseLayout, parseParams } from './layout.js';
 import { parseScope } from './scope.js';
-import { REGIONS } from './types.js';
+import { REGIONS, SCOPE_KINDS } from './types.js';
 
 const P = '11111111-2222-4333-8444-555555555555';
 
@@ -17,6 +17,14 @@ describe('catalogue', () => {
       for (const r of w.regions) expect(REGIONS).toContain(r);
       for (const p of w.params) expect(p.key).toMatch(/^[a-zA-Z][a-zA-Z0-9]*$/);
     }
+  });
+
+  it('le catalogue renseigne tous les champs non nuls du schéma GraphQL (CockpitWidget)', () => {
+    for (const kind of SCOPE_KINDS)
+      for (const w of catalogFor(kind)) {
+        expect(typeof w.singleton, `${kind} ${w.key}`).toBe('boolean');
+        expect(Array.isArray(w.params), `${kind} ${w.key}`).toBe(true);
+      }
   });
 
   it('les agencements par défaut sont valides pour leur portée', () => {
@@ -45,8 +53,8 @@ describe('parseScope', () => {
     expect(parseScope('home:default')).toMatchObject({ kind: 'home', cell: true });
     expect(parseScope('home').cell).toBeUndefined();
   });
-  it('refuse les portées réservées et inconnues', () => {
-    expect(() => parseScope(`project:${P}:page:reporting`)).toThrow(/pas encore composable/);
+  it('reconnaît une page personnalisée et refuse les portées inconnues', () => {
+    expect(parseScope(`project:${P}:page:reporting`)).toMatchObject({ kind: 'page', projectId: P, slug: 'reporting' });
     expect(() => parseScope('agent:not-a-uuid')).toThrow(/Portée inconnue/);
     expect(() => parseScope('')).toThrow(/Portée inconnue/);
   });
@@ -70,10 +78,10 @@ describe('parseLayout', () => {
     expect(() => parseLayout({ blocks: Array.from({ length: LAYOUT_LIMITS.maxBlocks + 1 }, () => ({ kind: 'builtin', widget: 'text' })) }, 'home')).toThrow(/Au plus/);
   });
 
-  it('accepte un bloc artefact hors des tuiles, avec hauteur et sondage bornés', () => {
+  it('accepte un bloc artefact dans toute région, avec hauteur et sondage bornés', () => {
     const l = parseLayout({ blocks: [{ kind: 'artifact', artifact: P.toUpperCase(), region: 'side', height: 10, pollSeconds: 1, params: { a: 1 }, title: ' CA ' }] }, 'project');
     expect(l.blocks[0]).toMatchObject({ kind: 'artifact', artifact: P, region: 'side', height: LAYOUT_LIMITS.minHeight, pollSeconds: LAYOUT_LIMITS.minPollSeconds, params: { a: 1 }, title: 'CA' });
-    expect(() => parseLayout({ blocks: [{ kind: 'artifact', artifact: P, region: 'tiles' }] }, 'project')).toThrow(/tuiles/);
+    expect(parseLayout({ blocks: [{ kind: 'artifact', artifact: P, region: 'tiles', title: 'CA du mois' }] }, 'project').blocks[0]).toMatchObject({ kind: 'artifact', region: 'tiles' });
     expect(() => parseLayout({ blocks: [{ kind: 'artifact', artifact: 'x', region: 'main' }] }, 'project')).toThrow(/artefact invalide/);
   });
 

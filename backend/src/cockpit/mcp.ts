@@ -10,7 +10,8 @@ import { runGraphql } from './liveSources.js';
 import { describeSchema } from './schemaDoc.js';
 import { describeBlock, describeCatalog, diffLayouts } from './layout.js';
 import { cockpitService } from './service.js';
-import { projectScopeKey, tasksScopeKey } from './scope.js';
+import { pageScopeKey, projectScopeKey, tasksScopeKey } from './scope.js';
+import { PROJECT_TAB_KEYS, projectPageService } from './projectPages.js';
 import type { Layout, ResolvedLayout } from './types.js';
 import { REGION_LABELS, REGIONS } from './types.js';
 
@@ -18,12 +19,12 @@ const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
 const failure = (t: string) => ({ content: [{ type: 'text' as const, text: t }], isError: true });
 
 /** Outils libres du serveur `cockpit` : lecture seule. Modifier un agencement passe par l'autorisation de la personne. */
-export const COCKPIT_FREE_TOOLS = ['mcp__cockpit__get', 'mcp__cockpit__history', 'mcp__cockpit__query', 'mcp__cockpit__schema'];
+export const COCKPIT_FREE_TOOLS = ['mcp__cockpit__get', 'mcp__cockpit__history', 'mcp__cockpit__query', 'mcp__cockpit__schema', 'mcp__cockpit__pages_list'];
 
 /** Paragraphe du prompt système qui présente le cockpit composable aux agents. */
 export function cockpitPromptSummary(): string {
   return [
-    "Cockpit configurable (serveur MCP `cockpit`) : le tableau de bord du projet (`project`), la vue pilotage des tâches (`tasks`), la fiche d'un agent (`agent:<id>`) et l'accueil de la personne qui pilote (`home`) sont des agencements de blocs par région (tuiles, colonne principale, colonne latérale, pleine largeur). `cockpit.get` (portée `project` ou `home`) montre l'agencement actuel et le catalogue des blocs natifs disponibles avec leurs paramètres ; `cockpit.update` le modifie par opérations (`ops` : add, remove, move, set) ou par un agencement complet (`layout`), en créant une version ; `cockpit.reset` revient au défaut ; `cockpit.history` et `cockpit.restore` consultent et restaurent les versions ; `cockpit.query` exécute une requête GraphQL de lecture avec les droits de la personne qui pilote (pour mettre au point une source `graphql` d'artefact : les données de Skipper, tâches, sessions, PR, livraisons, consommation, vues par la personne qui regarde) et `cockpit.schema` montre les champs disponibles. Préfère un bloc natif paramétré (étiquettes, nombre de semaines…) quand il répond au besoin. Sinon, construis un **bloc artefact** : une page HTML (`pages.publish`, le plus souvent un artefact de données) conçue pour un cadre — pas d'en-tête, largeur fluide, hauteur au contenu, couleurs par `var(--cc-fg)`, `var(--cc-dim)`, `var(--cc-accent)`, `var(--cc-border)`, `var(--cc-bg-elevated)` (variables du thème injectées par Skipper, clair comme sombre), un seul sujet — puis épingle-la avec `cockpit.update` (`{ op: 'add', block: { kind: 'artifact', artifact: <id>, region: 'side' | 'main' | 'full', title, params } }`). Dans le cadre, la page reçoit `Skipper.context` (`viewer`, `project`, `scope`, `params` du bloc, `theme`) en plus de `Skipper.data`, et peut appeler `Skipper.navigate('/tasks/<id>')`, `Skipper.openSession({ prompt })` ou `Skipper.summon({ agent, text })` : l'interface exécute l'action après confirmation de la personne. Un artefact épinglé dans le tableau de bord du projet doit être ouvert aux membres du projet (`updateSharedPage { projectAccess: true }` par son propriétaire, ou le bouton Partager) : l'outil avertit sinon. Modifier le tableau de bord du projet change ce que voit toute l'équipe : fais-le sur demande ou avec accord, dis ce que tu as changé, et pas en silence.",
+    "Cockpit configurable (serveur MCP `cockpit`) : le tableau de bord du projet (`project`), la vue pilotage des tâches (`tasks`), la fiche d'un agent (`agent:<id>`) et l'accueil de la personne qui pilote (`home`) sont des agencements de blocs par région (tuiles, colonne principale, colonne latérale, pleine largeur). `cockpit.get` (portée `project` ou `home`) montre l'agencement actuel et le catalogue des blocs natifs disponibles avec leurs paramètres ; `cockpit.update` le modifie par opérations (`ops` : add, remove, move, set) ou par un agencement complet (`layout`), en créant une version ; `cockpit.reset` revient au défaut ; `cockpit.history` et `cockpit.restore` consultent et restaurent les versions ; `cockpit.query` exécute une requête GraphQL de lecture avec les droits de la personne qui pilote (pour mettre au point une source `graphql` d'artefact : les données de Skipper, tâches, sessions, PR, livraisons, consommation, vues par la personne qui regarde) et `cockpit.schema` montre les champs disponibles. Préfère un bloc natif paramétré (étiquettes, nombre de semaines…) quand il répond au besoin. Sinon, construis un **bloc artefact** : une page HTML (`pages.publish`, le plus souvent un artefact de données) conçue pour un cadre — pas d'en-tête, largeur fluide, hauteur au contenu, couleurs par `var(--cc-fg)`, `var(--cc-dim)`, `var(--cc-accent)`, `var(--cc-border)`, `var(--cc-bg-elevated)` (variables du thème injectées par Skipper, clair comme sombre), un seul sujet — puis épingle-la avec `cockpit.update` (`{ op: 'add', block: { kind: 'artifact', artifact: <id>, region: 'tiles' | 'side' | 'main' | 'full', title, params } }`). Un artefact en tuile (`tiles`) est un indicateur : le titre du bloc sert de libellé, la page montre seulement une grande valeur et une ou deux lignes de détail (pas de tableau ni de section dépliable), sans fond ni marge propre, 90 px de haut environ. Dans le cadre, la page reçoit `Skipper.context` (`viewer`, `project`, `scope`, `region` du bloc, `params` du bloc, `theme`) en plus de `Skipper.data`, et peut appeler `Skipper.navigate('/tasks/<id>')`, `Skipper.openSession({ prompt })` ou `Skipper.summon({ agent, text })` : l'interface exécute l'action après confirmation de la personne. Un artefact épinglé dans le tableau de bord du projet doit être ouvert aux membres du projet (`updateSharedPage { projectAccess: true }` par son propriétaire, ou le bouton Partager) : l'outil avertit sinon. Modifier le tableau de bord du projet change ce que voit toute l'équipe : fais-le sur demande ou avec accord, dis ce que tu as changé, et pas en silence.",
   ].join('\n');
 }
 
@@ -74,9 +75,10 @@ export function createCockpitMcpServer(ctx: CockpitMcpContext): McpSdkServerConf
     const s = (scope ?? 'project').trim().toLowerCase();
     if (s === 'project' || s === 'projet') return projectScopeKey(ctx.project.id);
     if (s === 'tasks' || s === 'taches' || s === 'tâches' || s === 'pilotage') return tasksScopeKey(ctx.project.id);
+    if (s.startsWith('page:')) return pageScopeKey(ctx.project.id, s.slice('page:'.length));
     return s;
   };
-  const scopeParam = z.string().optional().describe("Portée : « project » (tableau de bord du projet de la session, défaut), « tasks » (vue pilotage des tâches du projet), « home » (accueil du propriétaire de la session), « home:default » (accueil par défaut de toute la cellule, administrateurs), « agent:<id> » (onglet Activité de la fiche d'un agent), ou une clé complète (project:<id>)");
+  const scopeParam = z.string().optional().describe("Portée : « project » (tableau de bord du projet de la session, défaut), « tasks » (vue pilotage des tâches du projet), « home » (accueil du propriétaire de la session), « home:default » (accueil par défaut de toute la cellule, administrateurs), « agent:<id> » (onglet Activité de la fiche d'un agent), « page:<slug> » (page personnalisée du projet), ou une clé complète (project:<id>)");
   const audit = (action: string, r: ResolvedLayout, details: Record<string, unknown>) =>
     r.scope.projectId ? auditService.record({ projectId: r.scope.projectId, actor: { sessionId: ctx.sessionId }, action, targetType: 'cockpit', targetId: r.scope.key, targetLabel: r.scope.key, details: { version: r.version, ...details } }) : Promise.resolve();
 
@@ -147,6 +149,63 @@ export function createCockpitMcpServer(ctx: CockpitMcpContext): McpSdkServerConf
           const authors = new Map((await userRepository.findByIds([...new Set(versions.map((v) => v.authorId).filter((x): x is string => Boolean(x)))])).map((a) => [a.id, a.name]));
           return versions.map((v) => `- v${v.version} · ${v.createdAt.toISOString()} · ${v.authorId ? authors.get(v.authorId) ?? 'inconnu' : 'Skipper'}${v.sessionId ? ' (session d’agent)' : ''}${v.reset ? ' · réinitialisation' : ''}${v.note ? ` · ${v.note}` : ''} · ${v.layout.blocks.length} bloc(s)`).join('\n');
         }),
+      ),
+      tool(
+        'pages_list',
+        "Les pages personnalisées du projet (onglets de plus dans l'en-tête, chacune un agencement de portée page:<slug>) et le réglage des onglets natifs (masqués, ordre).",
+        {},
+        async () =>
+          run(async () => {
+            const pages = await projectPageService.list(ctx.project.id);
+            const tabs = await projectPageService.tabs(ctx.project.id);
+            return [pages.length ? pages.map((p) => `- page:${p.slug} · ${p.title}${p.icon ? ` · ${p.icon}` : ''} · position ${p.position} · /projects/${ctx.project.id}/p/${p.slug}`).join('\n') : 'Aucune page personnalisée.', `Onglets masqués : ${tabs.hidden.join(', ') || 'aucun'} ; ordre : ${tabs.order.join(', ') || 'par défaut'}.`, `Onglets natifs : ${PROJECT_TAB_KEYS.join(', ')}.`].join('\n');
+          }),
+      ),
+      tool(
+        'page_create',
+        "Crée une page personnalisée du projet (un onglet de plus) ; compose-la ensuite avec cockpit.update sur la portée page:<slug>.",
+        { title: z.string().describe('Titre de la page (onglet)'), icon: z.string().optional().describe('Icône Bootstrap, ex. bi-graph-up'), slug: z.string().optional().describe('Identifiant dans l’URL ; dérivé du titre sinon') },
+        async ({ title, icon, slug }) =>
+          run(async () => {
+            const page = await projectPageService.create(ctx.project.id, { title, icon, slug }, ctx.userId);
+            await auditService.record({ projectId: ctx.project.id, actor: { sessionId: ctx.sessionId }, action: 'project_page.create', targetType: 'project_page', targetId: page.id, targetLabel: page.title, details: { slug: page.slug } });
+            return `Page créée : page:${page.slug} · ${page.title} · /projects/${ctx.project.id}/p/${page.slug}. Compose-la avec cockpit.update { scope: "page:${page.slug}", ops: [...] }.`;
+          }),
+      ),
+      tool(
+        'page_update',
+        "Renomme une page personnalisée, change son icône ou sa position.",
+        { slug: z.string().describe('Identifiant de la page'), title: z.string().optional(), icon: z.string().optional(), position: z.number().int().min(0).optional() },
+        async ({ slug, title, icon, position }) =>
+          run(async () => {
+            const page = await projectPageService.update(await projectPageService.bySlug(ctx.project.id, slug), { title, icon, position });
+            await auditService.record({ projectId: ctx.project.id, actor: { sessionId: ctx.sessionId }, action: 'project_page.update', targetType: 'project_page', targetId: page.id, targetLabel: page.title, details: { title, icon, position } });
+            return `Page mise à jour : page:${page.slug} · ${page.title}${page.icon ? ` · ${page.icon}` : ''} · position ${page.position}.`;
+          }),
+      ),
+      tool(
+        'page_delete',
+        "Supprime une page personnalisée et son agencement.",
+        { slug: z.string().describe('Identifiant de la page') },
+        async ({ slug }) =>
+          run(async () => {
+            const page = await projectPageService.bySlug(ctx.project.id, slug);
+            await projectPageService.delete(page);
+            await auditService.record({ projectId: ctx.project.id, actor: { sessionId: ctx.sessionId }, action: 'project_page.delete', targetType: 'project_page', targetId: page.id, targetLabel: page.title, details: { slug } });
+            return `Page « ${page.title} » supprimée.`;
+          }),
+      ),
+      tool(
+        'tabs',
+        "Règle les onglets du projet : onglets natifs masqués (jamais overview ni settings) et ordre des onglets (clés natives et page:<slug>).",
+        { hidden: z.array(z.string()).optional().describe('Onglets natifs masqués'), order: z.array(z.string()).optional().describe('Ordre des onglets ; les absents suivent') },
+        async ({ hidden, order }) =>
+          run(async () => {
+            const current = await projectPageService.tabs(ctx.project.id);
+            const tabs = await projectPageService.setTabs(ctx.project.id, { hidden: hidden ?? current.hidden, order: order ?? current.order });
+            await auditService.record({ projectId: ctx.project.id, actor: { sessionId: ctx.sessionId }, action: 'project.tabs', targetType: 'project', targetId: ctx.project.id, targetLabel: ctx.project.name, details: tabs as unknown as Record<string, unknown> });
+            return `Onglets masqués : ${tabs.hidden.join(', ') || 'aucun'} ; ordre : ${tabs.order.join(', ') || 'par défaut'}.`;
+          }),
       ),
       tool(
         'query',

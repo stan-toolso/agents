@@ -11,6 +11,7 @@ const { store, userService } = vi.hoisted(() => ({
   },
 }));
 vi.mock('../users/service.js', () => ({ userService }));
+vi.mock('./projectPages.js', () => ({ projectPageRepository: { findBySlug: async (_p: string, slug: string) => (slug === 'reporting' ? { id: 'pg', slug } : null) } }));
 vi.mock('../agents/repository.js', () => ({ agentRepository: { findById: async (id: string) => (id === A ? { id: A, projectId: P } : null) } }));
 vi.mock('../sharedPages/service.js', () => ({ sharedPageService: { getFor: async () => null, canManage: () => false } }));
 vi.mock('./repository.js', () => ({
@@ -90,7 +91,11 @@ describe('cockpitService', () => {
 
   it('refuse un enregistrement sans layout ni ops, et une portée réservée', async () => {
     await expect(cockpitService.update(alice, 'home', {})).rejects.toThrow(/Rien à enregistrer/);
-    await expect(cockpitService.resolve(alice, `project:${P}:page:x`)).rejects.toThrow(/pas encore/);
+    store.roles.set(P, 'member');
+    await expect(cockpitService.resolve(alice, `project:${P}:page:absente`)).rejects.toThrow(/introuvable/);
+    const page = await cockpitService.resolve(alice, `project:${P}:page:reporting`);
+    expect(page).toMatchObject({ isDefault: true, canEdit: true });
+    expect(page.layout.blocks).toEqual([]);
   });
 
   it('la fiche d’un agent suit les droits de son projet ; le pilotage a son défaut', async () => {

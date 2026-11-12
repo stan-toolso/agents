@@ -74,7 +74,7 @@ export default function ProjectDetailPage() {
       {newTask && <TaskModal task={null} projectId={project.id} onClose={() => setNewTask(false)} />}
       {error && <Alert variant="warning" className="py-2 small">Dernier rafraîchissement en échec : {error.message}</Alert>}
 
-      {cockpit.layout ? <CockpitBoard cockpit={cockpit} ctx={ctx} scopeLabel={project.isPersonal ? 'votre espace' : 'le tableau de bord du projet'} /> : <div className="text-secondary small"><Spinner animation="border" size="sm" /> Agencement…</div>}
+      {cockpit.layout ? <CockpitBoard cockpit={cockpit} ctx={ctx} scopeLabel={project.isPersonal ? 'votre espace' : 'le tableau de bord du projet'} /> : cockpit.error ? <Alert variant="danger" className="py-2 small">Agencement indisponible : {cockpit.error}</Alert> : <div className="text-secondary small"><Spinner animation="border" size="sm" /> Agencement…</div>}
     </>
   );
 }

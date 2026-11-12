@@ -58,6 +58,7 @@
 .ck-history .v { font-family: var(--cc-font-mono); color: var(--cc-dim); width: 36px; flex: none; }
 .ck-history .main { flex: 1; min-width: 0; }
 .ck-history .meta { font-size: 12px; color: var(--cc-dim); }
+.ck-history .ck-history-diff { font-family: var(--cc-font-mono); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 @media (max-width: 767.98px) {
   .ck-toolbar select { max-width: 80px; }
@@ -68,7 +69,24 @@
 /* ---- Blocs artefacts ------------------------------------------------------------------------------------------------ */
 .ck-artifact-frame { position: relative; border: 1px solid var(--cc-border); border-radius: var(--cc-radius); background: var(--cc-bg-elevated); box-shadow: var(--cc-card-shadow); overflow: hidden; transition: height .15s; }
 .ck-artifact-frame iframe { display: block; width: 100%; height: 100%; border: 0; background: transparent; }
+/* Artefact en tuile : le cadre d'une tuile native, la page n'apporte que la valeur et son détail. */
+.ck-artifact-tile { display: flex; flex-direction: column; min-width: 0; }
+.ck-artifact-tile .dash-tile-label { align-items: flex-start; }
+.ck-artifact-tile .dash-tile-label span { flex: 1; min-width: 0; }
+.ck-artifact-tile-open { color: var(--cc-dimmer); font-size: 11px; line-height: 1; }
+.ck-artifact-tile-open .bi { display: inline-block; }
+.ck-artifact-tile-open:hover { color: var(--cc-accent); }
+.ck-artifact-tile-frame { overflow: hidden; transition: height .15s; }
+.ck-artifact-tile-frame iframe { display: block; width: 100%; height: 100%; border: 0; background: transparent; }
 .ck-artifact-item { padding: 0; display: flex; flex-direction: column; }
 .ck-catalog-pick { text-align: left; border: 0; background: transparent; color: inherit; padding: 10px 12px; flex: 1; border-radius: var(--cc-radius); }
 .ck-catalog-pick:hover { background: var(--cc-bg-hover); }
 .ck-artifact-warn { font-size: 11px; color: var(--cc-yellow); padding: 4px 12px 8px; }
+
+/* ---- Réglages › Onglets et pages ------------------------------------------------------------------------------------ */
+.ck-tabs-list li { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-top: 1px solid var(--cc-border-soft); }
+.ck-tabs-list li:first-child { border-top: 0; }
+.ck-tabs-list li.hidden .lbl, .ck-tabs-list li.hidden .bi { color: var(--cc-dimmer); }
+.ck-tabs-list .form-check { margin: 0; min-height: 0; }
+.ck-tabs-list .lbl { flex: 1; min-width: 0; }
+.ck-tabs-actions { display: flex; gap: 8px; }

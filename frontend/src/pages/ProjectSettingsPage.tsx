@@ -6,6 +6,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTabTitle } from '../workbench/TabsContext';
 import { useGitTarget } from '../workbench/GitTargetContext';
 import ProjectHeader from '../components/ProjectHeader';
+import ProjectTabsCard from '../cockpit/ProjectTabsCard';
 import WorksessionDiskCard from '../components/WorksessionDiskCard';
 import BrowserCheckCard from '../components/BrowserCheckCard';
 import NotificationChannelsCard from '../components/settings/NotificationChannelsCard';
@@ -705,6 +706,7 @@ export default function ProjectSettingsPage() {
 
       {actionError && <Alert variant="danger">{actionError.message}</Alert>}
 
+      {!personal && <ProjectTabsCard projectId={project.id} canManage={isAdmin} />}
       <Row className="g-3 mb-4">
         <Col md={5}>
           <Card className="h-100">

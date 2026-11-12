@@ -3,7 +3,7 @@ import { authSession, readCookie, SESSION_COOKIE } from '../auth/session.js';
 import { config } from '../config.js';
 import { AppError } from '../errors.js';
 import { artifactDataService } from './dataService.js';
-import { embedStyle, parseEmbedTheme } from '../cockpit/embedTheme.js';
+import { embedStyle, parseEmbedRegion, parseEmbedTheme } from '../cockpit/embedTheme.js';
 import { liveSources } from '../cockpit/liveSources.js';
 import { projectService } from '../projects/service.js';
 import { INJECT_MAX_BYTES, injectCommentScript, injectDataScript, injectEmbed, injectSlidesScript } from './inject.js';
@@ -92,6 +92,7 @@ export async function handleSharedPageRoute(req: IncomingMessage, res: ServerRes
       const theme = parseEmbedTheme(url.searchParams.get('theme'));
       const context = {
         scope: (url.searchParams.get('scope') ?? '').slice(0, 120),
+        region: parseEmbedRegion(url.searchParams.get('region')),
         params: blockParams,
         viewer: { id: user.id, name: user.name },
         project: project ? { id: project.id, name: project.name } : null,

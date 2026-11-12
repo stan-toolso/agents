@@ -12,6 +12,8 @@ import { sameLayout, type Layout, type WidgetDef } from './types';
  */
 export interface CockpitState {
   data: CockpitLayoutData | null;
+  /** Échec du chargement de l'agencement (sans agencement à afficher, la page le montre au lieu d'attendre indéfiniment). */
+  error: string | null;
   layout: Layout | null;
   catalog: WidgetDef[];
   canEdit: boolean;
@@ -37,16 +39,18 @@ const EMPTY: WidgetDef[] = [];
 /** `fallback` : agencement affiché, non modifiable, quand il n'y a pas de portée (ex. pilotage de tous les projets). */
 export function useCockpit(scope: string | null, fallback: Layout | null = null): CockpitState {
   const { showError, confirm } = useDialogs();
-  const { data } = usePollingQuery<{ cockpitLayout: CockpitLayoutData }>(COCKPIT_LAYOUT, { variables: { scope: scope ?? '' }, skip: !scope, pollInterval: 30_000, fetchPolicy: 'cache-and-network' });
+  const { data, error } = usePollingQuery<{ cockpitLayout: CockpitLayoutData }>(COCKPIT_LAYOUT, { variables: { scope: scope ?? '' }, skip: !scope, pollInterval: 30_000, fetchPolicy: 'cache-and-network' });
   const current = data?.cockpitLayout ?? null;
   const [draft, setDraftState] = useState<Layout | null>(null);
   const [editing, setEditing] = useState(false);
   const [seenVersion, setSeenVersion] = useState<number | null>(null);
   const [changedElsewhere, setChangedElsewhere] = useState<CockpitLayoutData | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
-  const [update, { loading: saving }] = useMutation<{ updateCockpitLayout: CockpitLayoutData }>(UPDATE_COCKPIT_LAYOUT);
-  const [resetMutation] = useMutation<{ resetCockpitLayout: CockpitLayoutData }>(RESET_COCKPIT_LAYOUT);
-  const [restoreMutation] = useMutation<{ restoreCockpitLayout: CockpitLayoutData }>(RESTORE_COCKPIT_LAYOUT);
+  // Le type CockpitLayout n'a pas d'identifiant : Apollo ne fusionne pas le résultat d'une mutation avec la query, on la relit.
+  const refetch = { refetchQueries: ['CockpitLayout'], awaitRefetchQueries: true };
+  const [update, { loading: saving }] = useMutation<{ updateCockpitLayout: CockpitLayoutData }>(UPDATE_COCKPIT_LAYOUT, refetch);
+  const [resetMutation] = useMutation<{ resetCockpitLayout: CockpitLayoutData }>(RESET_COCKPIT_LAYOUT, refetch);
+  const [restoreMutation] = useMutation<{ restoreCockpitLayout: CockpitLayoutData }>(RESTORE_COCKPIT_LAYOUT, refetch);
 
   // Changement fait ailleurs (agent, autre membre) pendant qu'on regarde : signalé, pas imposé en cours d'édition.
   useEffect(() => {
@@ -126,6 +130,7 @@ export function useCockpit(scope: string | null, fallback: Layout | null = null)
 
   return {
     data: current,
+    error: error?.message ?? null,
     layout: editing && draft ? draft : current?.layout ?? (scope ? null : fallback),
     catalog: current?.catalog ?? EMPTY,
     canEdit: Boolean(current?.canEdit),

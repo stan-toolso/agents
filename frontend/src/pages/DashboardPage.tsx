@@ -109,7 +109,7 @@ export default function DashboardPage() {
 
       {!cockpit.editing && <ChatComposer withGreeting />}
 
-      {cockpit.layout ? <CockpitBoard cockpit={cockpit} ctx={ctx} scopeLabel={scope === 'home:default' ? "l’accueil par défaut de tout le monde" : 'votre accueil'} /> : <div className="text-secondary small"><Spinner animation="border" size="sm" /> Agencement…</div>}
+      {cockpit.layout ? <CockpitBoard cockpit={cockpit} ctx={ctx} scopeLabel={scope === 'home:default' ? "l’accueil par défaut de tout le monde" : 'votre accueil'} /> : cockpit.error ? <Alert variant="danger" className="py-2 small">Agencement indisponible : {cockpit.error}</Alert> : <div className="text-secondary small"><Spinner animation="border" size="sm" /> Agencement…</div>}
 
       {newTask && <TaskModal task={null} projectId={writableProjects[0]?.id ?? ''} projects={writableProjects} onClose={() => setNewTask(false)} />}
     </>

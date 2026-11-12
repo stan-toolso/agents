@@ -126,6 +126,7 @@ import { userService } from '../users/service.js';
 import { cleanInviteMessage, sendProjectGuestInvitation } from '../users/invitations.js';
 import { userRepository } from '../users/repository.js';
 import { cockpitService } from '../cockpit/service.js';
+import { projectPageService } from '../cockpit/projectPages.js';
 import type { ResolvedLayout } from '../cockpit/types.js';
 import { signInService } from '../auth/signInService.js';
 import type { ProjectMember, ProjectRole } from '../users/types.js';
@@ -884,6 +885,8 @@ export const resolvers = {
 
   Project: {
     workspacePath: (project: Project) => workspacePath(project),
+    pages: (project: Project) => projectPageService.list(project.id),
+    tabs: (project: Project) => projectPageService.tabs(project.id),
     monthUsd: (project: Project) => projectBudget.monthSpent(project.id),
     permissionRules: (project: Project) => permissionRuleService.list(project.id),
     runnerStatus: (project: Project) => runner.status(project),
@@ -2346,6 +2349,26 @@ export const resolvers = {
     resetCockpitLayout: (_: unknown, args: { scope: string }, ctx: Ctx) => cockpitService.reset(requireUser(ctx), args.scope),
     restoreCockpitLayout: (_: unknown, args: { scope: string; version: number }, ctx: Ctx) => cockpitService.restore(requireUser(ctx), args.scope, args.version),
     pinArtifactToCockpit: async (_: unknown, args: { scope: string; artifactId: string; region?: string | null; title?: string | null }, ctx: Ctx) => (await cockpitService.pin(requireUser(ctx), args.scope, { artifactId: args.artifactId, region: args.region, title: args.title })).result,
+    createProjectPage: async (_: unknown, args: { projectId: string; title: string; icon?: string | null; slug?: string | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'member');
+      return projectPageService.create(args.projectId, { title: args.title, icon: args.icon, slug: args.slug }, requireUser(ctx).id);
+    },
+    updateProjectPage: async (_: unknown, args: { id: string; title?: string | null; icon?: string | null; position?: number | null }, ctx: Ctx) => {
+      const page = await projectPageService.get(args.id);
+      await requireProject(ctx, page.projectId, 'member');
+      return projectPageService.update(page, { title: args.title, icon: args.icon, position: args.position });
+    },
+    deleteProjectPage: async (_: unknown, args: { id: string }, ctx: Ctx) => {
+      const page = await projectPageService.get(args.id);
+      await requireProject(ctx, page.projectId, 'member');
+      await projectPageService.delete(page);
+      return true;
+    },
+    updateProjectTabs: async (_: unknown, args: { projectId: string; tabs: unknown }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'admin');
+      await projectPageService.setTabs(args.projectId, args.tabs);
+      return projectService.get(args.projectId);
+    },
     duplicateSharedPage: (_: unknown, args: { id: string; title?: string | null; version?: number | null }, ctx: Ctx) => sharedPageService.duplicate(requireUser(ctx), args.id, { title: args.title, version: args.version }),
     deleteAllSharedPageComments: (_: unknown, args: { id: string }, ctx: Ctx) => sharedPageService.deleteAllComments(requireUser(ctx), args.id),
     addSharedPageComment: (_: unknown, args: { pageId: string; body: string; anchor?: unknown; version?: number | null }, ctx: Ctx) =>

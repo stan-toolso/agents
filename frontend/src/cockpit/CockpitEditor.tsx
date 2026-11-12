@@ -6,7 +6,10 @@ import TagsInput from '../components/TagsInput';
 import { COCKPIT_LAYOUT_HISTORY, COCKPIT_PINNABLE_PAGES, OPEN_PAGE_TO_PROJECT, type CockpitLayoutVersion, type PinnablePage } from '../graphql/cockpit';
 import { timeAgo } from '../lib/humanize';
 import type { CockpitContext } from './registry';
-import { REGION_LABELS, newBlockId, type Block, type BlockParams, type Layout, type Region, type WidgetDef, type WidgetParam } from './types';
+import { REGION_LABELS, diffLayouts, newBlockId, type Block, type BlockParams, type Layout, type Region, type WidgetDef, type WidgetParam } from './types';
+import { SUMMON_AGENT } from '../graphql/agents';
+import { useNavigate } from 'react-router-dom';
+import { useDialogs } from '../components/Dialogs';
 
 /** Fenêtres du mode « Personnaliser » : catalogue (ajouter un bloc), réglages d'un bloc, historique des versions. */
 
@@ -23,12 +26,27 @@ export function AddBlockModal({ region, catalog, layout, ctx, scope, onClose, on
   const [pane, setPane] = useState<Pane>('builtin');
   const [wish, setWish] = useState('');
   const { openNewSession } = useSessionLauncher();
+  const navigate = useNavigate();
+  const { showError } = useDialogs();
+  const [summon, { loading: summoning }] = useMutation<{ summonAgent: { id: string } }>(SUMMON_AGENT, { refetchQueries: ['Sidebar', 'Sessions'] });
+  // Un Product Manager du projet est responsable du tableau de bord : la demande lui est confiée plutôt qu'à une session neuve.
+  const pm = ctx.kind === 'project' ? ctx.project?.d.team.map((m) => m.agent).find((a) => a && a.kind === 'PRODUCT_MANAGER') ?? null : null;
   const present = new Set(layout.blocks.filter((b): b is Extract<Block, { kind: 'builtin' }> => b.kind === 'builtin').map((b) => b.widget));
   const items = catalog.filter((w) => w.regions.includes(region));
   const projectId = ctx.kind === 'project' ? ctx.project?.project.id ?? null : null;
   const askAgent = () => {
     const where = ctx.kind === 'project' ? `du tableau de bord du projet « ${ctx.project?.project.name ?? ''} »` : 'de mon accueil';
-    const prompt = `Configure l'agencement ${where} (portée \`${scope}\`, outils du serveur MCP \`cockpit\`).\n\nDemande : ${wish.trim() || '…'}\n\nRegarde d'abord \`cockpit.get\` (agencement actuel et catalogue des blocs natifs). Préfère un bloc natif paramétré quand il répond au besoin ; place le bloc dans la région « ${REGION_LABELS[region].toLowerCase()} ». Enregistre avec \`cockpit.update\` (une note de version qui dit ce qui change), puis dis-moi ce que tu as modifié.`;
+    const prompt = `Configure l'agencement ${where} (portée \`${scope}\`, outils du serveur MCP \`cockpit\`).\n\nDemande : ${wish.trim() || '…'}\n\nRegarde d'abord \`cockpit.get\` (agencement actuel et catalogue des blocs natifs). Préfère un bloc natif paramétré quand il répond au besoin ; place le bloc dans la région « ${REGION_LABELS[region].toLowerCase()} »${region === 'tiles' ? ' (un artefact en tuile est un indicateur : une grande valeur et une ligne de détail, le titre du bloc sert de libellé)' : ''}. Enregistre avec \`cockpit.update\` (une note de version qui dit ce qui change), puis dis-moi ce que tu as modifié.`;
+    if (pm) {
+      summon({ variables: { id: pm.id, text: prompt } })
+        .then((res) => {
+          onClose();
+          const id = res.data?.summonAgent.id;
+          if (id) navigate(`/sessions/${id}`);
+        })
+        .catch(showError);
+      return;
+    }
     openNewSession({ projectId, prompt });
     onClose();
   };
@@ -40,7 +58,7 @@ export function AddBlockModal({ region, catalog, layout, ctx, scope, onClose, on
       <Modal.Body>
         <Nav variant="underline" activeKey={pane} onSelect={(k) => setPane((k as Pane) ?? 'builtin')} className="mb-3">
           <Nav.Item><Nav.Link eventKey="builtin">Blocs Skipper</Nav.Link></Nav.Item>
-          {region !== 'tiles' && <Nav.Item><Nav.Link eventKey="artifacts">Artefacts</Nav.Link></Nav.Item>}
+          <Nav.Item><Nav.Link eventKey="artifacts">Artefacts</Nav.Link></Nav.Item>
           <Nav.Item><Nav.Link eventKey="agent">Demander à un agent</Nav.Link></Nav.Item>
         </Nav>
         {pane === 'builtin' && (
@@ -65,12 +83,12 @@ export function AddBlockModal({ region, catalog, layout, ctx, scope, onClose, on
         {pane === 'agent' && (
           <div>
             <p className="small text-secondary">
-              Décrivez le bloc que vous voulez voir ici. Une session d’agent lit l’agencement actuel et le catalogue, construit ou règle le bloc, puis l’enregistre : vous le verrez apparaître sur la page.
+              Décrivez le bloc que vous voulez voir ici. {pm ? <>{pm.name}, Product Manager du projet, lit l’agencement actuel et le catalogue, construit ou règle le bloc, puis l’enregistre</> : 'Une session d’agent lit l’agencement actuel et le catalogue, construit ou règle le bloc, puis l’enregistre'} : vous le verrez apparaître sur la page (bandeau « mis à jour par … »).
             </p>
             <Form.Control as="textarea" rows={3} value={wish} onChange={(e) => setWish(e.target.value)} placeholder="Ex. : un bloc qui compare le débit des deux derniers sprints, ou les tâches « infra » en retard" autoFocus />
             <div className="d-flex justify-content-end mt-3">
-              <Button variant="primary" size="sm" disabled={!wish.trim()} onClick={askAgent}>
-                <i className="bi bi-robot me-1" />Lancer une session
+              <Button variant="primary" size="sm" disabled={!wish.trim() || summoning} onClick={askAgent}>
+                <i className="bi bi-robot me-1" />{pm ? `Demander à ${pm.name}` : 'Lancer une session'}
               </Button>
             </div>
           </div>
@@ -191,7 +209,12 @@ export function HistoryModal({ scope, canEdit, onRestore, onClose }: { scope: st
         {loading && !data && <Spinner animation="border" size="sm" />}
         {!loading && versions.length === 0 && <div className="text-secondary small">Aucune version enregistrée : c’est l’agencement par défaut de Skipper.</div>}
         <ul className="list-unstyled ck-history mb-0">
-          {versions.map((v, i) => (
+          {versions.map((v, i) => {
+            const prev = versions[i + 1];
+            const d = prev ? diffLayouts(prev.layout, v.layout) : null;
+            const name = (b: Block) => b.title || (b.kind === 'builtin' ? b.widget : 'artefact');
+            const changes = d ? [...d.added.map((b) => `+ ${name(b)}`), ...d.removed.map((b) => `− ${name(b)}`), ...d.changed.map((b) => `~ ${name(b)}`)] : [];
+            return (
             <li key={v.version}>
               <span className="v">v{v.version}</span>
               <div className="main">
@@ -199,13 +222,15 @@ export function HistoryModal({ scope, canEdit, onRestore, onClose }: { scope: st
                 <div className="meta">
                   {v.author?.name ?? 'Skipper'}{v.sessionId ? ' (session d’agent)' : ''} · {timeAgo(v.createdAt)}
                 </div>
+                {changes.length > 0 && <div className="meta ck-history-diff" title={changes.join('\n')}>{changes.slice(0, 6).join(' · ')}{changes.length > 6 ? ` · +${changes.length - 6}` : ''}</div>}
               </div>
               {canEdit && i > 0 && (
                 <Button size="sm" variant="outline-secondary" onClick={() => onRestore(v.version)}>Restaurer</Button>
               )}
               {i === 0 && <Badge bg="secondary">actuelle</Badge>}
             </li>
-          ))}
+            );
+          })}
         </ul>
       </Modal.Body>
     </Modal>

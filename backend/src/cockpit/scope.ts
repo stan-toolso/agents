@@ -13,7 +13,7 @@ const PATTERNS: { kind: ScopeKind; re: RegExp }[] = [
 ];
 
 /** Portées composables aujourd'hui ; les autres sont réservées (voir docs/conception/cockpit-configurable.md). */
-export const SUPPORTED_SCOPE_KINDS: ScopeKind[] = ['home', 'project', 'tasks', 'agent'];
+export const SUPPORTED_SCOPE_KINDS: ScopeKind[] = ['home', 'project', 'tasks', 'agent', 'page'];
 
 /**
  * Analyse une clé de portée (`home`, `project:<id>`, `project:<id>:tasks`, `agent:<id>`, `project:<id>:page:<slug>`).
@@ -38,5 +38,6 @@ export function parseScope(key: string): Scope {
 export const projectScopeKey = (projectId: string) => `project:${projectId}`;
 export const tasksScopeKey = (projectId: string) => `project:${projectId}:tasks`;
 export const agentScopeKey = (agentId: string) => `agent:${agentId}`;
+export const pageScopeKey = (projectId: string, slug: string) => `project:${projectId}:page:${slug}`;
 /** Défaut de l'accueil pour toute la cellule (administrateurs de Skipper). */
 export const HOME_DEFAULT_KEY = 'home:default';

@@ -2,6 +2,7 @@
 
 export const TARGET_LABELS: Record<string, string> = {
   cockpit: 'agencement du tableau de bord',
+  project_page: 'page personnalisée',
   session: 'Session',
   schedule: 'Planification',
   request: 'Demande',
@@ -163,6 +164,10 @@ export const ACTION_LABELS: Record<string, string> = {
   'conversation.archive': 'a archivé ou rouvert le canal',
   'cockpit.update': "a modifié l'agencement du tableau de bord",
   'cockpit.pin': "a épinglé un artefact dans le tableau de bord",
+  'project_page.create': 'a créé la page personnalisée',
+  'project_page.update': 'a modifié la page personnalisée',
+  'project_page.delete': 'a supprimé la page personnalisée',
+  'project.tabs': 'a réglé les onglets du projet',
   'cockpit.reset': "a réinitialisé l'agencement du tableau de bord",
   'cockpit.restore': "a restauré une version de l'agencement du tableau de bord",
   'page.publish': 'a publié la page',

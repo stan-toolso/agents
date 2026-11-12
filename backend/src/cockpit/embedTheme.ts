@@ -4,6 +4,9 @@
  * Copie volontaire des valeurs essentielles de frontend/src/theme.css (le backend ne lit pas le bundle) : à tenir à jour
  * quand la palette change (test `embedTheme.test.ts` : les deux jeux ont les mêmes clés).
  */
+
+import { REGIONS, type Region } from './types.js';
+
 export type EmbedTheme = 'light' | 'dark';
 
 const COMMON = {
@@ -55,6 +58,9 @@ export const EMBED_THEMES: Record<EmbedTheme, Record<string, string>> = {
 };
 
 export const parseEmbedTheme = (v: string | null | undefined): EmbedTheme => (v === 'dark' ? 'dark' : 'light');
+
+/** Région du bloc qui affiche l'artefact (`Skipper.context.region`) : une tuile se dessine en indicateur compact. */
+export const parseEmbedRegion = (v: string | null | undefined): Region | null => ((REGIONS as readonly string[]).includes(v ?? '') ? (v as Region) : null);
 
 /** Feuille de style de base d'un bloc : variables du thème, fond transparent, marges nulles, police de Skipper. */
 export function embedStyle(theme: EmbedTheme): string {

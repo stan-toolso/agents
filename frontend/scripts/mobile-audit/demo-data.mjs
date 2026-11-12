@@ -38,6 +38,8 @@ const project = (id, name, slug, description, gitUrl, extra = {}) => ({
   slug,
   description,
   gitUrl,
+  pages: () => projectPagesDemo.filter((pg) => pg.projectId === id),
+  tabs: () => projectTabsDemo.get(id) ?? { hidden: [], order: [] },
   gitBranch: gitUrl ? 'main' : null,
   systemPrompt: '',
   taskInstructions: '',
@@ -269,6 +271,8 @@ S.hebdo.pages.unshift(demoSharedPage('page-data-inscriptions', 'Inscriptions : t
 S.hebdo.pages[0].versions = [4, 3, 2, 1].map((v) => ({ __typename: 'SharedPageVersion', version: v, size: 21_000 - v * 600, createdBy: U.me, createdAt: ago(60 * 24 * (5 - v)), kind: v === 1 ? 'PAGE' : 'DATA', refreshMinutes: v >= 3 ? 60 : null, sourceCount: v === 1 ? null : v === 2 ? 2 : 3 }));
 S.tarifs.pages.push(demoSharedPage('page-slides-offres', 'Présentation des trois offres', U.me, [[U.hugo, null]], { kind: 'SLIDES', session: S.tarifs, project: P.site, version: 2 }));
 sharedPagesDemo.push(...S.tarifs.pages.slice(0, 1), ...S.hebdo.pages, S.tarifs.pages[2]);
+// Artefact de données épinglé en tuile du tableau de bord du site (servi compact par le serveur factice : /api/shared/page-data-ca).
+sharedPagesDemo.push(demoSharedPage('page-data-ca', 'Chiffre d’affaires projeté', U.me, [], { kind: 'DATA', refreshMinutes: 360, dataRefreshedAt: ago(30), project: P.site, projectAccess: true, version: 1 }));
 // Favoris (section « Favoris » de la sidebar) : le tableau de bord des inscriptions et la présentation des offres.
 for (const pg of sharedPagesDemo) if (pg.id === 'page-data-inscriptions' || pg.id === 'page-slides-offres') pg.favorite = true;
 
@@ -755,15 +759,19 @@ const COCKPIT_CATALOG = [
   ...[['tile.active', 'Sessions en cours', 'tiles'], ['tile.sessions', 'Sessions au total', 'tiles'], ['tile.tasks', 'Tâches touchées', 'tiles'], ['tile.cost', 'Consommation', 'tiles'], ['sessions', 'Sessions', 'main'], ['tasks', 'Tâches', 'side']].map(([k, l, r]) => ckWidget(`agent.${k}`, l, `Bloc « ${l} » de la fiche d’un agent.`, ['agent'], r, r === 'tiles' ? ['tiles'] : ['main', 'side', 'full'], true, r === 'tiles' ? [] : [ckLimit(20, 50)])),
 ];
 const cockpitState = { layouts: new Map(), versions: [] };
-const cockpitKind = (scope) => (scope.startsWith('home') ? 'home' : scope.endsWith(':tasks') ? 'tasks' : scope.startsWith('agent:') ? 'agent' : 'project');
-const cockpitDefault = (scope) => { const k = cockpitKind(scope); return k === 'home' ? COCKPIT_HOME : k === 'tasks' ? COCKPIT_TASKS : k === 'agent' ? COCKPIT_AGENT : byId(allProjects, scope.replace(/^project:/, ''))?.isPersonal ? COCKPIT_PERSONAL : COCKPIT_PROJECT; };
+// Le tableau de bord du site a une tuile artefact (CA projeté du mois) après les tuiles natives.
+cockpitState.layouts.set('project:p-site', { layout: { v: 1, blocks: [...COCKPIT_PROJECT.blocks.filter((b) => b.region === 'tiles'), { id: 'd-ca', kind: 'artifact', artifact: 'page-data-ca', region: 'tiles', title: 'CA projeté du mois' }, ...COCKPIT_PROJECT.blocks.filter((b) => b.region !== 'tiles')] }, version: 1 });
+const projectPagesDemo = [{ __typename: 'ProjectPage', id: 'pp-1', projectId: 'p-site', slug: 'reporting', title: 'Reporting', icon: 'bi-graph-up', position: 0, createdAt: ago(60 * 24 * 3) }];
+const projectTabsDemo = new Map([['p-site', { hidden: ['workflows'], order: [] }]]);
+const cockpitKind = (scope) => (scope.startsWith('home') ? 'home' : scope.endsWith(':tasks') ? 'tasks' : scope.startsWith('agent:') ? 'agent' : scope.includes(':page:') ? 'page' : 'project');
+const cockpitDefault = (scope) => { const k = cockpitKind(scope); return k === 'home' ? COCKPIT_HOME : k === 'tasks' ? COCKPIT_TASKS : k === 'agent' ? COCKPIT_AGENT : k === 'page' ? { v: 1, blocks: [] } : byId(allProjects, scope.replace(/^project:/, ''))?.isPersonal ? COCKPIT_PERSONAL : COCKPIT_PROJECT; };
 const cockpitLayout = (scope) => {
   const st = cockpitState.layouts.get(scope);
   const kind = cockpitKind(scope);
   return {
-    __typename: 'CockpitLayout', scope, kind, projectId: kind === 'project' || kind === 'tasks' ? scope.replace(/^project:/, '').replace(/:tasks$/, '') : null,
+    __typename: 'CockpitLayout', scope, kind, projectId: kind === 'project' || kind === 'tasks' || kind === 'page' ? scope.replace(/^project:/, '').replace(/:tasks$/, '').replace(/:page:.*$/, '') : null,
     layout: st?.layout ?? cockpitDefault(scope), version: st?.version ?? 0, isDefault: !st?.layout, canEdit: true,
-    updatedAt: st ? ago(0) : null, updatedBy: st ? U.me : null, catalog: COCKPIT_CATALOG.filter((w) => w.scopes.includes(kind)),
+    updatedAt: st ? ago(0) : null, updatedBy: st ? U.me : null, catalog: COCKPIT_CATALOG.filter((w) => w.scopes.includes(kind === 'page' ? 'project' : kind)),
     artifacts: (st?.layout ?? cockpitDefault(scope)).blocks.filter((b) => b.kind === 'artifact').map((b) => {
       const pg = sharedPagesDemo.find((x) => x.id === b.artifact);
       return pg
@@ -952,6 +960,26 @@ export const demoRoot = {
   dashboard,
   projectDashboard: (a) => projectDashboard(a.id),
   // Cockpit configurable : agencements par défaut (copie de backend/src/cockpit/defaults.ts) et catalogue abrégé.
+  createProjectPage: (a) => {
+    const slug = (a.slug || a.title).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'page';
+    const page = { __typename: 'ProjectPage', id: `pp-${projectPagesDemo.length + 1}`, projectId: a.projectId, slug, title: a.title, icon: a.icon ?? null, position: projectPagesDemo.length, createdAt: ago(0) };
+    projectPagesDemo.push(page);
+    return page;
+  },
+  updateProjectPage: (a) => {
+    const page = projectPagesDemo.find((p) => p.id === a.id);
+    if (page) Object.assign(page, a.title != null ? { title: a.title } : {}, a.icon !== undefined ? { icon: a.icon } : {}, a.position != null ? { position: a.position } : {});
+    return page;
+  },
+  deleteProjectPage: (a) => {
+    const i = projectPagesDemo.findIndex((p) => p.id === a.id);
+    if (i >= 0) projectPagesDemo.splice(i, 1);
+    return true;
+  },
+  updateProjectTabs: (a) => {
+    projectTabsDemo.set(a.projectId, a.tabs);
+    return byId(allProjects, a.projectId);
+  },
   cockpitLayout: (a) => cockpitLayout(a.scope),
   cockpitLayoutHistory: (a) => cockpitState.versions.filter((v) => v.scope === a.scope).map(({ scope: _s, ...v }) => v).reverse(),
   updateCockpitLayout: (a) => {

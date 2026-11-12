@@ -38,7 +38,7 @@ export default function CockpitBoard({ cockpit, ctx, scopeLabel, columns = [7, 5
     }
     if (!editing) return <div key={block.id} className="ck-block-view">{body}</div>;
     const def = block.kind === 'builtin' ? defs.get(block.widget) : null;
-    const regions = def ? def.regions : REGIONS.filter((r) => r !== 'tiles');
+    const regions = def ? def.regions : [...REGIONS];
     const same = blocksOf(layout, block.region);
     const i = same.indexOf(block);
     const name = block.title || def?.label || (block.kind === 'artifact' ? 'Artefact' : block.widget);
@@ -119,7 +119,7 @@ export default function CockpitBoard({ cockpit, ctx, scopeLabel, columns = [7, 5
             Tableau de bord mis à jour {cockpit.changedElsewhere.updatedAt ? timeAgo(cockpit.changedElsewhere.updatedAt) : ''} par {cockpit.changedElsewhere.updatedBy?.name ?? 'quelqu’un'}
             {cockpit.changedElsewhere.updatedBy?.id && <> (<Link to={`/projects/${cockpit.changedElsewhere.projectId ?? ''}/audit`}>journal</Link>)</>}.
           </span>
-          {cockpit.canEdit && <button type="button" className="btn btn-link btn-sm p-0" onClick={() => setHistory(true)}>Historique</button>}
+          <button type="button" className="btn btn-link btn-sm p-0" onClick={() => setHistory(true)}>Voir les changements</button>
           <button type="button" className="btn btn-link btn-sm p-0 text-secondary" onClick={cockpit.acknowledge}>Fermer</button>
         </div>
       )}

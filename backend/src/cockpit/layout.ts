@@ -104,7 +104,6 @@ function parseBlock(raw: unknown, index: number, kind: ScopeKind): Block {
   }
   if (raw.kind === 'artifact') {
     if (typeof raw.artifact !== 'string' || !UUID_RE.test(raw.artifact)) return fail(`${where} : identifiant d'artefact invalide`);
-    if (region === 'tiles') return fail(`${where} : un artefact ne se place pas dans les tuiles (main, side ou full)`);
     const block: ArtifactBlock = { id, kind: 'artifact', artifact: raw.artifact.toLowerCase(), region };
     if (title) block.title = title;
     if (raw.version !== undefined && raw.version !== null) {
