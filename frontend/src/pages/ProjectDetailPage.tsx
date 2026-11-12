@@ -132,12 +132,10 @@ export default function ProjectDetailPage() {
           {d.general && (
             <section className="dash-section">
               <h2 className="dash-section-title">
-                <span>
-                  <i className="bi bi-chat-left-text me-1" /><span style={{ textTransform: 'none', letterSpacing: 0 }}>#{d.general.slug}</span>
-                  <span className="text-secondary ms-2" style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>parlez à l’équipe : @Nom prévient une personne, @Agent le fait répondre</span>
-                </span>
+                <span className="dash-channel-name"><span className="hash">#</span>{d.general.slug}</span>
                 <Link to={`/projects/${project.id}/conversations`}>Toutes les conversations{d.general.unreadCount > 0 && <Badge bg="primary" pill className="ms-1">{d.general.unreadCount}</Badge>}</Link>
               </h2>
+              <p className="dash-section-hint">Parlez à l’équipe : <b>@Nom</b> prévient une personne, <b>@Agent</b> le fait répondre.</p>
               <div className="dash-embedded-channel">
                 <div className="ch-embedded ch-scroll">
                   <ChannelThread conversationId={d.general.id} canWrite={canWrite} compact limit={6} placeholder="Écrire à l’équipe… (@ pour mentionner une personne ou un agent)" />
@@ -215,8 +213,8 @@ export default function ProjectDetailPage() {
           <section className="dash-section">
             <h2 className="dash-section-title">
               <span>Débit hebdomadaire</span>
-              <span className="text-secondary" style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400, fontSize: 12 }}>créées · terminées, 8 semaines</span>
             </h2>
+            <p className="dash-section-hint">Tâches créées et terminées, sur 8 semaines.</p>
             <div className="task-dash-card">
               <WeeklyChart weeks={stats.weeks} />
             </div>
@@ -460,7 +458,7 @@ function computeStats(tasks: Task[]) {
   const weeks = weeklyBuckets(tasks, now, 8);
   const done7d = tasks.filter((t) => t.status === 'DONE' && t.completedAt && now.getTime() - new Date(t.completedAt).getTime() < 7 * 86_400_000).length;
   const leads = leadTimes(tasks, now, 8).sort((a, b) => a - b);
-  const leadP50 = leads.length ? Math.round(percentile(leads, 50) * 10) / 10 : null;
+  const leadP50 = leads.length ? Math.round(percentile(leads, 0.5) * 10) / 10 : null;
   const fc = forecast(open.length, weeks.slice(0, -1).map((w) => w.done));
   return { stages, maxStage: Math.max(0, ...stages.map((s) => s.count)), weeks, done7d, leadP50, forecastWeeks: fc ? fc.p50 : null };
 }
