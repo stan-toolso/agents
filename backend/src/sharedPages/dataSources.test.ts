@@ -16,7 +16,7 @@ describe('parseSources', () => {
   it('refuse un nom invalide, un doublon, un type inconnu, une source incomplète', () => {
     expect(() => parseSources([{ name: 'Ventes', type: 'sql', item: 'b', query: 'x' }])).toThrow(/minuscule/);
     expect(() => parseSources([{ name: 'a', type: 'sql', item: 'b', query: 'x' }, { name: 'a', type: 'sql', item: 'b', query: 'y' }])).toThrow(/double/);
-    expect(() => parseSources([{ name: 'a', type: 'csv' }])).toThrow(/sql » ou « script/);
+    expect(() => parseSources([{ name: 'a', type: 'csv' }])).toThrow(/sql », « script » ou « graphql/);
     expect(() => parseSources([{ name: 'a', type: 'sql', query: 'x' }])).toThrow(/item/);
     expect(() => parseSources([{ name: 'a', type: 'script', interpreter: 'ruby', code: 'x' }])).toThrow(/interpreter/);
     expect(() => parseSources(Array.from({ length: 13 }, (_, i) => ({ name: `s${i}`, type: 'script', code: 'x' })))).toThrow(/12 sources/);

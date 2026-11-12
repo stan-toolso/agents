@@ -105,6 +105,8 @@ async function runScript(project: Project, source: DataSource): Promise<{ data: 
 class SkippedError extends Error {}
 
 async function refreshOne(page: SharedPage, project: Project | null, source: DataSource, trigger: RefreshTrigger, memberOk: boolean): Promise<void> {
+  // Source graphql : vivante, exécutée à la lecture aux droits de la personne qui regarde (cockpit/liveSources.ts) ; rien à rafraîchir.
+  if (source.kind === 'graphql') return;
   const started = Date.now();
   try {
     if (!project) throw new SkippedError("Le projet d'origine de l'artefact n'existe plus");

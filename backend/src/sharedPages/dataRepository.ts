@@ -1,12 +1,12 @@
 import { pool } from '../db/pool.js';
-import type { DataSource, DataSourceKind, DataSourceStatus, ScriptSourceConfig, SqlSourceConfig } from './dataSources.js';
+import type { DataSource, DataSourceKind, DataSourceStatus, GraphqlSourceConfig, ScriptSourceConfig, SqlSourceConfig } from './dataSources.js';
 
 interface Row {
   id: string;
   page_id: string;
   name: string;
   kind: DataSourceKind;
-  config: SqlSourceConfig | ScriptSourceConfig;
+  config: SqlSourceConfig | ScriptSourceConfig | GraphqlSourceConfig;
   position: number;
   data: unknown;
   row_count: number | null;
@@ -49,7 +49,7 @@ export const dataSourceRepository = {
    * Remplace les sources d'un artefact. Une source gardée (même nom, même type, même définition) garde ses données et
    * son état ; une source modifiée repart à « jamais rafraîchie » ; les autres sont supprimées.
    */
-  async replace(pageId: string, sources: { name: string; kind: DataSourceKind; config: SqlSourceConfig | ScriptSourceConfig }[]): Promise<void> {
+  async replace(pageId: string, sources: { name: string; kind: DataSourceKind; config: SqlSourceConfig | ScriptSourceConfig | GraphqlSourceConfig }[]): Promise<void> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');

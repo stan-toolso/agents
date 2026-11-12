@@ -1,4 +1,5 @@
 import { AppError } from '../errors.js';
+import { checkGraphqlQuery, checkGraphqlVariables, type GraphqlSourceConfig } from '../cockpit/graphqlSource.js';
 
 /**
  * Sources de données d'un artefact « Données » (fonctions pures, testées dans dataSources.test.ts).
@@ -8,9 +9,12 @@ import { AppError } from '../errors.js';
  *   texte (bigint, numeric) reconvertis en nombres, les dates en ISO.
  * - `script` : un script (node, python, sh) lancé dans l'environnement Docker du projet ; sa sortie standard doit être
  *   du JSON (n'importe quelle forme). Il ne voit aucun identifiant du coffre.
+ * - `graphql` : une requête de lecture sur l'API de Skipper, **vivante** : exécutée à la lecture de la page avec les
+ *   droits de la personne qui regarde (cockpit/liveSources.ts), jamais rafraîchie ni gardée en base.
  */
 
-export type DataSourceKind = 'sql' | 'script';
+export type DataSourceKind = 'sql' | 'script' | 'graphql';
+export type { GraphqlSourceConfig };
 export type ScriptInterpreter = 'node' | 'python' | 'sh';
 export const SCRIPT_INTERPRETERS: readonly ScriptInterpreter[] = ['node', 'python', 'sh'];
 
@@ -33,7 +37,7 @@ export interface DataSource {
   pageId: string;
   name: string;
   kind: DataSourceKind;
-  config: SqlSourceConfig | ScriptSourceConfig;
+  config: SqlSourceConfig | ScriptSourceConfig | GraphqlSourceConfig;
   position: number;
   data: unknown;
   rowCount: number | null;
@@ -54,6 +58,8 @@ export interface DataSourceInput {
   interpreter?: string | null;
   code?: string | null;
   timeout_seconds?: number | null;
+  /** graphql : variables de la requête (valeurs modèles {{project.id}}, {{viewer.id}}, {{params.x}}, {{now-7d}} admises). */
+  variables?: Record<string, unknown> | null;
 }
 
 export const DATA_LIMITS = {
@@ -76,7 +82,7 @@ export const DATA_LIMITS = {
 const NAME = /^[a-z][a-z0-9_]{0,39}$/;
 
 /** Valide et normalise une liste de sources ; lève une AppError lisible (l'agent la lit telle quelle). */
-export function parseSources(inputs: DataSourceInput[]): { name: string; kind: DataSourceKind; config: SqlSourceConfig | ScriptSourceConfig }[] {
+export function parseSources(inputs: DataSourceInput[]): { name: string; kind: DataSourceKind; config: SqlSourceConfig | ScriptSourceConfig | GraphqlSourceConfig }[] {
   if (inputs.length > DATA_LIMITS.sources) throw new AppError(`${DATA_LIMITS.sources} sources au plus par artefact`);
   const seen = new Set<string>();
   return inputs.map((s, i) => {
@@ -103,7 +109,15 @@ export function parseSources(inputs: DataSourceInput[]): { name: string; kind: D
       if (!Number.isInteger(t) || t < 1 || t > DATA_LIMITS.scriptTimeoutSeconds) throw new AppError(`${where} : timeout_seconds entre 1 et ${DATA_LIMITS.scriptTimeoutSeconds}`);
       return { name, kind: 'script' as const, config: { interpreter, code, timeoutSeconds: t } };
     }
-    throw new AppError(`${where} : type doit être « sql » ou « script »`);
+    if (s.type === 'graphql') {
+      try {
+        checkGraphqlQuery(s.query ?? '');
+        return { name, kind: 'graphql' as const, config: { query: (s.query ?? '').trim(), variables: checkGraphqlVariables(s.variables) } };
+      } catch (err) {
+        throw new AppError(`${where} : ${(err as Error).message}`);
+      }
+    }
+    throw new AppError(`${where} : type doit être « sql », « script » ou « graphql »`);
   });
 }
 
@@ -200,7 +214,8 @@ export function scriptCommand(interpreter: ScriptInterpreter): { file: string; c
 
 /** Résumé d'une source pour un agent ou le journal (une ligne). */
 export function describeSource(s: Pick<DataSource, 'name' | 'kind' | 'config' | 'status' | 'error' | 'rowCount' | 'refreshedAt'>): string {
-  const what = s.kind === 'sql' ? `SQL sur « ${(s.config as SqlSourceConfig).item} »${(s.config as SqlSourceConfig).database ? ` [${(s.config as SqlSourceConfig).database}]` : ''}` : `script ${(s.config as ScriptSourceConfig).interpreter}`;
+  const what = s.kind === 'sql' ? `SQL sur « ${(s.config as SqlSourceConfig).item} »${(s.config as SqlSourceConfig).database ? ` [${(s.config as SqlSourceConfig).database}]` : ''}` : s.kind === 'graphql' ? 'GraphQL (vivante, aux droits de la personne qui regarde)' : `script ${(s.config as ScriptSourceConfig).interpreter}`;
+  if (s.kind === 'graphql') return `${s.name} · ${what}`;
   const state = s.status === 'ok' ? `ok${s.rowCount != null ? `, ${s.rowCount} ligne(s)` : ''}` : s.status === 'error' ? `erreur : ${s.error}` : s.status === 'skipped' ? `non rafraîchie : ${s.error}` : 'jamais rafraîchie';
   return `${s.name} · ${what} · ${state}${s.refreshedAt ? ` · données du ${s.refreshedAt.toISOString()}` : ''}`;
 }

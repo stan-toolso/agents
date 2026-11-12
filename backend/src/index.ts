@@ -1,8 +1,7 @@
 import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { createSchema, createYoga } from 'graphql-yoga';
+import { createYoga } from 'graphql-yoga';
 import { createAuthContext } from './auth/access.js';
 import { googleAuth } from './auth/google.js';
 import { signInService } from './auth/signInService.js';
@@ -39,7 +38,8 @@ import { csrfPreventionPlugin, guestGuardPlugin, introspectionGuardPlugin } from
 import { isAllowedOrigin } from './origin.js';
 import { pool } from './db/pool.js';
 import { runMigrations } from './db/migrate.js';
-import { resolvers } from './graphql/resolvers.js';
+import { executableSchema } from './graphql/executable.js';
+import { setExecutableSchema } from './cockpit/schemaRegistry.js';
 import { projectService } from './projects/service.js';
 import { runner } from './runners/index.js';
 import { scheduleService } from './schedules/service.js';
@@ -72,7 +72,7 @@ import { previewService } from './previews/service.js';
 import { deliveryService } from './deliveries/service.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const typeDefs = readFileSync(path.join(here, 'graphql/schema.graphql'), 'utf8');
+
 
 /**
  * Passage de l'instance qui tient les tâches périodiques : sessions et terminaux d'une instance morte (arrêt brutal)
@@ -213,8 +213,11 @@ async function main() {
   // Origines autorisées à appeler l'API avec le cookie de session : voir origin.ts (aussi appliqué aux WebSockets).
   const appOrigin = new URL(config.appUrl).origin;
 
+  // Le schéma sert aussi aux sources graphql vivantes des artefacts (cockpit/liveSources.ts) : déposé dans le registre.
+  const schema = executableSchema();
+  setExecutableSchema(schema);
   const yoga = createYoga({
-    schema: createSchema({ typeDefs, resolvers }),
+    schema,
     graphqlEndpoint: '/graphql',
     landingPage: false,
     logging: yogaLogger,

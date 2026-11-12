@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { AppError } from '../errors.js';
 import { artifactDataService } from './dataService.js';
 import { embedStyle, parseEmbedTheme } from '../cockpit/embedTheme.js';
+import { liveSources } from '../cockpit/liveSources.js';
 import { projectService } from '../projects/service.js';
 import { INJECT_MAX_BYTES, injectCommentScript, injectDataScript, injectEmbed, injectSlidesScript } from './inject.js';
 import { sharedPageRepository } from './repository.js';
@@ -56,12 +57,26 @@ export async function handleSharedPageRoute(req: IncomingMessage, res: ServerRes
     let html = content.html;
     // Type de la version servie (une republication peut l'avoir changé) ; celui de l'artefact si elle ne l'a pas gardé.
     const kind = content.version === page.version ? page.kind : ((await sharedPageRepository.version(page.id, content.version))?.kind ?? page.kind);
+    const embed = !raw && url.searchParams.get('embed') === '1';
+    const blockParams = embed ? parseParams(url.searchParams.get('params')) : {};
+    const project = page.projectId ? await projectService.get(page.projectId).catch(() => null) : null;
     if (kind === 'data' && content.html.length <= INJECT_MAX_BYTES && url.searchParams.get('raw') !== '1') {
       const sources = await artifactDataService.sourcesAt(page, content.version, true);
-      const data = Object.fromEntries(sources.map((s) => [s.name, s.data]));
+      // Sources graphql : exécutées maintenant, aux droits de la personne qui regarde (jamais gardées en base).
+      const live = new Map<string, Awaited<ReturnType<typeof liveSources.run>>>();
+      for (const s of sources) {
+        if (s.kind !== 'graphql' || s.status === 'inactive') continue;
+        live.set(s.name, await liveSources.run(s, user, { project: project ? { id: project.id, name: project.name } : null, viewer: { id: user.id, name: user.name }, params: blockParams }, content.version));
+      }
+      const data = Object.fromEntries(sources.map((s) => [s.name, live.has(s.name) ? live.get(s.name)!.data : s.data]));
       const meta = {
         refreshedAt: page.dataRefreshedAt?.toISOString() ?? null,
-        sources: sources.map((s) => ({ name: s.name, kind: s.kind, status: s.status, error: s.error, rowCount: s.rowCount, refreshedAt: s.refreshedAt?.toISOString() ?? null })),
+        sources: sources.map((s) => {
+          const l = live.get(s.name);
+          return l
+            ? { name: s.name, kind: s.kind, status: l.status, error: l.error, rowCount: null, refreshedAt: new Date().toISOString(), live: true }
+            : { name: s.name, kind: s.kind, status: s.status, error: s.error, rowCount: s.rowCount, refreshedAt: s.refreshedAt?.toISOString() ?? null };
+        }),
       };
       html = Buffer.from(injectDataScript(html.toString('utf8'), { data, meta }), 'utf8');
       // Aperçu réduit de la galerie (`thumb=1`) : pas une lecture, le rafraîchissement automatique n'en tient pas compte.
@@ -73,13 +88,11 @@ export async function handleSharedPageRoute(req: IncomingMessage, res: ServerRes
     }
     // Bloc d'un tableau de bord (`embed=1`) : style du thème, contexte du bloc et script d'intégration ; pas de commentaires
     // (on commente depuis la page entière). Les paramètres du bloc arrivent en JSON (`params`), bornés.
-    const embed = !raw && url.searchParams.get('embed') === '1';
     if (embed) {
       const theme = parseEmbedTheme(url.searchParams.get('theme'));
-      const project = page.projectId ? await projectService.get(page.projectId).catch(() => null) : null;
       const context = {
         scope: (url.searchParams.get('scope') ?? '').slice(0, 120),
-        params: parseParams(url.searchParams.get('params')),
+        params: blockParams,
         viewer: { id: user.id, name: user.name },
         project: project ? { id: project.id, name: project.name } : null,
         artifact: { id: page.id, version: content.version, kind },

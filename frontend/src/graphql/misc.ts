@@ -141,16 +141,18 @@ export type ArtifactKind = 'PAGE' | 'DATA' | 'SLIDES';
 export interface SharedPageSource {
   id: string;
   name: string;
-  kind: 'sql' | 'script';
+  kind: 'sql' | 'script' | 'graphql';
   item: string | null;
   database: string | null;
   /** Propriétaire ou administrateur seulement. */
   query: string | null;
+  /** graphql : variables (valeurs modèles comprises), propriétaire ou administrateur seulement. */
+  variables?: Record<string, unknown> | null;
   interpreter: string | null;
   code: string | null;
   timeoutSeconds: number | null;
   /** inactive : source d'une ancienne version dont la définition a changé depuis (plus rafraîchie, sans données). */
-  status: 'pending' | 'ok' | 'error' | 'skipped' | 'inactive';
+  status: 'pending' | 'ok' | 'error' | 'skipped' | 'inactive' | 'live';
   error: string | null;
   rowCount: number | null;
   durationMs: number | null;
@@ -209,6 +211,7 @@ export const SHARED_PAGE_FIELDS = gql`
       item
       database
       query
+      variables
       interpreter
       code
       timeoutSeconds

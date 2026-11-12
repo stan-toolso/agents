@@ -1360,7 +1360,8 @@ note)`, `resetCockpitLayout(scope)`, `restoreCockpitLayout(scope, version)` (aud
 Agents (`cockpit/mcp.ts`, outils `cockpit.get` et `cockpit.history` libres ; `update`, `reset` et `restore` soumis à
 l'autorisation de la personne, mémorisable) : `get` renvoie l'agencement et le catalogue de la portée (`project` =
 le projet de la session, `home` = l'accueil du propriétaire de la session), `update` applique des opérations ou un
-agencement complet et décrit ce qui a changé.
+agencement complet et décrit ce qui a changé ; `cockpit.query` exécute une requête GraphQL de lecture avec les droits de la
+personne qui pilote et `cockpit.schema` décrit les champs disponibles (mise au point d'une source `graphql`).
 
 **Blocs artefacts** : un artefact (page, données, diapositives) s'épingle dans un agencement (`{ kind: "artifact",
 artifact: <id>, region, title?, params?, height?, pollSeconds? }` ; volet « Artefacts » du catalogue, « Épingler dans un
@@ -1371,8 +1372,7 @@ thème `--cc-*` (`cockpit/embedTheme.ts`), `Skipper.context` (personne, projet, 
 `Skipper.summon`), plus `sharedPages/widget-client.js` qui mesure la hauteur (le bloc suit son contenu). Le cadre est
 rechargé quand les données de l'artefact changent. Épingler ne donne aucun droit : chaque personne voit le bloc si elle
 voit l'artefact ; pour l'équipe, l'artefact s'ouvre **aux membres du projet** (`SharedPage.projectAccess`, « Partager »
-› Accès général) et le serveur avertit sinon (`CockpitLayout.warnings`). Lots suivants de la conception : sources
-`graphql` vivantes, paramètres avancés, pilotage des tâches et fiche d'agent composables, pages personnalisées.
+› Accès général) et le serveur avertit sinon (`CockpitLayout.warnings`). Lots suivants de la conception : paramètres avancés, pilotage des tâches et fiche d'agent composables, pages personnalisées.
 
 ## Lancer des sessions
 
@@ -2058,7 +2058,12 @@ version ; la page est servie par `GET /api/shared/:id[?v=N][&download=1]` dans u
 lecture seule sur un élément PostgreSQL du coffre (`{ name, type: "sql", item, query }`, 5000 lignes au plus) ou
 un script node, python ou sh lancé dans l'environnement Docker du projet (`{ name, type: "script", interpreter,
 code }`, sortie standard en JSON, sans identifiant du coffre), et un intervalle de **rafraîchissement automatique**
-(`refresh_minutes`, 5 minutes à 7 jours ; absent : à la demande). Les sources sont exécutées **au nom du
+(`refresh_minutes`, 5 minutes à 7 jours ; absent : à la demande), ou une **source `graphql`** (`{ name, type: "graphql", query,
+variables }`) : une requête de lecture sur l'API de Skipper, **vivante**, exécutée à chaque lecture de la page avec les droits
+de la personne qui regarde (`cockpit/liveSources.ts` : même schéma et même contexte que l'API, une opération `query`,
+pas d'introspection, 8 niveaux et 80 champs au plus, cache de 15 s par personne et variables), jamais rafraîchie en base ;
+variables modèles `{{project.id}}`, `{{viewer.id}}`, `{{params.<clé>}}` (paramètres du bloc quand la page est épinglée
+dans un tableau de bord), `{{now}}`, `{{now-7d}}` (`cockpit/graphqlSource.ts`). Les sources SQL et scripts sont exécutées **au nom du
 propriétaire** de l'artefact, dans la portée du coffre de son projet, l'une après l'autre, jamais deux fois en même
 temps pour un même artefact ; une source en échec garde ses dernières données. Le planificateur (tâche de
 l'instance meneuse, un passage par minute) rafraîchit les artefacts dont l'échéance est passée et qui ont été
