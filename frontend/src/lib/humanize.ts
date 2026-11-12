@@ -471,6 +471,7 @@ export const projectRoleLabels: Record<string, { label: string; hint: string }> 
   ADMIN: { label: 'Administrateur', hint: 'Gère le projet et ses membres, en plus de tout ce que fait un membre.' },
   MEMBER: { label: 'Membre', hint: 'Lance des sessions et des terminaux, gère tâches et contexte.' },
   VIEWER: { label: 'Lecteur', hint: 'Consulte sessions, tâches et contexte sans rien modifier.' },
+  GUEST: { label: 'Invité', hint: 'Participe aux conversations du projet et lit les artefacts qu’on lui partage ; ne voit ni sessions, ni tâches, ni coffre.' },
 };
 
 /**

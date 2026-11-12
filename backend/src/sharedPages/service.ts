@@ -4,8 +4,9 @@ import { log } from '../log.js';
 import { notificationService } from '../notifications/service.js';
 import { mailService } from '../notifications/mail.js';
 import { userRepository } from '../users/repository.js';
+import { isRestrictedAccount } from '../users/restricted.js';
 import { userService } from '../users/service.js';
-import type { User } from '../users/types.js';
+import { ROLE_RANK, type User } from '../users/types.js';
 import { SHARE_LOGIN_LINK_DAYS, signInService } from '../auth/signInService.js';
 import { pageShareEmail } from './emails.js';
 import { sharedPageCommentRepository } from './commentRepository.js';
@@ -69,8 +70,11 @@ export const sharedPageService = {
   async canView(page: SharedPage, userId: string, guest = false): Promise<boolean> {
     if (page.ownerId === userId || (page.linkAccess && !guest)) return true;
     if (await sharedPageRepository.isMember(page.id, userId)) return true;
-    // Ouverte aux membres de son projet (jamais à un invité des pages).
-    return Boolean(page.projectAccess && page.projectId && !guest && (await userService.memberRoleFor(userId, page.projectId)));
+    // Ouverte aux membres de son projet, lecteurs et plus (jamais à un invité des pages, ni à un invité du projet :
+    // lui ne voit que les artefacts où il a été ajouté).
+    if (!page.projectAccess || !page.projectId || guest) return false;
+    const role = await userService.memberRoleFor(userId, page.projectId);
+    return role !== null && ROLE_RANK[role] >= ROLE_RANK.viewer;
   },
 
   /** Page visible par la personne ; sinon « introuvable » (l'existence n'est pas révélée). */
@@ -189,7 +193,7 @@ export const sharedPageService = {
    * seulement quand on duplique sa propre page.
    */
   async duplicate(user: User, id: string, opts: { title?: string | null; version?: number | null } = {}): Promise<SharedPage> {
-    if (user.isGuest) throw new AppError('Un invité ne peut pas dupliquer une page', 'FORBIDDEN');
+    if (await isRestrictedAccount(user)) throw new AppError('Un invité ne peut pas dupliquer une page', 'FORBIDDEN');
     const page = await this.getFor(user.id, id);
     if (page.kind === 'data' && !this.canManage(page, user)) throw new AppError("Seul le propriétaire d'un artefact de données (ou un administrateur) peut le dupliquer : la copie emporte ses requêtes et ses scripts", 'FORBIDDEN');
     const version = opts.version ?? page.version;

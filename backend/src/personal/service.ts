@@ -40,6 +40,9 @@ export const personalService = {
   async ensure(user: User): Promise<Project> {
     const existing = await projectRepository.findPersonal(user.id);
     if (existing) return existing;
+    // Une personne qui n'a que des accès d'invité (conversations seulement) n'a pas d'espace personnel : il lui
+    // donnerait des sessions et des chats, avec les crédits de la cellule.
+    if (await userService.conversationsOnly(user)) throw new AppError("L'espace personnel est réservé aux membres d'un projet : votre compte ne donne accès qu'aux conversations et aux artefacts partagés avec vous", 'FORBIDDEN');
     let project: Project;
     try {
       project = await projectService.create(

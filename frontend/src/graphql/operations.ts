@@ -105,7 +105,8 @@ export interface Provider {
   configFields: ConfigField[];
 }
 
-export type ProjectRole = 'ADMIN' | 'MEMBER' | 'VIEWER';
+/** Rôles d'un projet ; GUEST (invité) : conversations et artefacts partagés seulement. */
+export type ProjectRole = 'ADMIN' | 'MEMBER' | 'VIEWER' | 'GUEST';
 
 export interface User {
   id: string;
@@ -120,6 +121,8 @@ export interface User {
   isCto?: boolean;
   /** Invité des pages partagées : ne voit que les pages partagées avec lui (aucun projet, aucun menu). */
   isGuest?: boolean;
+  /** N'a que des accès d'invité (projets avec le rôle invité) : conversations et artefacts partagés, sans espace personnel ; null pour les autres personnes. */
+  conversationsOnly?: boolean | null;
   createdAt: string;
   lastLoginAt: string | null;
   /** Lu seulement par la page Utilisateurs (administrateurs) et pour soi-même. */
@@ -617,6 +620,7 @@ export const USER_FIELDS = gql`
     isSuperAdmin
     isCto
     isGuest
+    conversationsOnly
     createdAt
     lastLoginAt
   }
@@ -658,8 +662,8 @@ export const PROJECT_MEMBERS = gql`
 `;
 
 export const INVITE_PROJECT_MEMBER = gql`
-  mutation InviteProjectMember($projectId: ID!, $email: String!, $role: ProjectRole) {
-    inviteProjectMember(projectId: $projectId, email: $email, role: $role) {
+  mutation InviteProjectMember($projectId: ID!, $email: String!, $role: ProjectRole, $message: String, $notify: Boolean) {
+    inviteProjectMember(projectId: $projectId, email: $email, role: $role, message: $message, notify: $notify) {
       role
       user {
         id
@@ -1600,6 +1604,11 @@ export const SIDEBAR = gql`
   query Sidebar($open: OpenItemsInput) {
     chats(limit: 12) {
       ...SidebarSession
+    }
+    guestProjects {
+      id
+      name
+      unreadMessages
     }
     projects: sidebarProjects(open: $open) {
       id

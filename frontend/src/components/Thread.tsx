@@ -6,7 +6,8 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import type { TaskMention, TaskMentionable, TaskReaction } from '../graphql/operations';
 import { usePendingAttachments, toAttachmentInputs, type AttachmentInput } from '../lib/attachments';
-import { timeAgo } from '../lib/humanize';
+import { isTouchDevice } from '../lib/device';
+import { clockTime, timeAgo } from '../lib/humanize';
 import { initialsOf } from '../workbench/WorkspaceTabs';
 import AttachmentChips from './AttachmentChips';
 import { useDialogs } from './Dialogs';
@@ -48,6 +49,8 @@ export interface ThreadMessage {
   attachments?: { id: string; name: string; mediaType: string; size: number }[];
   /** Sessions reliées au fil dont l'agent travaille en ce moment (« X répond… »), pour une racine. */
   respondingSessions?: { id: string; name: string; agent: { id: string; name: string } | null }[];
+  /** Rôle de l'auteur sur le projet : un invité (GUEST) est signalé dans le fil. */
+  authorRole?: 'ADMIN' | 'MEMBER' | 'VIEWER' | 'GUEST' | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -71,6 +74,8 @@ interface ThreadContextValue {
   mentionables: TaskMentionable[];
   canWrite: boolean;
   compact: boolean;
+  /** Les liens vers les sessions d'agent (« session », « voir la session ») : pas pour un invité du projet, qui n'y a pas accès. */
+  linkSessions: boolean;
 }
 
 const ThreadContext = createContext<ThreadContextValue | null>(null);
@@ -82,8 +87,8 @@ export function useThread(): ThreadContextValue {
 }
 
 /** Enveloppe d'un fil : fournit l'API, les mentions possibles et les droits aux messages et à la saisie. */
-export function ThreadProvider({ api, mentionables, canWrite, compact = false, children }: { api: ThreadApi; mentionables: TaskMentionable[]; canWrite: boolean; compact?: boolean; children: ReactNode }) {
-  const value = useMemo(() => ({ api, mentionables, canWrite, compact }), [api, mentionables, canWrite, compact]);
+export function ThreadProvider({ api, mentionables, canWrite, compact = false, linkSessions = true, children }: { api: ThreadApi; mentionables: TaskMentionable[]; canWrite: boolean; compact?: boolean; linkSessions?: boolean; children: ReactNode }) {
+  const value = useMemo(() => ({ api, mentionables, canWrite, compact, linkSessions }), [api, mentionables, canWrite, compact, linkSessions]);
   return <ThreadContext.Provider value={value}>{children}</ThreadContext.Provider>;
 }
 
@@ -206,10 +211,14 @@ function EmojiPicker({ onPick, onClose }: { onPick: (emoji: string) => void; onC
   );
 }
 
+/** Hauteur maximale de la zone de saisie quand elle grandit avec le texte (au-delà, elle défile). */
+const COMPOSER_MAX_HEIGHT = 280;
+
 /**
- * Zone de saisie d'un message : Markdown, fichiers collés ou déposés (si l'API les accepte), ⌘/Ctrl+Entrée pour
- * envoyer, et suggestions de mention dès que l'on tape « @ » (membres du projet, agents, sessions ; flèches pour
- * choisir, Entrée ou Tab pour insérer). Pas de <form> : vit dans des formulaires.
+ * Zone de saisie d'un message : Markdown, fichiers collés ou déposés (si l'API les accepte), Entrée pour envoyer
+ * (Maj+Entrée : retour à la ligne ; sur écran tactile, Entrée va à la ligne et le bouton envoie ; ⌘/Ctrl+Entrée
+ * envoie partout), zone qui grandit avec le texte, et suggestions de mention dès que l'on tape « @ » (membres du
+ * projet, agents, sessions ; flèches pour choisir, Entrée ou Tab pour insérer). Pas de <form> : vit dans des formulaires.
  */
 export function Composer({
   parentId = null,
@@ -236,6 +245,15 @@ export function Composer({
   const ref = useRef<HTMLTextAreaElement>(null);
   const [mention, setMention] = useState<{ start: number; query: string; index: number } | null>(null);
   const canSend = Boolean(text.trim() || (api.files && files.items.length));
+  const touch = useMemo(() => isTouchDevice(), []);
+  // La zone grandit avec le texte (jusqu'à COMPOSER_MAX_HEIGHT), et revient à sa hauteur de départ une fois vidée.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
+    el.style.overflowY = el.scrollHeight > COMPOSER_MAX_HEIGHT ? 'auto' : 'hidden';
+  }, [text, compact]);
   const send = async () => {
     if (!canSend || loading) return;
     setLoading(true);
@@ -304,6 +322,10 @@ export function Composer({
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
       void send();
+    } else if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !touch && !e.nativeEvent.isComposing) {
+      // Entrée envoie (comme dans Slack) ; Maj+Entrée va à la ligne. Pas sur écran tactile : le bouton envoie.
+      e.preventDefault();
+      void send();
     } else if (e.key === 'Escape' && onCancel) {
       onCancel();
     }
@@ -351,7 +373,7 @@ export function Composer({
       </div>
       <div className="tt-composer-foot">
         {api.files && <AttachmentChips items={files.items} onAdd={(f) => files.add(f)} onRemove={files.remove} disabled={loading} error={files.error} />}
-        <span className="tt-composer-hint">@ pour mentionner · Markdown · ⌘/Ctrl+Entrée</span>
+        <span className="tt-composer-hint">{touch ? '@ pour mentionner · Markdown' : 'Entrée pour envoyer · Maj+Entrée : à la ligne · @ pour mentionner · Markdown'}</span>
         <span className="tt-composer-actions">
           {onCancel && (
             <Button size="sm" variant="link" className="text-secondary" onClick={onCancel}>
@@ -372,9 +394,13 @@ export function Composer({
   );
 }
 
-/** Un message du fil : avatar, auteur, date, texte (mentions en pastilles), fichiers, réactions ; actions au survol. */
-export function MessageView({ c, onReply, isReply }: { c: ThreadMessage; onReply?: () => void; isReply?: boolean }) {
-  const { api, canWrite } = useThread();
+/**
+ * Un message du fil : avatar, auteur, date, texte (mentions en pastilles), fichiers, réactions ; actions au survol.
+ * `continued` : le message suit un autre du même auteur à quelques minutes ; il s'affiche sans en-tête, l'heure à la
+ * place de l'avatar au survol (lib/threadGroups.ts).
+ */
+export function MessageView({ c, onReply, isReply, continued = false }: { c: ThreadMessage; onReply?: () => void; isReply?: boolean; continued?: boolean }) {
+  const { api, canWrite, linkSessions } = useThread();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [body, setBody] = useState(c.body);
@@ -401,19 +427,8 @@ export function MessageView({ c, onReply, isReply }: { c: ThreadMessage; onReply
       setSaving(false);
     }
   };
-  return (
-    <div id={`${api.anchor}-${c.id}`} className={`tt-msg${isReply ? ' tt-reply' : ''}${mentionsMe ? ' tt-mentions-me' : ''}`}>
-      <Avatar name={name} agent={robot} projectAgent={c.agent} />
-      <div className="tt-msg-main">
-        <div className="tt-msg-head">
-          <span className="tt-author">{name}</span>
-          {(c.agent || robot) && <span className="tt-badge-agent">{c.agent ? agentKindLabels[c.agent.kind] : 'agent'}</span>}
-          {c.authorSession && <SessionLink session={c.authorSession} />}
-          <span className="tt-time" title={fmtFull(c.createdAt)}>
-            {timeAgo(c.createdAt)}
-            {edited && ' · modifié'}
-          </span>
-          <span className="tt-msg-actions">
+  const actions = (
+    <span className="tt-msg-actions">
             {canWrite && (
               <span className="tt-react-wrap">
                 <button type="button" className="tt-icon-btn" title="Réagir" aria-label="Réagir" onClick={(e) => { e.stopPropagation(); setPicking((p) => !p); }}>
@@ -445,8 +460,40 @@ export function MessageView({ c, onReply, isReply }: { c: ThreadMessage; onReply
                 <i className="bi bi-trash" />
               </button>
             )}
+    </span>
+  );
+  return (
+    <div id={`${api.anchor}-${c.id}`} className={`tt-msg${isReply ? ' tt-reply' : ''}${mentionsMe ? ' tt-mentions-me' : ''}${continued ? ' tt-cont' : ''}`}>
+      {continued ? (
+        <span className="tt-cont-time" title={fmtFull(c.createdAt)}>
+          {clockTime(c.createdAt)}
+        </span>
+      ) : (
+        <Avatar name={name} agent={robot} projectAgent={c.agent} />
+      )}
+      <div className="tt-msg-main">
+        {continued ? (
+          <span className="tt-msg-actions-float">
+            {edited && <span className="tt-time">modifié</span>}
+            {actions}
           </span>
+        ) : (
+        <div className="tt-msg-head">
+          <span className="tt-author">{name}</span>
+          {(c.agent || robot) && <span className="tt-badge-agent">{c.agent ? agentKindLabels[c.agent.kind] : 'agent'}</span>}
+          {c.authorRole === 'GUEST' && (
+            <span className="tt-badge-guest" title="Invité du projet : participe aux conversations, sans accès aux sessions, aux tâches ni au coffre">
+              invité
+            </span>
+          )}
+          {c.authorSession && linkSessions && <SessionLink session={c.authorSession} />}
+          <span className="tt-time" title={fmtFull(c.createdAt)}>
+            {timeAgo(c.createdAt)}
+            {edited && ' · modifié'}
+          </span>
+          {actions}
         </div>
+        )}
         {editing ? (
           <div className="mt-1">
             <Form.Control as="textarea" rows={3} value={body} onChange={(e) => setBody(e.target.value)} />
@@ -474,6 +521,7 @@ export function MessageView({ c, onReply, isReply }: { c: ThreadMessage; onReply
 
 /** « Ben répond… » : les sessions d'agent reliées au fil qui travaillent en ce moment. */
 function Responding({ sessions }: { sessions: NonNullable<ThreadMessage['respondingSessions']> }) {
+  const { linkSessions } = useThread();
   if (!sessions.length) return null;
   const names = [...new Set(sessions.map((s) => s.agent?.name ?? s.name))];
   return (
@@ -485,7 +533,7 @@ function Responding({ sessions }: { sessions: NonNullable<ThreadMessage['respond
       </span>
       {names.slice(0, 2).join(' et ')}
       {names.length > 2 && ` et ${names.length - 2} autre${names.length > 3 ? 's' : ''}`} {names.length > 1 ? 'répondent' : 'répond'}…
-      {sessions[0] && (
+      {sessions[0] && linkSessions && (
         <Link to={`/sessions/${sessions[0].id}`} className="ms-2">
           voir la session
         </Link>
@@ -495,7 +543,7 @@ function Responding({ sessions }: { sessions: NonNullable<ThreadMessage['respond
 }
 
 /** Un message racine avec son fil de réponses (replié au-delà de trois) et, à la demande, la zone pour y répondre. */
-export function RootMessage({ root, replies, replyPlaceholder }: { root: ThreadMessage; replies: ThreadMessage[]; replyPlaceholder?: string }) {
+export function RootMessage({ root, replies, replyPlaceholder, continued = false }: { root: ThreadMessage; replies: ThreadMessage[]; replyPlaceholder?: string; continued?: boolean }) {
   const { canWrite } = useThread();
   const [open, setOpen] = useState(replies.length <= 3);
   const [replying, setReplying] = useState(false);
@@ -504,7 +552,7 @@ export function RootMessage({ root, replies, replyPlaceholder }: { root: ThreadM
   const responding = root.respondingSessions ?? [];
   return (
     <div className="tt-root">
-      <MessageView c={root} onReply={() => { setReplying(true); setOpen(true); }} />
+      <MessageView c={root} continued={continued} onReply={() => { setReplying(true); setOpen(true); }} />
       {(replies.length > 0 || replying || responding.length > 0) && (
         <div className="tt-thread">
           {replies.length > 0 && (
@@ -532,6 +580,24 @@ export function RootMessage({ root, replies, replyPlaceholder }: { root: ThreadM
           {replying && <Composer parentId={root.id} placeholder={replyPlaceholder ?? `Répondre à ${root.authorName}…`} autoFocus compact onSent={() => setReplying(false)} onCancel={() => setReplying(false)} />}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Séparateur de jour entre deux messages du fil (« Aujourd'hui », « Hier », une date). */
+export function DaySeparator({ label }: { label: string }) {
+  return (
+    <div className="tt-day" role="separator" aria-label={label}>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+/** Repère « Nouveaux messages » : devant le premier message des autres posté depuis la dernière lecture. */
+export function NewMessagesSeparator() {
+  return (
+    <div className="tt-new" role="separator" aria-label="Nouveaux messages">
+      <span>Nouveaux messages</span>
     </div>
   );
 }

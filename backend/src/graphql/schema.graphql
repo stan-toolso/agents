@@ -53,6 +53,8 @@ enum ProjectRole {
   ADMIN
   MEMBER
   VIEWER
+  "Invité : participe aux conversations du projet et lit les artefacts qu'on lui a partagés ; ne voit ni sessions, ni tâches, ni coffre, ni contexte."
+  GUEST
 }
 
 "Utilisateur de l'application (connexion Google). Il n'existe que s'il a été invité sur un projet."
@@ -72,6 +74,12 @@ type User {
   pages partagées avec lui. Une invitation sur un projet ou dans l'application en fait une personne ordinaire.
   """
   isGuest: Boolean!
+  """
+  La personne n'a que des accès d'invité (invitée sur des projets avec le rôle invité, ou invitée des pages) : ni
+  administratrice ni membre d'aucun projet. Elle ne voit que les conversations de ces projets et les artefacts partagés
+  avec elle ; pas d'espace personnel ni de chat. Calculé pour la personne connectée seulement (null pour les autres).
+  """
+  conversationsOnly: Boolean
   createdAt: DateTime!
   "Null tant que l'utilisateur ne s'est jamais connecté."
   lastLoginAt: DateTime
@@ -3034,6 +3042,9 @@ type Query {
   sessionFileDiff(sessionId: ID!, path: String!, origPath: String): GitDiff!
   "Projets dont l'utilisateur est membre ; all : tous les projets, pour un super administrateur (ignoré sinon) ; includePersonal : avec son espace personnel."
   projects(all: Boolean = false, includePersonal: Boolean = false): [Project!]!
+  "Projets où l'utilisateur n'est qu'invité (conversations et artefacts partagés seulement) : absents de `projects` et de la sidebar des sessions."
+  guestProjects: [Project!]!
+  "Un projet : ouvert à ses invités aussi, mais seuls quelques champs (nom, canaux, membres, agents, non-lus) leur répondent ; les autres sont refusés."
   project(id: ID!): Project
   "Demandes, toutes sessions confondues. `status` à null renvoie tout l'historique (par défaut : celles en attente)."
   requests(status: RequestStatus = PENDING, sessionId: ID, limit: Int, newestFirst: Boolean = false): [Request!]!
@@ -3277,8 +3288,12 @@ type Mutation {
   "Accorde ou retire le profil CTO (temps suivi et facturé). Super administrateurs."
   setUserCto(userId: ID!, isCto: Boolean!): User!
   deleteUser(userId: ID!): Boolean!
-  "Invite un e-mail sur le projet (l'utilisateur est créé s'il n'existe pas) ou change son rôle. Réservé aux administrateurs du projet."
-  inviteProjectMember(projectId: ID!, email: String!, role: ProjectRole = MEMBER): ProjectMember!
+  """
+  Invite une adresse sur le projet (administrateurs du projet) : crée le compte s'il n'existe pas, ou change le rôle.
+  Pour un invité (GUEST), un e-mail d'invitation part si l'envoi des e-mails est configuré (notify), avec le mot
+  d'accueil (message, 2000 caractères) et un lien de connexion directe quand le compte n'a que des accès d'invité.
+  """
+  inviteProjectMember(projectId: ID!, email: String!, role: ProjectRole = MEMBER, message: String, notify: Boolean = true): ProjectMember!
   updateProjectMemberRole(projectId: ID!, userId: ID!, role: ProjectRole!): ProjectMember!
   removeProjectMember(projectId: ID!, userId: ID!): Boolean!
   "Ajoute une autorisation mémorisée au projet (membres). ruleContent vide = tout l'outil."
@@ -4268,6 +4283,8 @@ type Conversation {
   createdAt: DateTime!
   "Messages des autres postés après la dernière lecture de l'utilisateur connecté."
   unreadCount: Int!
+  "Dernière lecture du canal par l'utilisateur connecté (null : jamais ouvert) : le fil place le repère « Nouveaux messages » juste après."
+  lastReadAt: DateTime
   messageCount: Int!
   "Les derniers messages racines (limit, défaut 50 ; before : plus anciens que cette date) avec toutes leurs réponses, à plat, du plus ancien au plus récent."
   messages(before: DateTime, limit: Int): [Message!]!
@@ -4299,6 +4316,8 @@ type Message {
   lastReplyAt: DateTime
   "Sessions reliées au fil (message racine) dont l'agent travaille en ce moment : « X répond… »."
   respondingSessions: [Session!]!
+  "Rôle de l'auteur (personne) sur le projet du canal, pour signaler un invité ; null pour une session ou quelqu'un qui n'est plus membre."
+  authorRole: ProjectRole
   createdAt: DateTime!
   updatedAt: DateTime!
 }

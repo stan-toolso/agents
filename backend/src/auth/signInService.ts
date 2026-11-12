@@ -4,6 +4,7 @@ import { AppError } from '../errors.js';
 import { log } from '../log.js';
 import { mailService } from '../notifications/mail.js';
 import { userRepository } from '../users/repository.js';
+import { isRestrictedAccount } from '../users/restricted.js';
 import type { ExternalIdentity, User, UserIdentity } from '../users/types.js';
 import { loginLinkEmail } from '../sharedPages/emails.js';
 import { googleAuth } from './google.js';
@@ -235,11 +236,12 @@ export const signInService = {
   },
 
   /**
-   * Lien de connexion directe pour un invité des pages partagées (aucun compte à créer, aucun mot de passe) : sert
-   * plusieurs fois jusqu'à son expiration, et seulement tant que le compte reste un invité.
+   * Lien de connexion directe pour un compte à accès restreint — invité des pages partagées ou invité de projets
+   * (conversations seulement) — sans compte à créer ni mot de passe : sert plusieurs fois jusqu'à son expiration, et
+   * seulement tant que le compte reste restreint (users/restricted.ts).
    */
   async createLoginLink(user: User, nextPath: string, opts: { createdById: string | null; ttlMs: number }): Promise<string> {
-    if (user.kind !== 'person' || !user.isGuest) throw new AppError('Lien de connexion directe réservé aux invités des pages partagées', 'FORBIDDEN');
+    if (user.kind !== 'person' || !(await isRestrictedAccount(user))) throw new AppError('Lien de connexion directe réservé aux invités (pages partagées ou conversations)', 'FORBIDDEN');
     const token = randomBytes(32).toString('base64url');
     await userRepository.createLoginLink(hash(token), user.id, safeAppPath(nextPath), new Date(Date.now() + opts.ttlMs), opts.createdById);
     return `${config.apiUrl.replace(/\/$/, '')}/auth/link/${token}`;
@@ -249,25 +251,26 @@ export const signInService = {
   async loginWithLink(token: string): Promise<{ user: User; nextPath: string } | { user: null; nextPath: string | null }> {
     const found = token ? await userRepository.findLoginLink(hash(token)) : null;
     if (!found) return { user: null, nextPath: null };
-    if (found.expired || found.user.kind !== 'person' || !found.user.isGuest) return { user: null, nextPath: found.nextPath };
+    if (found.expired || found.user.kind !== 'person' || !(await isRestrictedAccount(found.user))) return { user: null, nextPath: found.nextPath };
     await userRepository.touchLoginLink(hash(token));
     return { user: await userRepository.touchLogin(found.user.id), nextPath: found.nextPath };
   },
 
   /**
-   * « Recevoir un lien de connexion » (page de connexion) : pour un invité des pages partagées, un lien valable une
-   * heure, si l'envoi des e-mails est configuré. Ne dit jamais si l'adresse existe ; une personne ordinaire garde ses
-   * modes habituels (et « mot de passe oublié »).
+   * « Recevoir un lien de connexion » (page de connexion) : pour un compte à accès restreint (invité des pages ou de
+   * projets), un lien valable une heure, si l'envoi des e-mails est configuré. Ne dit jamais si l'adresse existe ;
+   * une personne ordinaire garde ses modes habituels (et « mot de passe oublié »).
    */
   async requestLoginLink(rawEmail: string, nextPath: string | null): Promise<void> {
     const email = rawEmail.trim().toLowerCase();
     const user = email ? await userRepository.findByEmail(email) : null;
-    if (!user || user.kind !== 'person' || !user.isGuest) return;
+    if (!user || user.kind !== 'person' || !(await isRestrictedAccount(user))) return;
     if (!(await mailService.configured())) return;
     const last = await userRepository.lastSelfServiceLoginLinkAt(user.id);
     if (last && Date.now() - last.getTime() < SELF_SERVICE_COOLDOWN_MS) return;
     const next = safeAppPath(nextPath);
-    const url = await this.createLoginLink(user, next.startsWith('/shared') ? next : '/shared', { createdById: null, ttlMs: SELF_LOGIN_LINK_MINUTES * 60 * 1000 });
+    // Un invité des pages retrouve ses pages ; un invité de projets arrive sur ses conversations (l'accueil l'y mène).
+    const url = await this.createLoginLink(user, next.startsWith('/shared') || next.startsWith('/projects/') ? next : user.isGuest ? '/shared' : '/', { createdById: null, ttlMs: SELF_LOGIN_LINK_MINUTES * 60 * 1000 });
     await mailService.send({ to: user.email, ...loginLinkEmail({ name: user.name, to: user.email, url, minutes: SELF_LOGIN_LINK_MINUTES }) }).catch((err) => log.warn(`[auth] envoi du lien de connexion à ${user.email} impossible : ${(err as Error).message}`));
   },
 

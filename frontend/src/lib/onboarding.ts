@@ -12,7 +12,7 @@ import { SETTINGS, type AppSettings } from '../graphql/settings';
 export function useOnboardingAutoOpen(pathname: string) {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const skip = !user || user.isGuest || pathname !== '/';
+  const skip = !user || user.isGuest || Boolean(user.conversationsOnly) || pathname !== '/';
   const { data } = useQuery<{ settings: AppSettings }>(SETTINGS, { skip, fetchPolicy: 'cache-first' });
   useEffect(() => {
     if (skip || !data) return;

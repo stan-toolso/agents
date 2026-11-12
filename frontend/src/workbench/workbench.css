@@ -74,6 +74,11 @@
 .wb-section-action:hover { color: var(--cc-fg); }
 
 .wb-explorer { flex: 1; overflow-y: auto; padding-bottom: 12px; }
+/* Section « Conversations » : projets où la personne n'est qu'invitée. */
+.wb-guest-projects { padding: 0 6px 4px; }
+.wb-guest-project { color: var(--cc-dim); text-decoration: none; border-radius: 6px; }
+.wb-guest-project:hover, .wb-guest-project.active { color: var(--cc-fg); background: var(--cc-bg-hover); }
+.wb-guest-project .wb-row-label { font-weight: 500; }
 .wb-row {
   display: flex;
   align-items: center;
@@ -932,6 +937,23 @@ button.task-tag:hover { color: var(--cc-fg); border-color: var(--cc-border); }
 .tt-session-link:hover { color: var(--cc-accent); text-decoration: underline; }
 .tt-time { color: var(--cc-dim); font-size: 11.5px; }
 .tt-badge-agent { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--cc-accent); border: 1px solid color-mix(in srgb, var(--cc-accent) 40%, transparent); border-radius: 3px; padding: 0 4px; line-height: 1.4; }
+/* Invité du projet (conversations seulement) : pastille discrète à côté de son nom. */
+.tt-badge-guest { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--cc-dim); border: 1px solid var(--cc-border); border-radius: 3px; padding: 0 4px; line-height: 1.4; }
+/* Message qui continue le précédent (même auteur, quelques minutes) : sans en-tête, l'heure à la place de l'avatar au survol. */
+.tt-msg.tt-cont { padding-top: 1px; padding-bottom: 1px; margin-top: -4px; }
+.tt-cont-time { flex: 0 0 28px; width: 28px; font-size: 10px; color: var(--cc-dimmer); text-align: center; line-height: 20px; visibility: hidden; font-variant-numeric: tabular-nums; }
+.tt-msg.tt-cont:hover .tt-cont-time, .tt-msg.tt-cont:focus-within .tt-cont-time { visibility: visible; }
+.tt-cont .tt-body { margin-top: 0; }
+.tt-msg-actions-float { position: absolute; right: 8px; top: -10px; display: inline-flex; align-items: center; gap: 4px; background: var(--cc-bg-elevated); border: 1px solid var(--cc-border); border-radius: 6px; padding: 0 2px; visibility: hidden; z-index: 2; }
+.tt-msg-actions-float .tt-msg-actions { visibility: visible; margin-left: 0; }
+.tt-msg.tt-cont:hover .tt-msg-actions-float, .tt-msg.tt-cont:focus-within .tt-msg-actions-float { visibility: visible; }
+/* Séparateurs du fil : le jour (filet et date au centre) et le repère « Nouveaux messages » (filet rouge). */
+.tt-day, .tt-new { display: flex; align-items: center; gap: 10px; margin: 10px 0 4px; font-size: 11px; color: var(--cc-dimmer); }
+.tt-day::before, .tt-day::after, .tt-new::before, .tt-new::after { content: ''; flex: 1; height: 1px; background: var(--cc-border); }
+.tt-day span { font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.tt-new { color: var(--cc-red); }
+.tt-new::before, .tt-new::after { background: color-mix(in srgb, var(--cc-red) 50%, transparent); }
+.tt-new span { font-weight: 600; }
 .tt-avatar { width: 28px; height: 28px; border-radius: 6px; flex: 0 0 28px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; background: var(--cc-accent); color: #fff; margin-top: 1px; }
 .tt-avatar-agent { background: var(--cc-bg-elevated); color: var(--cc-accent); border: 1px solid var(--cc-border); font-size: 15px; }
 .tt-reply .tt-avatar { width: 22px; height: 22px; flex-basis: 22px; font-size: 9.5px; }
@@ -980,7 +1002,7 @@ a.task-mention:hover { background: rgba(var(--cc-accent-rgb), 0.24); color: var(
 .tt-composer { margin-top: 8px; padding: 8px 10px 6px; border-top: 1px solid var(--cc-border); }
 .tt-thread .tt-composer, .tt-composer.compact { border-top: 0; padding: 6px 0 0; }
 .tt-composer-box { position: relative; }
-.tt-composer textarea { resize: vertical; font-size: 13px; }
+.tt-composer textarea { resize: none; font-size: 13px; min-height: 0; }
 .tt-composer-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .tt-composer-foot .cc-attachments { margin-top: 0; }
 .tt-composer-hint { color: var(--cc-dimmer); font-size: 11px; margin-left: auto; }
@@ -1005,6 +1027,8 @@ a.task-mention:hover { background: rgba(var(--cc-accent-rgb), 0.24); color: var(
   .tt-thread { margin-left: 14px; padding-left: 8px; }
   .tt-msg-actions { visibility: visible; }
   .tt-composer-hint { display: none; }
+  .tt-msg.tt-cont { padding-top: 0; padding-bottom: 0; }
+  .tt-msg-actions-float { visibility: visible; top: -6px; }
 }
 
 /* ---- Branche d'une session : état de la PR, dossier absent -------------------------------------- */

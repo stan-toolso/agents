@@ -31,7 +31,7 @@ interface UnreadData {
   unreadMessagesByProject: { count: number; project: { id: string; name: string } }[];
 }
 interface ProjectData {
-  project: { id: string; myRole: 'ADMIN' | 'MEMBER' | 'VIEWER'; isPersonal: boolean; conversations: Conversation[] } | null;
+  project: { id: string; myRole: 'ADMIN' | 'MEMBER' | 'VIEWER' | 'GUEST'; isPersonal: boolean; conversations: Conversation[] } | null;
 }
 
 /** Le contenu du panneau : sélecteur de projet, canaux en pastilles avec leurs non-lus, et le canal choisi. */
@@ -41,7 +41,9 @@ function Panel({ projects, projectId, onProject, onClose }: { projects: UnreadDa
   const channels = useMemo(() => (project?.conversations ?? []).filter((c) => !c.archivedAt), [project]);
   const [slugByProject, setSlugByProject] = useState<Record<string, string>>({});
   const current = channels.find((c) => c.slug === slugByProject[projectId]) ?? channels.find((c) => c.slug === 'general') ?? channels[0] ?? null;
-  const canWrite = project?.myRole === 'ADMIN' || project?.myRole === 'MEMBER';
+  // Les invités écrivent dans les canaux ; seuls les lecteurs lisent sans écrire.
+  const canWrite = Boolean(project && project.myRole !== 'VIEWER');
+  const guest = project?.myRole === 'GUEST';
 
   return (
     <aside className="msg-panel" aria-label="Messages">
@@ -81,7 +83,7 @@ function Panel({ projects, projectId, onProject, onClose }: { projects: UnreadDa
       )}
       {current?.topic && <div className="msg-topic">{current.topic}</div>}
       <div className="msg-body ch-scroll">
-        {current ? <ChannelThread key={current.id} conversationId={current.id} canWrite={canWrite} compact /> : <div className="text-secondary p-3">{data ? 'Aucun canal.' : 'Chargement…'}</div>}
+        {current ? <ChannelThread key={current.id} conversationId={current.id} canWrite={canWrite} guest={guest} compact /> : <div className="text-secondary p-3">{data ? 'Aucun canal.' : 'Chargement…'}</div>}
       </div>
     </aside>
   );

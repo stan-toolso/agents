@@ -13,7 +13,7 @@ const day = (offset) => new Date(NOW + offset * 86_400_000).toISOString().slice(
 
 // ---- Personnes et agents ------------------------------------------------------------------------------------------
 
-const user = (id, name, email, extra = {}) => ({ __typename: 'User', id, name, email, avatarUrl: null, isAdmin: false, isSuperAdmin: false, isCto: false, isGuest: false, kind: 'PERSON', agent: null, createdAt: ago(60 * 24 * 120), lastLoginAt: ago(30), ...extra });
+const user = (id, name, email, extra = {}) => ({ __typename: 'User', id, name, email, avatarUrl: null, isAdmin: false, isSuperAdmin: false, isCto: false, isGuest: false, conversationsOnly: false, kind: 'PERSON', agent: null, createdAt: ago(60 * 24 * 120), lastLoginAt: ago(30), ...extra });
 const U = {
   me: user('u-camille', 'Camille Laurent', 'camille.laurent@toolso.io', { isAdmin: true, lastLoginAt: ago(2) }),
   hugo: user('u-hugo', 'Hugo Bernard', 'hugo.bernard@toolso.io', { lastLoginAt: ago(45) }),
@@ -22,6 +22,8 @@ const U = {
   chris: user('u-chris', 'Chris', 'chris@agents.toolso.io', { kind: 'AGENT' }),
   max: user('u-max', 'Max', 'max@agents.toolso.io', { kind: 'AGENT' }),
   nora: user('u-nora', 'Nora', 'nora@agents.toolso.io', { kind: 'AGENT' }),
+  // Invitée sur le site vitrine (rôle invité : conversations seulement), cliente de l'agence.
+  claire: user('u-claire-guest', 'Claire Martin', 'claire.martin@client.fr', { lastLoginAt: ago(60 * 7), guestOf: 'p-site' }),
 };
 const people = [U.me, U.hugo, U.lea, U.thomas];
 const person = (u) => ({ __typename: 'TaskPerson', name: u.name, email: u.email });
@@ -61,7 +63,7 @@ const project = (id, name, slug, description, gitUrl, extra = {}) => ({
   worksessions: () => sessions.filter((s) => s.project === P[key(id)] && s.worksession && !s.archivedAt).map((s) => s.worksession),
   archivedWorksessions: [],
   terminals: [],
-  members: () => (id === 'p-perso' ? [member(U.me, 'ADMIN')] : [member(U.me, 'ADMIN'), member(U.hugo, 'MEMBER'), member(U.lea, 'MEMBER'), ...(id === 'p-data' || id === 'p-api' ? [member(U.thomas, 'VIEWER')] : []), ...agents.filter((a) => a.project.id === id).map((a) => member(a.user, 'MEMBER'))]),
+  members: () => (id === 'p-perso' ? [member(U.me, 'ADMIN')] : [member(U.me, 'ADMIN'), member(U.hugo, 'MEMBER'), member(U.lea, 'MEMBER'), ...(id === 'p-data' || id === 'p-api' ? [member(U.thomas, 'VIEWER')] : []), ...(id === 'p-site' || id === 'p-client' ? [member(U.claire, 'GUEST')] : []), ...agents.filter((a) => a.project.id === id).map((a) => member(a.user, 'MEMBER'))]),
   agents: () => agents.filter((a) => a.project === P[key(id)]),
   contextFolders: () => contextFolders.filter((f) => f.projectId === id),
   contextInstructions: () => contextInstructions.filter((i) => i.projectId === id),
@@ -92,7 +94,11 @@ P.api = project('p-api', 'API Facturation', 'api-facturation', 'Service de factu
 P.mobile = project('p-mobile', 'Appli Scouts', 'appli-scouts', 'Application mobile des groupes scouts : inscriptions aux camps, cotisations et messagerie des parents.', 'https://github.com/toolso/appli-scouts');
 // Camille n'y est que lectrice : ses sessions s'ouvrent en lecture seule (ni saisie, ni actions).
 P.data = project('p-data', 'Data & reporting', 'data-reporting', 'Tableaux de bord et rapports hebdomadaires (dbt, Metabase).', 'https://github.com/toolso/data-reporting', { myRole: 'VIEWER' });
+// Camille n'y est qu'invitée (rôle invité) : seules les conversations lui sont ouvertes (sidebar « Conversations », onglet unique).
+P.client = project('p-client', 'Agence Horizon', 'agence-horizon', 'Refonte du site de l’agence Horizon, menée par leur équipe ; nous y sommes invités pour suivre les échanges.', 'https://github.com/horizon/site', { myRole: 'GUEST', isMember: true });
 const teamProjects = [P.site, P.api, P.mobile, P.data];
+/** Projets où Camille n'est qu'invitée (requête guestProjects). */
+const guestProjects = [P.client];
 // Budgets mensuels (page Consommation) : l'API Facturation a passé 80 %, l'appli Scouts est loin du sien.
 const PROJECT_MONTH = { 'p-perso': 3.1, 'p-site': 38.4, 'p-api': 104.2, 'p-mobile': 27.5, 'p-data': 12.9 };
 for (const p of [P.perso, ...teamProjects]) {
@@ -440,7 +446,7 @@ const messages = [];
 const conversations = [];
 const channel = (p, slug, name, topic, extra = {}) => {
   const c = {
-    __typename: 'Conversation', id: `c-${p.id}-${slug}`, slug, name, topic, archivedAt: null, createdAt: ago(60 * 24 * 40), lastMessageAt: null,
+    __typename: 'Conversation', id: `c-${p.id}-${slug}`, slug, name, topic, archivedAt: null, createdAt: ago(60 * 24 * 40), lastMessageAt: null, lastReadAt: ago(60 * 24 * 3),
     project: p, unreadCount: 0, messageCount: () => messages.filter((m) => m.conversationId === c.id).length,
     mentionables: () => [...people, ...agents.map((a) => a.user)].map((u) => ({ __typename: 'TaskMentionable', kind: 'user', id: u.id, label: u.name, detail: u.kind === 'AGENT' ? 'agent' : u.email, text: `@${u.name}` })),
     messages: () => messages.filter((m) => m.conversationId === c.id),
@@ -454,7 +460,7 @@ const message = (c, author, minutesAgo, body, extra = {}) => {
     __typename: 'Message', id: `msg-${++msgSeq}`, conversationId: c.id, parentId: null, authorType: author.kind === 'AGENT' ? 'agent' : 'human',
     authorName: author.name, author, authorSession: null, agent: author.agent ?? null, body, mentions: [], reactions: [], attachments: [], editable: author === U.me,
     deletable: author === U.me, replyCount: () => messages.filter((r) => r.parentId === m.id).length, lastReplyAt: () => messages.filter((r) => r.parentId === m.id).at(-1)?.createdAt ?? null,
-    respondingSessions: [], createdAt: ago(minutesAgo), updatedAt: ago(minutesAgo), ...extra,
+    respondingSessions: [], authorRole: author.kind === 'AGENT' ? 'MEMBER' : author.guestOf ? 'GUEST' : 'MEMBER', createdAt: ago(minutesAgo), updatedAt: ago(minutesAgo), ...extra,
   };
   if (!c.lastMessageAt || m.createdAt > c.lastMessageAt) c.lastMessageAt = m.createdAt;
   messages.push(m);
@@ -467,6 +473,7 @@ const C = {
   apiGeneral: channel(P.api, 'general', 'général', ''),
   mobileGeneral: channel(P.mobile, 'general', 'général', ''),
   dataGeneral: channel(P.data, 'general', 'général', ''),
+  clientGeneral: channel(P.client, 'general', 'général', 'Suivi de la refonte avec l’agence', { unreadCount: 1, lastReadAt: ago(60 * 2) }),
 };
 const mention = (u) => ({ __typename: 'TaskMention', kind: 'user', id: u.id, label: u.name, text: `@${u.name}` });
 const m1 = message(C.siteGeneral, U.me, 60 * 3, '@Chris @Léa Fontaine on vise la mise en ligne de la nouvelle page tarifs ce soir. Qu’est-ce qui bloque encore ?', {
@@ -481,6 +488,11 @@ message(C.siteGeneral, U.chris, 60 * 9, 'Point du matin : 2 PR fusionnées hier,
 message(C.siteGeneral, U.hugo, 60 * 26, 'Le support signale que la page tarifs n’affiche pas l’offre annuelle sur mobile. Quelqu’un peut jeter un œil ?', {
   attachments: [{ __typename: 'MessageAttachment', id: 'msg-att-1', name: 'ticket-support-4521.pdf', mediaType: 'application/pdf', size: 184_320, createdAt: ago(60 * 26) }],
 });
+message(C.siteGeneral, U.claire, 60 * 1, 'Bonjour à tous ! Merci pour l’invitation. Est-ce que la nouvelle page tarifs sera visible sur notre environnement de test avant la mise en ligne ?');
+message(C.siteGeneral, U.claire, 60 * 1 - 1, 'Et si oui, à quelle adresse ?');
+message(C.clientGeneral, U.hugo, 60 * 24 + 15, 'Bienvenue Camille ! On vous a invitée pour suivre les échanges sur la refonte : n’hésitez pas à poser vos questions ici.');
+message(C.clientGeneral, U.me, 60 * 24, 'Merci ! Première question : la maquette de la page d’accueil est-elle figée, ou peut-on encore proposer des retouches ?');
+message(C.clientGeneral, U.lea, 60 * 1.5, 'Elle est figée depuis hier, mais les retouches de contenu restent possibles jusqu’à vendredi.');
 message(C.siteLivraisons, U.me, 60 * 24 * 2, 'v1.7 en production. Rien à signaler sur les métriques.', { reactions: [{ __typename: 'TaskReaction', emoji: '🎉', count: 3, actors: ['Hugo Bernard', 'Léa Fontaine', 'Chris'], mine: false }] });
 message(C.siteLivraisons, U.chris, 60 * 24 * 2 + 30, 'Notes de version préparées dans le contexte (`releases/v1.7`).');
 message(C.apiGeneral, U.hugo, 60 * 5, '@Nora peux-tu relire la PR #118 ? Le calcul des totaux me semble fragile.', { mentions: [mention(U.nora)] });
@@ -765,6 +777,8 @@ const cockpitLayout = (scope) => {
 
 const byId = (list, id) => list.find((x) => x.id === id) ?? null;
 const allProjects = [P.perso, ...teamProjects];
+/** Tous les projets atteignables par leur identifiant, projets invités compris. */
+const everyProject = [...allProjects, ...guestProjects];
 const providers = [
   {
     __typename: 'Provider', type: 'claude', label: 'Claude Code', description: 'Agent de code Claude, dans le conteneur du projet.', interactive: true,
@@ -913,7 +927,8 @@ export const demoRoot = {
   users: Object.values(U),
   sidebarProjects: allProjects,
   projects: (a = {}) => (a.includePersonal ? allProjects : teamProjects),
-  project: (a) => byId(allProjects, a.id),
+  project: (a) => byId(everyProject, a.id),
+  guestProjects,
   personalSpace: P.perso,
   chats: (a = {}) => chats.slice(0, a.limit ?? 50),
   sessions: (a = {}) =>
@@ -974,7 +989,7 @@ export const demoRoot = {
     pullRequests: pullRequests.filter((x) => x.stage === 'TO_MERGE'),
   }),
   inboxCounts,
-  unreadMessagesByProject: () => teamProjects.map((p) => ({ __typename: 'ProjectUnreadMessages', project: p, count: typeof p.unreadMessages === 'function' ? p.unreadMessages() : 0 })),
+  unreadMessagesByProject: () => [...teamProjects, ...guestProjects].map((p) => ({ __typename: 'ProjectUnreadMessages', project: p, count: typeof p.unreadMessages === 'function' ? p.unreadMessages() : 0 })),
   pullRequests: (a = {}) => pullRequests.filter((x) => (!a.projectId || x.project.id === a.projectId) && (!a.taskId || x.task?.id === a.taskId) && (!a.stage || a.stage.includes(x.stage)) && (!a.status || a.status.includes(x.status))),
   pullRequest: (a) => byId(pullRequests, a.id),
   deliveries: (a = {}) => deliveries.filter((d) => d.projectId === a.projectId && (!a.worksessionId || d.worksessionId === a.worksessionId) && (!a.taskId || d.task?.id === a.taskId) && (!a.kind || d.kind === a.kind.toUpperCase())).slice(0, a.limit ?? 50),

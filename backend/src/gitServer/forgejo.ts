@@ -167,7 +167,8 @@ export const forgejoAccounts = {
 
 // --- Organisation, dépôts, droits ------------------------------------------------
 
-const PERMISSION: Record<ProjectRole, 'read' | 'write' | 'admin'> = { viewer: 'read', member: 'write', admin: 'admin' };
+/** Un invité (conversations seulement) n'est jamais collaborateur : `syncMembers` l'écarte avant d'arriver ici. */
+const PERMISSION: Record<ProjectRole, 'read' | 'write' | 'admin'> = { guest: 'read', viewer: 'read', member: 'write', admin: 'admin' };
 
 let orgReady: Promise<void> | null = null;
 

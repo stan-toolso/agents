@@ -12,7 +12,7 @@ import type { ProjectScope } from './scope.js';
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
 const failure = (t: string) => ({ content: [{ type: 'text' as const, text: t }], isError: true });
 
-const roleLabels: Record<string, string> = { admin: 'administrateur', member: 'membre', viewer: 'lecteur' };
+const roleLabels: Record<string, string> = { admin: 'administrateur', member: 'membre', viewer: 'lecteur', guest: 'invité' };
 
 const stateOf = (s: Session) => (s.status === 'running' ? (s.activity === 'idle' ? 'attend des instructions' : 'travaille') : s.status);
 

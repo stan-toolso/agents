@@ -288,6 +288,7 @@ import {
   type Session,
 } from '../graphql/operations';
 import { projectRoleLabels, timeAgo } from '../lib/humanize';
+import { EMAIL_AVAILABLE } from '../graphql/misc';
 import { useAuth } from '../auth/AuthContext';
 import { ADD_PROJECT_PERMISSION_RULE, DELETE_PROJECT_PERMISSION_RULE, DELETE_PROJECT_PERMISSION_RULES, PROJECT_PERMISSION_RULES, UPDATE_PROJECT_PERMISSION_RULE, type PermissionRule } from '../graphql/operations';
 
@@ -444,7 +445,7 @@ function PermissionRulesCard({ projectId, canManage }: { projectId: string; canM
   );
 }
 
-const ROLES: ProjectRole[] = ['ADMIN', 'MEMBER', 'VIEWER'];
+const ROLES: ProjectRole[] = ['ADMIN', 'MEMBER', 'VIEWER', 'GUEST'];
 
 /** Membres du projet : liste avec rôle, invitation par e-mail et retrait (administrateurs du projet). */
 function MembersCard({ projectId, canManage }: { projectId: string; canManage: boolean }) {
@@ -457,6 +458,9 @@ function MembersCard({ projectId, canManage }: { projectId: string; canManage: b
   const [remove, { error: removeError }] = useMutation(REMOVE_PROJECT_MEMBER, refetch);
   const [email, setEmail] = useState('');
   const [role, setRoleInput] = useState<ProjectRole>('MEMBER');
+  const [message, setMessage] = useState('');
+  const { data: mail } = useQuery<{ emailNotificationsAvailable: boolean }>(EMAIL_AVAILABLE);
+  const canEmail = Boolean(mail?.emailNotificationsAvailable);
   const members = data?.project?.members ?? [];
   const error = inviteError ?? roleError ?? removeError;
   return (
@@ -518,11 +522,14 @@ function MembersCard({ projectId, canManage }: { projectId: string; canManage: b
             onSubmit={(e) => {
               e.preventDefault();
               if (!email.trim()) return;
-              invite({ variables: { projectId, email: email.trim(), role } }).then(() => setEmail(''));
+              invite({ variables: { projectId, email: email.trim(), role, message: role === 'GUEST' && message.trim() ? message.trim() : null } }).then(() => {
+                setEmail('');
+                setMessage('');
+              });
             }}
           >
             <Form.Group>
-              <Form.Label className="mb-1">Inviter par e-mail (compte Google)</Form.Label>
+              <Form.Label className="mb-1">Inviter par e-mail</Form.Label>
               <Form.Control size="sm" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="prenom@exemple.com" style={{ width: 260 }} />
             </Form.Group>
             <Form.Group>
@@ -538,7 +545,20 @@ function MembersCard({ projectId, canManage }: { projectId: string; canManage: b
             <Button type="submit" size="sm" disabled={inviting || !email.trim()}>
               {inviting ? 'Invitation…' : 'Inviter'}
             </Button>
-            <div className="text-secondary w-100">{projectRoleLabels[role].hint} La personne pourra se connecter avec ce compte Google.</div>
+            {role === 'GUEST' && (
+              <Form.Group className="w-100">
+                <Form.Label className="mb-1">Mot d’accueil (facultatif, repris dans l’e-mail d’invitation)</Form.Label>
+                <Form.Control as="textarea" size="sm" rows={2} value={message} maxLength={2000} placeholder="Bonjour Claire, voici l’espace où nous échangeons avec l’équipe et ses agents…" onChange={(e) => setMessage(e.target.value)} />
+              </Form.Group>
+            )}
+            <div className="text-secondary w-100">
+              {projectRoleLabels[role].hint}{' '}
+              {role === 'GUEST'
+                ? canEmail
+                  ? 'Elle reçoit un e-mail qui la mène droit aux conversations ; si elle n’a pas d’autre accès à Skipper, le lien la connecte directement, sans mot de passe.'
+                  : 'L’envoi des e-mails n’est pas configuré : transmettez-lui l’adresse de Skipper, elle se connecte avec cette adresse (compte Google, Microsoft, GitHub ou mot de passe).'
+                : 'La personne se connecte avec cette adresse (compte Google, Microsoft, GitHub ou mot de passe).'}
+            </div>
           </Form>
         )}
         {error && (

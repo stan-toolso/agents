@@ -376,6 +376,12 @@ export const conversationRepository = {
     await pool.query('INSERT INTO conversation_reads (conversation_id, user_id, last_read_at) VALUES ($1, $2, now()) ON CONFLICT (conversation_id, user_id) DO UPDATE SET last_read_at = now()', [conversationId, userId]);
   },
 
+  /** Dernière lecture d'un canal par la personne (null : jamais ouvert). */
+  async lastReadAt(conversationId: string, userId: string): Promise<Date | null> {
+    const { rows } = await pool.query<{ last_read_at: Date }>('SELECT last_read_at FROM conversation_reads WHERE conversation_id = $1 AND user_id = $2', [conversationId, userId]);
+    return rows[0]?.last_read_at ?? null;
+  },
+
   /** Messages non lus par la personne, par canal (ceux des autres, postés après sa dernière lecture). */
   async unreadCounts(conversationIds: string[], userId: string): Promise<Map<string, number>> {
     if (!conversationIds.length) return new Map();

@@ -354,10 +354,15 @@ frontend/
   puissant :
   - `admin` : modifier / supprimer le projet, gérer les membres, et tout ce qui suit ;
   - `member` : sessions, terminaux, tâches, contexte, réponses aux demandes ;
-  - `viewer` : lecture seule.
+  - `viewer` : lecture seule ;
+  - `guest` (« invité ») : **les conversations du projet seulement** (lire et écrire dans les canaux, répondre dans les
+    fils, réagir, joindre des fichiers, mentionner les personnes et les agents — qui lui répondent), plus les artefacts
+    qu'on lui a partagés nommément. Ni sessions, ni tâches, ni dépôt, ni coffre, ni contexte, ni tableau de bord : voir
+    « Invités d'un projet » plus bas.
   Le créateur d'un projet en est administrateur. Un projet garde toujours au moins un
   administrateur. Inviter une adresse crée l'utilisateur s'il n'existe pas (« en attente » jusqu'à sa
-  première connexion) ; réinviter change le rôle.
+  première connexion) ; réinviter change le rôle. L'invitation d'un invité part par e-mail (mot d'accueil, lien de
+  connexion directe) si l'envoi des e-mails est configuré.
 - **Contrôle d'accès** : chaque requête et mutation GraphQL vérifie le rôle sur le projet de l'objet
   visé (`backend/src/auth/access.ts`) ; les listes globales (projets, sessions, demandes, tâches,
   notifications) sont restreintes aux projets de l'utilisateur ; les subscriptions filtrent de même ;
@@ -1305,7 +1310,18 @@ retrait.
   reçoivent : joints à l'instruction quand le message leur est adressé (ou les convoque), nommés dans une note
   discrète, et `conversations.read` montre les images en blocs image (les plus récentes, 10 et 12 Mo au plus).
 - **Non-lus** par personne et par canal (`conversation_reads`, marqué lu à l'affichage) : pastille sur l'onglet
-  Conversations et dans la liste des canaux. Le canal affiché est sondé toutes les 4 s (`ChannelThread`).
+  Conversations et dans la liste des canaux. Le canal affiché est sondé toutes les 3 s (`ChannelThread`).
+- **Lecture du fil** (`lib/threadGroups.ts`, pur et testé, partagé avec le fil des tâches) : séparateurs de jour
+  (« Aujourd'hui », « Hier », la date), repère rouge **« Nouveaux messages »** devant le premier message des autres
+  posté depuis la dernière lecture (`Conversation.lastReadAt`, figé à l'ouverture du canal), messages d'un même auteur
+  à moins de cinq minutes **groupés** sans répéter l'en-tête (l'heure apparaît au survol). Le fil **suit** les nouveaux
+  messages quand on est en bas ; sinon une pastille « n nouveaux messages » propose d'y descendre ; son propre message
+  envoyé y mène toujours.
+- **Saisie** : **Entrée envoie**, Maj+Entrée va à la ligne (sur écran tactile, Entrée va à la ligne et le bouton
+  envoie ; ⌘/Ctrl+Entrée envoie partout) ; la zone grandit avec le texte.
+- **Invités** : un membre de rôle `guest` écrit dans les canaux comme un membre (pas de création ni de réglage de
+  canal), son nom porte la pastille « invité » (`Message.authorRole`) et « Qui est là » le range à part ; il ne voit ni
+  les liens vers les sessions des agents ni les fils de tâches. Voir « Invités d'un projet ».
 - Pas encore : messages directs, canaux privés, recherche, export dans
   l'archive du projet.
 
@@ -2120,6 +2136,28 @@ d'une page publiée par une session lui renvoie, en une instruction, les comment
 l'agent » dans le panneau) et/ou une demande libre (« Demander une mise à jour à l'agent » dans le menu de la page).
 La session est relancée, ou restaurée si elle était archivée ; l'agent modifie le fichier HTML, republie avec
 `pages.publish` (`page_id`) puis marque les commentaires traités avec `pages.resolve`.
+
+**Invités d'un projet** (rôle `guest` de `project_members`, migration `20261112T2140_project_role_guest.sql`) : une
+personne invitée pour **participer aux conversations** d'un projet (un client, un partenaire…) sans rien voir d'autre.
+Dans l'ordre des rôles (`ROLE_RANK`, `users/types.ts`), `guest` est sous `viewer` : `requireProject` exige le rôle
+lecteur par défaut, donc tout l'existant lui est fermé, et seul ce qui le vise s'ouvre explicitement avec `'guest'` :
+`project(id)`, les canaux (`conversation`, `conversationBySlug`, `postMessage`, `updateMessage`, `deleteMessage`,
+`toggleMessageReaction`, `markConversationRead`, route des fichiers des messages), `unreadMessagesByProject` et la
+requête `guestProjects` (les projets où l'on n'est qu'invité, absents de `projects` et de la sidebar des sessions). Sur
+les types qu'un invité atteint (`Project`, et par un message `Session` et `Agent`), seuls les champs de
+`GUEST_TYPE_FIELDS` (`graphql/guestFields.ts`) lui répondent : les autres, résolveur ou simple colonne, lèvent
+`FORBIDDEN` (test `guestFields.test.ts`). Les listes globales et les flux (`accessibleProjectIds`, `canAccessProject`)
+ignorent ses projets ; les artefacts ouverts « aux membres du projet » sont réservés aux lecteurs et plus (il ne voit
+que ceux où il a été ajouté) ; il n'est pas collaborateur du dépôt Forgejo. Mentionner un agent depuis un canal le
+convoque aussi pour un invité (la session est demandée par lui, mais il ne peut ni la voir ni la prendre en main).
+Interface : onglet **Conversations** seul (`ProjectHeader`), toute autre page du projet ramène aux conversations
+(`components/GuestGate.tsx`), section « Conversations » de la sidebar avec les non-lus, sélecteur de rôle « Invité »
+dans les membres avec un mot d'accueil. Une personne qui **n'a que des accès d'invité** (`User.conversationsOnly`,
+`users/restricted.ts` : ni administratrice ni membre d'aucun projet) n'a ni espace personnel, ni chat, ni création de
+projet, ni recherche ; son accueil mène aux conversations de son projet (`RestrictedHome`) et son menu se réduit aux
+artefacts partagés ; elle se connecte par le **lien de connexion directe** de son e-mail d'invitation
+(`users/invitations.ts`, gabarit `users/invitationEmail.ts`, 30 jours), comme un invité des pages — les liens
+(`signInService.createLoginLink`, `loginWithLink`, « Recevoir un lien de connexion ») valent pour tout compte restreint.
 
 **Invités des pages** (`users.guest`, `User.isGuest`) : partager une page avec une adresse qui n'a pas de compte
 Skipper propose de l'**inviter** (« Inviter et partager », `addSharedPageMember(invite: true)` ; sans `invite`,

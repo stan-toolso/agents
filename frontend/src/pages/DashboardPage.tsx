@@ -68,7 +68,7 @@ export default function DashboardPage() {
     );
 
   // Projets où l'on peut créer une tâche (pas lecteur), proposés dans la modale de création.
-  const writableProjects = d.projects.filter((p) => p.project.myRole !== 'VIEWER').map((p) => p.project);
+  const writableProjects = d.projects.filter((p) => p.project.myRole !== 'VIEWER' && p.project.myRole !== 'GUEST').map((p) => p.project);
   const ctx: CockpitContext = { kind: 'home', viewer: user, showCostTile, home: d, project: null, refetch: ['Dashboard'] };
 
   return (

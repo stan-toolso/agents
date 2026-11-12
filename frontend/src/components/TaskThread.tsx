@@ -4,10 +4,11 @@ import { ADD_TASK_COMMENT, DELETE_TASK_COMMENT, TASK_THREAD, TOGGLE_TASK_REACTIO
 import type { TaskComment, TaskMentionable, TaskReaction } from '../graphql/operations';
 import type { AttachmentRef } from '../lib/attachments';
 import { timeAgo } from '../lib/humanize';
+import { layoutThread } from '../lib/threadGroups';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { useDialogs } from './Dialogs';
 import TaskAttachments from './TaskAttachments';
-import { Avatar, Composer, Reactions, RootMessage, SessionLink, ThreadProvider, fmtFull, groupThread, useThreadAnchor, type ThreadApi, type ThreadMessage } from './Thread';
+import { Avatar, Composer, DaySeparator, Reactions, RootMessage, SessionLink, ThreadProvider, fmtFull, groupThread, useThreadAnchor, type ThreadApi, type ThreadMessage } from './Thread';
 
 const REFETCH = ['TaskThread', 'Tasks', 'TaskDetail', 'TaskPage'];
 
@@ -55,6 +56,8 @@ export default function TaskThread({ taskId, opening, canWrite = true, compact =
   const comments = data?.task?.comments ?? [];
   const mentionables = data?.task?.mentionables ?? [];
   const { roots, byParent } = useMemo(() => groupThread(comments), [comments]);
+  // Séparateurs de jour et messages groupés par auteur, comme dans un canal (pas de repère « nouveaux » : les fils de tâches n'ont pas de dernière lecture).
+  const items = useMemo(() => layoutThread(roots, (r) => byParent.get(r.id)?.length ?? 0), [roots, byParent]);
   useThreadAnchor('comment', Boolean(data));
 
   return (
@@ -79,9 +82,7 @@ export default function TaskThread({ taskId, opening, canWrite = true, compact =
           </div>
         )}
         {data && comments.length === 0 && <div className="tt-empty">Pas encore de message. {canWrite && 'Écrivez le premier : les sessions reliées à la tâche le recevront.'}</div>}
-        {roots.map((root) => (
-          <RootMessage key={root.id} root={root} replies={byParent.get(root.id) ?? []} />
-        ))}
+        {items.map((item) => (item.kind === 'day' ? <DaySeparator key={item.key} label={item.label} /> : item.kind === 'message' ? <RootMessage key={item.key} root={item.message} replies={byParent.get(item.message.id) ?? []} continued={item.continued} /> : null))}
         {canWrite && <Composer placeholder="Écrire dans le fil… (@ pour mentionner une personne ou une session)" compact={compact} />}
       </div>
     </ThreadProvider>

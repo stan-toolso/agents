@@ -40,6 +40,9 @@ function UnreadBadge({ projectId }: { projectId: string }) {
   );
 }
 
+/** Onglets d'un invité du projet (conversations et artefacts partagés seulement) : les conversations, rien d'autre. */
+const GUEST_TABS: typeof TABS = TABS.filter((t) => t.key === 'conversations');
+
 /** Onglets de l'espace personnel : pas de workflows, mais les chats (qui ont leur propre page). */
 const PERSONAL_TABS: typeof TABS = [
   { key: 'overview', label: 'Aperçu', path: '', icon: 'bi-person-circle' },
@@ -51,7 +54,7 @@ export interface ProjectHeaderProject {
   id: string;
   name: string;
   description?: string | null;
-  myRole?: 'ADMIN' | 'MEMBER' | 'VIEWER';
+  myRole?: 'ADMIN' | 'MEMBER' | 'VIEWER' | 'GUEST';
   /** Espace personnel : en-tête « Mon espace personnel », sans retour aux projets, onglets propres. */
   isPersonal?: boolean;
 }
@@ -64,8 +67,9 @@ export interface ProjectHeaderProject {
 export default function ProjectHeader({ project, active, actions }: { project: ProjectHeaderProject; active: ProjectTab; actions?: ReactNode }) {
   const { openNewSession } = useSessionLauncher();
   const canWrite = project.myRole === 'ADMIN' || project.myRole === 'MEMBER';
+  const guest = project.myRole === 'GUEST';
   const personal = Boolean(project.isPersonal);
-  const tabs = personal ? PERSONAL_TABS : TABS;
+  const tabs = personal ? PERSONAL_TABS : guest ? GUEST_TABS : TABS;
   return (
     <>
       <div className="d-flex align-items-start justify-content-between flex-wrap gap-2 mb-2">
@@ -74,7 +78,7 @@ export default function ProjectHeader({ project, active, actions }: { project: P
             <Link to="/" className="small">
               ← Tableau de bord
             </Link>
-          ) : projectWindowId ? null : (
+          ) : projectWindowId || guest ? null : (
             <Link to="/projects" className="small">
               ← Projets
             </Link>
@@ -88,7 +92,7 @@ export default function ProjectHeader({ project, active, actions }: { project: P
               <i className="bi bi-plus-lg me-1" /> Nouvelle session
             </Button>
           )}
-          {!personal && !projectWindowId && (
+          {!personal && !projectWindowId && !guest && (
             <Button size="sm" variant="outline-secondary" onClick={() => openProjectWindow(project.id)} title="Ouvrir dans une nouvelle fenêtre dédiée à ce projet : sidebar, notifications, messages et recherche limités au projet" aria-label="Ouvrir dans une nouvelle fenêtre">
               <i className="bi bi-window-plus" />
             </Button>

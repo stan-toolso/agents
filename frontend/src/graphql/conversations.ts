@@ -12,6 +12,8 @@ export interface Conversation {
   archivedAt: string | null;
   createdAt: string;
   unreadCount: number;
+  /** Dernière lecture par la personne connectée (null : jamais ouvert) : repère « Nouveaux messages ». */
+  lastReadAt: string | null;
   messageCount?: number;
 }
 
@@ -34,6 +36,8 @@ export interface ChannelMessage {
   replyCount: number;
   lastReplyAt: string | null;
   respondingSessions: { id: string; name: string; agent: { id: string; name: string } | null }[];
+  /** Rôle de l'auteur sur le projet (GUEST : invité, signalé dans le fil) ; null pour une session ou un ancien membre. */
+  authorRole: 'ADMIN' | 'MEMBER' | 'VIEWER' | 'GUEST' | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -48,6 +52,7 @@ export const CONVERSATION_FIELDS = gql`
     archivedAt
     createdAt
     unreadCount
+    lastReadAt
   }
 `;
 
@@ -110,6 +115,7 @@ export const MESSAGE_FIELDS = gql`
         name
       }
     }
+    authorRole
     createdAt
     updatedAt
   }
