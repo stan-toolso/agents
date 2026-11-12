@@ -44,9 +44,11 @@ export function useCockpit(scope: string | null, fallback: Layout | null = null)
   const [seenVersion, setSeenVersion] = useState<number | null>(null);
   const [changedElsewhere, setChangedElsewhere] = useState<CockpitLayoutData | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
-  const [update, { loading: saving }] = useMutation<{ updateCockpitLayout: CockpitLayoutData }>(UPDATE_COCKPIT_LAYOUT);
-  const [resetMutation] = useMutation<{ resetCockpitLayout: CockpitLayoutData }>(RESET_COCKPIT_LAYOUT);
-  const [restoreMutation] = useMutation<{ restoreCockpitLayout: CockpitLayoutData }>(RESTORE_COCKPIT_LAYOUT);
+  // Le type CockpitLayout n'a pas d'identifiant : Apollo ne fusionne pas le résultat d'une mutation avec la query, on la relit.
+  const refetch = { refetchQueries: ['CockpitLayout'], awaitRefetchQueries: true };
+  const [update, { loading: saving }] = useMutation<{ updateCockpitLayout: CockpitLayoutData }>(UPDATE_COCKPIT_LAYOUT, refetch);
+  const [resetMutation] = useMutation<{ resetCockpitLayout: CockpitLayoutData }>(RESET_COCKPIT_LAYOUT, refetch);
+  const [restoreMutation] = useMutation<{ restoreCockpitLayout: CockpitLayoutData }>(RESTORE_COCKPIT_LAYOUT, refetch);
 
   // Changement fait ailleurs (agent, autre membre) pendant qu'on regarde : signalé, pas imposé en cours d'édition.
   useEffect(() => {

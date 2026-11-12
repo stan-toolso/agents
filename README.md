@@ -1379,7 +1379,16 @@ thème `--cc-*` (`cockpit/embedTheme.ts`), `Skipper.context` (personne, projet, 
 `Skipper.summon`), plus `sharedPages/widget-client.js` qui mesure la hauteur (le bloc suit son contenu). Le cadre est
 rechargé quand les données de l'artefact changent. Épingler ne donne aucun droit : chaque personne voit le bloc si elle
 voit l'artefact ; pour l'équipe, l'artefact s'ouvre **aux membres du projet** (`SharedPage.projectAccess`, « Partager »
-› Accès général) et le serveur avertit sinon (`CockpitLayout.warnings`). Lot suivant de la conception : pages personnalisées et onglets d'un projet.
+› Accès général) et le serveur avertit sinon (`CockpitLayout.warnings`). **Pages personnalisées et onglets** (`cockpit/projectPages.ts`, table `project_pages` et colonne `projects.tabs`, migration
+`20261112T2050`) : une page personnalisée est un onglet de plus dans l'en-tête du projet (`/projects/<id>/p/<slug>`,
+`pages/ProjectCustomPage.tsx`) dont le contenu est l'agencement de la portée `project:<id>:page:<slug>`, vide au départ,
+avec les mêmes blocs que le tableau de bord et les artefacts épinglables (une page « Reporting client » peut n'être qu'un
+artefact en pleine largeur). Réglages › **Onglets et pages** (`cockpit/ProjectTabsCard.tsx`) : masquer les onglets natifs
+inutiles (jamais le tableau de bord ni les réglages), les ordonner, créer, renommer et supprimer des pages ; l'en-tête
+(`ProjectHeader`, `lib/projectTabs.ts`) lit ce réglage par une requête légère en cache. API : `Project.pages`,
+`Project.tabs`, `createProjectPage`, `updateProjectPage`, `deleteProjectPage` (membres), `updateProjectTabs`
+(administrateurs) ; outils `cockpit.pages_list`, `page_create`, `page_update`, `page_delete`, `tabs`. L'export d'un projet
+emporte onglets, pages et agencements partagés (sans les blocs artefacts, propres au serveur d'origine).
 
 ## Lancer des sessions
 
