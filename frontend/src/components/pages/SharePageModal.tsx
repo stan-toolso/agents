@@ -169,11 +169,22 @@ export default function SharePageModal({ page, onClose }: { page: SharedPage; on
         </Table>
         <Form.Group>
           <Form.Label className="small text-secondary mb-1">Accès général</Form.Label>
-          <Form.Select size="sm" value={page.linkAccess ? 'link' : 'restricted'} onChange={(e) => void run(() => update({ variables: { id: page.id, input: { linkAccess: e.target.value === 'link' } } }))}>
+          <Form.Select
+            size="sm"
+            value={page.linkAccess ? 'link' : page.projectAccess ? 'project' : 'restricted'}
+            onChange={(e) => void run(() => update({ variables: { id: page.id, input: e.target.value === 'link' ? { linkAccess: true } : e.target.value === 'project' ? { linkAccess: false, projectAccess: true } : { linkAccess: false, projectAccess: false } } }))}
+          >
             <option value="restricted">Restreint : seules les personnes ci-dessus</option>
+            {(page.project || page.projectAccess) && <option value="project">Les membres du projet{page.project ? ` « ${page.project.name} »` : ''}</option>}
             <option value="link">Toute personne connectée à Skipper disposant du lien</option>
           </Form.Select>
-          <Form.Text className="text-secondary">{page.linkAccess ? 'Le lien suffit à toute personne ayant un compte Skipper (sauf les invités, qui ne voient que les pages où ils ont été ajoutés).' : 'Le lien ne fonctionne que pour les personnes ajoutées.'}</Form.Text>
+          <Form.Text className="text-secondary">
+            {page.linkAccess
+              ? 'Le lien suffit à toute personne ayant un compte Skipper (sauf les invités, qui ne voient que les pages où ils ont été ajoutés).'
+              : page.projectAccess
+                ? 'Tout membre du projet voit la page (sauf les invités) : nécessaire pour l’épingler dans le tableau de bord du projet.'
+                : 'Le lien ne fonctionne que pour les personnes ajoutées.'}
+          </Form.Text>
         </Form.Group>
         {error && (
           <Alert variant="danger" className="mt-3 mb-0 py-2">

@@ -281,6 +281,7 @@ backend/
     chrome/                    # extension « Skipper pour Chrome » : navigateurs reliés (jetons skc_), WebSocket de l'extension, routage des commandes entre instances, MCP `chrome`, archive de l'extension
     previews/                  # aperçus des branches : configuration, lancement dans le conteneur, proxy par sous-domaine, instantanés des dépendances, MCP `preview`
     sharedPages/               # pages partagées : publication, versions, membres, route de lecture en bac à sable, MCP `pages`
+    cockpit/                   # cockpit configurable : catalogue des blocs natifs, agencements par défaut, validation, portées, versions, MCP `cockpit`
     search/                    # recherche globale (projets, sessions, tâches, pages, coffre)
     audit/                     # journal d'audit : table audit_log, enveloppe des mutations GraphQL (mutations.ts), export CSV
     exports/                   # export d'une session en Markdown, archive tar.gz d'un projet et import (routes /api/…/export.*)
@@ -1332,6 +1333,47 @@ Les réglages (dossier de
 travail, instructions permanentes, membres, autorisations mémorisées, conteneur, disque, clés d'API, suppression)
 sont dans l'onglet **Réglages** (`/projects/:id/settings`, `pages/ProjectSettingsPage.tsx`).
 
+## Cockpit configurable
+
+L'accueil d'une personne et le tableau de bord d'un projet sont des **agencements de blocs** par région (tuiles, colonne
+principale, colonne latérale, pleine largeur), composables depuis l'interface (bouton **Personnaliser**) et par les
+agents (serveur MCP `cockpit`). Conception : `docs/conception/cockpit-configurable.md`. Module `backend/src/cockpit/` :
+`catalog.ts` (le **catalogue** des blocs natifs : clé, libellé, portées admises, régions, paramètres typés ; chaque clé
+a son composant dans `frontend/src/cockpit/registry.tsx`), `defaults.ts` (les agencements par défaut, identiques aux
+pages d'avant : rien ne change tant que personne n'enregistre), `layout.ts` (validation d'un agencement et application
+d'opérations `add` / `remove` / `move` / `set`, pur et testé), `scope.ts` (portées : `home` propre à chaque personne,
+`project:<id>` partagé par l'équipe ; `project:<id>:tasks`, `agent:<id>` et `project:<id>:page:<slug>` réservées),
+`repository.ts` et `service.ts` (tables `cockpit_layouts` et `cockpit_layout_versions`, migration
+`20261112T1941_cockpit_layouts` : chaque enregistrement crée une version, la réinitialisation garde l'historique ;
+lecture avec le rôle lecteur, écriture avec le rôle membre ; un bloc qu'une version plus récente du catalogue ne
+connaît plus est ignoré à la lecture). Un bloc natif est masqué quand il n'a rien à montrer à la personne (tuile de
+consommation sans crédits, canal d'un espace personnel) ; le mode édition le signale au lieu de le cacher.
+
+Interface (`frontend/src/cockpit/`) : `useCockpit(scope)` (agencement relu toutes les 30 s, brouillon pendant l'édition,
+bandeau « mis à jour par … » quand un agent ou un autre membre l'a changé), `CockpitBoard` (rendu des régions ; en
+édition : barre par bloc — titre, région, monter / descendre, réglages, retirer —, zone « Ajouter » par région, barre
+Historique / Réinitialiser / Annuler / Enregistrer), `CockpitEditor` (catalogue avec un volet « Demander à un agent »
+qui ouvre une session à la consigne pré-remplie, formulaire des paramètres généré depuis le catalogue, historique
+avec restauration). API : `cockpitLayout(scope)`, `cockpitLayoutHistory(scope)` ; `updateCockpitLayout(scope, layout,
+note)`, `resetCockpitLayout(scope)`, `restoreCockpitLayout(scope, version)` (auditées `cockpit.*`).
+
+Agents (`cockpit/mcp.ts`, outils `cockpit.get` et `cockpit.history` libres ; `update`, `reset` et `restore` soumis à
+l'autorisation de la personne, mémorisable) : `get` renvoie l'agencement et le catalogue de la portée (`project` =
+le projet de la session, `home` = l'accueil du propriétaire de la session), `update` applique des opérations ou un
+agencement complet et décrit ce qui a changé.
+
+**Blocs artefacts** : un artefact (page, données, diapositives) s'épingle dans un agencement (`{ kind: "artifact",
+artifact: <id>, region, title?, params?, height?, pollSeconds? }` ; volet « Artefacts » du catalogue, « Épingler dans un
+tableau de bord » du menu d'un artefact, mutation `pinArtifactToCockpit`). Il est servi dans un cadre en bac à sable par
+la route de lecture en mode **`embed=1`** (`sharedPages/viewRoute.ts`, `injectEmbed` de `inject.ts`) : variables du
+thème `--cc-*` (`cockpit/embedTheme.ts`), `Skipper.context` (personne, projet, portée, paramètres du bloc, thème),
+`Skipper.onContext`, et trois actions vers l'hôte exécutées par l'interface (`Skipper.navigate`, `Skipper.openSession`,
+`Skipper.summon`), plus `sharedPages/widget-client.js` qui mesure la hauteur (le bloc suit son contenu). Le cadre est
+rechargé quand les données de l'artefact changent. Épingler ne donne aucun droit : chaque personne voit le bloc si elle
+voit l'artefact ; pour l'équipe, l'artefact s'ouvre **aux membres du projet** (`SharedPage.projectAccess`, « Partager »
+› Accès général) et le serveur avertit sinon (`CockpitLayout.warnings`). Lots suivants de la conception : sources
+`graphql` vivantes, paramètres avancés, pilotage des tâches et fiche d'agent composables, pages personnalisées.
+
 ## Lancer des sessions
 
 **Depuis l'interface.** « Nouvelle session » (sidebar, pages Projets, Sessions, projet, accueil) ouvre la
@@ -2006,7 +2048,7 @@ nouvelle session avec une consigne à compléter.
 
 Un agent (outil `pages.publish`) ou l'éditeur de fichiers publie un fichier HTML comme **page**
 (`/shared/:id`, `backend/src/sharedPages/`), privée à son propriétaire jusqu'à ce qu'il la partage avec
-des personnes ou l'ouvre à toute personne connectée disposant du lien. Chaque publication crée une
+des personnes, l'ouvre aux membres de son projet d'origine (`projectAccess`, jamais aux invités) ou à toute personne connectée disposant du lien. Chaque publication crée une
 version ; la page est servie par `GET /api/shared/:id[?v=N][&download=1]` dans un bac à sable (CSP
 `sandbox` sans `allow-same-origin` : la page ne lit ni les cookies ni l'API), l'accès étant revérifié
 à chaque chargement. Être ajouté à une page envoie une notification.
@@ -2390,6 +2432,7 @@ Toutes les opérations exigent une session (cookie), sauf `me`. Les erreurs de d
 - `notifications(unreadOnly, limit)`, `unreadNotificationCount` ; `markNotificationRead(id)`, `markAllNotificationsRead` ; subscription `notificationCreated`
 - `Project.tasks(status)`, `tasks(projectId, status, priority, limit)`, `task(id)` ; `createTask`, `updateTask`, `deleteTask`, `startTaskSession(id, provider, config)`
 - `githubPullRequests(projectId, state, limit)`, `githubPullRequest(projectId, number, repo)`, `githubPullRequestDraft(projectId, worksessionId)` ; `createPullRequest(projectId, worksessionId, title, body, base, draft)`, `mergePullRequest(projectId, number, method, cleanup, repo)` ; `Task.branch`, `Task.pullRequest`
+- Cockpit configurable : `cockpitLayout(scope)` (agencement résolu, catalogue, `canEdit`), `cockpitLayoutHistory(scope)` ; `updateCockpitLayout(scope, layout, note)`, `resetCockpitLayout(scope)`, `restoreCockpitLayout(scope, version)`
 - Pull requests suivies : `pullRequests(projectId, taskId, status, stage, limit)`, `pullRequest(id)`, `Task.pullRequests`, `Dashboard.pullRequests` ; `registerPullRequest(projectId, url, number, taskId, note)`, `updatePullRequest(id, input { status, note, taskId })`, `deletePullRequest(id)`, `syncPullRequests(projectId)`
 - `Project.worksessions`, `worksession(id)` avec `sessions` et `terminals` ; `createWorksession(projectId, branch?, name?, baseRef?, label?)`, `deleteWorksession(id, deleteBranch)` ; `CreateSessionInput.worksessionId`, `createTerminal(..., worksessionId)` (API technique : l'interface ne manipule que des sessions)
 - `Project.terminals`, `terminal(id)` ; `createTerminal(projectId, name)`, `closeTerminal(id)`, `deleteTerminal(id)` ; WebSocket `/terminals/<id>` (messages JSON `input`, `resize` / `data`, `exit`)

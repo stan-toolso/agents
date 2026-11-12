@@ -11,6 +11,7 @@ import PageData, { refreshLabel } from '../components/pages/PageData';
 import SlidesBar, { useSlides } from '../components/pages/SlidesBar';
 import SharePageModal from '../components/pages/SharePageModal';
 import FavoriteButton from '../components/pages/FavoriteButton';
+import PinArtifactModal from '../cockpit/PinArtifactModal';
 import { DELETE_ALL_SHARED_PAGE_COMMENTS, DELETE_SHARED_PAGE, DUPLICATE_SHARED_PAGE, REFRESH_SHARED_PAGE_DATA, REMOVE_SHARED_PAGE_MEMBER, REQUEST_SHARED_PAGE_UPDATE, SET_SHARED_PAGE_HISTORY, SHARED_PAGE, SHARED_PAGE_VERSION_SOURCES, type SharedPageSource, UPDATE_SHARED_PAGE, type SharedPage, type SharedPageAgentHandoff } from '../graphql/misc';
 import { useAuth } from '../auth/AuthContext';
 import { formatSize } from '../lib/files';
@@ -40,6 +41,7 @@ const fmt = (iso: string) => new Date(iso).toLocaleString('fr-FR', { dateStyle: 
 export default function SharedPagePage() {
   const { id = '', sessionId } = useParams();
   const navigate = useNavigate();
+  const [pinOpen, setPinOpen] = useState(false);
   const [search, setSearch] = useSearchParams();
   const focusComment = search.get('comment');
   const { user } = useAuth();
@@ -105,7 +107,7 @@ export default function SharedPagePage() {
   const shownVersion = page.versions.find((v) => v.version === shown);
   const viewUrl = sharedPageUrl(page.id, version);
   const access = accessLabel(page);
-  const shared = page.linkAccess || page.members.length > 0;
+  const shared = page.linkAccess || page.projectAccess || page.members.length > 0;
   const openComments = page.openComments;
   const link = `${window.location.origin}/shared/${page.id}`;
   // Artefact de données : sources en défaut (pastille du bouton « Données »), rechargement du cadre après un rafraîchissement.
@@ -189,6 +191,8 @@ export default function SharedPagePage() {
     { label: 'Ouvrir dans un onglet', icon: 'bi-box-arrow-up-right', onClick: () => void window.open(viewUrl, '_blank', 'noopener') },
     ...(isSlides ? [{ label: 'Exporter en PDF', icon: 'bi-file-earmark-pdf', onClick: () => void window.open(`${viewUrl}${viewUrl.includes('?') ? '&' : '?'}print=1`, '_blank', 'noopener') }] : []),
     { label: 'Télécharger le HTML', icon: 'bi-download', onClick: () => void window.open(sharedPageUrl(page.id, version, true), '_self') },
+    // Épingler comme bloc d'un tableau de bord (accueil, ou projet d'origine pour le propriétaire).
+    ...(!user?.isGuest ? [{ label: 'Épingler dans un tableau de bord', icon: 'bi-pin-angle', onClick: () => setPinOpen(true) }] : []),
     // Copie privée (sources de données comprises) ; un artefact de données seulement par qui en voit les requêtes.
     ...(!user?.isGuest && (shownKind !== 'DATA' || admin)
       ? [
@@ -451,6 +455,7 @@ export default function SharedPagePage() {
         )}
       </div>
       {sharing && <SharePageModal page={page} onClose={() => setSharing(false)} />}
+      {pinOpen && <PinArtifactModal page={page} onClose={() => setPinOpen(false)} />}
     </div>
   );
 }

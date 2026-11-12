@@ -68,13 +68,15 @@ export const sharedPageService = {
    */
   async canView(page: SharedPage, userId: string, guest = false): Promise<boolean> {
     if (page.ownerId === userId || (page.linkAccess && !guest)) return true;
-    return sharedPageRepository.isMember(page.id, userId);
+    if (await sharedPageRepository.isMember(page.id, userId)) return true;
+    // Ouverte aux membres de son projet (jamais à un invité des pages).
+    return Boolean(page.projectAccess && page.projectId && !guest && (await userService.memberRoleFor(userId, page.projectId)));
   },
 
   /** Page visible par la personne ; sinon « introuvable » (l'existence n'est pas révélée). */
   async getFor(userId: string, id: string): Promise<SharedPage> {
     const page = await this.get(id);
-    const guest = page.linkAccess && page.ownerId !== userId ? Boolean((await userRepository.findById(userId))?.isGuest) : false;
+    const guest = (page.linkAccess || page.projectAccess) && page.ownerId !== userId ? Boolean((await userRepository.findById(userId))?.isGuest) : false;
     if (!(await this.canView(page, userId, guest))) throw new NotFoundError('Page partagée introuvable, ou non partagée avec vous');
     return page;
   },
@@ -134,7 +136,7 @@ export const sharedPageService = {
 
   /** La page est-elle vue par d'autres que son propriétaire ? */
   async isShared(page: SharedPage): Promise<boolean> {
-    return page.linkAccess || (await sharedPageRepository.members(page.id)).length > 0;
+    return page.linkAccess || page.projectAccess || (await sharedPageRepository.members(page.id)).length > 0;
   },
 
   /** Publie une nouvelle page, ou une nouvelle version d'une page du propriétaire. */
@@ -217,9 +219,9 @@ export const sharedPageService = {
     return { html, version: v };
   },
 
-  async update(userId: string, id: string, input: { title?: string | null; description?: string | null; linkAccess?: boolean | null; agentHandoff?: string | null; refreshMinutes?: number | null }): Promise<SharedPage> {
+  async update(userId: string, id: string, input: { title?: string | null; description?: string | null; linkAccess?: boolean | null; projectAccess?: boolean | null; agentHandoff?: string | null; refreshMinutes?: number | null }): Promise<SharedPage> {
     const page = await this.getOwned(userId, id);
-    const patch: { title?: string; description?: string | null; linkAccess?: boolean; agentHandoff?: AgentHandoff; refreshMinutes?: number | null } = {};
+    const patch: { title?: string; description?: string | null; linkAccess?: boolean; projectAccess?: boolean; agentHandoff?: AgentHandoff; refreshMinutes?: number | null } = {};
     if (input.refreshMinutes !== undefined) {
       if (page.kind !== 'data') throw new AppError("Seul un artefact de données se rafraîchit");
       patch.refreshMinutes = parseRefreshMinutes(input.refreshMinutes);
@@ -227,6 +229,10 @@ export const sharedPageService = {
     if (input.title != null) patch.title = cleanTitle(input.title);
     if (input.description !== undefined) patch.description = cleanDescription(input.description);
     if (input.linkAccess != null) patch.linkAccess = input.linkAccess;
+    if (input.projectAccess != null) {
+      if (input.projectAccess && !page.projectId) throw new AppError("Cet artefact n'est rattaché à aucun projet");
+      patch.projectAccess = input.projectAccess;
+    }
     if (input.agentHandoff != null) {
       if (!AGENT_HANDOFF_MODES.includes(input.agentHandoff as AgentHandoff)) throw new AppError('Réglage de transmission à l’agent inconnu');
       patch.agentHandoff = input.agentHandoff as AgentHandoff;

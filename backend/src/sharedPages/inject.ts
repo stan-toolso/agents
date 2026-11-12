@@ -74,3 +74,49 @@ export function injectSlidesScript(html: string, mode: SlidesMode = 'view', scri
   }
   return html + tag;
 }
+
+const EMBED_MARKER = 'data-skipper-embed';
+const WIDGET_MARKER = 'data-skipper-widget';
+let widgetScript: string | null = null;
+export function widgetClientScript(): string {
+  widgetScript ??= asciiOnly(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'widget-client.js'), 'utf8'));
+  return widgetScript;
+}
+
+/**
+ * Artefact affiché comme bloc d'un tableau de bord (`embed=1`) : une feuille de style de base (variables du thème de
+ * Skipper, fond transparent, marges nulles) et le contexte du bloc (`window.Skipper.context` : personne, projet,
+ * portée, paramètres du bloc, thème) sont injectés **en tête** (après `<head>`, sinon tout au début), après l'éventuel
+ * script des données (qui crée `window.Skipper`) ; le script d'intégration (widget-client.js : hauteur au contenu,
+ * actions vers l'hôte) est injecté **avant `</body>`**. Une seule fois chacun.
+ */
+export function injectEmbed(html: string, payload: { style: string; context: unknown }, script = widgetClientScript()): string {
+  let out = html;
+  if (!out.includes(EMBED_MARKER)) {
+    // L'API du bloc (contexte, onContext, actions vers l'hôte) est définie ici, avant tout script de la page ; le script
+    // d'intégration en fin de page ne fait que mesurer la hauteur et recevoir les mises à jour du contexte.
+    const api = `(function(S){var L=S._ctxListeners=[];S.onContext=function(f){L.push(f)};function send(m){m.skipperWidget=1;window.parent.postMessage(m,"*")}S.navigate=function(to){send({type:"action",action:"navigate",to:String(to||"")})};S.openSession=function(o){o=o||{};send({type:"action",action:"openSession",prompt:String(o.prompt||""),projectId:o.projectId?String(o.projectId):null})};S.summon=function(o){o=o||{};send({type:"action",action:"summon",agent:String(o.agent||""),text:String(o.text||"")})}})(window.Skipper);`;
+    const head = `<style ${EMBED_MARKER}>${payload.style}</style><script ${EMBED_MARKER}>window.Skipper=window.Skipper||{data:{},meta:{sources:[]},ready:function(f){var r=function(){f(window.Skipper.data,window.Skipper.meta)};document.readyState==="loading"?document.addEventListener("DOMContentLoaded",r):r()}};window.Skipper.context=${jsonForScript(payload.context)};${api}</script>`;
+    // Après le script des données s'il est là (il doit créer window.Skipper avant), sinon après <head>.
+    const data = new RegExp(`<script ${DATA_MARKER}>[^]*?</script>`).exec(out);
+    if (data) out = out.slice(0, data.index + data[0].length) + head + out.slice(data.index + data[0].length);
+    else {
+      const m = /<head(\s[^>]*)?>/i.exec(out);
+      out = m ? out.slice(0, m.index + m[0].length) + head + out.slice(m.index + m[0].length) : head + out;
+    }
+  }
+  if (!out.includes(WIDGET_MARKER)) {
+    const tag = `<script ${WIDGET_MARKER}>${script}</script>`;
+    let placed = false;
+    for (const close of [/<\/body\s*>/i, /<\/html\s*>/i]) {
+      const m = close.exec(out);
+      if (m) {
+        out = out.slice(0, m.index) + tag + out.slice(m.index);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) out += tag;
+  }
+  return out;
+}

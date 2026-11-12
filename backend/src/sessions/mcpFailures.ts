@@ -14,6 +14,7 @@ const HANDLED_ELSEWHERE = new Set(['playwright']);
 /** Libellé des outils de chaque serveur de Skipper, pour un avis lisible. */
 const LABELS: Record<string, string> = {
   vault: 'Outils du coffre',
+  cockpit: 'Outils du cockpit (agencements des tableaux de bord)',
   tasks: 'Outils des tâches',
   context: 'Outils de la bibliothèque de contexte',
   sessions: 'Outils des sessions',
