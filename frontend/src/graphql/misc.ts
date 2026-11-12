@@ -714,3 +714,24 @@ export const SEND_TEST_EMAIL = gql`
     sendTestEmail
   }
 `;
+
+/** Rôle de la personne sur un projet, pour aiguiller un invité vers ses conversations (components/GuestGate.tsx). */
+export const PROJECT_ROLE = gql`
+  query ProjectRole($id: ID!) {
+    project(id: $id) {
+      id
+      myRole
+    }
+  }
+`;
+
+/** Projets où la personne n'est qu'invitée (conversations et artefacts partagés seulement). */
+export const GUEST_PROJECTS = gql`
+  query GuestProjects {
+    guestProjects {
+      id
+      name
+      unreadMessages
+    }
+  }
+`;

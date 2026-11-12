@@ -125,6 +125,39 @@ function ChatsBlock({ chats, expanded, onToggle }: { chats: SidebarSession[]; ex
   );
 }
 
+/** Projet où la personne n'est qu'invitée : ses conversations, avec les non-lus. */
+export interface GuestProject {
+  id: string;
+  name: string;
+  unreadMessages: number;
+}
+
+/**
+ * Section « Conversations » : les projets où la personne n'est qu'invitée (rôle invité : canaux et artefacts partagés,
+ * sans sessions ni tâches), chacun menant à ses canaux. Rien tant qu'il n'y en a pas.
+ */
+function GuestProjectsSection({ projects, activeProjectId }: { projects: GuestProject[]; activeProjectId: string | null | undefined }) {
+  if (!projects.length) return null;
+  return (
+    <>
+      <div className="wb-section-title">
+        <span className="wb-section-link" title="Projets où vous êtes invité : vous y suivez les conversations de l’équipe et de ses agents">
+          Conversations
+        </span>
+      </div>
+      <div className="wb-guest-projects">
+        {projects.map((p) => (
+          <Link key={p.id} to={`/projects/${p.id}/conversations`} className={`wb-row wb-guest-project${p.id === activeProjectId ? ' active' : ''}`} title={`Conversations de ${p.name}`}>
+            <i className="bi bi-chat-square-text wb-icon" />
+            <span className="wb-row-label">{p.name}</span>
+            {p.unreadMessages > 0 && <span className="wb-badge">{p.unreadMessages}</span>}
+          </Link>
+        ))}
+      </div>
+    </>
+  );
+}
+
 /** Icône et libellé d'un type d'artefact (repris de ARTIFACT_KINDS de pages/SharedPagesPage, chargée à la demande : pas importée ici). */
 const FAVORITE_KINDS: Record<FavoriteSharedPage['kind'], { icon: string; label: string }> = {
   PAGE: { icon: 'bi-file-earmark-richtext', label: 'Page' },
@@ -190,6 +223,8 @@ const MAIN_MENU: MenuEntry[] = [
   { to: '/inbox', label: 'À traiter', icon: 'bi-inbox', title: 'À traiter : demandes, sessions en attente et pull requests à fusionner, tous projets' },
   { to: '/tasks', label: 'Tâches', icon: 'bi-check2-square', title: 'Tâches de tous vos projets' },
 ];
+/** Personne qui n'a que des accès d'invité (conversations et artefacts partagés) : ni accueil, ni tâches, ni « à traiter ». */
+const RESTRICTED_MENU: MenuEntry[] = [{ to: '/shared', label: 'Artefacts partagés', icon: 'bi-collection', title: 'Pages, tableaux de bord et diapositives partagés avec vous' }];
 /** Fenêtre dédiée à un projet : l'essentiel, limité au projet (les pages globales n'y existent pas). */
 const projectMenu = (id: string): MenuEntry[] => [
   { to: `/projects/${id}`, label: 'Accueil', icon: 'bi-house', title: 'Tableau de bord du projet' },
@@ -750,7 +785,7 @@ function UserBlock() {
     ...(installable ? [{ label: "Installer l'application", icon: 'bi-phone', onClick: install, separatorBefore: !user.isGuest }] : []),
     ...(user.isAdmin ? [{ label: 'Utilisateurs', icon: 'bi-people', to: '/users', separatorBefore: !installable && !user.isGuest }] : []),
     ...(user.isAdmin ? [{ label: 'Consommation', icon: 'bi-receipt', to: '/billing' }] : []),
-    { label: 'Premiers pas', icon: 'bi-compass', to: '/welcome', separatorBefore: !installable && !user.isAdmin && !user.isGuest },
+    ...(user.conversationsOnly ? [] : [{ label: 'Premiers pas', icon: 'bi-compass', to: '/welcome', separatorBefore: !installable && !user.isAdmin && !user.isGuest }]),
     { label: 'Paramètres', icon: 'bi-gear', to: '/settings' },
     { label: 'Se déconnecter', icon: 'bi-box-arrow-right', separatorBefore: true, onClick: () => void logout() },
   ];
@@ -795,8 +830,11 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
   const { openSearch } = useSearchPalette();
   const { openHelp } = useShortcutsHelp();
   const open = useMemo(() => (user?.isSuperAdmin ? openItemsOf([...tabs.map((t) => t.url), location.pathname]) : null), [user?.isSuperAdmin, tabs, location.pathname]);
-  const { data } = usePollingQuery<{ projects: SidebarProject[]; chats: SidebarSession[] }>(SIDEBAR, { variables: { open }, pollInterval: 5000, fetchPolicy: 'cache-and-network' });
+  const { data } = usePollingQuery<{ projects: SidebarProject[]; chats: SidebarSession[]; guestProjects: GuestProject[] }>(SIDEBAR, { variables: { open }, pollInterval: 5000, fetchPolicy: 'cache-and-network' });
   const chats = data?.chats ?? [];
+  const guestProjects = data?.guestProjects ?? [];
+  // Accès restreint (invité seulement) : la sidebar se réduit aux conversations et aux artefacts partagés.
+  const restricted = Boolean(user?.conversationsOnly);
   const { data: prData } = usePollingQuery<{ projects: { id: string; worksessions: { id: string; trackedPullRequest: PullRequestRef | null }[] }[] }>(SIDEBAR_PULL_REQUESTS, { variables: { open }, pollInterval: 60_000 });
   const { data: inboxData } = usePollingQuery<{ inboxCounts: { total: number } }>(INBOX_COUNTS, { variables: { projectId: projectWindowId }, pollInterval: 5000 });
   const inboxTotal = inboxData?.inboxCounts.total ?? 0;
@@ -900,13 +938,15 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
         </span>
       </div>
 
-      <button type="button" className="wb-search-btn" onClick={() => openSearch()}>
-        <i className="bi bi-search" /> Rechercher…
-        <kbd>{displayComboText('mod+k')}</kbd>
-      </button>
+      {!restricted && (
+        <button type="button" className="wb-search-btn" onClick={() => openSearch()}>
+          <i className="bi bi-search" /> Rechercher…
+          <kbd>{displayComboText('mod+k')}</kbd>
+        </button>
+      )}
 
       <nav className="wb-menu" aria-label="Navigation principale">
-        {(projectWindowId ? projectMenu(projectWindowId) : MAIN_MENU).map((m) => (
+        {(restricted ? RESTRICTED_MENU : projectWindowId ? projectMenu(projectWindowId) : MAIN_MENU).map((m) => (
           <NavLink key={m.to} to={m.to} end={m.to !== '/inbox'} className="wb-menu-item" title={m.title ?? m.label}>
             <i className={`bi ${m.icon} wb-icon`} />
             <span className="wb-menu-label">{m.label}</span>
@@ -921,6 +961,14 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
 
       {!user?.isGuest && <FavoritesSection projectId={projectWindowId} expanded={expanded.favorites ?? true} onToggle={() => toggle('favorites', true)} />}
 
+      {!projectWindowId && <GuestProjectsSection projects={guestProjects} activeProjectId={activeProjectId} />}
+
+      {restricted ? (
+        <div className="wb-explorer" ref={explorerRef}>
+          {data && guestProjects.length === 0 && <div className="wb-row wb-empty">Aucune conversation : personne ne vous a encore invité sur un projet.</div>}
+        </div>
+      ) : (
+      <>
       <div className="wb-section-title">
         {projectWindowId ? (
           <span className="wb-section-link">Sessions</span>
@@ -1084,6 +1132,8 @@ export default function Sidebar({ onCollapse }: { onCollapse?: () => void }) {
           </div>
         )}
       </div>
+      </>
+      )}
       <div className="wb-menu wb-menu-bottom">
         <UserBlock />
       </div>

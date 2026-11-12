@@ -52,6 +52,8 @@ vi.mock('../users/repository.js', () => {
       lastSelfServiceTokenAt: async (userId: string) => [...state.tokens.values()].filter((t) => t.userId === userId && !t.createdBy).map((t) => t.createdAt).sort((a, b) => +b - +a)[0] ?? null,
       deleteUserSessions: async (userId: string, except: string | null = null) => void state.deletedSessions.push({ userId, except }),
       deleteExpiredPasswordTokens: async () => 0,
+      // Les personnes du test sont membres d'un projet : seuls les invités des pages ont un accès restreint.
+      hasFullMembership: async () => true,
       createLoginLink: async (h: string, userId: string, nextPath: string, expiresAt: Date, createdBy: string | null) => void state.links.set(h, { userId, nextPath, expiresAt, createdBy, createdAt: new Date(), used: 0 }),
       findLoginLink: async (h: string) => {
         const l = state.links.get(h);

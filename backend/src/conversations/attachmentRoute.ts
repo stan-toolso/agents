@@ -47,7 +47,7 @@ export async function handleMessageAttachmentRoute(req: IncomingMessage, res: Se
     return true;
   }
   try {
-    await requireProject(createAuthContext(user), conversation.projectId, 'viewer');
+    await requireProject(createAuthContext(user), conversation.projectId, 'guest');
   } catch {
     res.writeHead(403).end();
     return true;

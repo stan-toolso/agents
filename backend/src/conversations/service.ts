@@ -135,6 +135,7 @@ export const conversationService = {
   threadsOfSession: (sessionId: string) => conversationRepository.threadsOfSession(sessionId),
   agentSessionIdsOnThread: (agentId: string, rootMessageId: string, opts: { archived?: boolean } = {}) => conversationRepository.agentSessionIdsOnThread(agentId, rootMessageId, opts),
   markRead: (conversationId: string, userId: string) => conversationRepository.markRead(conversationId, userId),
+  lastReadAt: (conversationId: string, userId: string) => conversationRepository.lastReadAt(conversationId, userId),
   unreadCounts: (conversationIds: string[], userId: string) => conversationRepository.unreadCounts(conversationIds, userId),
   unreadByProject: (projectIds: string[], userId: string) => conversationRepository.unreadByProject(projectIds, userId),
 

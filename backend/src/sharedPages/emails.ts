@@ -5,11 +5,11 @@
  * toujours une version texte.
  */
 
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
-const ACCENT = '#2f5fd0';
-const INK = '#1b1f24';
-const MUTED = '#5f6b7a';
+export const ACCENT = '#2f5fd0';
+export const INK = '#1b1f24';
+export const MUTED = '#5f6b7a';
 const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 
 /** Initiales d'un nom (« Stanislas Giraudet » → « SG »), pour la pastille de l'expéditeur. */
@@ -19,17 +19,17 @@ export function initials(name: string): string {
   return letters.join('').toUpperCase() || '?';
 }
 
-const firstName = (name: string) => name.trim().split(/\s+/)[0] || name;
+export const firstName = (name: string) => name.trim().split(/\s+/)[0] || name;
 
 /** Bouton « à l'épreuve d'Outlook » (tableau + lien plein). */
-function button(label: string, url: string): string {
+export function button(label: string, url: string): string {
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:28px 0 8px"><tr><td align="center" bgcolor="${ACCENT}" style="border-radius:8px">
 <a href="${esc(url)}" target="_blank" style="display:inline-block;padding:14px 30px;font-family:${FONT};font-size:16px;font-weight:600;line-height:20px;color:#ffffff;text-decoration:none;border-radius:8px;background:${ACCENT}">${esc(label)}</a>
 </td></tr></table>`;
 }
 
 /** Gabarit commun : fond gris clair, carte blanche, marque Skipper, pied de page. */
-function layout(opts: { preheader: string; body: string; footer: string; title: string }): string {
+export function layout(opts: { preheader: string; body: string; footer: string; title: string }): string {
   return `<!DOCTYPE html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>${esc(opts.title)}</title>
 <style>@media (max-width:480px){.sk-card{padding:26px 20px 22px!important}.sk-outer{padding:20px 8px!important}}</style></head>

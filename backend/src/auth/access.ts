@@ -26,7 +26,7 @@ export function settingsUser(ctx: AuthContext): User {
   return ctx.actAs ?? user;
 }
 
-const roleLabels: Record<ProjectRole, string> = { viewer: 'lecteur', member: 'membre', admin: 'administrateur' };
+const roleLabels: Record<ProjectRole, string> = { guest: 'invité', viewer: 'lecteur', member: 'membre', admin: 'administrateur' };
 
 export function requireUser(ctx: AuthContext): User {
   if (!ctx.user) throw new AppError('Connexion requise', 'UNAUTHENTICATED');
@@ -71,16 +71,33 @@ export async function requireProject(ctx: AuthContext, projectId: string, min: P
   return role;
 }
 
-/** Projets dont l'utilisateur courant est membre (mémorisés pour la requête) : ce sont eux qui alimentent les listes et les flux. */
+/** L'utilisateur courant n'est qu'invité sur ce projet (rôle `guest`) : il n'y voit que les conversations. */
+export async function isGuestOn(ctx: AuthContext, projectId: string): Promise<boolean> {
+  if (!ctx.user) return false;
+  return (await roleFor(ctx, projectId)) === 'guest';
+}
+
+/**
+ * Projets dont l'utilisateur courant est membre (mémorisés pour la requête) : ce sont eux qui alimentent les listes
+ * et les flux. Les projets où il n'est qu'invité n'en font pas partie : rien de leur activité (sessions, tâches,
+ * demandes, notifications de projet, recherche) ne lui est montré.
+ */
 export async function accessibleProjectIds(ctx: AuthContext): Promise<string[]> {
   const user = requireUser(ctx);
   if (!ctx.projectIds) ctx.projectIds = await userService.projectIdsFor(user.id);
   return ctx.projectIds;
 }
 
-/** Appartenance seule : un événement d'un projet dont un super administrateur n'est pas membre ne lui parvient pas. */
-export const canAccessProject = async (ctx: AuthContext, projectId: string | null | undefined): Promise<boolean> =>
-  Boolean(ctx.user) && (projectId == null || (await memberRoleFor(ctx, projectId)) !== null);
+/**
+ * Appartenance seule, au moins lecteur : un événement d'un projet dont un super administrateur n'est pas membre ne lui
+ * parvient pas, ni ceux d'un projet où l'on n'est qu'invité.
+ */
+export const canAccessProject = async (ctx: AuthContext, projectId: string | null | undefined): Promise<boolean> => {
+  if (!ctx.user) return false;
+  if (projectId == null) return true;
+  const role = await memberRoleFor(ctx, projectId);
+  return role !== null && ROLE_RANK[role] >= ROLE_RANK.viewer;
+};
 
 /** Filtre un flux de subscription selon un prédicat asynchrone. */
 export async function* filterAsync<T>(source: AsyncIterable<T>, predicate: (value: T) => Promise<boolean> | boolean): AsyncGenerator<T> {

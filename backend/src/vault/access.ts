@@ -1,4 +1,4 @@
-import type { ProjectRole } from '../users/types.js';
+import { ROLE_RANK, type ProjectRole } from '../users/types.js';
 import { PERMISSION_RANK, type VaultItem, type VaultLinkScope, type VaultPermission } from './types.js';
 
 /** Faits d'accès d'une personne sur un élément, lus en base. */
@@ -46,7 +46,7 @@ export function hasDirectAccess(item: Pick<VaultItem, 'ownerUserId' | 'ownerProj
 export function canLink(scope: VaultLinkScope, permission: VaultPermission | null, projectRole: ProjectRole | null, direct: boolean): boolean {
   if (!projectRole) return false;
   if (scope === 'project') return atLeast(permission, 'manage') && projectRole === 'admin';
-  return direct && atLeast(permission, 'use') && projectRole !== 'viewer';
+  return direct && atLeast(permission, 'use') && ROLE_RANK[projectRole] >= ROLE_RANK.member;
 }
 
 /** Champs secrets révélables selon le type (la clé privée SSH et le jeton Google ne quittent jamais le serveur). */

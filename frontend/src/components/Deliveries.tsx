@@ -7,7 +7,7 @@ import { formatDuration, timeAgo } from '../lib/humanize';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { useDialogs } from './Dialogs';
 
-type Role = 'ADMIN' | 'MEMBER' | 'VIEWER' | null | undefined;
+type Role = 'ADMIN' | 'MEMBER' | 'VIEWER' | 'GUEST' | null | undefined;
 
 export function DeliveryStatusBadge({ status }: { status: Delivery['status'] }) {
   const s = DELIVERY_STATUS_LABELS[status] ?? { label: String(status).toLowerCase(), variant: 'secondary' };

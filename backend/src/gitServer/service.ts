@@ -200,11 +200,11 @@ export const gitServer = {
     await this.backup(project, { force: true }).catch((err) => log.warn(`[git-server] première sauvegarde de ${project.slug} impossible : ${(err as Error).message}`));
   },
 
-  /** Membres du projet → collaborateurs du dépôt Forgejo (comptes créés au besoin). */
+  /** Membres du projet → collaborateurs du dépôt Forgejo (comptes créés au besoin) ; les invités n'y ont pas accès. */
   async syncMembers(project: Project): Promise<void> {
     if (!project.gitHosted || !forgejoConfigured()) return;
     const { userService } = await import('../users/service.js');
-    const members = await userService.members(project.id);
+    const members = (await userService.members(project.id)).filter((m) => m.role !== 'guest');
     const withUsers = await Promise.all(members.map(async (m) => ({ user: await userService.get(m.userId), role: m.role })));
     await forgejoRepos.syncCollaborators(hostedRepo(project.slug).name, withUsers);
   },

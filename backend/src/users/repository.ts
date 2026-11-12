@@ -322,9 +322,26 @@ export const userRepository = {
   },
 
   /** Identifiants des projets auxquels l'utilisateur appartient. */
+  /** Projets où la personne est au moins lectrice : ceux où elle n'est qu'invitée (conversations seulement) n'en sont pas. */
   async projectIdsForUser(userId: string): Promise<string[]> {
-    const { rows } = await pool.query<{ project_id: string }>('SELECT project_id FROM project_members WHERE user_id = $1', [userId]);
+    const { rows } = await pool.query<{ project_id: string }>(`SELECT project_id FROM project_members WHERE user_id = $1 AND role <> 'guest'`, [userId]);
     return rows.map((r) => r.project_id);
+  },
+
+  /** La personne a-t-elle au moins une appartenance de lecteur ou plus (hors espace personnel) ? Sinon elle n'a que des accès d'invité. */
+  async hasFullMembership(userId: string): Promise<boolean> {
+    const { rows } = await pool.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM project_members m JOIN projects p ON p.id = m.project_id WHERE m.user_id = $1 AND m.role <> 'guest' AND p.personal_owner_id IS NULL`,
+      [userId],
+    );
+    return Number(rows[0].n) > 0;
+  },
+
+  /** Rôle de plusieurs personnes sur un projet (absentes : pas membres). */
+  async rolesFor(projectId: string, userIds: string[]): Promise<Map<string, ProjectRole>> {
+    if (!userIds.length) return new Map();
+    const { rows } = await pool.query<{ user_id: string; role: ProjectRole }>('SELECT user_id, role FROM project_members WHERE project_id = $1 AND user_id = ANY($2::uuid[])', [projectId, userIds]);
+    return new Map(rows.map((r) => [r.user_id, r.role]));
   },
 
   /** Ajoute ou met à jour une appartenance ; un invité des pages partagées qui entre dans un projet devient une personne ordinaire. */

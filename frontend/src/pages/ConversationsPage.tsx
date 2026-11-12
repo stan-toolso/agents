@@ -29,7 +29,7 @@ interface ProjectAgent {
   avatar: { emoji: string | null; color: string | null };
 }
 interface Data {
-  project: { id: string; name: string; description: string | null; myRole: 'ADMIN' | 'MEMBER' | 'VIEWER'; isPersonal: boolean; unreadMessages: number; conversations: Conversation[]; members: Member[]; agents: ProjectAgent[] } | null;
+  project: { id: string; name: string; description: string | null; myRole: 'ADMIN' | 'MEMBER' | 'VIEWER' | 'GUEST'; isPersonal: boolean; unreadMessages: number; conversations: Conversation[]; members: Member[]; agents: ProjectAgent[] } | null;
 }
 
 /** `task-<id>` : le fil d'une tâche ouvert dans l'onglet (fils de tâches suivis). */
@@ -155,11 +155,15 @@ export default function ConversationsPage() {
   if (error && !data) return <Alert variant="danger">Erreur : {error.message}</Alert>;
   if (!project) return <Alert variant="warning">Projet introuvable.</Alert>;
   if (project.isPersonal) return <Alert variant="info">L'espace personnel n'a pas de canaux : ses chats en tiennent lieu.</Alert>;
-  const canWrite = project.myRole === 'ADMIN' || project.myRole === 'MEMBER';
+  // Les membres gèrent les canaux ; les invités y écrivent sans les gérer ; les lecteurs lisent.
+  const canManage = project.myRole === 'ADMIN' || project.myRole === 'MEMBER';
+  const guest = project.myRole === 'GUEST';
+  const canPost = canManage || guest;
   const isAdmin = project.myRole === 'ADMIN';
   const active = channels.filter((c) => !c.archivedAt);
   const archived = channels.filter((c) => c.archivedAt);
-  const people = project.members.filter((m) => m.user.kind !== 'AGENT');
+  const people = project.members.filter((m) => m.user.kind !== 'AGENT' && m.role !== 'GUEST');
+  const guests = project.members.filter((m) => m.user.kind !== 'AGENT' && m.role === 'GUEST');
   const agents = project.agents.filter((a) => a.enabled);
 
   return (
@@ -168,7 +172,7 @@ export default function ConversationsPage() {
         project={project}
         active="conversations"
         actions={
-          canWrite ? (
+          canManage ? (
             <Button size="sm" variant="outline-primary" onClick={() => setEditing({ channel: null })}>
               <i className="bi bi-plus-lg me-1" /> Canal
             </Button>
@@ -211,7 +215,7 @@ export default function ConversationsPage() {
               )}
             </>
           )}
-          {canWrite && (
+          {canManage && (
             <button type="button" className="ch-side-toggle" onClick={() => setEditing({ channel: null })}>
               <i className="bi bi-plus" /> Nouveau canal
             </button>
@@ -239,7 +243,7 @@ export default function ConversationsPage() {
 
         <section className="ch-main">
           {taskId ? (
-            <ConversationTaskThread key={taskId} taskId={taskId} canWrite={canWrite} />
+            <ConversationTaskThread key={taskId} taskId={taskId} canWrite={canManage} />
           ) : current ? (
             <>
               <div className="ch-head">
@@ -254,7 +258,7 @@ export default function ConversationsPage() {
                 </div>
                 <div className="ch-head-topic">{current.topic || <span className="text-secondary">Pas de sujet.</span>}</div>
                 <div className="ch-head-actions">
-                  {canWrite && (
+                  {canManage && (
                     <Button size="sm" variant="link" className="text-secondary p-0" title="Modifier le nom ou le sujet" onClick={() => setEditing({ channel: current })}>
                       <i className="bi bi-pencil" />
                     </Button>
@@ -275,7 +279,7 @@ export default function ConversationsPage() {
                 </div>
               </div>
               <div className="ch-body ch-scroll">
-                <ChannelThread key={current.id} conversationId={current.id} canWrite={canWrite} />
+                <ChannelThread key={current.id} conversationId={current.id} canWrite={canPost} guest={guest} />
               </div>
             </>
           ) : (
@@ -286,15 +290,21 @@ export default function ConversationsPage() {
         <aside className="ch-people">
           <div className="ch-side-title">Qui est là</div>
           <ul className="ch-people-list">
-            {agents.map((a) => (
-              <li key={a.id} title={a.description || undefined}>
-                <Link to={`/projects/${id}/agents/${a.id}`} className="ch-person">
+            {agents.map((a) => {
+              const inner = (
+                <>
                   <AgentAvatar agent={a} size={22} />
                   <span className="ch-person-name">{a.name}</span>
                   <span className="ch-person-detail">{agentKindLabels[a.kind]}</span>
-                </Link>
-              </li>
-            ))}
+                </>
+              );
+              return (
+                <li key={a.id} title={a.description || undefined}>
+                  {/* La fiche d'un agent est fermée aux invités : pour eux, le nom seulement. */}
+                  {guest ? <span className="ch-person">{inner}</span> : <Link to={`/projects/${id}/agents/${a.id}`} className="ch-person">{inner}</Link>}
+                </li>
+              );
+            })}
             {people.map((m) => (
               <li key={m.user.id}>
                 <span className="ch-person">
@@ -305,8 +315,28 @@ export default function ConversationsPage() {
               </li>
             ))}
           </ul>
+          {guests.length > 0 && (
+            <>
+              <div className="ch-side-title ch-side-title-guests" title="Invités du projet : ils participent aux conversations, sans voir les sessions, les tâches ni le coffre">
+                Invités
+              </div>
+              <ul className="ch-people-list">
+                {guests.map((m) => (
+                  <li key={m.user.id}>
+                    <span className="ch-person">
+                      <span className="ch-initials ch-initials-guest">{initialsOf(m.user.name || m.user.email)}</span>
+                      <span className="ch-person-name">{m.user.name || m.user.email}</span>
+                      <span className="ch-person-detail">{m.user.lastLoginAt ? timeAgo(m.user.lastLoginAt) : 'jamais connecté'}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
           <div className="ch-side-hint">
-            Mentionnez une personne (<code>@Nom</code>) pour la prévenir ; mentionnez un agent pour qu'il réponde dans le fil.
+            {guest
+              ? <>Vous êtes invité sur ce projet : écrivez dans les canaux, répondez dans les fils, mentionnez une personne (<code>@Nom</code>) pour la prévenir ou un agent pour qu'il réponde.</>
+              : <>Mentionnez une personne (<code>@Nom</code>) pour la prévenir ; mentionnez un agent pour qu'il réponde dans le fil.</>}
           </div>
         </aside>
       </div>

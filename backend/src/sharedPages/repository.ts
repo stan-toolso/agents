@@ -112,7 +112,7 @@ export const sharedPageRepository = {
     const { rows } = await pool.query<Row>(
       `SELECT p.* FROM shared_pages p
         WHERE p.project_id = $1
-          AND (p.owner_id = $2 OR ($3 AND p.link_access) OR ($3 AND p.project_access AND EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.project_id AND pm.user_id = $2)) OR EXISTS (SELECT 1 FROM shared_page_members m WHERE m.page_id = p.id AND m.user_id = $2))
+          AND (p.owner_id = $2 OR ($3 AND p.link_access) OR ($3 AND p.project_access AND EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.project_id AND pm.user_id = $2 AND pm.role <> 'guest')) OR EXISTS (SELECT 1 FROM shared_page_members m WHERE m.page_id = p.id AND m.user_id = $2))
         ORDER BY p.updated_at DESC`,
       [projectId, userId, openLinks],
     );
@@ -124,7 +124,7 @@ export const sharedPageRepository = {
     const { rows } = await pool.query<Row>(
       `SELECT p.* FROM shared_page_favorites f JOIN shared_pages p ON p.id = f.page_id
         WHERE f.user_id = $1
-          AND (p.owner_id = $1 OR ($2 AND p.link_access) OR ($2 AND p.project_access AND p.project_id IS NOT NULL AND EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.project_id AND pm.user_id = $1)) OR EXISTS (SELECT 1 FROM shared_page_members m WHERE m.page_id = p.id AND m.user_id = $1))
+          AND (p.owner_id = $1 OR ($2 AND p.link_access) OR ($2 AND p.project_access AND p.project_id IS NOT NULL AND EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.project_id AND pm.user_id = $1 AND pm.role <> 'guest')) OR EXISTS (SELECT 1 FROM shared_page_members m WHERE m.page_id = p.id AND m.user_id = $1))
         ORDER BY f.created_at`,
       [userId, openLinks],
     );
@@ -309,7 +309,7 @@ export const sharedPageRepository = {
     const { rows } = await pool.query<Row & { by_session: string }>(
       `SELECT p.*, s.by_session FROM shared_pages p
          JOIN (SELECT DISTINCT page_id, session_id AS by_session FROM shared_page_versions WHERE session_id = ANY($1::uuid[])) s ON s.page_id = p.id
-        WHERE p.owner_id = $2 OR p.link_access OR (p.project_access AND p.project_id IS NOT NULL AND EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.project_id AND pm.user_id = $2)) OR EXISTS (SELECT 1 FROM shared_page_members m WHERE m.page_id = p.id AND m.user_id = $2)
+        WHERE p.owner_id = $2 OR p.link_access OR (p.project_access AND p.project_id IS NOT NULL AND EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.project_id AND pm.user_id = $2 AND pm.role <> 'guest')) OR EXISTS (SELECT 1 FROM shared_page_members m WHERE m.page_id = p.id AND m.user_id = $2)
         ORDER BY p.updated_at DESC`,
       [sessionIds, viewerId],
     );

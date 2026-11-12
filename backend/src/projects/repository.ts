@@ -103,10 +103,15 @@ export const projectRepository = {
     return rows.map(toProject);
   },
 
-  /** Projets dont l'utilisateur est membre, sans son espace personnel (sauf `includePersonal`). */
-  async listForUser(userId: string, opts: { includePersonal?: boolean } = {}): Promise<Project[]> {
+  /**
+   * Projets dont l'utilisateur est membre (au moins lecteur), sans son espace personnel (sauf `includePersonal`) ni
+   * ceux où il n'est qu'invité (`guests: 'include'` les ajoute, `guests: 'only'` ne garde qu'eux).
+   */
+  async listForUser(userId: string, opts: { includePersonal?: boolean; guests?: 'exclude' | 'include' | 'only' } = {}): Promise<Project[]> {
+    const guests = opts.guests ?? 'exclude';
+    const roleFilter = guests === 'include' ? '' : guests === 'only' ? " AND m.role = 'guest'" : " AND m.role <> 'guest'";
     const { rows } = await pool.query<ProjectRow>(
-      `SELECT p.* FROM projects p JOIN project_members m ON m.project_id = p.id WHERE m.user_id = $1${opts.includePersonal ? '' : ' AND p.personal_owner_id IS NULL'} ORDER BY p.name ASC`,
+      `SELECT p.* FROM projects p JOIN project_members m ON m.project_id = p.id WHERE m.user_id = $1${opts.includePersonal ? '' : ' AND p.personal_owner_id IS NULL'}${roleFilter} ORDER BY p.name ASC`,
       [userId],
     );
     return rows.map(toProject);

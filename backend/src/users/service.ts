@@ -1,6 +1,7 @@
 import { AppError, NotFoundError } from '../errors.js';
 import { projectService } from '../projects/service.js';
 import { userRepository } from './repository.js';
+import { isRestrictedAccount } from './restricted.js';
 import type { GoogleProfile, OpenItems, ProjectMember, ProjectRole, User } from './types.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -124,6 +125,14 @@ export const userService = {
   },
 
   projectIdsFor: (userId: string) => userRepository.projectIdsForUser(userId),
+  rolesFor: (projectId: string, userIds: string[]) => userRepository.rolesFor(projectId, userIds),
+
+  /**
+   * La personne n'a que des accès d'invité (conversations des projets où elle est invitée, artefacts partagés avec
+   * elle) : ni administratrice, ni membre (lectrice ou plus) d'aucun projet ; un invité des pages l'est a fortiori.
+   * Pas d'espace personnel ni de chat pour elle (voir users/restricted.ts).
+   */
+  conversationsOnly: (user: Pick<User, 'id' | 'isAdmin' | 'isSuperAdmin' | 'isGuest' | 'kind'>) => isRestrictedAccount(user),
 
   /** Invite un e-mail sur un projet : crée l'utilisateur s'il n'existe pas, puis l'appartenance (ou met à jour le rôle). */
   async invite(projectId: string, email: string, role: ProjectRole, invitedBy: User): Promise<ProjectMember> {

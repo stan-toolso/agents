@@ -4,7 +4,8 @@ import { auditService } from '../audit/service.js';
 import { actionLabel, targetTypeLabel } from '../audit/labels.js';
 import { parseAuditFilter, type AuditEntry, type RawAuditFilter } from '../audit/types.js';
 import { DateTimeResolver, JSONResolver } from 'graphql-scalars';
-import { accessibleProjectIds, canAccessProject, filterAsync, memberRoleFor, requireAdmin, requireProject, requireSuperAdmin, requireUser, roleFor, settingsUser, type AuthContext } from '../auth/access.js';
+import { accessibleProjectIds, canAccessProject, filterAsync, isGuestOn, memberRoleFor, requireAdmin, requireProject, requireSuperAdmin, requireUser, roleFor, settingsUser, type AuthContext } from '../auth/access.js';
+import { guardTypeForGuests } from './guestFields.js';
 import { agentService } from '../agents/service.js';
 import type { Agent, AgentAccountKind, AgentAction, AgentActionInput, AgentInput, AgentKind, AgentManager, AgentManagerRole, AgentTemplate } from '../agents/types.js';
 import { slugify } from '../projects/slug.js';
@@ -122,6 +123,7 @@ import { formatRule, type PermissionRule } from '../permissions/types.js';
 import type { CreateScheduleInput, ScheduleRun, SessionSchedule, SessionScheduleInput } from '../schedules/types.js';
 import { scheduleRepository } from '../schedules/repository.js';
 import { userService } from '../users/service.js';
+import { cleanInviteMessage, sendProjectGuestInvitation } from '../users/invitations.js';
 import { userRepository } from '../users/repository.js';
 import { cockpitService } from '../cockpit/service.js';
 import { projectPageService } from '../cockpit/projectPages.js';
@@ -134,7 +136,7 @@ import { personAuthor } from '../sessions/instructionAuthor.js';
 
 type Ctx = AuthContext;
 /** Message d'un canal enrichi par le résolveur de la liste : ses réactions et ses réponses, lues en une fois. */
-type MessageWithRows = Message & { reactionRows?: MessageReaction[]; attachmentRows?: MessageAttachment[]; replyStat?: { count: number; lastAt: Date | null } | null };
+type MessageWithRows = Message & { reactionRows?: MessageReaction[]; attachmentRows?: MessageAttachment[]; replyStat?: { count: number; lastAt: Date | null } | null; authorRole?: ProjectRole | null };
 type GqlRole = Uppercase<ProjectRole>;
 const fromGqlRole = (r?: GqlRole | null): ProjectRole => ((r ?? 'MEMBER').toLowerCase() as ProjectRole);
 
@@ -225,9 +227,11 @@ const guardConversation = async (ctx: Ctx, id: string, min: ProjectRole) => {
   const role = await requireProject(ctx, conversation.projectId, min);
   return { conversation, role };
 };
+// Les canaux sont ouverts aux invités du projet (rôle `guest`) : lire, écrire, réagir ; les gardes qui suivent ne
+// demandent que ce rôle, et la propriété du message reste vérifiée par chaque mutation.
 const guardMessage = async (ctx: Ctx, id: string) => {
   const message = await conversationService.getMessage(id);
-  const { conversation, role } = await guardConversation(ctx, message.conversationId, 'member');
+  const { conversation, role } = await guardConversation(ctx, message.conversationId, 'guest');
   return { message, conversation, role };
 };
 const guardFolder = async (ctx: Ctx, id: string, min: ProjectRole) => requireProject(ctx, (await contextService.getFolder(id)).projectId, min);
@@ -528,13 +532,15 @@ export const resolvers = {
   Conversation: {
     project: (c: Conversation) => projectService.get(c.projectId),
     unreadCount: async (c: Conversation, _: unknown, ctx: Ctx) => (ctx.user ? ((await conversationService.unreadCounts([c.id], ctx.user.id)).get(c.id) ?? 0) : 0),
+    lastReadAt: async (c: Conversation, _: unknown, ctx: Ctx) => (ctx.user ? conversationService.lastReadAt(c.id, ctx.user.id) : null),
     messageCount: (c: Conversation) => conversationService.countMessages(c.id),
-    // Les réactions et les comptes de réponses de la page sont lus une fois et accrochés à chaque message.
+    // Les réactions, les comptes de réponses et les rôles des auteurs de la page sont lus une fois et accrochés à chaque message.
     messages: async (c: Conversation, args: { before?: Date | null; limit?: number | null }) => {
       const messages = await conversationService.messages(c.id, { before: args.before ?? null, limit: args.limit ?? undefined });
       const ids = messages.map((m) => m.id);
-      const [reactions, replies, attachments] = await Promise.all([conversationService.reactions(ids), conversationService.replyStats(messages.filter((m) => !m.parentId).map((m) => m.id)), conversationService.attachments(ids)]);
-      return messages.map((m): MessageWithRows => ({ ...m, reactionRows: reactions.filter((r) => r.messageId === m.id), attachmentRows: attachments.filter((a) => a.messageId === m.id), replyStat: replies.get(m.id) ?? { count: 0, lastAt: null } }));
+      const authorIds = [...new Set(messages.map((m) => m.authorUserId).filter((id): id is string => Boolean(id)))];
+      const [reactions, replies, attachments, roles] = await Promise.all([conversationService.reactions(ids), conversationService.replyStats(messages.filter((m) => !m.parentId).map((m) => m.id)), conversationService.attachments(ids), userService.rolesFor(c.projectId, authorIds)]);
+      return messages.map((m): MessageWithRows => ({ ...m, reactionRows: reactions.filter((r) => r.messageId === m.id), attachmentRows: attachments.filter((a) => a.messageId === m.id), replyStat: replies.get(m.id) ?? { count: 0, lastAt: null }, authorRole: m.authorUserId ? (roles.get(m.authorUserId) ?? null) : null }));
     },
     mentionables: (c: Conversation) => conversationService.mentionables(c.projectId),
   },
@@ -561,6 +567,11 @@ export const resolvers = {
       if (m.parentId) return [];
       const ids = await conversationService.busySessionIdsOnThread(m.id);
       return ids.length ? sessionService.list({ ids, archived: 'all', limit: 20 }) : [];
+    },
+    authorRole: async (m: MessageWithRows) => {
+      if (!m.authorUserId) return null;
+      const role = m.authorRole !== undefined ? m.authorRole : await userService.memberRoleFor(m.authorUserId, (await conversationService.get(m.conversationId)).projectId);
+      return role ? role.toUpperCase() : null;
     },
   },
 
@@ -909,7 +920,8 @@ export const resolvers = {
     // Un espace personnel n'a pas de canaux (ses chats suffisent).
     conversations: (project: Project, args: { includeArchived?: boolean | null }) => (isPersonalProject(project) ? [] : conversationService.list(project.id, { includeArchived: Boolean(args.includeArchived) })),
     followedTaskThreads: async (project: Project, args: { limit?: number | null }, ctx: Ctx) => {
-      if (!ctx.user || isPersonalProject(project)) return [];
+      // Un invité n'a pas accès aux tâches : aucun fil de tâche pour lui.
+      if (!ctx.user || isPersonalProject(project) || (await isGuestOn(ctx, project.id))) return [];
       const limit = Math.min(Math.max(args.limit ?? 30, 1), 100);
       const threads = await conversationService.followedTaskThreads(project.id, ctx.user.id, ctx.user.email ?? null, limit);
       return threads.map((t) => ({ id: t.conversation.id, slug: t.conversation.slug, taskId: t.conversation.taskId, messageCount: t.messageCount, lastMessageAt: t.conversation.lastMessageAt }));
@@ -1032,6 +1044,7 @@ export const resolvers = {
     kind: (u: User) => (u.kind ?? 'person').toUpperCase(),
     agent: async (u: User, _: unknown, ctx: Ctx) => (u.kind === 'agent' ? ((await loadersOf(ctx).agent(u.id)) ?? null) : null),
     hasPassword: (u: User, _: unknown, ctx: Ctx) => (ctx.user && (ctx.user.id === u.id || ctx.user.isAdmin) ? Boolean(u.passwordSetAt) : null),
+    conversationsOnly: (u: User, _: unknown, ctx: Ctx) => (ctx.user?.id === u.id ? userService.conversationsOnly(u) : null),
   },
 
   Query: {
@@ -1406,10 +1419,12 @@ export const resolvers = {
       const user = requireUser(ctx);
       return args.all && user.isSuperAdmin ? projectService.list() : projectService.listForUser(user.id, { includePersonal: args.includePersonal ?? false });
     },
+    // Ouvert aux invités du projet : seuls les champs de GUEST_TYPE_FIELDS.Project leur répondent (guestFields.ts).
     project: async (_: unknown, args: { id: string }, ctx: Ctx) => {
-      await requireProject(ctx, args.id);
+      await requireProject(ctx, args.id, 'guest');
       return projectService.get(args.id);
     },
+    guestProjects: (_: unknown, __: unknown, ctx: Ctx) => projectService.listForUser(requireUser(ctx).id, { guests: 'only' }),
     requests: async (_: unknown, args: { status?: GqlRequestStatus | null; sessionId?: string | null; limit?: number | null; newestFirst?: boolean | null }, ctx: Ctx) => {
       if (args.sessionId) await guardSession(ctx, args.sessionId, 'viewer');
       return requestService.list({
@@ -1453,16 +1468,17 @@ export const resolvers = {
     },
     cockpitLayout: (_: unknown, args: { scope: string }, ctx: Ctx) => cockpitService.resolve(requireUser(ctx), args.scope),
     cockpitLayoutHistory: (_: unknown, args: { scope: string }, ctx: Ctx) => cockpitService.history(requireUser(ctx), args.scope),
-    conversation: async (_: unknown, args: { id: string }, ctx: Ctx) => (await guardConversation(ctx, args.id, 'viewer')).conversation,
+    conversation: async (_: unknown, args: { id: string }, ctx: Ctx) => (await guardConversation(ctx, args.id, 'guest')).conversation,
     conversationBySlug: async (_: unknown, args: { projectId: string; slug: string }, ctx: Ctx) => {
-      await requireProject(ctx, args.projectId);
+      await requireProject(ctx, args.projectId, 'guest');
       return conversationService.resolve(args.projectId, args.slug).catch(() => null);
     },
     inbox: async (_: unknown, args: { projectId?: string | null }, ctx: Ctx) => inboxService.build(await inboxProjectIds(ctx, args.projectId)),
     inboxCounts: async (_: unknown, args: { projectId?: string | null }, ctx: Ctx) => inboxService.counts(await inboxProjectIds(ctx, args.projectId)),
     unreadMessagesByProject: async (_: unknown, __: unknown, ctx: Ctx) => {
       const user = requireUser(ctx);
-      const projects = await projectService.listForUser(user.id, { includePersonal: false });
+      // Les projets où l'on n'est qu'invité comptent : ce sont leurs conversations que l'on suit.
+      const projects = await projectService.listForUser(user.id, { includePersonal: false, guests: 'include' });
       const counts = await conversationService.unreadByProject(projects.map((p) => p.id), user.id);
       return projects.map((project) => ({ project, count: counts.get(project.id) ?? 0 }));
     },
@@ -1863,12 +1879,15 @@ export const resolvers = {
       const admin = requireAdmin(ctx);
       return signInService.createPasswordLink(await userService.get(args.userId), admin, Boolean(args.sendEmail));
     },
-    inviteProjectMember: async (_: unknown, args: { projectId: string; email: string; role?: GqlRole | null }, ctx: Ctx) => {
+    inviteProjectMember: async (_: unknown, args: { projectId: string; email: string; role?: GqlRole | null; message?: string | null; notify?: boolean | null }, ctx: Ctx) => {
       const user = requireUser(ctx);
       await requireProject(ctx, args.projectId, 'admin');
       await personalService.assertNotPersonal(args.projectId, 'Inviter quelqu\'un');
-      const member = await userService.invite(args.projectId, args.email, fromGqlRole(args.role), user);
+      const role = fromGqlRole(args.role);
+      const member = await userService.invite(args.projectId, args.email, role, user);
       syncHostedMembers(args.projectId);
+      // Un invité (conversations seulement) reçoit un e-mail qui le mène droit aux canaux du projet.
+      if (role === 'guest' && args.notify !== false) void sendProjectGuestInvitation(user, await projectService.get(args.projectId), await userService.get(member.userId), cleanInviteMessage(args.message));
       return member;
     },
     updateProjectMemberRole: async (_: unknown, args: { projectId: string; userId: string; role: GqlRole }, ctx: Ctx) => {
@@ -1904,6 +1923,8 @@ export const resolvers = {
 
     createProject: async (_: unknown, { input }: { input: CreateProjectInput }, ctx: Ctx) => {
       const user = requireUser(ctx);
+      // Un compte qui n'a que des accès d'invité ne crée pas de projet : il y lancerait des sessions avec les crédits de la cellule.
+      if (await userService.conversationsOnly(user)) throw new AppError("Créer un projet est réservé aux membres d'un projet : votre compte ne donne accès qu'aux conversations et aux artefacts partagés avec vous", 'FORBIDDEN');
       const project = await projectService.create(input, user.id);
       await userService.addCreator(project.id, user);
       syncHostedMembers(project.id);
@@ -2162,7 +2183,9 @@ export const resolvers = {
       return conversationService.setArchived(args.id, args.archived);
     },
     postMessage: async (_: unknown, args: { conversationId: string; body: string; parentId?: string | null; attachments?: AttachmentInput[] | null }, ctx: Ctx) => {
-      await guardConversation(ctx, args.conversationId, 'member');
+      // Les invités écrivent dans les canaux (c'est leur raison d'être) ; les lecteurs non, comme avant.
+      const { role } = await guardConversation(ctx, args.conversationId, 'guest');
+      if (role === 'viewer') throw new AppError('Cette action demande le rôle membre sur le projet', 'FORBIDDEN');
       return conversationService.post(args.conversationId, args.body, actorOf(requireUser(ctx)), { parentId: args.parentId ?? null, attachments: args.attachments ?? null });
     },
     updateMessage: async (_: unknown, args: { id: string; body: string; attachments?: AttachmentInput[] | null; removeAttachmentIds?: string[] | null }, ctx: Ctx) => {
@@ -2176,11 +2199,12 @@ export const resolvers = {
       return conversationService.deleteMessage(args.id);
     },
     toggleMessageReaction: async (_: unknown, args: { messageId: string; emoji: string }, ctx: Ctx) => {
-      await guardMessage(ctx, args.messageId);
+      const { role } = await guardMessage(ctx, args.messageId);
+      if (role === 'viewer') throw new AppError('Cette action demande le rôle membre sur le projet', 'FORBIDDEN');
       return (await conversationService.toggleReaction(args.messageId, args.emoji, actorOf(requireUser(ctx)))).added;
     },
     markConversationRead: async (_: unknown, args: { id: string }, ctx: Ctx) => {
-      await guardConversation(ctx, args.id, 'viewer');
+      await guardConversation(ctx, args.id, 'guest');
       await conversationService.markRead(args.id, requireUser(ctx).id);
       return true;
     },
@@ -2521,3 +2545,8 @@ function sourceView(s: DataSource, full: boolean) {
     attemptedAt: s.attemptedAt,
   };
 }
+
+// Types atteints par les invités d'un projet (rôle `guest`) : seuls les champs de GUEST_TYPE_FIELDS leur répondent.
+resolvers.Project = guardTypeForGuests('Project', (p: Project) => p.id, resolvers.Project);
+resolvers.Session = guardTypeForGuests('Session', (s: Session) => s.projectId, resolvers.Session);
+resolvers.Agent = guardTypeForGuests('Agent', (a: Agent) => a.projectId, resolvers.Agent);
