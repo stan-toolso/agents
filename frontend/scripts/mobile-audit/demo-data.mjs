@@ -700,6 +700,50 @@ const gitStatus = (a) => {
   };
 };
 
+// ---- Cockpit configurable ---------------------------------------------------------------------------------------
+
+const ckBlock = (widget, region, params) => ({ id: `d-${widget.replace(/[._]/g, '-')}`, kind: 'builtin', widget, region, ...(params ? { params } : {}) });
+const COCKPIT_HOME = { v: 1, blocks: [ckBlock('tile.requests', 'tiles'), ckBlock('tile.agents', 'tiles'), ckBlock('tile.tasks', 'tiles'), ckBlock('tile.usage', 'tiles'), ckBlock('list.todo', 'main'), ckBlock('list.running_sessions', 'main'), ckBlock('list.attention_tasks', 'main'), ckBlock('list.pull_requests', 'main'), ckBlock('usage.card', 'side'), ckBlock('list.activity', 'side'), ckBlock('projects.table', 'full')] };
+const COCKPIT_PROJECT = { v: 1, blocks: [ckBlock('tile.requests', 'tiles'), ckBlock('tile.agents', 'tiles'), ckBlock('tile.tasks', 'tiles'), ckBlock('tile.usage', 'tiles'), ckBlock('tile.pull_requests', 'tiles'), ckBlock('channel', 'main'), ckBlock('list.todo', 'main'), ckBlock('list.team', 'main'), ckBlock('list.attention_tasks', 'main'), ckBlock('tasks.stages', 'side'), ckBlock('tasks.weekly', 'side'), ckBlock('list.upcoming', 'side'), ckBlock('list.activity', 'side'), ckBlock('usage.top_sessions', 'side')] };
+const COCKPIT_PERSONAL = { v: 1, blocks: [ckBlock('tile.requests', 'tiles'), ckBlock('tile.agents', 'tiles'), ckBlock('tile.tasks', 'tiles'), ckBlock('tile.usage', 'tiles'), ckBlock('list.todo', 'main'), ckBlock('list.attention_tasks', 'main'), ckBlock('tasks.stages', 'side'), ckBlock('list.upcoming', 'side'), ckBlock('list.activity', 'side'), ckBlock('usage.top_sessions', 'side')] };
+const ckParam = (key, label, type, extra = {}) => ({ __typename: 'CockpitWidgetParam', key, label, type, description: null, min: null, max: null, options: null, default: null, ...extra });
+const ckLimit = (d, max = 20) => ckParam('limit', 'Nombre de lignes', 'int', { min: 1, max, default: d });
+const ckTags = ckParam('tags', 'Étiquettes', 'tags', { description: 'Ne garder que les tâches portant une de ces étiquettes' });
+const ckWidget = (key, label, description, scopes, region, regions, singleton, params = []) => ({ __typename: 'CockpitWidget', key, label, description, scopes, region, regions, singleton, params });
+const COCKPIT_CATALOG = [
+  ckWidget('tile.requests', 'Demandes en attente', 'Demandes des agents qui attendent une réponse.', ['home', 'project'], 'tiles', ['tiles'], true),
+  ckWidget('tile.agents', 'Agents au travail', 'Sessions au travail et en attente.', ['home', 'project'], 'tiles', ['tiles'], true),
+  ckWidget('tile.tasks', 'Tâches ouvertes', 'Tâches à faire et en cours, retards.', ['home', 'project'], 'tiles', ['tiles'], true),
+  ckWidget('tile.usage', 'Consommation du mois', 'Coût du mois, plafond et limites Claude.', ['home', 'project'], 'tiles', ['tiles'], true),
+  ckWidget('tile.pull_requests', 'Pull requests', 'Pull requests à fusionner et branches en préparation.', ['project'], 'tiles', ['tiles'], true),
+  ckWidget('list.todo', 'À traiter', 'Demandes, sessions en erreur, tâches à l’agent arrêté, PR à fusionner.', ['home', 'project'], 'main', ['main', 'side', 'full'], true),
+  ckWidget('list.running_sessions', 'Agents au travail', 'Sessions dont l’agent travaille.', ['home', 'project'], 'main', ['main', 'side', 'full'], false, [ckLimit(10, 30)]),
+  ckWidget('list.team', 'L’équipe en ce moment', 'Chaque membre, ses sessions et ses tâches.', ['project'], 'main', ['main', 'side', 'full'], true, [ckParam('onlyAgents', 'Agents seulement', 'bool', { default: false })]),
+  ckWidget('list.attention_tasks', 'Tâches à surveiller', 'Tâches urgentes, hautes ou en retard.', ['home', 'project'], 'main', ['main', 'side', 'full'], false, [ckTags, ckLimit(10, 30)]),
+  ckWidget('list.pull_requests', 'Pull requests à traiter', 'Pull requests à fusionner et brouillons.', ['home', 'project'], 'main', ['main', 'side', 'full'], false, [ckLimit(10, 30)]),
+  ckWidget('list.upcoming', 'Prochainement', 'Prochaines planifications et échéances.', ['project'], 'side', ['main', 'side', 'full'], false, [ckLimit(6, 20)]),
+  ckWidget('list.activity', 'Activité récente', 'Sessions terminées, PR fusionnées, tâches terminées.', ['home', 'project'], 'side', ['main', 'side', 'full'], false, [ckLimit(8, 30)]),
+  ckWidget('usage.top_sessions', 'Sessions les plus coûteuses du mois', 'Les sessions qui ont le plus consommé.', ['home', 'project'], 'side', ['main', 'side', 'full'], false, [ckLimit(5, 20)]),
+  ckWidget('tasks.stages', 'Flux des tâches', 'Tâches ouvertes par étiquette d’état.', ['project'], 'side', ['main', 'side', 'full'], false, [ckTags]),
+  ckWidget('tasks.weekly', 'Débit hebdomadaire', 'Tâches créées et terminées par semaine.', ['project'], 'side', ['main', 'side', 'full'], false, [ckParam('weeks', 'Semaines', 'int', { min: 2, max: 26, default: 8 }), ckTags]),
+  ckWidget('usage.card', 'Consommation', 'Consommation par jour, limites Claude, sessions coûteuses.', ['home', 'project'], 'side', ['main', 'side', 'full'], true),
+  ckWidget('projects.table', 'Projets', 'Une ligne par projet.', ['home'], 'full', ['main', 'side', 'full'], true),
+  ckWidget('channel', 'Canal #général', 'Le canal général du projet.', ['project'], 'main', ['main', 'side', 'full'], true, [ckLimit(6, 20)]),
+  ckWidget('text', 'Texte', 'Un texte libre en Markdown.', ['home', 'project'], 'main', ['main', 'side', 'full'], false, [ckParam('markdown', 'Texte (Markdown)', 'markdown', { default: '' })]),
+];
+const cockpitState = { layouts: new Map(), versions: [] };
+const cockpitKind = (scope) => (scope === 'home' ? 'home' : 'project');
+const cockpitDefault = (scope) => (scope === 'home' ? COCKPIT_HOME : byId(allProjects, scope.replace(/^project:/, ''))?.isPersonal ? COCKPIT_PERSONAL : COCKPIT_PROJECT);
+const cockpitLayout = (scope) => {
+  const st = cockpitState.layouts.get(scope);
+  const kind = cockpitKind(scope);
+  return {
+    __typename: 'CockpitLayout', scope, kind, projectId: kind === 'project' ? scope.replace(/^project:/, '') : null,
+    layout: st?.layout ?? cockpitDefault(scope), version: st?.version ?? 0, isDefault: !st?.layout, canEdit: true,
+    updatedAt: st ? ago(0) : null, updatedBy: st ? U.me : null, catalog: COCKPIT_CATALOG.filter((w) => w.scopes.includes(kind)),
+  };
+};
+
 // ---- Requêtes racine ----------------------------------------------------------------------------------------------
 
 const byId = (list, id) => list.find((x) => x.id === id) ?? null;
@@ -873,6 +917,28 @@ export const demoRoot = {
   unreadNotificationCount: () => notifications.filter((n) => !n.readAt).length,
   dashboard,
   projectDashboard: (a) => projectDashboard(a.id),
+  // Cockpit configurable : agencements par défaut (copie de backend/src/cockpit/defaults.ts) et catalogue abrégé.
+  cockpitLayout: (a) => cockpitLayout(a.scope),
+  cockpitLayoutHistory: (a) => cockpitState.versions.filter((v) => v.scope === a.scope).map(({ scope: _s, ...v }) => v).reverse(),
+  updateCockpitLayout: (a) => {
+    const v = (cockpitState.layouts.get(a.scope)?.version ?? 0) + 1;
+    cockpitState.layouts.set(a.scope, { layout: a.layout, version: v });
+    cockpitState.versions.push({ __typename: 'CockpitLayoutVersion', scope: a.scope, version: v, layout: a.layout, reset: false, author: U.me, sessionId: null, note: a.note ?? null, createdAt: ago(0) });
+    return cockpitLayout(a.scope);
+  },
+  resetCockpitLayout: (a) => {
+    const v = (cockpitState.layouts.get(a.scope)?.version ?? 0) + 1;
+    cockpitState.layouts.set(a.scope, { layout: null, version: v });
+    cockpitState.versions.push({ __typename: 'CockpitLayoutVersion', scope: a.scope, version: v, layout: cockpitDefault(a.scope), reset: true, author: U.me, sessionId: null, note: null, createdAt: ago(0) });
+    return cockpitLayout(a.scope);
+  },
+  restoreCockpitLayout: (a) => {
+    const old = cockpitState.versions.find((v) => v.scope === a.scope && v.version === a.version);
+    const v = (cockpitState.layouts.get(a.scope)?.version ?? 0) + 1;
+    cockpitState.layouts.set(a.scope, { layout: old?.layout ?? null, version: v });
+    cockpitState.versions.push({ __typename: 'CockpitLayoutVersion', scope: a.scope, version: v, layout: old?.layout ?? cockpitDefault(a.scope), reset: false, author: U.me, sessionId: null, note: `Restauration de la version ${a.version}`, createdAt: ago(0) });
+    return cockpitLayout(a.scope);
+  },
   inbox: () => ({
     __typename: 'Inbox', generatedAt: new Date().toISOString(), counts: inboxCounts(), requests: pending(),
     sessions: live().filter((s) => ['FAILED', 'INTERRUPTED'].includes(s.status)),

@@ -122,6 +122,9 @@ import { formatRule, type PermissionRule } from '../permissions/types.js';
 import type { CreateScheduleInput, ScheduleRun, SessionSchedule, SessionScheduleInput } from '../schedules/types.js';
 import { scheduleRepository } from '../schedules/repository.js';
 import { userService } from '../users/service.js';
+import { userRepository } from '../users/repository.js';
+import { cockpitService } from '../cockpit/service.js';
+import type { ResolvedLayout } from '../cockpit/types.js';
 import { signInService } from '../auth/signInService.js';
 import type { ProjectMember, ProjectRole } from '../users/types.js';
 import { log } from '../log.js';
@@ -794,6 +797,16 @@ export const resolvers = {
       return (await sharedPageService.get(m.pageId)).ownerId === ctx.user.id ? m.message : null;
     },
   },
+  CockpitLayout: {
+    kind: (r: ResolvedLayout) => r.scope.kind,
+    scope: (r: ResolvedLayout) => r.scope.key,
+    projectId: (r: ResolvedLayout) => r.scope.projectId,
+    updatedBy: (r: ResolvedLayout) => (r.updatedById ? userRepository.findById(r.updatedById) : null),
+    catalog: (r: ResolvedLayout) => cockpitService.catalog(r.scope.kind),
+  },
+  CockpitLayoutVersion: {
+    author: (v: { authorId: string | null }) => (v.authorId ? userRepository.findById(v.authorId) : null),
+  },
   SharedPageVersion: {
     createdBy: (v: SharedPageVersion, _: unknown, ctx: Ctx) => userOrNull(ctx, v.createdById),
     kind: (v: SharedPageVersion & { pageKind?: string }) => (v.kind ?? v.pageKind ?? 'page').toUpperCase(),
@@ -1416,6 +1429,8 @@ export const resolvers = {
       await requireProject(ctx, args.id);
       return dashboardService.buildForProject(requireUser(ctx).id, await projectService.get(args.id), new Date(), requireUser(ctx).isAdmin);
     },
+    cockpitLayout: (_: unknown, args: { scope: string }, ctx: Ctx) => cockpitService.resolve(requireUser(ctx), args.scope),
+    cockpitLayoutHistory: (_: unknown, args: { scope: string }, ctx: Ctx) => cockpitService.history(requireUser(ctx), args.scope),
     conversation: async (_: unknown, args: { id: string }, ctx: Ctx) => (await guardConversation(ctx, args.id, 'viewer')).conversation,
     conversationBySlug: async (_: unknown, args: { projectId: string; slug: string }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId);
@@ -2284,6 +2299,9 @@ export const resolvers = {
     setSharedPageHistory: (_: unknown, args: { id: string; enabled: boolean }, ctx: Ctx) => sharedPageService.setHistory(requireUser(ctx), args.id, args.enabled),
     refreshSharedPageData: (_: unknown, args: { id: string }, ctx: Ctx) => artifactDataService.refreshFor(requireUser(ctx), args.id),
     setSharedPageFavorite: (_: unknown, args: { id: string; favorite: boolean }, ctx: Ctx) => sharedPageService.setFavorite(requireUser(ctx), args.id, args.favorite),
+    updateCockpitLayout: async (_: unknown, args: { scope: string; layout: unknown; note?: string | null }, ctx: Ctx) => (await cockpitService.update(requireUser(ctx), args.scope, { layout: args.layout, note: args.note })).result,
+    resetCockpitLayout: (_: unknown, args: { scope: string }, ctx: Ctx) => cockpitService.reset(requireUser(ctx), args.scope),
+    restoreCockpitLayout: (_: unknown, args: { scope: string; version: number }, ctx: Ctx) => cockpitService.restore(requireUser(ctx), args.scope, args.version),
     duplicateSharedPage: (_: unknown, args: { id: string; title?: string | null; version?: number | null }, ctx: Ctx) => sharedPageService.duplicate(requireUser(ctx), args.id, { title: args.title, version: args.version }),
     deleteAllSharedPageComments: (_: unknown, args: { id: string }, ctx: Ctx) => sharedPageService.deleteAllComments(requireUser(ctx), args.id),
     addSharedPageComment: (_: unknown, args: { pageId: string; body: string; anchor?: unknown; version?: number | null }, ctx: Ctx) =>

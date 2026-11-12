@@ -1,6 +1,7 @@
 /** Libellés français des types de cible et des actions du journal d'audit (page Journal et export CSV). */
 
 export const TARGET_LABELS: Record<string, string> = {
+  cockpit: 'agencement du tableau de bord',
   session: 'Session',
   schedule: 'Planification',
   request: 'Demande',
@@ -160,6 +161,9 @@ export const ACTION_LABELS: Record<string, string> = {
   'conversation.create': 'a créé le canal',
   'conversation.update': 'a modifié le canal',
   'conversation.archive': 'a archivé ou rouvert le canal',
+  'cockpit.update': "a modifié l'agencement du tableau de bord",
+  'cockpit.reset': "a réinitialisé l'agencement du tableau de bord",
+  'cockpit.restore': "a restauré une version de l'agencement du tableau de bord",
   'page.publish': 'a publié la page',
   'page.update': 'a modifié le partage de la page',
   'page.share': 'a ouvert la page à',

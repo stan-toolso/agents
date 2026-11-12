@@ -218,6 +218,20 @@ export function describeTool(rawName: string, input: Record<string, unknown> = {
         const [label, detail, action] = verbs[op] ?? [`Artefacts : ${op}`, undefined, `utiliser les artefacts (${op})`];
         return { label, detail, action };
       }
+      if (name.startsWith('mcp__cockpit__')) {
+        const op = name.slice('mcp__cockpit__'.length);
+        const scope = str(input, 'scope') ?? 'project';
+        const where = scope === 'home' ? "de l'accueil" : scope === 'project' || scope === 'projet' ? 'du tableau de bord du projet' : `de ${scope}`;
+        const verbs: Record<string, [string, string | undefined, string]> = {
+          get: [`Lecture de l'agencement ${where}`, undefined, `lire l'agencement ${where}`],
+          update: [`Modification de l'agencement ${where}`, str(input, 'note'), `modifier l'agencement ${where}`],
+          reset: [`Réinitialisation de l'agencement ${where}`, undefined, `réinitialiser l'agencement ${where}`],
+          history: [`Historique de l'agencement ${where}`, undefined, `lire l'historique de l'agencement ${where}`],
+          restore: [`Restauration de l'agencement ${where} (version ${input.version ?? '?'})`, undefined, `restaurer une version de l'agencement ${where}`],
+        };
+        const [label, detail, action] = verbs[op] ?? [`Cockpit : ${op}`, undefined, `utiliser le cockpit (${op})`];
+        return { label, detail, action };
+      }
       if (name.startsWith('mcp__connections__') || name.startsWith('mcp__vault__')) {
         const op = name.replace(/^mcp__(connections|vault)__/, '');
         const conn = str(input, 'connection') ?? str(input, 'item') ?? '';

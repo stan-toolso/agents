@@ -4573,3 +4573,86 @@ extend type Mutation {
   "Retire un navigateur relié : son jeton est révoqué et sa connexion fermée."
   removeChromeBrowser(id: ID!): Boolean!
 }
+
+# ---- Cockpit configurable : agencements des tableaux de bord ------------------------------------------------------
+
+"Paramètre d'un bloc natif (formulaire du mode « Personnaliser »)."
+type CockpitWidgetParam {
+  key: String!
+  label: String!
+  "int, bool, tags, select, text, markdown"
+  type: String!
+  description: String
+  min: Int
+  max: Int
+  options: [CockpitWidgetOption!]
+  default: JSON
+}
+
+type CockpitWidgetOption {
+  value: String!
+  label: String!
+}
+
+"Un bloc natif du catalogue."
+type CockpitWidget {
+  key: String!
+  label: String!
+  description: String!
+  "Région par défaut."
+  region: String!
+  "Régions admises : tiles, main, side, full."
+  regions: [String!]!
+  "Un seul exemplaire par agencement."
+  singleton: Boolean!
+  params: [CockpitWidgetParam!]!
+}
+
+"Agencement d'une portée du cockpit (accueil d'une personne, tableau de bord d'un projet…) : l'enregistré, sinon le défaut."
+type CockpitLayout {
+  "Clé canonique de la portée : home, project:<id>…"
+  scope: String!
+  "home, project, tasks, agent, page"
+  kind: String!
+  projectId: ID
+  "{ v: 1, blocks: [{ id, kind: builtin|artifact, widget|artifact, region, title?, params? }] }"
+  layout: JSON!
+  "0 tant que rien n'a été enregistré."
+  version: Int!
+  "Agencement par défaut (rien d'enregistré, ou réinitialisé)."
+  isDefault: Boolean!
+  "La personne connectée peut le modifier (son accueil ; membre ou administrateur du projet)."
+  canEdit: Boolean!
+  updatedAt: DateTime
+  updatedBy: User
+  "Blocs natifs qu'on peut placer dans cette portée."
+  catalog: [CockpitWidget!]!
+}
+
+type CockpitLayoutVersion {
+  version: Int!
+  layout: JSON!
+  "Réinitialisation (la version garde le défaut du moment)."
+  reset: Boolean!
+  author: User
+  "Session d'agent à l'origine du changement."
+  sessionId: ID
+  note: String
+  createdAt: DateTime!
+}
+
+extend type Query {
+  "L'agencement d'une portée (home, project:<id>) : celui enregistré, sinon le défaut, avec le catalogue des blocs."
+  cockpitLayout(scope: String!): CockpitLayout!
+  "Versions d'un agencement, la plus récente d'abord."
+  cockpitLayoutHistory(scope: String!): [CockpitLayoutVersion!]!
+}
+
+extend type Mutation {
+  "Enregistre un agencement complet (nouvelle version)."
+  updateCockpitLayout(scope: String!, layout: JSON!, note: String): CockpitLayout!
+  "Revient à l'agencement par défaut (l'historique est conservé)."
+  resetCockpitLayout(scope: String!): CockpitLayout!
+  "Remet une ancienne version en tête (nouvelle version)."
+  restoreCockpitLayout(scope: String!, version: Int!): CockpitLayout!
+}

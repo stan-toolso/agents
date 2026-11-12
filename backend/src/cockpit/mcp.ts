@@ -1,0 +1,155 @@
+import { createSdkMcpServer, tool, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
+import { z } from 'zod';
+import { auditService } from '../audit/service.js';
+import { AppError } from '../errors.js';
+import type { Project } from '../projects/types.js';
+import { userRepository } from '../users/repository.js';
+import { describeBlock, describeCatalog, diffLayouts } from './layout.js';
+import { cockpitService } from './service.js';
+import { projectScopeKey } from './scope.js';
+import type { Layout, ResolvedLayout } from './types.js';
+import { REGION_LABELS, REGIONS } from './types.js';
+
+const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
+const failure = (t: string) => ({ content: [{ type: 'text' as const, text: t }], isError: true });
+
+/** Outils libres du serveur `cockpit` : lecture seule. Modifier un agencement passe par l'autorisation de la personne. */
+export const COCKPIT_FREE_TOOLS = ['mcp__cockpit__get', 'mcp__cockpit__history'];
+
+/** Paragraphe du prompt système qui présente le cockpit composable aux agents. */
+export function cockpitPromptSummary(): string {
+  return [
+    "Cockpit configurable (serveur MCP `cockpit`) : le tableau de bord du projet et l'accueil de la personne qui pilote sont des agencements de blocs par région (tuiles, colonne principale, colonne latérale, pleine largeur). `cockpit.get` (portée `project` ou `home`) montre l'agencement actuel et le catalogue des blocs natifs disponibles avec leurs paramètres ; `cockpit.update` le modifie par opérations (`ops` : add, remove, move, set) ou par un agencement complet (`layout`), en créant une version ; `cockpit.reset` revient au défaut ; `cockpit.history` et `cockpit.restore` consultent et restaurent les versions. Préfère un bloc natif paramétré (étiquettes, nombre de semaines…) quand il répond au besoin. Modifier le tableau de bord du projet change ce que voit toute l'équipe : fais-le sur demande ou avec accord, dis ce que tu as changé, et pas en silence.",
+  ].join('\n');
+}
+
+export interface CockpitMcpContext {
+  project: Project;
+  sessionId: string;
+  /** Personne (ou agent) au nom de qui les agencements sont lus et modifiés : le propriétaire de la session. */
+  userId: string;
+}
+
+function describe(r: ResolvedLayout): string {
+  const lines = [`Portée ${r.scope.key} · ${r.isDefault ? 'agencement par défaut' : `version ${r.version}`}${r.canEdit ? '' : ' · lecture seule pour vous'}`];
+  for (const region of REGIONS) {
+    const blocks = r.layout.blocks.filter((b) => b.region === region);
+    if (!blocks.length) continue;
+    lines.push(`${REGION_LABELS[region]} (${region}) :`, ...blocks.map((b) => `  - ${b.id} · ${describeBlock(b)}`));
+  }
+  if (!r.layout.blocks.length) lines.push('(aucun bloc)');
+  return lines.join('\n');
+}
+
+function describeChange(before: Layout, after: Layout): string {
+  const d = diffLayouts(before, after);
+  const parts = [
+    ...d.added.map((b) => `+ ${describeBlock(b)}`),
+    ...d.removed.map((b) => `− ${describeBlock(b)}`),
+    ...d.changed.map((b) => `~ ${describeBlock(b)}`),
+  ];
+  return parts.length ? parts.join('\n') : 'Aucun changement.';
+}
+
+/** Serveur MCP in-process `cockpit` : agencements des tableaux de bord, au nom du propriétaire de la session. */
+export function createCockpitMcpServer(ctx: CockpitMcpContext): McpSdkServerConfigWithInstance {
+  const run = async (fn: () => Promise<string>) => {
+    try {
+      return text(await fn());
+    } catch (err) {
+      return failure(`Erreur : ${(err as Error).message}`);
+    }
+  };
+  const user = async () => {
+    const u = await userRepository.findById(ctx.userId);
+    if (!u) throw new AppError('Propriétaire de la session introuvable');
+    return u;
+  };
+  /** `project` = le projet de la session ; `home` = l'accueil de la personne ; une clé complète est acceptée. */
+  const key = (scope: string | undefined) => {
+    const s = (scope ?? 'project').trim().toLowerCase();
+    if (s === 'project' || s === 'projet') return projectScopeKey(ctx.project.id);
+    return s;
+  };
+  const scopeParam = z.string().optional().describe("Portée : « project » (tableau de bord du projet de la session, défaut), « home » (accueil de la personne qui pilote), ou une clé complète (project:<id>)");
+  const audit = (action: string, r: ResolvedLayout, details: Record<string, unknown>) =>
+    r.scope.projectId ? auditService.record({ projectId: r.scope.projectId, actor: { sessionId: ctx.sessionId }, action, targetType: 'cockpit', targetId: r.scope.key, targetLabel: r.scope.key, details: { version: r.version, ...details } }) : Promise.resolve();
+
+  return createSdkMcpServer({
+    name: 'cockpit',
+    version: '1.0.0',
+    instructions: "Agencements des tableaux de bord de Skipper (blocs natifs par région). get : l'agencement et le catalogue ; update : opérations ou agencement complet (nouvelle version) ; reset, history, restore.",
+    tools: [
+      tool('get', "L'agencement actuel d'une portée (blocs par région, avec leurs identifiants et paramètres) et le catalogue des blocs natifs qu'on peut y placer.", { scope: scopeParam }, async ({ scope }) =>
+        run(async () => {
+          const r = await cockpitService.resolve(await user(), key(scope));
+          return [describe(r), '', `Blocs natifs disponibles (kind builtin, clé widget) :`, describeCatalog(r.scope.kind), '', "Un bloc artefact : { kind: \"artifact\", artifact: <id de l'artefact>, region: main|side|full, title?, params?, height?, pollSeconds? }."].join('\n');
+        }),
+      ),
+      tool(
+        'update',
+        "Modifie l'agencement d'une portée : soit des opérations (ops) appliquées à l'agencement actuel, soit un agencement complet (layout). Crée une version ; renvoie le nouvel agencement et ce qui a changé.",
+        {
+          scope: scopeParam,
+          ops: z
+            .array(
+              z.object({
+                op: z.enum(['add', 'remove', 'move', 'set']),
+                id: z.string().optional().describe('remove, move, set : identifiant du bloc'),
+                block: z
+                  .object({
+                    kind: z.enum(['builtin', 'artifact']),
+                    widget: z.string().optional().describe('builtin : clé du catalogue'),
+                    artifact: z.string().optional().describe("artifact : identifiant de l'artefact"),
+                    region: z.enum(['tiles', 'main', 'side', 'full']).optional(),
+                    title: z.string().optional(),
+                    params: z.object({}).catchall(z.any()).optional(),
+                    height: z.number().optional().describe('artifact : hauteur fixe en pixels (sinon au contenu)'),
+                    pollSeconds: z.number().optional().describe('artifact : rechargement périodique (15 s au moins)'),
+                  })
+                  .optional()
+                  .describe('add : le bloc à ajouter'),
+                region: z.enum(['tiles', 'main', 'side', 'full']).optional().describe('move : nouvelle région'),
+                index: z.number().int().min(0).optional().describe('add, move : position dans la région (0 = en tête ; absent : à la fin)'),
+                title: z.string().optional().describe('set : nouveau titre (vide : titre par défaut)'),
+                params: z.object({}).catchall(z.any()).optional().describe('set : paramètres à modifier (fusionnés avec les actuels)'),
+              }),
+            )
+            .optional()
+            .describe("Opérations appliquées dans l'ordre"),
+          layout: z.object({ v: z.number().int().optional(), blocks: z.array(z.object({}).catchall(z.any())) }).optional().describe('Agencement complet, à la place de ops'),
+          note: z.string().optional().describe('Note de version : ce qui change et pourquoi'),
+        },
+        async ({ scope, ops, layout, note }) =>
+          run(async () => {
+            const { result, before } = await cockpitService.update(await user(), key(scope), { ops, layout, note, sessionId: ctx.sessionId });
+            await audit('cockpit.update', result, { note: note ?? null, ops: ops?.length ?? null });
+            return [`Version ${result.version} enregistrée.`, describeChange(before, result.layout), '', describe(result)].join('\n');
+          }),
+      ),
+      tool('reset', "Remet l'agencement par défaut d'une portée (l'historique est conservé).", { scope: scopeParam }, async ({ scope }) =>
+        run(async () => {
+          const r = await cockpitService.reset(await user(), key(scope), ctx.sessionId);
+          await audit('cockpit.reset', r, {});
+          return `Agencement par défaut rétabli.\n${describe(r)}`;
+        }),
+      ),
+      tool('history', "Les versions d'un agencement, la plus récente d'abord.", { scope: scopeParam }, async ({ scope }) =>
+        run(async () => {
+          const u = await user();
+          const versions = await cockpitService.history(u, key(scope));
+          if (!versions.length) return 'Aucune version enregistrée : agencement par défaut.';
+          const authors = new Map((await userRepository.findByIds([...new Set(versions.map((v) => v.authorId).filter((x): x is string => Boolean(x)))])).map((a) => [a.id, a.name]));
+          return versions.map((v) => `- v${v.version} · ${v.createdAt.toISOString()} · ${v.authorId ? authors.get(v.authorId) ?? 'inconnu' : 'Skipper'}${v.sessionId ? ' (session d’agent)' : ''}${v.reset ? ' · réinitialisation' : ''}${v.note ? ` · ${v.note}` : ''} · ${v.layout.blocks.length} bloc(s)`).join('\n');
+        }),
+      ),
+      tool('restore', "Restaure une version de l'historique (nouvelle version en tête).", { scope: scopeParam, version: z.number().int().min(1).describe('Numéro de la version à restaurer') }, async ({ scope, version }) =>
+        run(async () => {
+          const r = await cockpitService.restore(await user(), key(scope), version, ctx.sessionId);
+          await audit('cockpit.restore', r, { restored: version });
+          return `Version ${version} restaurée (version ${r.version}).\n${describe(r)}`;
+        }),
+      ),
+    ],
+  });
+}

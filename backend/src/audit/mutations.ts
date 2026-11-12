@@ -209,6 +209,10 @@ export const AUDITED: Record<string, MutationAudit> = {
   updateConversation: { action: 'conversation.update', lookup: ['conversation', 'id'], details: (a) => ({ name: a.name, topic: a.topic }) },
   setConversationArchived: { action: 'conversation.archive', lookup: ['conversation', 'id'], details: (a) => ({ archived: a.archived }) },
   // Pages partagées : publication et ouverture à d'autres.
+  // Cockpit : agencements des tableaux de bord (le projet vient de result.projectId ; l'accueil d'une personne n'est pas inscrit).
+  updateCockpitLayout: { action: 'cockpit.update', target: 'cockpit', targetId: (a) => a.scope, label: (a) => a.scope, details: (a, r) => ({ note: a.note ?? null, version: r?.version, blocks: Array.isArray(a.layout?.blocks) ? a.layout.blocks.length : null }) },
+  resetCockpitLayout: { action: 'cockpit.reset', target: 'cockpit', targetId: (a) => a.scope, label: (a) => a.scope, details: (_a, r) => ({ version: r?.version }) },
+  restoreCockpitLayout: { action: 'cockpit.restore', target: 'cockpit', targetId: (a) => a.scope, label: (a) => a.scope, details: (a, r) => ({ restored: a.version, version: r?.version }) },
   publishSharedPage: { action: 'page.publish', project: 'projectId', label: (a) => a.title, details: (a) => ({ path: a.path, pageId: a.pageId }) },
   updateSharedPage: { action: 'page.update', lookup: ['shared_page', 'id'], details: (a) => ({ input: a.input }) },
   addSharedPageMember: { action: 'page.share', lookup: ['shared_page', 'id'], details: (a) => ({ email: a.email, ...(a.invite ? { invite: true } : {}), ...(a.message ? { message: true } : {}), ...(a.notify === false ? { notify: false } : {}) }) },
