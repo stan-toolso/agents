@@ -14,7 +14,7 @@ import './cockpit.css';
  * « Personnaliser », chaque bloc porte une barre (titre, région, monter / descendre, réglages, retirer), chaque région
  * une zone « Ajouter un bloc », et une barre d'édition flotte en haut (réinitialiser, historique, annuler, enregistrer).
  */
-export default function CockpitBoard({ cockpit, ctx, scopeLabel }: { cockpit: CockpitState; ctx: CockpitContext; scopeLabel: string }) {
+export default function CockpitBoard({ cockpit, ctx, scopeLabel, columns = [7, 5] }: { cockpit: CockpitState; ctx: CockpitContext; scopeLabel: string; columns?: [number, number] }) {
   const { layout, editing, catalog } = cockpit;
   const [adding, setAdding] = useState<Region | null>(null);
   const [settings, setSettings] = useState<Block | null>(null);
@@ -82,8 +82,8 @@ export default function CockpitBoard({ cockpit, ctx, scopeLabel }: { cockpit: Co
   const full = blocksOf(layout, 'full');
   const showMain = editing || main.length > 0;
   const showSide = editing || side.length > 0;
-  const mainWidth = showSide ? 7 : 12;
-  const sideWidth = showMain ? 5 : 12;
+  const mainWidth = showSide ? columns[0] : 12;
+  const sideWidth = showMain ? columns[1] : 12;
 
   return (
     <div className={editing ? 'ck-editing' : undefined}>

@@ -284,7 +284,7 @@ export default function TasksPage() {
       {loading && !data && <PageLoading />}
 
       {dashboard && data ? (
-        <TaskDashboard tasks={tasks} showProject={showProject && !projectId} onEdit={setEditing} onTag={onTag} targets={targets} />
+        <TaskDashboard tasks={tasks} showProject={showProject && !projectId} onEdit={setEditing} onTag={onTag} targets={targets} projectId={routeProjectId || null} />
       ) : table ? (
         <TaskGrid
           tasks={tasks}

@@ -25,6 +25,12 @@ describe('catalogue', () => {
     expect(parseLayout(defaultLayout({ kind: 'project' }, { personal: true }), 'project').blocks.some((b) => b.kind === 'builtin' && b.widget === 'channel')).toBe(false);
     expect(catalogFor('home').some((w) => w.key === 'projects.table')).toBe(true);
     expect(catalogFor('project').some((w) => w.key === 'projects.table')).toBe(false);
+    expect(parseLayout(defaultLayout({ kind: 'tasks' }), 'tasks').blocks.some((b) => b.kind === 'builtin' && b.widget === 'pilot.burnup')).toBe(true);
+    expect(parseLayout(defaultLayout({ kind: 'agent' }), 'agent').blocks).toHaveLength(6);
+    // Les blocs du tableau de bord n'ont pas de données dans le pilotage, et réciproquement.
+    expect(catalogFor('tasks').some((w) => w.key === 'tile.requests')).toBe(false);
+    expect(catalogFor('project').some((w) => w.key === 'pilot.burnup')).toBe(false);
+    expect(catalogFor('tasks').some((w) => w.key === 'text')).toBe(true);
   });
 });
 
@@ -33,8 +39,14 @@ describe('parseScope', () => {
     expect(parseScope('home')).toMatchObject({ kind: 'home', key: 'home', projectId: null });
     expect(parseScope(`Project:${P}`)).toMatchObject({ kind: 'project', key: `project:${P}`, projectId: P });
   });
+  it('reconnaît le pilotage, la fiche d’agent et le défaut de la cellule', () => {
+    expect(parseScope(`project:${P}:tasks`)).toMatchObject({ kind: 'tasks', projectId: P });
+    expect(parseScope(`agent:${P}`)).toMatchObject({ kind: 'agent', agentId: P, projectId: null });
+    expect(parseScope('home:default')).toMatchObject({ kind: 'home', cell: true });
+    expect(parseScope('home').cell).toBeUndefined();
+  });
   it('refuse les portées réservées et inconnues', () => {
-    expect(() => parseScope(`project:${P}:tasks`)).toThrow(/pas encore composable/);
+    expect(() => parseScope(`project:${P}:page:reporting`)).toThrow(/pas encore composable/);
     expect(() => parseScope('agent:not-a-uuid')).toThrow(/Portée inconnue/);
     expect(() => parseScope('')).toThrow(/Portée inconnue/);
   });

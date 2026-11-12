@@ -1,4 +1,5 @@
 import { AppError } from '../errors.js';
+import { agentRepository } from '../agents/repository.js';
 import { sharedPageService } from '../sharedPages/service.js';
 import { userService } from '../users/service.js';
 import type { User } from '../users/types.js';
@@ -6,7 +7,7 @@ import { catalogFor } from './catalog.js';
 import { defaultLayout } from './defaults.js';
 import { applyOps, parseLayout } from './layout.js';
 import { cockpitRepository, type LayoutRow } from './repository.js';
-import { parseScope } from './scope.js';
+import { HOME_DEFAULT_KEY, parseScope } from './scope.js';
 import type { Block, CockpitArtifactView, Layout, LayoutVersion, Region, ResolvedLayout, Scope, ScopeKind, WidgetDef } from './types.js';
 
 /**
@@ -24,15 +25,20 @@ interface Access {
 
 async function access(user: User, key: string): Promise<Access> {
   const scope = parseScope(key);
-  if (scope.kind === 'home') return { scope, canEdit: true, personal: false };
-  const projectId = scope.projectId as string;
+  if (scope.kind === 'home') return { scope, canEdit: scope.cell ? Boolean(user.isAdmin) : true, personal: false };
+  let projectId = scope.projectId as string;
+  if (scope.kind === 'agent') {
+    const agent = await agentRepository.findById(scope.agentId as string);
+    if (!agent) throw new AppError('Agent introuvable', 'NOT_FOUND');
+    projectId = agent.projectId;
+  }
   const role = await userService.roleFor(user.id, projectId);
   if (!role) throw new AppError("Vous n'avez pas accès à ce projet", 'FORBIDDEN');
   return { scope, canEdit: role !== 'viewer', personal: await userService.isPersonalProject(projectId) };
 }
 
 const assertEdit = (a: Access) => {
-  if (!a.canEdit) throw new AppError('Modifier cet agencement demande le rôle membre sur le projet', 'FORBIDDEN');
+  if (!a.canEdit) throw new AppError(a.scope.cell ? "Modifier l'accueil par défaut de tout le monde est réservé aux administrateurs" : 'Modifier cet agencement demande le rôle membre sur le projet', 'FORBIDDEN');
 };
 
 /**
@@ -56,11 +62,11 @@ export function sanitizeLayout(raw: unknown, kind: ScopeKind): Layout {
   }
 }
 
-function resolved(a: Access, row: LayoutRow | null): ResolvedLayout {
+function resolved(a: Access, row: LayoutRow | null, fallback: Layout | null = null): ResolvedLayout {
   const stored = row?.layout ?? null;
   return {
     scope: a.scope,
-    layout: stored ? sanitizeLayout(stored, a.scope.kind) : defaultLayout(a.scope, { personal: a.personal }),
+    layout: stored ? sanitizeLayout(stored, a.scope.kind) : fallback ?? defaultLayout(a.scope, { personal: a.personal }),
     version: row?.version ?? 0,
     isDefault: !stored,
     updatedAt: row?.updated_at ?? null,
@@ -96,6 +102,13 @@ async function checkArtifacts(user: User, scope: Scope, layout: Layout): Promise
   return warnings;
 }
 
+/** Accueil d'une personne sans agencement propre : celui que les administrateurs ont réglé pour toute la cellule, s'il existe. */
+async function cellDefault(scope: Scope, user: User): Promise<Layout | null> {
+  if (scope.kind !== 'home' || scope.cell) return null;
+  const row = await cockpitRepository.find(parseScope(HOME_DEFAULT_KEY), user.id);
+  return row?.layout ? sanitizeLayout(row.layout, 'home') : null;
+}
+
 export const cockpitService = {
   catalog: (kind: ScopeKind): WidgetDef[] => catalogFor(kind),
 
@@ -119,21 +132,21 @@ export const cockpitService = {
 
   async resolve(user: User, key: string): Promise<ResolvedLayout> {
     const a = await access(user, key);
-    return resolved(a, await cockpitRepository.find(a.scope, user.id));
+    return resolved(a, await cockpitRepository.find(a.scope, user.id), await cellDefault(a.scope, user));
   },
 
   /** Enregistre une nouvelle version et renvoie l'agencement résolu, avec celui d'avant (pour décrire le changement). */
   async update(user: User, key: string, input: UpdateInput): Promise<{ result: ResolvedLayout; before: Layout }> {
     const a = await access(user, key);
     assertEdit(a);
-    const current = resolved(a, await cockpitRepository.find(a.scope, user.id));
+    const current = resolved(a, await cockpitRepository.find(a.scope, user.id), await cellDefault(a.scope, user));
     let layout: Layout;
     if (input.ops !== undefined && input.ops !== null) layout = applyOps(current.layout, input.ops, a.scope.kind);
     else if (input.layout !== undefined && input.layout !== null) layout = parseLayout(input.layout, a.scope.kind);
     else throw new AppError("Rien à enregistrer : passez l'agencement complet (layout) ou des opérations (ops)", 'VALIDATION');
     const warnings = await checkArtifacts(user, a.scope, layout);
     const row = await cockpitRepository.save({ scope: a.scope, userId: user.id, layout, snapshot: layout, authorId: user.id, sessionId: input.sessionId ?? null, note: input.note?.trim() || null });
-    return { result: { ...resolved(a, row), warnings }, before: current.layout };
+    return { result: { ...resolved(a, row, await cellDefault(a.scope, user)), warnings }, before: current.layout };
   },
 
   /** Retour au défaut : l'agencement enregistré est effacé (l'historique le garde). */
@@ -141,9 +154,10 @@ export const cockpitService = {
     const a = await access(user, key);
     assertEdit(a);
     const existing = await cockpitRepository.find(a.scope, user.id);
-    if (!existing || !existing.layout) return resolved(a, existing);
-    const row = await cockpitRepository.save({ scope: a.scope, userId: user.id, layout: null, snapshot: defaultLayout(a.scope, { personal: a.personal }), authorId: user.id, sessionId, note: 'Réinitialisation' });
-    return resolved(a, row);
+    const fallback = await cellDefault(a.scope, user);
+    if (!existing || !existing.layout) return resolved(a, existing, fallback);
+    const row = await cockpitRepository.save({ scope: a.scope, userId: user.id, layout: null, snapshot: fallback ?? defaultLayout(a.scope, { personal: a.personal }), authorId: user.id, sessionId, note: 'Réinitialisation' });
+    return resolved(a, row, fallback);
   },
 
   async history(user: User, key: string): Promise<LayoutVersion[]> {

@@ -1,6 +1,6 @@
 import { usePollingQuery } from '../lib/usePollingQuery';
-import { useState } from 'react';
-import { Alert, Button, Card, Col, Row, Spinner } from 'react-bootstrap';
+import { useEffect, useState } from 'react';
+import { Alert, Button, ButtonGroup, Card, Col, Dropdown, Row, Spinner } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import { DASHBOARD, type Dashboard } from '../graphql/operations';
 import { timeAgo } from '../lib/humanize';
@@ -32,7 +32,22 @@ export default function DashboardPage() {
   // administrateurs ; les autres ne voient de coût qu'en crédits, dans une cellule facturée.
   const { user, costUnit } = useAuth();
   const showCostTile = costUnit === 'CREDIT' || Boolean(user?.isSuperAdmin);
-  const cockpit = useCockpit(d && d.projects.length > 0 ? 'home' : null);
+  // Un administrateur de Skipper peut aussi régler l'accueil par défaut de toute la cellule (hérité par qui n'a rien réglé).
+  const [scope, setScope] = useState<'home' | 'home:default'>('home');
+  const [wantEdit, setWantEdit] = useState(false);
+  const cockpit = useCockpit(d && d.projects.length > 0 ? scope : null);
+  const { data: layoutData, editing, startEdit } = cockpit;
+  // Édition d'un autre agencement : on change de portée, on attend qu'il soit chargé, puis on ouvre l'édition ; en sortant, retour à « home ».
+  useEffect(() => {
+    if (wantEdit && layoutData?.scope === scope && !editing) {
+      setWantEdit(false);
+      startEdit();
+    } else if (!wantEdit && !editing && scope !== 'home') setScope('home');
+  }, [wantEdit, layoutData?.scope, scope, editing, startEdit]);
+  const editScope = (s: 'home' | 'home:default') => {
+    setScope(s);
+    setWantEdit(true);
+  };
 
   if (!d && loading) {
     return (
@@ -65,7 +80,20 @@ export default function DashboardPage() {
           <Button size="sm" variant="outline-secondary" className="d-none d-sm-inline-block" onClick={() => refetch()} title="Rafraîchir">
             <i className="bi bi-arrow-clockwise" />
           </Button>
-          <CustomizeButton cockpit={cockpit} />
+          {user?.isAdmin && !cockpit.editing ? (
+            <Dropdown as={ButtonGroup} size="sm">
+              <Button size="sm" variant="outline-secondary" onClick={() => editScope('home')} title="Choisir, ordonner et régler les blocs de votre accueil">
+                <i className="bi bi-sliders me-1" /> Personnaliser
+              </Button>
+              <Dropdown.Toggle split size="sm" variant="outline-secondary" title="Autres agencements" />
+              <Dropdown.Menu align="end">
+                <Dropdown.Item onClick={() => editScope('home')}>Mon accueil</Dropdown.Item>
+                <Dropdown.Item onClick={() => editScope('home:default')}>L’accueil par défaut de tout le monde</Dropdown.Item>
+              </Dropdown.Menu>
+            </Dropdown>
+          ) : (
+            <CustomizeButton cockpit={cockpit} />
+          )}
           {writableProjects.length > 0 && (
             <Button size="sm" variant="outline-primary" onClick={() => setNewTask(true)} title="Créer une tâche dans l'un de vos projets">
               <i className="bi bi-plus-lg me-1" /> Tâche
@@ -81,7 +109,7 @@ export default function DashboardPage() {
 
       {!cockpit.editing && <ChatComposer withGreeting />}
 
-      {cockpit.layout ? <CockpitBoard cockpit={cockpit} ctx={ctx} scopeLabel="votre accueil" /> : <div className="text-secondary small"><Spinner animation="border" size="sm" /> Agencement…</div>}
+      {cockpit.layout ? <CockpitBoard cockpit={cockpit} ctx={ctx} scopeLabel={scope === 'home:default' ? "l’accueil par défaut de tout le monde" : 'votre accueil'} /> : <div className="text-secondary small"><Spinner animation="border" size="sm" /> Agencement…</div>}
 
       {newTask && <TaskModal task={null} projectId={writableProjects[0]?.id ?? ''} projects={writableProjects} onClose={() => setNewTask(false)} />}
     </>

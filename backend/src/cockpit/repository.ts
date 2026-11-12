@@ -25,7 +25,7 @@ interface VersionRow {
 const toVersion = (r: VersionRow): LayoutVersion => ({ version: r.version, layout: r.layout, reset: r.reset, authorId: r.author_id, sessionId: r.session_id, note: r.note, createdAt: r.created_at });
 
 /** Clé de ligne d'une portée : « home » est propre à chaque personne, les autres portées sont partagées. */
-const userKey = (scope: Scope, userId: string) => (scope.kind === 'home' ? userId : null);
+const userKey = (scope: Scope, userId: string) => (scope.kind === 'home' && !scope.cell ? userId : null);
 
 export interface SaveInput {
   scope: Scope;
