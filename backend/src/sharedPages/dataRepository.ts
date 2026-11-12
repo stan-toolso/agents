@@ -1,12 +1,12 @@
 import { pool } from '../db/pool.js';
-import type { DataSource, DataSourceKind, DataSourceStatus, GraphqlSourceConfig, ScriptSourceConfig, SqlSourceConfig } from './dataSources.js';
+import type { DataSource, DataSourceKind, DataSourceStatus, SourceConfig } from './dataSources.js';
 
 interface Row {
   id: string;
   page_id: string;
   name: string;
   kind: DataSourceKind;
-  config: SqlSourceConfig | ScriptSourceConfig | GraphqlSourceConfig;
+  config: SourceConfig;
   position: number;
   data: unknown;
   row_count: number | null;
@@ -15,6 +15,7 @@ interface Row {
   duration_ms: number | null;
   refreshed_at: Date | null;
   attempted_at: Date | null;
+  session_id: string | null;
 }
 
 const toSource = (r: Row): DataSource => ({
@@ -31,9 +32,10 @@ const toSource = (r: Row): DataSource => ({
   durationMs: r.duration_ms,
   refreshedAt: r.refreshed_at,
   attemptedAt: r.attempted_at,
+  sessionId: r.session_id ?? null,
 });
 
-const META = 'id, page_id, name, kind, config, position, NULL::jsonb AS data, row_count, status, error, duration_ms, refreshed_at, attempted_at';
+const META = 'id, page_id, name, kind, config, position, NULL::jsonb AS data, row_count, status, error, duration_ms, refreshed_at, attempted_at, session_id';
 
 /** Colonnes jsonb : toujours passer par JSON.stringify (un tableau JS serait pris pour un tableau PostgreSQL). */
 const toJson = (v: unknown) => JSON.stringify(v ?? null);
@@ -49,7 +51,7 @@ export const dataSourceRepository = {
    * Remplace les sources d'un artefact. Une source gardée (même nom, même type, même définition) garde ses données et
    * son état ; une source modifiée repart à « jamais rafraîchie » ; les autres sont supprimées.
    */
-  async replace(pageId: string, sources: { name: string; kind: DataSourceKind; config: SqlSourceConfig | ScriptSourceConfig | GraphqlSourceConfig }[]): Promise<void> {
+  async replace(pageId: string, sources: { name: string; kind: DataSourceKind; config: SourceConfig }[]): Promise<void> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -73,7 +75,7 @@ export const dataSourceRepository = {
     }
   },
 
-  async saveSuccess(id: string, data: unknown, rowCount: number | null, durationMs: number): Promise<void> {
+  async saveSuccess(id: string, data: unknown, rowCount: number | null, durationMs: number | null): Promise<void> {
     await pool.query(
       `UPDATE shared_page_sources SET data = $2::jsonb, row_count = $3, status = 'ok', error = NULL, duration_ms = $4, refreshed_at = now(), attempted_at = now(), updated_at = now() WHERE id = $1`,
       [id, toJson(data), rowCount, durationMs],
@@ -83,6 +85,24 @@ export const dataSourceRepository = {
   /** Échec ou source sautée : les dernières données réussies sont gardées (la page reste lisible). */
   async saveFailure(id: string, status: 'error' | 'skipped', error: string, durationMs: number | null): Promise<void> {
     await pool.query(`UPDATE shared_page_sources SET status = $2, error = $3, duration_ms = $4, attempted_at = now(), updated_at = now() WHERE id = $1`, [id, status, error.slice(0, 2000), durationMs]);
+  },
+
+  /** Source agent : une session vient d'être lancée pour la calculer (status `running`, données précédentes gardées). */
+  async markRunning(id: string, sessionId: string): Promise<void> {
+    await pool.query(`UPDATE shared_page_sources SET status = 'running', error = NULL, session_id = $2, attempted_at = now(), updated_at = now() WHERE id = $1`, [id, sessionId]);
+  },
+
+  /**
+   * Données écrites par la session d'une source agent (outil pages.set_data) : durée depuis le lancement de la session
+   * quand elle est connue.
+   */
+  async saveAgentData(id: string, data: unknown, rowCount: number | null): Promise<void> {
+    await pool.query(
+      `UPDATE shared_page_sources SET data = $2::jsonb, row_count = $3, status = 'ok', error = NULL,
+         duration_ms = CASE WHEN status = 'running' AND attempted_at IS NOT NULL THEN (EXTRACT(EPOCH FROM now() - attempted_at) * 1000)::int ELSE NULL END,
+         refreshed_at = now(), attempted_at = COALESCE(attempted_at, now()), updated_at = now() WHERE id = $1`,
+      [id, toJson(data), rowCount],
+    );
   },
 
   /** Données de toutes les sources d'un artefact : `{ nom: données }`. */

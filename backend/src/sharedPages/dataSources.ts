@@ -11,9 +11,12 @@ import { checkGraphqlQuery, checkGraphqlVariables, type GraphqlSourceConfig } fr
  *   du JSON (n'importe quelle forme). Il ne voit aucun identifiant du coffre.
  * - `graphql` : une requête de lecture sur l'API de Skipper, **vivante** : exécutée à la lecture de la page avec les
  *   droits de la personne qui regarde (cockpit/liveSources.ts), jamais rafraîchie ni gardée en base.
+ * - `agent` : une consigne confiée à une session (au nom du propriétaire de l'artefact, ou d'un agent du projet) à
+ *   chaque rafraîchissement ; la session calcule le résultat comme elle l'entend (documents, code du dépôt, coffre…)
+ *   et l'écrit avec l'outil `pages.set_data`. Pour les chiffres qu'aucune requête ne sait produire.
  */
 
-export type DataSourceKind = 'sql' | 'script' | 'graphql';
+export type DataSourceKind = 'sql' | 'script' | 'graphql' | 'agent';
 export type { GraphqlSourceConfig };
 export type ScriptInterpreter = 'node' | 'python' | 'sh';
 export const SCRIPT_INTERPRETERS: readonly ScriptInterpreter[] = ['node', 'python', 'sh'];
@@ -29,15 +32,22 @@ export interface ScriptSourceConfig {
   timeoutSeconds: number;
 }
 
-/** `inactive` : jamais en base ; source d'une ancienne version dont la définition a changé depuis (plus rafraîchie, sans données). */
-export type DataSourceStatus = 'pending' | 'ok' | 'error' | 'skipped' | 'inactive';
+export interface AgentSourceConfig {
+  /** Consigne donnée à la session à chaque rafraîchissement. */
+  prompt: string;
+  /** Agent du projet (nom ou identifiant) qui calcule la source ; null : une session au nom du propriétaire de l'artefact. */
+  agent: string | null;
+}
+
+/** `running` : une session calcule la source (type agent) ; `inactive` : jamais en base ; source d'une ancienne version dont la définition a changé depuis (plus rafraîchie, sans données). */
+export type DataSourceStatus = 'pending' | 'ok' | 'error' | 'skipped' | 'running' | 'inactive';
 
 export interface DataSource {
   id: string;
   pageId: string;
   name: string;
   kind: DataSourceKind;
-  config: SqlSourceConfig | ScriptSourceConfig | GraphqlSourceConfig;
+  config: SourceConfig;
   position: number;
   data: unknown;
   rowCount: number | null;
@@ -46,7 +56,11 @@ export interface DataSource {
   durationMs: number | null;
   refreshedAt: Date | null;
   attemptedAt: Date | null;
+  /** agent : dernière session lancée pour calculer la source. */
+  sessionId?: string | null;
 }
+
+export type SourceConfig = SqlSourceConfig | ScriptSourceConfig | GraphqlSourceConfig | AgentSourceConfig;
 
 /** Définition d'une source telle que la donne un agent (outil pages.publish) ou l'API. */
 export interface DataSourceInput {
@@ -60,6 +74,10 @@ export interface DataSourceInput {
   timeout_seconds?: number | null;
   /** graphql : variables de la requête (valeurs modèles {{project.id}}, {{viewer.id}}, {{params.x}}, {{now-7d}} admises). */
   variables?: Record<string, unknown> | null;
+  /** agent : consigne de la session qui calcule la source. */
+  prompt?: string | null;
+  /** agent : agent du projet (nom ou identifiant) ; absent : une session au nom du propriétaire. */
+  agent?: string | null;
 }
 
 export const DATA_LIMITS = {
@@ -74,6 +92,9 @@ export const DATA_LIMITS = {
   defaultScriptTimeoutSeconds: 60,
   /** Intervalles proposés (minutes) ; tout entier entre min et max est accepté. */
   minRefreshMinutes: 5,
+  /** Source agent : une session par rafraîchissement, pas plus d'une par heure. */
+  minAgentRefreshMinutes: 60,
+  promptChars: 20_000,
   maxRefreshMinutes: 10080,
   /** Sans lecture ni modification depuis ce nombre de jours, le rafraîchissement automatique se met en veille. */
   idleDays: 14,
@@ -82,7 +103,7 @@ export const DATA_LIMITS = {
 const NAME = /^[a-z][a-z0-9_]{0,39}$/;
 
 /** Valide et normalise une liste de sources ; lève une AppError lisible (l'agent la lit telle quelle). */
-export function parseSources(inputs: DataSourceInput[]): { name: string; kind: DataSourceKind; config: SqlSourceConfig | ScriptSourceConfig | GraphqlSourceConfig }[] {
+export function parseSources(inputs: DataSourceInput[]): { name: string; kind: DataSourceKind; config: SourceConfig }[] {
   if (inputs.length > DATA_LIMITS.sources) throw new AppError(`${DATA_LIMITS.sources} sources au plus par artefact`);
   const seen = new Set<string>();
   return inputs.map((s, i) => {
@@ -117,15 +138,27 @@ export function parseSources(inputs: DataSourceInput[]): { name: string; kind: D
         throw new AppError(`${where} : ${(err as Error).message}`);
       }
     }
-    throw new AppError(`${where} : type doit être « sql », « script » ou « graphql »`);
+    if (s.type === 'agent') {
+      const prompt = (s.prompt ?? '').trim();
+      if (!prompt) throw new AppError(`${where} : prompt (la consigne de la session qui calcule la source) est obligatoire`);
+      if (prompt.length > DATA_LIMITS.promptChars) throw new AppError(`${where} : consigne trop longue (${DATA_LIMITS.promptChars} caractères au plus)`);
+      return { name, kind: 'agent' as const, config: { prompt, agent: s.agent?.trim() || null } };
+    }
+    throw new AppError(`${where} : type doit être « sql », « script », « graphql » ou « agent »`);
   });
 }
 
-/** Intervalle de rafraîchissement : null (à la demande) ou un entier de minutes borné. */
-export function parseRefreshMinutes(v: number | null | undefined): number | null {
+/**
+ * Intervalle de rafraîchissement : null (à la demande) ou un entier de minutes borné. `withAgent` : l'artefact a une
+ * source agent (une session par rafraîchissement), d'où un minimum d'une heure.
+ */
+export function parseRefreshMinutes(v: number | null | undefined, withAgent = false): number | null {
   if (v == null || v === 0) return null;
   if (!Number.isInteger(v) || v < DATA_LIMITS.minRefreshMinutes || v > DATA_LIMITS.maxRefreshMinutes) {
     throw new AppError(`Intervalle de rafraîchissement : entre ${DATA_LIMITS.minRefreshMinutes} minutes et 7 jours (${DATA_LIMITS.maxRefreshMinutes} minutes), ou 0 pour « à la demande »`);
+  }
+  if (withAgent && v < DATA_LIMITS.minAgentRefreshMinutes) {
+    throw new AppError(`Un artefact avec une source agent lance une session à chaque rafraîchissement : ${DATA_LIMITS.minAgentRefreshMinutes} minutes au moins`);
   }
   return v;
 }
@@ -213,9 +246,28 @@ export function scriptCommand(interpreter: ScriptInterpreter): { file: string; c
 }
 
 /** Résumé d'une source pour un agent ou le journal (une ligne). */
-export function describeSource(s: Pick<DataSource, 'name' | 'kind' | 'config' | 'status' | 'error' | 'rowCount' | 'refreshedAt'>): string {
-  const what = s.kind === 'sql' ? `SQL sur « ${(s.config as SqlSourceConfig).item} »${(s.config as SqlSourceConfig).database ? ` [${(s.config as SqlSourceConfig).database}]` : ''}` : s.kind === 'graphql' ? 'GraphQL (vivante, aux droits de la personne qui regarde)' : `script ${(s.config as ScriptSourceConfig).interpreter}`;
+export function describeSource(s: Pick<DataSource, 'name' | 'kind' | 'config' | 'status' | 'error' | 'rowCount' | 'refreshedAt' | 'sessionId'>): string {
+  const agent = s.kind === 'agent' ? (s.config as AgentSourceConfig).agent : null;
+  const what =
+    s.kind === 'sql'
+      ? `SQL sur « ${(s.config as SqlSourceConfig).item} »${(s.config as SqlSourceConfig).database ? ` [${(s.config as SqlSourceConfig).database}]` : ''}`
+      : s.kind === 'graphql'
+        ? 'GraphQL (vivante, aux droits de la personne qui regarde)'
+        : s.kind === 'agent'
+          ? `agent (session ${agent ? `de ${agent}` : 'du propriétaire'}, données écrites par pages.set_data)`
+          : `script ${(s.config as ScriptSourceConfig).interpreter}`;
   if (s.kind === 'graphql') return `${s.name} · ${what}`;
-  const state = s.status === 'ok' ? `ok${s.rowCount != null ? `, ${s.rowCount} ligne(s)` : ''}` : s.status === 'error' ? `erreur : ${s.error}` : s.status === 'skipped' ? `non rafraîchie : ${s.error}` : 'jamais rafraîchie';
+  const state =
+    s.status === 'ok'
+      ? `ok${s.rowCount != null ? `, ${s.rowCount} ligne(s)` : ''}`
+      : s.status === 'error'
+        ? `erreur : ${s.error}`
+        : s.status === 'skipped'
+          ? `non rafraîchie : ${s.error}`
+          : s.status === 'running'
+            ? `en cours de calcul${s.sessionId ? ` (session ${s.sessionId})` : ''}`
+            : s.kind === 'agent'
+              ? 'jamais écrite (pages.set_data)'
+              : 'jamais rafraîchie';
   return `${s.name} · ${what} · ${state}${s.refreshedAt ? ` · données du ${s.refreshedAt.toISOString()}` : ''}`;
 }

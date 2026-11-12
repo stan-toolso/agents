@@ -35,6 +35,7 @@
   .sp-body.with-data .pd-panel { flex: 1 1 auto; width: 100%; border-left: 0; }
 }
 .pd-state.inactive { color: var(--cc-dim); background: var(--cc-bg-hover); }
+.pd-state.running { color: var(--cc-accent); background: color-mix(in srgb, var(--cc-accent) 14%, transparent); }
 .pd-state.live { color: var(--cc-blue); background: color-mix(in srgb, var(--cc-blue) 14%, transparent); }
 .pd-version-note { margin: 10px 14px 0; padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.4; color: var(--cc-dim); background: var(--cc-bg-hover); }
 .pd-version-note .bi { margin-right: 4px; }
