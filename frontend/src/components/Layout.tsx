@@ -110,7 +110,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const sidebar = usePanelWidth(rootRef, SIDEBAR);
   const panel = usePanelWidth(rootRef, PANEL);
-  const flush = /^\/sessions\/[^/]+(?:\/browser)?$/.test(pathname) || /^\/chats\/[^/]+$/.test(pathname) || /^\/terminals\/[^/]+$/.test(pathname) || /^\/(?:projects|sessions)\/[^/]+\/files(?:\/|$)/.test(pathname) || /^\/shared\/[^/]+$/.test(pathname);
+  const flush = /^\/sessions\/[^/]+(?:\/browser|\/pages\/[^/]+)?$/.test(pathname) || /^\/chats\/[^/]+$/.test(pathname) || /^\/terminals\/[^/]+$/.test(pathname) || /^\/(?:projects|sessions)\/[^/]+\/files(?:\/|$)/.test(pathname) || /^\/shared\/[^/]+$/.test(pathname);
   return (
     <TabsProvider>
       <GitTargetProvider>
