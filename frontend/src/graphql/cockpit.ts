@@ -197,3 +197,74 @@ export const OPEN_PAGE_TO_PROJECT = gql`
     }
   }
 `;
+
+// ---- Pages personnalisées et onglets d'un projet (lot 5) ---------------------------------------------------------------
+
+export interface ProjectPageInfo {
+  id: string;
+  slug: string;
+  title: string;
+  icon: string | null;
+  position: number;
+}
+
+export interface ProjectTabsSetting {
+  hidden: string[];
+  order: string[];
+}
+
+/** Onglets et pages d'un projet, lus par l'en-tête (cache partagé entre les pages du projet). */
+export const PROJECT_TABS = gql`
+  query ProjectTabs($id: ID!) {
+    project(id: $id) {
+      id
+      tabs
+      pages {
+        id
+        slug
+        title
+        icon
+        position
+      }
+    }
+  }
+`;
+
+export const CREATE_PROJECT_PAGE = gql`
+  mutation CreateProjectPage($projectId: ID!, $title: String!, $icon: String, $slug: String) {
+    createProjectPage(projectId: $projectId, title: $title, icon: $icon, slug: $slug) {
+      id
+      slug
+      title
+      icon
+      position
+    }
+  }
+`;
+
+export const UPDATE_PROJECT_PAGE = gql`
+  mutation UpdateProjectPage($id: ID!, $title: String, $icon: String, $position: Int) {
+    updateProjectPage(id: $id, title: $title, icon: $icon, position: $position) {
+      id
+      slug
+      title
+      icon
+      position
+    }
+  }
+`;
+
+export const DELETE_PROJECT_PAGE = gql`
+  mutation DeleteProjectPage($id: ID!) {
+    deleteProjectPage(id: $id)
+  }
+`;
+
+export const UPDATE_PROJECT_TABS = gql`
+  mutation UpdateProjectTabs($projectId: ID!, $tabs: JSON!) {
+    updateProjectTabs(projectId: $projectId, tabs: $tabs) {
+      id
+      tabs
+    }
+  }
+`;

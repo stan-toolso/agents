@@ -1,5 +1,6 @@
 import { AppError } from '../errors.js';
 import { agentRepository } from '../agents/repository.js';
+import { projectPageRepository } from './projectPages.js';
 import { sharedPageService } from '../sharedPages/service.js';
 import { userService } from '../users/service.js';
 import type { User } from '../users/types.js';
@@ -32,6 +33,7 @@ async function access(user: User, key: string): Promise<Access> {
     if (!agent) throw new AppError('Agent introuvable', 'NOT_FOUND');
     projectId = agent.projectId;
   }
+  if (scope.kind === 'page' && !(await projectPageRepository.findBySlug(projectId, scope.slug as string))) throw new AppError(`Page personnalisée « ${scope.slug} » introuvable`, 'NOT_FOUND');
   const role = await userService.roleFor(user.id, projectId);
   if (!role) throw new AppError("Vous n'avez pas accès à ce projet", 'FORBIDDEN');
   return { scope, canEdit: role !== 'viewer', personal: await userService.isPersonalProject(projectId) };

@@ -1,4 +1,5 @@
 import { pool } from '../db/pool.js';
+import { projectPageService } from '../cockpit/projectPages.js';
 import { toJson } from '../db/json.js';
 import { contextRepository } from '../context/repository.js';
 import { contextService } from '../context/service.js';
@@ -38,6 +39,12 @@ export interface ImportReport {
 }
 
 /** Toutes les données d'un projet à exporter (bibliothèque du projet seulement : pas celles de ses agents). */
+/** Agencements partagés du projet, par portée relative, sans les blocs artefacts (identifiants propres à ce serveur). */
+async function exportLayouts(projectId: string): Promise<{ scope: string; layout: unknown }[]> {
+  const { rows } = await pool.query<{ scope: string; layout: { v: number; blocks: { kind: string }[] } }>('SELECT scope, layout FROM cockpit_layouts WHERE project_id = $1 AND user_id IS NULL AND layout IS NOT NULL', [projectId]);
+  return rows.map((r) => ({ scope: r.scope.replace(`project:${projectId}`, 'project').replace(/^project:tasks$/, 'tasks').replace(/^project:page:/, 'page:'), layout: { ...r.layout, blocks: r.layout.blocks.filter((b) => b.kind !== 'artifact') } }));
+}
+
 export async function collectProjectExport(projectId: string, now = new Date()): Promise<ProjectExport> {
   const project = await projectService.get(projectId);
   const [tree, versionRows, taskRows, commentRows, attachmentRows, rules, envFiles, items] = await Promise.all([
@@ -102,6 +109,9 @@ export async function collectProjectExport(projectId: string, now = new Date()):
       defaultPermissionMode: project.defaultPermissionMode,
       taskInstructions: project.taskInstructions,
       permissionRules: rules.map((r) => ({ toolName: r.toolName, ruleContent: r.ruleContent })),
+      tabs: await projectPageService.tabs(projectId),
+      pages: (await projectPageService.list(projectId)).map((pg) => ({ slug: pg.slug, title: pg.title, icon: pg.icon, position: pg.position })),
+      layouts: await exportLayouts(projectId),
       envFiles: envFiles.map((f) => ({
         path: f.path,
         applyOnCreate: f.applyOnCreate,
@@ -325,6 +335,25 @@ export async function importProjectArchive(projectId: string, archive: Buffer, o
           'INSERT INTO project_permission_rules (project_id, tool_name, rule_content) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
           [projectId, rule.toolName, typeof rule.ruleContent === 'string' ? rule.ruleContent : null],
         );
+      }
+      // Cockpit : onglets, pages personnalisées et agencements partagés (sans écraser une page ou un agencement déjà réglé ici).
+      if (Array.isArray(p.pages)) {
+        for (const pg of p.pages) {
+          if (!pg || typeof pg.slug !== 'string' || typeof pg.title !== 'string') continue;
+          await client.query('INSERT INTO project_pages (project_id, slug, title, icon, position) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (project_id, slug) DO NOTHING', [projectId, pg.slug, pg.title, typeof pg.icon === 'string' ? pg.icon : null, Number(pg.position) || 0]);
+        }
+      }
+      if (p.tabs && typeof p.tabs === 'object') await client.query('UPDATE projects SET tabs = $2::jsonb WHERE id = $1', [projectId, JSON.stringify({ hidden: Array.isArray(p.tabs.hidden) ? p.tabs.hidden : [], order: Array.isArray(p.tabs.order) ? p.tabs.order : [] })]);
+      if (Array.isArray(p.layouts)) {
+        for (const l of p.layouts) {
+          if (!l || typeof l.scope !== 'string' || !l.layout) continue;
+          const scope = l.scope === 'project' ? `project:${projectId}` : l.scope === 'tasks' ? `project:${projectId}:tasks` : l.scope.startsWith('page:') ? `project:${projectId}:page:${l.scope.slice(5)}` : null;
+          if (!scope) continue;
+          const exists = await client.query('SELECT 1 FROM cockpit_layouts WHERE scope = $1 AND user_id IS NULL', [scope]);
+          if (exists.rowCount) continue;
+          const inserted = await client.query<{ id: string }>('INSERT INTO cockpit_layouts (scope, project_id, layout, version) VALUES ($1, $2, $3::jsonb, 1) RETURNING id', [scope, projectId, JSON.stringify(l.layout)]);
+          await client.query('INSERT INTO cockpit_layout_versions (layout_id, version, layout, note) VALUES ($1, 1, $2::jsonb, $3)', [inserted.rows[0].id, JSON.stringify(l.layout), 'Import d’une archive']);
+        }
       }
       report.settingsUpdated = true;
     }

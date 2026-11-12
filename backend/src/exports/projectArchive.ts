@@ -25,6 +25,11 @@ export interface ExportedProject {
   permissionRules: { toolName: string; ruleContent: string | null }[];
   /** Fichiers d'environnement : chemins et clés, avec leurs références au coffre ; jamais les valeurs. */
   envFiles: { path: string; applyOnCreate: boolean; keys: { key: string; vaultRefs: string[] }[] }[];
+  /** Cockpit : onglets du projet, pages personnalisées et agencements partagés (tableau de bord, pilotage, pages) ; absents dans une archive d'avant. */
+  tabs?: { hidden: string[]; order: string[] };
+  pages?: { slug: string; title: string; icon: string | null; position: number }[];
+  /** Agencements par portée relative (`project`, `tasks`, `page:<slug>`) : les blocs artefacts ne sont pas exportés (identifiants d'un autre serveur). */
+  layouts?: { scope: string; layout: unknown }[];
 }
 
 export interface ExportedFolder {

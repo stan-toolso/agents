@@ -45,8 +45,8 @@ describe('parseScope', () => {
     expect(parseScope('home:default')).toMatchObject({ kind: 'home', cell: true });
     expect(parseScope('home').cell).toBeUndefined();
   });
-  it('refuse les portées réservées et inconnues', () => {
-    expect(() => parseScope(`project:${P}:page:reporting`)).toThrow(/pas encore composable/);
+  it('reconnaît une page personnalisée et refuse les portées inconnues', () => {
+    expect(parseScope(`project:${P}:page:reporting`)).toMatchObject({ kind: 'page', projectId: P, slug: 'reporting' });
     expect(() => parseScope('agent:not-a-uuid')).toThrow(/Portée inconnue/);
     expect(() => parseScope('')).toThrow(/Portée inconnue/);
   });

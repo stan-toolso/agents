@@ -9,6 +9,7 @@ export interface TargetInfo {
 /** Une requête par type de cible : `$1` est l'identifiant ; colonnes `project_id` et `label`. */
 const QUERIES = {
   project: 'SELECT id AS project_id, name AS label FROM projects WHERE id = $1',
+  project_page: 'SELECT project_id, title AS label FROM project_pages WHERE id = $1',
   session: 'SELECT project_id, name AS label FROM sessions WHERE id = $1',
   session_share: 'SELECT s.project_id, s.name AS label FROM session_shares sh JOIN sessions s ON s.id = sh.session_id WHERE sh.id = $1',
   task: 'SELECT project_id, title AS label FROM tasks WHERE id = $1',

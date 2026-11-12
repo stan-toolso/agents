@@ -8,6 +8,7 @@ import TabPages from './workbench/TabPages';
 import ProjectsPage from './pages/ProjectsPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
 const ProjectSettingsPage = lazy(() => import('./pages/ProjectSettingsPage'));
+const ProjectCustomPage = lazy(() => import('./pages/ProjectCustomPage'));
 import LoginPage from './pages/LoginPage';
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'));
 import SessionsPage from './pages/SessionsPage';
@@ -78,6 +79,7 @@ function PageRoutes({ location, isAdmin }: { location: Location; isAdmin: boolea
       <Route path="/projects/:id" element={<ProjectDetailPage />} />
       <Route path="/projects/:id/edit" element={<ProjectFormPage />} />
       <Route path="/projects/:id/settings" element={<ProjectSettingsPage />} />
+      <Route path="/projects/:id/p/:slug" element={<ProjectCustomPage />} />
       <Route path="/projects/:id/context" element={<ContextPage />} />
       <Route path="/projects/:id/tasks" element={<TasksPage />} />
       <Route path="/projects/:id/artifacts" element={<SharedPagesPage />} />
