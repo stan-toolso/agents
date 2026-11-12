@@ -44,7 +44,7 @@ export default function VaultPage() {
   useTabTitle('Coffre');
   const { flash, setFlash, deepItem, setDeepItem } = useReturnParams();
   const { data, loading, error } = usePollingQuery<{ vaultItems: VaultItem[]; vaultGoogleAvailable: boolean }>(VAULT_ITEMS, { pollInterval: 15_000 });
-  const { data: projectsData } = useQuery<{ projects: Project[] }>(PROJECTS);
+  const { data: projectsData } = useQuery<{ projects: Project[] }>(PROJECTS, { variables: { includePersonal: true } });
   const [scope, setScope] = useState<Scope>('all');
   const [kind, setKind] = useState<VaultItemKind | ''>('');
   const [search, setSearch] = useState('');
@@ -59,7 +59,7 @@ export default function VaultPage() {
 
   const items = data?.vaultItems ?? [];
   const projects = projectsData?.projects ?? [];
-  const owners: VaultOwnerChoice[] = [{ projectId: null, label: 'Mon coffre personnel' }, ...projects.filter((p) => p.myRole === 'ADMIN').map((p) => ({ projectId: p.id, label: `Projet ${p.name}` }))];
+  const owners: VaultOwnerChoice[] = [{ projectId: null, label: 'Mon coffre personnel' }, ...projects.filter((p) => p.myRole === 'ADMIN' && !p.isPersonal).map((p) => ({ projectId: p.id, label: `Projet ${p.name}` }))];
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return items.filter((i) => {

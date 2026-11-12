@@ -147,7 +147,14 @@ const SCOPE_SQL = `
      AND (i.owner_user_id = $2
           OR EXISTS (SELECT 1 FROM vault_item_shares s WHERE s.item_id = i.id AND s.user_id = $2)
           OR EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = i.owner_project_id AND m.user_id = $2 AND m.role = 'admin'))
-     AND EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = $1 AND m.user_id = $2)`;
+     AND EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = $1 AND m.user_id = $2)
+  UNION ALL
+  -- Espace personnel : les sessions de son propriétaire ont d'office tout son coffre personnel, sans lien à créer
+  -- (un élément déjà relié à l'espace y entre par son lien, avec sa portée).
+  SELECT i.*, 'personal', NULL::uuid, NULL::text, NULL::uuid, NULL::uuid, NULL::timestamptz
+    FROM vault_items i JOIN projects p ON p.id = $1 AND p.personal_owner_id = $2
+   WHERE i.owner_user_id = $2
+     AND NOT EXISTS (SELECT 1 FROM vault_item_links l WHERE l.item_id = i.id AND l.project_id = $1)`;
 
 type ScopeRow = Row & { via: VaultItemVia; link_id: string | null; link_scope: VaultLinkScope | null; link_user_id: string | null; link_linked_by: string | null; link_created_at: Date | null };
 
