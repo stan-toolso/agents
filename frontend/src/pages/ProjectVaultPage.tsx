@@ -100,7 +100,7 @@ export default function ProjectVaultPage() {
   const { confirm, showError } = useDialogs();
   const { data, loading, error } = usePollingQuery<{ project: VaultProject | null; vaultGoogleAvailable: boolean }>(VAULT_PROJECT, { variables: { id }, pollInterval: 15_000 });
   const { data: mineData } = useQuery<{ vaultItems: VaultItem[] }>(VAULT_ITEMS);
-  const { data: projectsData } = useQuery<{ projects: Project[] }>(PROJECTS);
+  const { data: projectsData } = useQuery<{ projects: Project[] }>(PROJECTS, { variables: { includePersonal: true } });
   const project = data?.project;
   useTabTitle(project ? `Coffre · ${project.name}` : null);
   const [editing, setEditing] = useState<VaultItem | null | 'new'>(null);
