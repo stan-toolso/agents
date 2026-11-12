@@ -11,6 +11,7 @@ import { SHARE_LOGIN_LINK_DAYS, signInService } from '../auth/signInService.js';
 import { pageShareEmail } from './emails.js';
 import { sharedPageCommentRepository } from './commentRepository.js';
 import { sharedPageRepository } from './repository.js';
+import { dataSourceRepository } from './dataRepository.js';
 import { parseRefreshMinutes } from './dataSources.js';
 import { AGENT_HANDOFF_MODES, type AgentHandoff, type PublishInput, type SharedPage } from './types.js';
 
@@ -228,7 +229,7 @@ export const sharedPageService = {
     const patch: { title?: string; description?: string | null; linkAccess?: boolean; projectAccess?: boolean; agentHandoff?: AgentHandoff; refreshMinutes?: number | null } = {};
     if (input.refreshMinutes !== undefined) {
       if (page.kind !== 'data') throw new AppError("Seul un artefact de données se rafraîchit");
-      patch.refreshMinutes = parseRefreshMinutes(input.refreshMinutes);
+      patch.refreshMinutes = parseRefreshMinutes(input.refreshMinutes, (await dataSourceRepository.list(page.id)).some((s) => s.kind === 'agent'));
     }
     if (input.title != null) patch.title = cleanTitle(input.title);
     if (input.description !== undefined) patch.description = cleanDescription(input.description);

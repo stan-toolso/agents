@@ -231,15 +231,16 @@ export const sharedPageRepository = {
         await client.query(
           `INSERT INTO shared_page_sources (page_id, name, kind, config, position, data, row_count, status, error, duration_ms, refreshed_at, attempted_at)
            SELECT $1, d.def->>'name', d.def->>'kind', d.def->'config', d.ord - 1,
-                  s.data, s.row_count, COALESCE(s.status, 'pending'), s.error, s.duration_ms, s.refreshed_at, s.attempted_at
+                  s.data, s.row_count, CASE WHEN s.status IS NULL THEN 'pending' WHEN s.status = 'running' THEN (CASE WHEN s.data IS NULL THEN 'pending' ELSE 'ok' END) ELSE s.status END, s.error, s.duration_ms, s.refreshed_at, s.attempted_at
              FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY AS d(def, ord)
+             -- Une source agent en calcul repart sans session : la copie n'est pas « en calcul ».
              LEFT JOIN shared_page_sources s ON s.page_id = $2 AND s.name = d.def->>'name' AND s.kind = d.def->>'kind' AND s.config = d.def->'config'`,
           [copy.id, sourceId, JSON.stringify(snapshot.rows[0].sources)],
         );
       } else if (copy.kind === 'data') {
         await client.query(
           `INSERT INTO shared_page_sources (page_id, name, kind, config, position, data, row_count, status, error, duration_ms, refreshed_at, attempted_at)
-           SELECT $1, name, kind, config, position, data, row_count, status, error, duration_ms, refreshed_at, attempted_at FROM shared_page_sources WHERE page_id = $2`,
+           SELECT $1, name, kind, config, position, data, row_count, CASE WHEN status = 'running' THEN (CASE WHEN data IS NULL THEN 'pending' ELSE 'ok' END) ELSE status END, error, duration_ms, refreshed_at, attempted_at FROM shared_page_sources WHERE page_id = $2`,
           [copy.id, sourceId],
         );
       }

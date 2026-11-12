@@ -16,10 +16,30 @@ describe('parseSources', () => {
   it('refuse un nom invalide, un doublon, un type inconnu, une source incomplète', () => {
     expect(() => parseSources([{ name: 'Ventes', type: 'sql', item: 'b', query: 'x' }])).toThrow(/minuscule/);
     expect(() => parseSources([{ name: 'a', type: 'sql', item: 'b', query: 'x' }, { name: 'a', type: 'sql', item: 'b', query: 'y' }])).toThrow(/double/);
-    expect(() => parseSources([{ name: 'a', type: 'csv' }])).toThrow(/sql », « script » ou « graphql/);
+    expect(() => parseSources([{ name: 'a', type: 'csv' }])).toThrow(/« graphql » ou « agent »/);
     expect(() => parseSources([{ name: 'a', type: 'sql', query: 'x' }])).toThrow(/item/);
     expect(() => parseSources([{ name: 'a', type: 'script', interpreter: 'ruby', code: 'x' }])).toThrow(/interpreter/);
     expect(() => parseSources(Array.from({ length: 13 }, (_, i) => ({ name: `s${i}`, type: 'script', code: 'x' })))).toThrow(/12 sources/);
+  });
+});
+
+describe('source agent', () => {
+  it('garde la consigne et l’agent facultatif, refuse une consigne vide', () => {
+    expect(parseSources([{ name: 'resultat', type: 'agent', prompt: '  Recalcule le prévisionnel  ', agent: ' Chris ' }])[0]).toEqual({ name: 'resultat', kind: 'agent', config: { prompt: 'Recalcule le prévisionnel', agent: 'Chris' } });
+    expect(parseSources([{ name: 'r', type: 'agent', prompt: 'x' }])[0].config).toEqual({ prompt: 'x', agent: null });
+    expect(() => parseSources([{ name: 'r', type: 'agent' }])).toThrow(/prompt/);
+  });
+
+  it('impose une heure au moins entre deux rafraîchissements', () => {
+    expect(parseRefreshMinutes(60, true)).toBe(60);
+    expect(parseRefreshMinutes(0, true)).toBeNull();
+    expect(() => parseRefreshMinutes(15, true)).toThrow(/60 minutes/);
+  });
+
+  it('se décrit selon son état', () => {
+    const base = { name: 'r', kind: 'agent' as const, config: { prompt: 'x', agent: null }, error: null, rowCount: null, refreshedAt: null };
+    expect(describeSource({ ...base, status: 'pending' })).toMatch(/jamais écrite/);
+    expect(describeSource({ ...base, status: 'running', sessionId: 'S1' })).toMatch(/en cours de calcul \(session S1\)/);
   });
 });
 

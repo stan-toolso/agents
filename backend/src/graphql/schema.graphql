@@ -2559,7 +2559,7 @@ type SharedPageSource {
   id: ID!
   "Clé de Skipper.data dans la page."
   name: String!
-  "sql, script ou graphql (vivante : exécutée à la lecture aux droits de la personne qui regarde)."
+  "sql, script, graphql (vivante : exécutée à la lecture aux droits de la personne qui regarde) ou agent (calculée par une session qui l'écrit avec pages.set_data)."
   kind: String!
   "sql : nom de l'élément PostgreSQL du coffre."
   item: String
@@ -2573,7 +2573,13 @@ type SharedPageSource {
   "script : le code (propriétaire ou administrateur seulement)."
   code: String
   timeoutSeconds: Int
-  "pending (jamais rafraîchie), ok, error, skipped (non rafraîchie : élément soumis à approbation, projet disparu…), live (graphql : exécutée à chaque lecture), inactive."
+  "agent : consigne de la session lancée à chaque rafraîchissement (propriétaire ou administrateur seulement)."
+  prompt: String
+  "agent : agent du projet qui calcule la source (nom ou identifiant) ; null : une session au nom du propriétaire."
+  agent: String
+  "agent : dernière session lancée pour calculer la source."
+  sessionId: ID
+  "pending (jamais rafraîchie), ok, error, skipped (non rafraîchie : élément soumis à approbation, projet disparu…), running (agent : une session la calcule), live (graphql : exécutée à chaque lecture), inactive."
   status: String!
   error: String
   rowCount: Int

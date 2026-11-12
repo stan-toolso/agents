@@ -23,7 +23,7 @@ export const pageUrl = (id: string) => `${config.appUrl}/shared/${id}`;
 export function sharedPagesPrompt(): string {
   return [
     "Artefacts : pour remettre un rapport, un tableau de bord ou toute page consultable, écris un fichier HTML autonome dans le dossier de travail (styles et scripts en ligne ; scripts externes seulement depuis un CDN) et publie-le avec l'outil `pages.publish` : il renvoie un lien `/shared/<id>`, privé pour la personne qui pilote la session jusqu'à ce qu'elle l'ouvre à d'autres (`anyone_with_link`, ou le bouton Partager). Pour mettre un artefact à jour, publie à nouveau avec `page_id` ; pour partir d'un artefact existant sans le toucher, `pages.duplicate` en fait une copie privée (sources de données comprises). `pages.list` liste les artefacts existants. Donne le lien dans ta réponse. Les lecteurs y laissent des commentaires, généraux ou ancrés sur un élément de la page (sélecteur CSS et extrait du texte) : `pages.comments` les lit (les non traités d'abord), `pages.reply` répond dans le fil d'un commentaire, `pages.resolve` le marque traité une fois pris en compte (par exemple après avoir publié une nouvelle version).",
-    "Artefact de données (`kind: \"data\"`) : une page dont les chiffres viennent de sources que Skipper rafraîchit tout seul, pour un tableau de bord qui reste à jour sans toi. Déclare les sources dans `pages.publish` (`sources`) : `{ name, type: \"sql\", item: <élément PostgreSQL du coffre>, query }` (lecture seule, 5000 lignes au plus : agrège avec GROUP BY et ORDER BY) ou `{ name, type: \"script\", interpreter: node|python|sh, code }` (lancé dans l'environnement du projet, sans identifiant du coffre ; sa sortie standard doit être du JSON). Troisième type : `{ name, type: \"graphql\", query, variables }`, une requête de lecture sur l'API de Skipper (tâches, sessions, pull requests, livraisons, consommation…), **vivante** : exécutée à chaque lecture de la page avec les droits de la personne qui regarde (chacun voit ce qu'il a le droit de voir), jamais rafraîchie en base ; variables modèles `{{project.id}}`, `{{viewer.id}}`, `{{params.<clé>}}` (paramètres du bloc quand la page est épinglée dans un tableau de bord), `{{now}}`, `{{now-7d}}` ; `Skipper.data.<name>` reçoit le `data` de la réponse. Mets au point une requête SQL avec `vault.sql_query`, une requête GraphQL avec `cockpit.query` (et `cockpit.schema` pour les champs disponibles) avant de la déclarer. Dans la page, les données sont disponibles avant tout script sous `window.Skipper` : `Skipper.data.<name>` (`{ columns, rows }` pour une requête SQL — chaque ligne est un objet colonne → valeur, nombres déjà convertis, dates en ISO — ou le JSON du script), `Skipper.meta` (`refreshedAt`, `sources[]` avec `status` et `error`) et `Skipper.ready((data, meta) => …)`. N'écris jamais les chiffres en dur : la page les lit dans `Skipper.data` et se dessine (prévois le cas d'une source en erreur ou vide : `Skipper.meta.sources`). `refresh_minutes` règle le rafraîchissement automatique (60 = toutes les heures ; absent : à la demande, bouton Rafraîchir). À la publication les sources sont exécutées une première fois et leur état renvoyé ; `pages.refresh` les relance, `pages.data` montre les données d'une source (pour vérifier ce que reçoit la page). Un élément du coffre soumis à approbation n'est pas rafraîchi sans une personne : dis-le-lui, elle rafraîchit depuis l'artefact. Pour les graphiques, préfère un SVG dessiné à la main ou une bibliothèque légère depuis un CDN, des couleurs sobres, une grille discrète, des libellés lisibles, et un rendu correct sur téléphone.",
+    "Artefact de données (`kind: \"data\"`) : une page dont les chiffres viennent de sources que Skipper rafraîchit tout seul, pour un tableau de bord qui reste à jour sans toi. Déclare les sources dans `pages.publish` (`sources`) : `{ name, type: \"sql\", item: <élément PostgreSQL du coffre>, query }` (lecture seule, 5000 lignes au plus : agrège avec GROUP BY et ORDER BY) ou `{ name, type: \"script\", interpreter: node|python|sh, code }` (lancé dans l'environnement du projet, sans identifiant du coffre ; sa sortie standard doit être du JSON). Troisième type : `{ name, type: \"graphql\", query, variables }`, une requête de lecture sur l'API de Skipper (tâches, sessions, pull requests, livraisons, consommation…), **vivante** : exécutée à chaque lecture de la page avec les droits de la personne qui regarde (chacun voit ce qu'il a le droit de voir), jamais rafraîchie en base ; variables modèles `{{project.id}}`, `{{viewer.id}}`, `{{params.<clé>}}` (paramètres du bloc quand la page est épinglée dans un tableau de bord), `{{now}}`, `{{now-7d}}` ; `Skipper.data.<name>` reçoit le `data` de la réponse. Quatrième type, pour les chiffres qu'aucune requête ne sait produire (documents à lire, calcul du dépôt, jugement) : `{ name, type: \"agent\", prompt, agent? }` ; à chaque rafraîchissement (intervalle d'une heure au moins, ou bouton Rafraîchir), Skipper lance une session (l'agent du projet nommé, sinon au nom du propriétaire) avec cette consigne, et elle écrit le résultat avec `pages.set_data` (page_id, source, data) sans republier la page ; la consigne doit se suffire à elle-même (où trouver les éléments, comment calculer, forme exacte du JSON). À la publication, calcule toi-même une première fois chaque source agent et écris-la avec `pages.set_data`. N'écris jamais un instantané figé dans une source script : préfère une source agent. Mets au point une requête SQL avec `vault.sql_query`, une requête GraphQL avec `cockpit.query` (et `cockpit.schema` pour les champs disponibles) avant de la déclarer. Dans la page, les données sont disponibles avant tout script sous `window.Skipper` : `Skipper.data.<name>` (`{ columns, rows }` pour une requête SQL — chaque ligne est un objet colonne → valeur, nombres déjà convertis, dates en ISO — ou le JSON du script), `Skipper.meta` (`refreshedAt`, `sources[]` avec `status` et `error`) et `Skipper.ready((data, meta) => …)`. N'écris jamais les chiffres en dur : la page les lit dans `Skipper.data` et se dessine (prévois le cas d'une source en erreur ou vide : `Skipper.meta.sources`). `refresh_minutes` règle le rafraîchissement automatique (60 = toutes les heures ; absent : à la demande, bouton Rafraîchir). À la publication les sources sont exécutées une première fois et leur état renvoyé ; `pages.refresh` les relance, `pages.data` montre les données d'une source (pour vérifier ce que reçoit la page). Un élément du coffre soumis à approbation n'est pas rafraîchi sans une personne : dis-le-lui, elle rafraîchit depuis l'artefact. Pour les graphiques, préfère un SVG dessiné à la main ou une bibliothèque légère depuis un CDN, des couleurs sobres, une grille discrète, des libellés lisibles, et un rendu correct sur téléphone.",
     "Diapositives (`kind: \"slides\"`) : un seul fichier HTML, une `<section class=\"slide\">` par diapositive (la première = titre), chacune conçue pour **1280 × 720** (le lecteur de Skipper la met à l'échelle, l'affiche une à la fois, gère le clavier, le balayage, la vue en grille, le mode présentation et l'export PDF : n'écris aucune navigation toi-même, pas de défilement dans une diapositive). `data-title` donne le titre d'une diapositive (sinon son premier titre) ; `<aside class=\"notes\">` dans une diapositive = notes de l'orateur, jamais affichées. Styles en ligne dans `<style>` : une palette sobre et constante, textes grands (titres ≥ 44 px, corps ≥ 24 px, jamais sous 18 px), 6 points au plus par diapositive, marges généreuses (≥ 64 px), images et graphiques en SVG en ligne ou images de données ; une idée par diapositive. Vérifie le rendu de chaque diapositive à 1280 × 720 (navigateur headless ou aperçu) avant de publier.",
   ].join('\n');
 }
@@ -73,7 +73,7 @@ export function createSharedPagesMcpServer(ctx: SharedPagesMcpContext): McpSdkSe
             .array(
               z.object({
                 name: z.string().describe('Clé de Skipper.data dans la page : lettre minuscule puis lettres, chiffres, _'),
-                type: z.enum(['sql', 'script', 'graphql']),
+                type: z.enum(['sql', 'script', 'graphql', 'agent']),
                 item: z.string().optional().describe("sql : nom de l'élément PostgreSQL du coffre"),
                 database: z.string().optional().describe("sql : base, pour un élément rattaché à un serveur entier"),
                 query: z.string().optional().describe("sql : la requête (une instruction, lecture seule, 5000 lignes au plus) ; graphql : la requête de lecture sur l'API de Skipper (une opération query, 8 niveaux et 80 champs au plus)"),
@@ -81,11 +81,13 @@ export function createSharedPagesMcpServer(ctx: SharedPagesMcpContext): McpSdkSe
                 interpreter: z.enum(['node', 'python', 'sh']).optional().describe('script : interpréteur (défaut node)'),
                 code: z.string().optional().describe('script : le code ; sa sortie standard doit être du JSON'),
                 timeout_seconds: z.number().int().min(1).max(DATA_LIMITS.scriptTimeoutSeconds).optional().describe('script : délai (défaut 60 s)'),
+                prompt: z.string().optional().describe("agent : consigne de la session lancée à chaque rafraîchissement pour calculer la source (elle écrit le résultat avec pages.set_data)"),
+                agent: z.string().optional().describe("agent : agent du projet (nom ou identifiant) qui calcule la source ; absent : une session au nom du propriétaire de l'artefact"),
               }),
             )
             .optional()
             .describe("kind data : les sources de données (remplacent celles de la version précédente, qui garde les siennes : chaque version est consultable avec ses sources) ; absentes, la nouvelle version reprend les sources actuelles"),
-          refresh_minutes: z.number().int().min(0).max(DATA_LIMITS.maxRefreshMinutes).optional().describe("kind data : rafraîchissement automatique toutes les N minutes (5 à 10080) ; 0 ou absent : à la demande"),
+          refresh_minutes: z.number().int().min(0).max(DATA_LIMITS.maxRefreshMinutes).optional().describe("kind data : rafraîchissement automatique toutes les N minutes (5 à 10080 ; 60 au moins avec une source agent) ; 0 ou absent : à la demande"),
         },
         async ({ path: p, title, description, page_id, anyone_with_link, kind, sources, refresh_minutes }) =>
           run(async () => {
@@ -101,10 +103,13 @@ export function createSharedPagesMcpServer(ctx: SharedPagesMcpContext): McpSdkSe
             const what = page.kind === 'data' ? 'Artefact de données publié' : page.kind === 'slides' ? 'Diapositives publiées' : 'Page publiée';
             const lines = [page.version > 1 ? `Version ${page.version} publiée : ${pageUrl(page.id)}` : `${what} : ${pageUrl(page.id)}`, `${page.id} · ${page.title} · accès : ${await describeAccess(page)}`];
             if (page.kind === 'data') {
+              // Intervalle d'abord (vérifié contre les sources à venir), puis les sources (vérifiées contre l'intervalle).
+              if (refresh_minutes !== undefined) page = await artifactDataService.setRefresh(page, refresh_minutes, sources ? sources.some((x) => x.type === 'agent') : undefined);
               if (sources) await artifactDataService.setSources(page, sources);
-              if (refresh_minutes !== undefined) page = await artifactDataService.setRefresh(page, refresh_minutes);
               const states = await artifactDataService.refresh(page, 'auto');
               lines.push(describeRefresh(page, states));
+              const waiting = states.filter((s) => s.kind === 'agent' && s.status !== 'ok' && s.status !== 'running');
+              if (waiting.length) lines.push(`Source(s) agent sans données : ${waiting.map((s) => s.name).join(', ')}. Calcule-les maintenant et écris-les avec pages.set_data ; ensuite, chaque rafraîchissement (planifié ou bouton Rafraîchir) lancera une session avec leur consigne.`);
               if (!states.length) lines.push('Aucune source déclarée : Skipper.data est vide dans la page. Passe `sources` à pages.publish.');
             }
             if (!page.linkAccess) lines.push("La personne qui pilote la session peut l'ouvrir à d'autres avec le bouton Partager de la page.");
@@ -121,6 +126,31 @@ export function createSharedPagesMcpServer(ctx: SharedPagesMcpContext): McpSdkSe
             if (page.kind !== 'data') throw new AppError("Cet artefact n'a pas de sources de données");
             const states = await artifactDataService.refresh(page, 'auto');
             return describeRefresh(page, states);
+          }),
+      ),
+      tool(
+        'set_data',
+        "Écrit les données d'une source agent d'un artefact de données (ce que la page reçoit dans Skipper.data.<source>), sans nouvelle version de la page. À appeler par la session lancée pour calculer la source, ou par une session du propriétaire de l'artefact.",
+        {
+          page_id: z.string().describe("Identifiant de l'artefact"),
+          source: z.string().describe('Nom de la source (de type agent)'),
+          data: z.any().describe('Le résultat, en JSON (objet ou tableau), de la même forme que celle que la page attend'),
+        },
+        async ({ page_id, source, data }) =>
+          run(async () => {
+            const page = await sharedPageService.get(page_id);
+            let value: unknown = data;
+            // Certains modèles passent le JSON en texte : on le relit.
+            if (typeof value === 'string') {
+              try {
+                value = JSON.parse(value);
+              } catch {
+                /* une chaîne reste une chaîne */
+              }
+            }
+            if (value === undefined) throw new AppError('data est obligatoire');
+            const s = await artifactDataService.setAgentData(page, source, value, { id: ctx.session.id, ownerId: ctx.session.ownerId ?? null });
+            return `${describeSource(s)}\nDonnées écrites : la page les affiche à sa prochaine lecture (${pageUrl(page.id)}).`;
           }),
       ),
       tool(

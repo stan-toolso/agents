@@ -95,4 +95,21 @@ describe.skipIf(!adminUrl)('versions des artefacts (PostgreSQL)', () => {
     await repo.snapshotLatest(page.id);
     expect((await repo.versions(page.id)).map((v) => [v.version, v.kind, v.sources])).toEqual([[2, 'slides', null], [1, 'page', null]]);
   });
+
+  it('source agent : en calcul avec sa session, puis données écrites ; la copie ne reste pas « en calcul »', async () => {
+    const page = await repo.create({ ownerId: alice, title: 'Prévisionnel', description: null, linkAccess: false, projectId: project, sessionId: null, sourcePath: null, html: Buffer.from('<p>v1</p>'), kind: 'data' });
+    await data.replace(page.id, [{ name: 'resultat', kind: 'agent', config: { prompt: 'Recalcule', agent: null } }]);
+    await repo.snapshotLatest(page.id);
+    const [src] = await data.list(page.id);
+    const session = (await pool.query<{ id: string }>(`INSERT INTO sessions (name, provider, project_id) VALUES ('calcul', 'claude', $1) RETURNING id`, [project])).rows[0].id;
+    await data.markRunning(src.id, session);
+    expect((await data.list(page.id))[0]).toMatchObject({ status: 'running', sessionId: session });
+    const copy = (await repo.duplicate(page.id, 1, { ownerId: alice, title: 'Copie', description: null, projectId: project, sessionId: null, sourcePath: null }))!;
+    expect((await data.list(copy.id))[0]).toMatchObject({ status: 'pending', sessionId: null });
+    await data.saveAgentData(src.id, { total: 234.83 }, null);
+    const [after] = await data.list(page.id, true);
+    expect(after).toMatchObject({ status: 'ok', data: { total: 234.83 }, sessionId: session });
+    expect(after.durationMs).not.toBeNull();
+    expect(after.refreshedAt).not.toBeNull();
+  });
 });

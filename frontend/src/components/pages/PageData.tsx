@@ -1,4 +1,5 @@
 import { Button, Form } from 'react-bootstrap';
+import { Link } from 'react-router-dom';
 import type { SharedPage, SharedPageSource } from '../../graphql/misc';
 import { timeAgo } from '../../lib/humanize';
 import './pageData.css';
@@ -28,17 +29,33 @@ const STATE: Record<SharedPageSource['status'], { label: string; icon: string }>
   pending: { label: 'Jamais rafraîchie', icon: 'bi-hourglass' },
   inactive: { label: 'Modifiée depuis', icon: 'bi-clock-history' },
   live: { label: 'Vivante', icon: 'bi-lightning-charge' },
+  running: { label: 'En calcul', icon: 'bi-robot' },
+};
+
+const KIND: Record<SharedPageSource['kind'], { icon: string; title: string }> = {
+  sql: { icon: 'bi-database', title: 'Requête SQL (coffre)' },
+  script: { icon: 'bi-terminal', title: "Script lancé dans l'environnement du projet" },
+  graphql: { icon: 'bi-lightning-charge', title: "Requête GraphQL sur l'API de Skipper, exécutée à chaque lecture avec les droits de la personne qui regarde" },
+  agent: { icon: 'bi-robot', title: 'Calculée par une session à chaque rafraîchissement, qui écrit le résultat (pages.set_data)' },
 };
 
 function SourceCard({ s, full }: { s: SharedPageSource; full: boolean }) {
   const st = STATE[s.status];
-  const where = s.kind === 'sql' ? `${s.item ?? '?'}${s.database ? ` · ${s.database}` : ''}` : s.kind === 'graphql' ? 'API de Skipper · droits de la personne qui regarde' : `script ${s.interpreter ?? ''}`;
-  const code = s.kind === 'script' ? s.code : s.query;
+  const where =
+    s.kind === 'sql'
+      ? `${s.item ?? '?'}${s.database ? ` · ${s.database}` : ''}`
+      : s.kind === 'graphql'
+        ? 'API de Skipper · droits de la personne qui regarde'
+        : s.kind === 'agent'
+          ? `session ${s.agent ? `de ${s.agent}` : 'du propriétaire'}`
+          : `script ${s.interpreter ?? ''}`;
+  const code = s.kind === 'script' ? s.code : s.kind === 'agent' ? s.prompt : s.query;
+  const kind = KIND[s.kind] ?? KIND.script;
   return (
     <div className="pd-src">
       <div className="pd-src-head">
-        <span className="pd-src-kind" title={s.kind === 'sql' ? 'Requête SQL (coffre)' : s.kind === 'graphql' ? "Requête GraphQL sur l'API de Skipper, exécutée à chaque lecture avec les droits de la personne qui regarde" : "Script lancé dans l'environnement du projet"}>
-          <i className={`bi ${s.kind === 'sql' ? 'bi-database' : s.kind === 'graphql' ? 'bi-lightning-charge' : 'bi-terminal'}`} />
+        <span className="pd-src-kind" title={kind.title}>
+          <i className={`bi ${kind.icon}`} />
         </span>
         <span className="pd-src-name" title={`Skipper.data.${s.name}`}>
           {s.name}
@@ -55,12 +72,17 @@ function SourceCard({ s, full }: { s: SharedPageSource; full: boolean }) {
         {s.rowCount != null && <span>{s.rowCount} ligne{s.rowCount > 1 ? 's' : ''}</span>}
         {s.durationMs != null && s.status !== 'pending' && <span>{s.durationMs >= 1000 ? `${(s.durationMs / 1000).toFixed(1)} s` : `${s.durationMs} ms`}</span>}
         {s.status === 'error' && s.refreshedAt && <span>Dernières données conservées</span>}
+        {s.kind === 'agent' && s.sessionId && (
+          <Link to={`/sessions/${s.sessionId}`} title="Session lancée pour calculer la source">
+            {s.status === 'running' ? 'Session en cours' : 'Dernière session'}
+          </Link>
+        )}
       </div>
       {s.error && <div className={`pd-src-error${s.status === 'skipped' ? ' skipped' : ''}`}>{s.error}</div>}
       {full && code && (
         <details className="pd-src-code">
           <summary>
-            <i className="bi bi-chevron-right" /> {s.kind === 'script' ? 'Script' : 'Requête'}
+            <i className="bi bi-chevron-right" /> {s.kind === 'script' ? 'Script' : s.kind === 'agent' ? 'Consigne' : 'Requête'}
           </summary>
           <pre>{code}</pre>
           {s.kind === 'graphql' && s.variables && Object.keys(s.variables).length > 0 && <pre>{`variables : ${JSON.stringify(s.variables, null, 1)}`}</pre>}
@@ -89,6 +111,8 @@ export default function PageData({ page, manage: canManage, refreshing, onRefres
   // Une ancienne version se consulte : rafraîchir et régler l'intervalle restent sur la dernière version.
   const manage = canManage && !oldVersion;
   const failing = page.sources.filter((s) => s.status === 'error' || s.status === 'skipped').length;
+  // Une source agent lance une session à chaque rafraîchissement : une heure au moins entre deux.
+  const hasAgent = page.sources.some((s) => s.kind === 'agent');
   return (
     <aside className="pc-panel pd-panel" aria-label="Données de l'artefact">
       <div className="pc-head">
@@ -131,7 +155,7 @@ export default function PageData({ page, manage: canManage, refreshing, onRefres
       {manage && (
         <div className="pd-refresh" style={{ paddingTop: 0, borderBottom: '1px solid var(--cc-border)' }}>
           <Form.Select size="sm" value={page.refreshMinutes ?? 0} onChange={(e) => onSetRefresh(Number(e.target.value))} aria-label="Rafraîchissement automatique">
-            {REFRESH_CHOICES.map(([m, label]) => (
+            {REFRESH_CHOICES.filter(([m]) => !hasAgent || m === 0 || m >= 60).map(([m, label]) => (
               <option key={m} value={m}>
                 {label}
               </option>
@@ -146,6 +170,7 @@ export default function PageData({ page, manage: canManage, refreshing, onRefres
       </div>
       <div className="pd-foot">
         Les sources sont exécutées au nom du propriétaire, en lecture seule ; une source en erreur garde ses dernières données.
+        {hasAgent && ' Une source « agent » lance une session à chaque rafraîchissement (bouton ou intervalle) : elle consomme comme une session.'}
         {onAskAgent && (
           <>
             {' '}

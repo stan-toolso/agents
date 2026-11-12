@@ -213,6 +213,7 @@ export function describeTool(rawName: string, input: Record<string, unknown> = {
           resolve: ['Commentaire marqué traité', undefined, 'marquer un commentaire traité'],
           duplicate: [title ? `Copie d'un artefact : « ${title} »` : "Copie d'un artefact", undefined, 'dupliquer un artefact'],
           refresh: ["Rafraîchissement des données d'un artefact", undefined, "rafraîchir les données d'un artefact"],
+          set_data: [`Écriture des données de la source « ${str(input, 'source') ?? '?'} »`, undefined, "écrire les données d'un artefact"],
           data: [`Lecture des données ${str(input, 'source') ? `de la source « ${str(input, 'source')} »` : "d'un artefact"}`, undefined, "lire les données d'un artefact"],
         };
         const [label, detail, action] = verbs[op] ?? [`Artefacts : ${op}`, undefined, `utiliser les artefacts (${op})`];

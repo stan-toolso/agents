@@ -8,7 +8,7 @@ import type { User } from '../users/types.js';
 import * as postgres from '../vault/postgres.js';
 import { vaultService } from '../vault/service.js';
 import { dataSourceRepository } from './dataRepository.js';
-import { DATA_LIMITS, assertDataSize, countRows, normalizeSqlResult, parseRefreshMinutes, parseScriptOutput, parseSources, scriptCommand, type DataSource, type DataSourceInput, type ScriptSourceConfig, type SqlSourceConfig } from './dataSources.js';
+import { DATA_LIMITS, assertDataSize, countRows, normalizeSqlResult, parseRefreshMinutes, parseScriptOutput, parseSources, scriptCommand, type AgentSourceConfig, type DataSource, type DataSourceInput, type ScriptSourceConfig, type SqlSourceConfig } from './dataSources.js';
 import { sharedPageRepository } from './repository.js';
 import { sharedPageService } from './service.js';
 import type { SharedPage, SharedPageVersion } from './types.js';
@@ -53,6 +53,17 @@ export function sourcesOfVersion(pageId: string, version: SharedPageVersion, liv
  *   (`skipped`) : rien n'y touche sans un humain.
  */
 export type RefreshTrigger = 'person' | 'auto';
+
+/**
+ * `agents` : lancer aussi les sessions des sources agent. Seuls le planificateur et le bouton Rafraîchir le font ; la
+ * publication et l'outil pages.refresh viennent d'une session qui écrit elle-même ses données (pages.set_data).
+ */
+export interface RefreshOptions {
+  agents?: boolean;
+}
+
+/** Délai au-delà duquel une session de source agent qui n'a rien écrit est tenue pour perdue. */
+const AGENT_RUN_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 
 /** Une tentative par minute au plus ; dix artefacts par passage (les autres au suivant). */
 const SCHEDULER_INTERVAL_MS = 60_000;
@@ -104,13 +115,103 @@ async function runScript(project: Project, source: DataSource): Promise<{ data: 
 
 class SkippedError extends Error {}
 
-async function refreshOne(page: SharedPage, project: Project | null, source: DataSource, trigger: RefreshTrigger, memberOk: boolean): Promise<void> {
+/** Texte envoyé à la session qui calcule une source agent : la consigne, puis comment rendre le résultat. */
+export function agentSourceInstruction(page: Pick<SharedPage, 'id' | 'title'>, source: Pick<DataSource, 'name'>, cfg: AgentSourceConfig, previous: unknown): string {
+  const prev = previous == null ? 'aucune (première fois)' : JSON.stringify(previous).slice(0, 4000);
+  return [
+    `Rafraîchissement de la source « ${source.name} » de l'artefact de données « ${page.title} » (${page.id}).`,
+    '',
+    cfg.prompt,
+    '',
+    `Quand tu as le résultat, écris-le avec l'outil \`pages.set_data\` (page_id: "${page.id}", source: "${source.name}", data: le JSON). ` +
+      "Garde la même forme que les données précédentes : la page les lit telles quelles dans Skipper.data. Ne republie pas la page (pas de pages.publish) et ne modifie pas le dépôt. " +
+      "Si tu ne peux pas calculer le résultat, explique pourquoi dans ta réponse sans appeler pages.set_data : les données précédentes restent affichées.",
+    '',
+    `Données précédentes : ${prev}`,
+  ].join('\n');
+}
+
+/** La session est-elle encore en train de travailler (ni terminée, ni archivée, ni au repos) ? */
+const sessionBusy = (s: { status: string; activity: string | null; archivedAt: Date | null } | null) =>
+  Boolean(s && !s.archivedAt && (s.status === 'pending' || s.status === 'queued' || (s.status === 'running' && s.activity !== 'idle')));
+
+/**
+ * Source agent : lance une session (au nom de l'agent choisi, sinon du propriétaire de l'artefact) chargée de calculer
+ * la source et de l'écrire avec pages.set_data. Une session encore au travail sur la source n'est pas doublée ; une
+ * session terminée sans rien écrire passe la source en erreur avant d'en lancer une nouvelle.
+ */
+async function launchAgentSource(page: SharedPage, project: Project, source: DataSource): Promise<void> {
+  const cfg = source.config as AgentSourceConfig;
+  // Imports à la demande : sessions et agents dépendent eux-mêmes des pages partagées (outils MCP).
+  const { sessionRepository } = await import('../sessions/repository.js');
+  if (source.status === 'running' && source.sessionId) {
+    const current = await sessionRepository.findById(source.sessionId);
+    if (sessionBusy(current)) {
+      log.info(`[artifacts] ${page.title} · ${source.name} : session ${source.sessionId} encore au travail, pas de nouvelle session`);
+      return;
+    }
+  }
+  const { sessionService } = await import('../sessions/service.js');
+  const { agentService } = await import('../agents/service.js');
+  const { autoArchiveConfig } = await import('../sessions/autoArchive.js');
+  const { claudeSettings } = await import('../settings/claude.js');
+  const { projectBudget } = await import('../projects/budget.js');
+  const { systemAuthor } = await import('../sessions/instructionAuthor.js');
+  const previous = (await dataSourceRepository.list(page.id, true)).find((s) => s.id === source.id)?.data ?? null;
+  const text = agentSourceInstruction(page, source, cfg, previous);
+  const agent = cfg.agent ? await agentService.resolve(project.id, cfg.agent) : null;
+  // Mêmes contrôles qu'une planification : identifiants et plafonds de qui joue la session, budget du projet.
+  const settings = await claudeSettings.forSession(agent ? agent.id : page.ownerId);
+  settings.assertCredentials();
+  await settings.assertBudgetAvailable();
+  await projectBudget.assertAvailable(project.id);
+  let sessionId: string;
+  if (agent) {
+    const owner = await userService.get(page.ownerId).catch(() => null);
+    const session = await agentService.summon(agent.id, { text, autoArchive: true, requestedById: owner && owner.kind !== 'agent' ? owner.id : null, actor: { type: 'human' } });
+    sessionId = session.id;
+  } else {
+    const session = await sessionService.create({
+      projectId: project.id,
+      name: `Données · ${page.title} · ${source.name}`.slice(0, 80),
+      provider: 'claude',
+      config: autoArchiveConfig(),
+      newWorksession: {},
+      ownerId: page.ownerId,
+      autoStart: false,
+    });
+    sessionId = session.id;
+    await sessionService.sendMessage(sessionId, text, null, { author: systemAuthor(`Artefact « ${page.title} »`) });
+  }
+  await dataSourceRepository.markRunning(source.id, sessionId);
+  log.info(`[artifacts] ${page.title} · ${source.name} : session ${sessionId} lancée`);
+  // Suivi : une session qui s'arrête sans avoir écrit la source la passe en erreur (les données précédentes restent).
+  void (async () => {
+    try {
+      await sessionService.waitForIdle(sessionId, AGENT_RUN_TIMEOUT_MS);
+      const now = (await dataSourceRepository.list(page.id)).find((s) => s.id === source.id);
+      if (now?.status === 'running' && now.sessionId === sessionId) {
+        await dataSourceRepository.saveFailure(source.id, 'error', `La session ${sessionId} a fini son tour sans écrire les données (pages.set_data)`, null);
+      }
+    } catch (err) {
+      log.warn(`[artifacts] suivi de la session ${sessionId} : ${(err as Error).message}`);
+    }
+  })();
+}
+
+async function refreshOne(page: SharedPage, project: Project | null, source: DataSource, trigger: RefreshTrigger, memberOk: boolean, opts: RefreshOptions): Promise<void> {
   // Source graphql : vivante, exécutée à la lecture aux droits de la personne qui regarde (cockpit/liveSources.ts) ; rien à rafraîchir.
   if (source.kind === 'graphql') return;
+  // Source agent : écrite par une session (pages.set_data) ; lancée seulement par le planificateur ou le bouton Rafraîchir.
+  if (source.kind === 'agent' && !opts.agents) return;
   const started = Date.now();
   try {
     if (!project) throw new SkippedError("Le projet d'origine de l'artefact n'existe plus");
     if (!memberOk) throw new SkippedError("Le propriétaire de l'artefact n'est plus membre du projet d'origine");
+    if (source.kind === 'agent') {
+      await launchAgentSource(page, project, source);
+      return;
+    }
     const { data, note } = source.kind === 'sql' ? await runSql(page, project, source, trigger) : await runScript(project, source);
     assertDataSize(data);
     await dataSourceRepository.saveSuccess(source.id, data, countRows(data), Date.now() - started);
@@ -127,22 +228,26 @@ export const artifactDataService = {
   async setSources(page: SharedPage, inputs: DataSourceInput[]): Promise<DataSource[]> {
     if (page.kind !== 'data') throw new AppError("Cet artefact n'est pas un artefact de données (publie-le avec kind: data)");
     if (!page.projectId) throw new AppError("Un artefact de données doit être rattaché à un projet (c'est celui de la session qui le publie)");
-    await dataSourceRepository.replace(page.id, parseSources(inputs));
+    const parsed = parseSources(inputs);
+    if (page.refreshMinutes && parsed.some((s) => s.kind === 'agent')) parseRefreshMinutes(page.refreshMinutes, true);
+    await dataSourceRepository.replace(page.id, parsed);
     // La dernière version garde la définition de ses sources (versionnage complet des artefacts).
     await sharedPageRepository.snapshotLatest(page.id);
     return dataSourceRepository.list(page.id);
   },
 
   /** Règle l'intervalle du rafraîchissement automatique (null : à la demande). */
-  async setRefresh(page: SharedPage, minutes: number | null | undefined): Promise<SharedPage> {
+  async setRefresh(page: SharedPage, minutes: number | null | undefined, withAgentSources?: boolean): Promise<SharedPage> {
     if (page.kind !== 'data') throw new AppError("Seul un artefact de données se rafraîchit");
-    const updated = (await sharedPageRepository.update(page.id, { refreshMinutes: parseRefreshMinutes(minutes) })) ?? page;
+    // Minimum d'une heure avec une source agent (`withAgentSources` : les sources sur le point d'être déclarées).
+    const withAgent = withAgentSources ?? (await dataSourceRepository.list(page.id)).some((s) => s.kind === 'agent');
+    const updated = (await sharedPageRepository.update(page.id, { refreshMinutes: parseRefreshMinutes(minutes, withAgent) })) ?? page;
     await sharedPageRepository.snapshotLatest(page.id);
     return updated;
   },
 
   /** Rafraîchit toutes les sources d'un artefact (en attendant un rafraîchissement déjà en cours plutôt que d'en lancer un second). */
-  refresh(page: SharedPage, trigger: RefreshTrigger): Promise<DataSource[]> {
+  refresh(page: SharedPage, trigger: RefreshTrigger, opts: RefreshOptions = {}): Promise<DataSource[]> {
     const pending = locks.get(page.id);
     if (pending) return pending;
     const run = (async () => {
@@ -151,7 +256,7 @@ export const artifactDataService = {
       if (!sources.length) return sources;
       const project = page.projectId ? await projectService.get(page.projectId).catch(() => null) : null;
       const memberOk = project ? (await userService.memberRoleFor(page.ownerId, project.id)) !== null || Boolean((await userService.get(page.ownerId).catch(() => null))?.isAdmin) : false;
-      for (const s of sources) await refreshOne(page, project, s, trigger, memberOk);
+      for (const s of sources) await refreshOne(page, project, s, trigger, memberOk, opts);
       return dataSourceRepository.list(page.id);
     })().finally(() => {
       if (locks.get(page.id) === run) locks.delete(page.id);
@@ -164,8 +269,26 @@ export const artifactDataService = {
   async refreshFor(user: User, id: string): Promise<SharedPage> {
     const page = await sharedPageService.getManaged(user, id);
     if (page.kind !== 'data') throw new AppError("Cet artefact n'a pas de données à rafraîchir");
-    await this.refresh(page, user.id === page.ownerId ? 'person' : 'auto');
+    await this.refresh(page, user.id === page.ownerId ? 'person' : 'auto', { agents: true });
     return sharedPageService.get(id);
+  },
+
+  /**
+   * Données d'une source agent écrites par une session (outil pages.set_data). Permis à une session du propriétaire de
+   * l'artefact, ou à la session lancée pour calculer cette source (agent du projet).
+   */
+  async setAgentData(page: SharedPage, sourceName: string, data: unknown, session: { id: string; ownerId: string | null }): Promise<DataSource> {
+    if (page.kind !== 'data') throw new AppError("Cet artefact n'a pas de sources de données");
+    const all = await dataSourceRepository.list(page.id);
+    const source = all.find((s) => s.name === sourceName);
+    if (!source) throw new AppError(`Source « ${sourceName} » introuvable (${all.map((s) => s.name).join(', ') || 'aucune source'})`);
+    if (source.kind !== 'agent') throw new AppError(`La source « ${sourceName} » est de type ${source.kind} : Skipper la calcule lui-même ; seule une source agent s'écrit avec pages.set_data`);
+    const allowed = (session.ownerId && session.ownerId === page.ownerId) || source.sessionId === session.id;
+    if (!allowed) throw new AppError("Seules une session du propriétaire de l'artefact ou la session lancée pour cette source peuvent écrire ses données");
+    assertDataSize(data);
+    await dataSourceRepository.saveAgentData(source.id, data, countRows(data));
+    log.info(`[artifacts] ${page.title} · ${source.name} écrite par la session ${session.id}`);
+    return (await dataSourceRepository.list(page.id)).find((s) => s.id === source.id) ?? source;
   },
 
   sources: (pageId: string) => dataSourceRepository.list(pageId),
@@ -190,7 +313,7 @@ export const artifactDataService = {
     const due = await sharedPageRepository.dueForRefresh(SCHEDULER_BATCH, DATA_LIMITS.idleDays);
     for (const page of due) {
       try {
-        await this.refresh(page, 'auto');
+        await this.refresh(page, 'auto', { agents: true });
       } catch (err) {
         log.error(`[artifacts] rafraîchissement de ${page.title}`, err);
       }

@@ -24,7 +24,7 @@ import { searchService, type SearchKind } from '../search/service.js';
 import { sharedPageCommentService } from '../sharedPages/commentService.js';
 import { sharedPageService } from '../sharedPages/service.js';
 import { artifactDataService } from '../sharedPages/dataService.js';
-import type { DataSource, GraphqlSourceConfig, ScriptSourceConfig, SqlSourceConfig } from '../sharedPages/dataSources.js';
+import type { AgentSourceConfig, DataSource, GraphqlSourceConfig, ScriptSourceConfig, SqlSourceConfig } from '../sharedPages/dataSources.js';
 import { sharedPageUpdateService } from '../sharedPages/updateRequest.js';
 import { envFileService } from '../envFiles/service.js';
 import type { EnvFile } from '../envFiles/types.js';
@@ -2525,6 +2525,7 @@ function sourceView(s: DataSource, full: boolean) {
   const sql = s.kind === 'sql' ? (s.config as SqlSourceConfig) : null;
   const script = s.kind === 'script' ? (s.config as ScriptSourceConfig) : null;
   const gql = s.kind === 'graphql' ? (s.config as GraphqlSourceConfig) : null;
+  const agent = s.kind === 'agent' ? (s.config as AgentSourceConfig) : null;
   return {
     id: s.id,
     name: s.name,
@@ -2536,6 +2537,9 @@ function sourceView(s: DataSource, full: boolean) {
     interpreter: script?.interpreter ?? null,
     code: full ? script?.code ?? null : null,
     timeoutSeconds: script?.timeoutSeconds ?? null,
+    prompt: full ? agent?.prompt ?? null : null,
+    agent: agent?.agent ?? null,
+    sessionId: agent ? s.sessionId ?? null : null,
     // Source graphql : vivante (exécutée à la lecture), jamais rafraîchie en base.
     status: gql && s.status !== 'inactive' ? 'live' : s.status,
     error: s.error,

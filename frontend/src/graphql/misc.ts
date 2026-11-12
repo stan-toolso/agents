@@ -141,7 +141,7 @@ export type ArtifactKind = 'PAGE' | 'DATA' | 'SLIDES';
 export interface SharedPageSource {
   id: string;
   name: string;
-  kind: 'sql' | 'script' | 'graphql';
+  kind: 'sql' | 'script' | 'graphql' | 'agent';
   item: string | null;
   database: string | null;
   /** Propriétaire ou administrateur seulement. */
@@ -151,8 +151,12 @@ export interface SharedPageSource {
   interpreter: string | null;
   code: string | null;
   timeoutSeconds: number | null;
+  /** agent : consigne de la session (propriétaire ou administrateur seulement), agent qui la calcule, dernière session lancée. */
+  prompt?: string | null;
+  agent?: string | null;
+  sessionId?: string | null;
   /** inactive : source d'une ancienne version dont la définition a changé depuis (plus rafraîchie, sans données). */
-  status: 'pending' | 'ok' | 'error' | 'skipped' | 'inactive' | 'live';
+  status: 'pending' | 'ok' | 'error' | 'skipped' | 'running' | 'inactive' | 'live';
   error: string | null;
   rowCount: number | null;
   durationMs: number | null;
@@ -215,6 +219,9 @@ export const SHARED_PAGE_FIELDS = gql`
       interpreter
       code
       timeoutSeconds
+      prompt
+      agent
+      sessionId
       status
       error
       rowCount
@@ -446,6 +453,9 @@ export const SHARED_PAGE_VERSION_SOURCES = gql`
         interpreter
         code
         timeoutSeconds
+        prompt
+        agent
+        sessionId
         status
         error
         rowCount

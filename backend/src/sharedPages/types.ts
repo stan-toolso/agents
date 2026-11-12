@@ -45,7 +45,7 @@ export interface SharedPage {
 /** Définition d'une source de données gardée avec une version (sans ses données, qui restent vivantes). */
 export interface VersionSource {
   name: string;
-  kind: 'sql' | 'script' | 'graphql';
+  kind: 'sql' | 'script' | 'graphql' | 'agent';
   config: Record<string, unknown>;
 }
 
