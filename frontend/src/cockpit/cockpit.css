@@ -72,10 +72,28 @@
 /* Artefact en tuile : le cadre d'une tuile native, la page n'apporte que la valeur et son détail. */
 .ck-artifact-tile { display: flex; flex-direction: column; min-width: 0; }
 .ck-artifact-tile .dash-tile-label { align-items: flex-start; }
-.ck-artifact-tile .dash-tile-label span { flex: 1; min-width: 0; }
+.ck-artifact-tile .dash-tile-label > span:first-child { flex: 1; min-width: 0; }
 .ck-artifact-tile-open { color: var(--cc-dimmer); font-size: 11px; line-height: 1; }
 .ck-artifact-tile-open .bi { display: inline-block; }
 .ck-artifact-tile-open:hover { color: var(--cc-accent); }
+/* Contrôles d'un artefact de données (rafraîchir, intervalle, état) dans le libellé d'une tuile ou le titre d'un bloc. */
+.ck-data-controls { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; position: relative; }
+.ck-data-controls .bi { display: inline-block; }
+.ck-data-btn { border: 0; background: none; padding: 0 3px; color: var(--cc-dimmer); font-size: 11px; line-height: 1; cursor: pointer; }
+.ck-data-btn:hover:not(:disabled) { color: var(--cc-accent); }
+.ck-data-btn:disabled { cursor: default; }
+.ck-data-warn { color: var(--cc-yellow); font-size: 11px; line-height: 1; padding: 0 3px; }
+.ck-data-controls .spin { animation: ck-spin 1s linear infinite; }
+@keyframes ck-spin { to { transform: rotate(360deg); } }
+/* En tuile, avec une souris : les boutons se superposent au survol (le libellé garde sa largeur) ; un calcul en cours ou
+   une source en défaut restent visibles. Sur écran tactile, ils restent dans le libellé. */
+@media (hover: hover) {
+  .ck-artifact-tile { position: relative; }
+  .ck-artifact-tile .ck-data-controls.quiet { position: absolute; top: 12px; right: 30px; padding: 2px 2px; border-radius: 6px; background: var(--cc-bg-elevated); opacity: 0; transition: opacity .12s; }
+  .ck-artifact-tile:hover .ck-data-controls.quiet,
+  .ck-artifact-tile .ck-data-controls.quiet:focus-within,
+  .ck-artifact-tile .ck-data-controls.quiet.open { opacity: 1; }
+}
 .ck-artifact-tile-frame { overflow: hidden; transition: height .15s; }
 .ck-artifact-tile-frame iframe { display: block; width: 100%; height: 100%; border: 0; background: transparent; }
 .ck-artifact-item { padding: 0; display: flex; flex-direction: column; }

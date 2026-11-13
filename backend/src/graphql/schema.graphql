@@ -4683,6 +4683,12 @@ type CockpitArtifact {
   owner: User
   "La personne connectée administre l'artefact (propriétaire ou administrateur de Skipper)."
   canManage: Boolean!
+  "Artefact de données : rafraîchissement automatique toutes les N minutes (null : à la demande)."
+  refreshMinutes: Int
+  "Artefact de données : une source agent est en cours de calcul par une session."
+  refreshing: Boolean!
+  "Artefact de données : sources en erreur ou non rafraîchies."
+  failingSources: Int!
 }
 
 type CockpitLayoutVersion {
