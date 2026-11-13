@@ -17,6 +17,8 @@ const icons: Record<string, string> = {
   'task.stalled': 'bi-person-x',
   'task.unblocked': 'bi-unlock',
   'task.autostart_failed': 'bi-exclamation-octagon',
+  'task.woken': 'bi-alarm',
+  'task.wake_due': 'bi-alarm',
   'task.mentioned': 'bi-at',
   'task.replied': 'bi-reply',
   'conversation.mentioned': 'bi-at',

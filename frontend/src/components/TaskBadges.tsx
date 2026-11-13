@@ -119,13 +119,36 @@ export function TaskBlockedBadge({ task, short = false, className = '' }: { task
  * « Agent arrêté » : la tâche est en cours mais aucune session en charge ne tourne plus (terminée, arrêtée, en erreur ou
  * interrompue, sans pull request ouverte) : personne n'y travaille, il faut la reprendre, la relancer ou la remettre à faire.
  */
-export function TaskStalledBadge({ task, short = false, className = '' }: { task: { stalledSince?: string | null }; short?: boolean; className?: string }) {
+export function TaskStalledBadge({ task, short = false, className = '' }: { task: { stalledSince?: string | null; wakeAt?: string | null }; short?: boolean; className?: string }) {
   if (!task.stalledSince) return null;
-  const since = new Date(task.stalledSince).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const since = shortDate(task.stalledSince);
+  const why = task.wakeAt && new Date(task.wakeAt) <= new Date() ? `le réveil prévu le ${shortDate(task.wakeAt)} est passé` : `l'agent s'est arrêté le ${since} sans la terminer`;
   return (
-    <span className={`task-stalled ${className}`} title={`En cours, mais l'agent s'est arrêté le ${since} sans la terminer : reprenez sa session, relancez un agent ou remettez-la à faire`}>
+    <span className={`task-stalled ${className}`} title={`En cours, mais ${why} : reprenez sa session, relancez un agent ou remettez-la à faire`}>
       <i className="bi bi-person-x" aria-label={short ? 'agent arrêté' : undefined} />
       {!short && ' agent arrêté'}
+    </span>
+  );
+}
+
+const shortDate = (iso: string) => new Date(iso).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+/** Pourquoi une tâche est « en attente » : réveil daté, ou ce que l'agent a laissé (étiquette d'état, compte rendu dans le fil). */
+export function waitingText(task: { wakeAt?: string | null; wakeNote?: string | null; statusTag?: string | null }): string {
+  if (task.wakeAt) return `réveil le ${shortDate(task.wakeAt)}${task.wakeNote ? ` : ${task.wakeNote}` : ''}`;
+  return `${task.statusTag ? `« ${task.statusTag} »` : 'compte rendu dans le fil'}, sans date de réveil (revient dans « À traiter » au bout de 7 jours)`;
+}
+
+/**
+ * « En attente » : en cours, aucun agent n'y travaille, mais il a dit ce qu'il attendait (date de réveil, étiquette
+ * d'état ou compte rendu dans le fil) : rien à faire avant le réveil.
+ */
+export function TaskWaitingBadge({ task, short = false, className = '' }: { task: { waitingSince?: string | null; wakeAt?: string | null; wakeNote?: string | null; statusTag?: string | null }; short?: boolean; className?: string }) {
+  if (!task.waitingSince) return null;
+  return (
+    <span className={`task-waiting ${className}`} title={`En attente : ${waitingText(task)}`}>
+      <i className="bi bi-hourglass-split" aria-label={short ? 'en attente' : undefined} />
+      {!short && (task.wakeAt ? ` réveil ${shortDate(task.wakeAt)}` : ' en attente')}
     </span>
   );
 }

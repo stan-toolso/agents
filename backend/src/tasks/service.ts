@@ -110,6 +110,35 @@ export const MAX_STATUS_TAG_LENGTH = 40;
 export const MAX_TAGS = 20;
 export const MAX_TAG_LENGTH = 40;
 
+export const MAX_WAKE_NOTE_LENGTH = 2000;
+/** Délai maximal d'une date de réveil : au-delà, une tâche n'est plus « en attente », elle est à replanifier. */
+export const MAX_WAKE_DAYS = 90;
+
+/** Formate une date de réveil pour un lecteur (agent ou personne), heure de Paris. */
+export const formatWakeAt = (d: Date) => d.toLocaleString('fr-FR', { timeZone: 'Europe/Paris', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+/**
+ * Date de réveil saisie (ISO 8601, ex. « 2026-11-14T07:00:00+01:00 ») : undefined reste inchangée, chaîne vide ou null
+ * la retire. Refusée si elle est passée ou au-delà de MAX_WAKE_DAYS jours.
+ */
+export function parseWakeAt(value: string | Date | null | undefined, now = new Date()): Date | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || (typeof value === 'string' && !value.trim())) return null;
+  const d = value instanceof Date ? value : new Date(value.trim());
+  if (Number.isNaN(d.getTime())) throw new AppError(`Date de réveil illisible : ${String(value)} (attendu : date et heure ISO, ex. 2026-11-14T07:00:00+01:00)`);
+  if (d.getTime() <= now.getTime()) throw new AppError('La date de réveil doit être dans le futur');
+  if (d.getTime() > now.getTime() + MAX_WAKE_DAYS * 86_400_000) throw new AppError(`Date de réveil trop lointaine (${MAX_WAKE_DAYS} jours au plus) : rends plutôt la tâche`);
+  return d;
+}
+
+/** Note de réveil nettoyée ; null si vide, undefined reste undefined. */
+export function normalizeWakeNote(note: string | null | undefined): string | null | undefined {
+  if (note === undefined) return undefined;
+  const text = note?.trim() || null;
+  if (text && text.length > MAX_WAKE_NOTE_LENGTH) throw new AppError(`Note de réveil trop longue (${MAX_WAKE_NOTE_LENGTH} caractères au plus)`);
+  return text;
+}
+
 /** Étiquette d'état nettoyée (espaces réduits) ; null si vide, undefined reste undefined (inchangée). */
 export function normalizeStatusTag(tag: string | null | undefined): string | null | undefined {
   if (tag === undefined) return undefined;
@@ -150,7 +179,7 @@ const STATUS_TAG_HINT =
  * (tasks/stalled.ts) ; l'agent la ferme, la rend ou explique ce qui la retient avant de finir.
  */
 export const FINISH_TASK_HINT =
-  "Avant de terminer (dernier tour, archivage de la session), passe chaque tâche dont tu es en charge à `done` (`tasks.update`) si le travail est fini et vérifié ; sinon rends-la (`tasks.release`) ou laisse-la en cours avec un message dans son fil qui dit ce qui reste et ce que tu attends. Une tâche laissée « en cours » par une session arrêtée sans PR ouverte est signalée « agent arrêté » à l'équipe.";
+  "Avant de terminer (dernier tour, archivage de la session), passe chaque tâche dont tu es en charge à `done` (`tasks.update`) si le travail est fini et vérifié ; sinon rends-la (`tasks.release`) ou laisse-la en cours avec un message dans son fil qui dit ce qui reste et ce que tu attends. Si tu attends un événement daté (un job de nuit, un relevé du lendemain, une réponse), pose une date de réveil (`tasks.update` avec `wake_at`, et `wake_note` : ce qu'il faudra vérifier) : la tâche est « en attente » jusque-là, puis l'agent qui la tenait est reconvoqué (ou la tâche revient dans « À traiter » pour une personne). Une tâche laissée « en cours » par une session arrêtée en erreur, sans rien dire ou dont le réveil est passé est signalée « agent arrêté » à l'équipe.";
 
 function validate(input: CreateTaskInput | UpdateTaskInput): void {
   if ('title' in input && input.title != null && !input.title.trim()) throw new AppError('Le titre de la tâche est obligatoire');
@@ -172,6 +201,9 @@ function prepare<T extends CreateTaskInput | UpdateTaskInput>(input: T): T & { a
   if (input.dueDate === '') out.dueDate = null;
   if (input.statusTag !== undefined) out.statusTag = normalizeStatusTag(input.statusTag);
   if (input.tags != null) out.tags = normalizeTags(input.tags);
+  const wake = out as UpdateTaskInput;
+  if ('wakeAt' in input && input.wakeAt !== undefined) wake.wakeAt = parseWakeAt(input.wakeAt);
+  if ('wakeNote' in input && input.wakeNote !== undefined) wake.wakeNote = normalizeWakeNote(input.wakeNote);
   return out;
 }
 
@@ -195,6 +227,8 @@ export function describeTaskChanges(before: Task, after: Task, addedAttachments:
   }
   for (const [k, f] of beforeFields) if (!afterFields.has(k)) lines.push(`- Champ « ${f.key} » retiré`);
   if (before.dependsOnIds.join('\n') !== after.dependsOnIds.join('\n')) lines.push(`- Dépendances (bloquée par) : ${before.dependsOnIds.join(', ') || 'aucune'} → ${after.dependsOnIds.join(', ') || 'aucune'}`);
+  if ((before.wakeAt?.getTime() ?? null) !== (after.wakeAt?.getTime() ?? null)) lines.push(`- Réveil : ${before.wakeAt ? formatWakeAt(before.wakeAt) : 'aucun'} → ${after.wakeAt ? formatWakeAt(after.wakeAt) : 'aucun'}`);
+  if (before.wakeNote !== after.wakeNote && after.wakeNote) lines.push(`- À vérifier au réveil : ${after.wakeNote}`);
   if (before.autoStartWhenUnblocked !== after.autoStartWhenUnblocked) lines.push(`- Lancement automatique quand débloquée : ${after.autoStartWhenUnblocked ? 'activé' : 'désactivé'}`);
   if (before.description !== after.description) lines.push(`- Description, nouveau texte :\n${after.description.split('\n').map((l) => `  ${l}`).join('\n')}`);
   const { kept, leftOut } = fitInInstruction(addedAttachments);

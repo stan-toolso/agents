@@ -9,7 +9,7 @@ import { RegisterPullRequestModal, TrackedPullRequestActions, TrackedPullRequest
 import { forgeOfUrl, prRef, PULL_REQUESTS, type TrackedPullRequest } from '../graphql/pullRequests';
 import StatusBadge from '../components/StatusBadge';
 import TaskActions from '../components/TaskActions';
-import { isOverdue, Linkified, TaskBlockedBadge, TaskStalledBadge, TaskPriorityBadge, TaskRefList, TaskStatusBadge, TaskTags } from '../components/TaskBadges';
+import { isOverdue, Linkified, TaskBlockedBadge, TaskStalledBadge, TaskWaitingBadge, TaskPriorityBadge, TaskRefList, TaskStatusBadge, TaskTags } from '../components/TaskBadges';
 import TaskThread from '../components/TaskThread';
 import type { LaunchTarget } from '../components/TaskLaunchModal';
 import TaskModal from '../components/TaskModal';
@@ -96,7 +96,7 @@ export default function TaskPage() {
       <div className="d-flex align-items-start justify-content-between gap-3 flex-wrap">
         <div>
           <h1 className="h3 mb-1">
-            {task.title} <TaskStatusBadge status={task.status} statusTag={task.statusTag} /> <TaskPriorityBadge priority={task.priority} /> <TaskBlockedBadge task={task} /> <TaskStalledBadge task={task} />
+            {task.title} <TaskStatusBadge status={task.status} statusTag={task.statusTag} /> <TaskPriorityBadge priority={task.priority} /> <TaskBlockedBadge task={task} /> <TaskStalledBadge task={task} /> <TaskWaitingBadge task={task} />
           </h1>
           <div className="small text-secondary">
             <Link to={`/projects/${task.project.id}`}>{task.project.name}</Link>

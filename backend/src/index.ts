@@ -28,6 +28,7 @@ import { archiveAgentSessionsOfPullRequest } from './pullRequests/archiveOnEnd.j
 import { registerTaskAutoStart } from './tasks/autoStart.js';
 import { registerTaskSessionEnd } from './tasks/endSessions.js';
 import { registerStalledTasks } from './tasks/stalled.js';
+import { taskWaker } from './tasks/wake.js';
 import { agentService } from './agents/service.js';
 import { vaultService } from './vault/service.js';
 import { authSession, readCookie, SESSION_COOKIE } from './auth/session.js';
@@ -208,6 +209,7 @@ async function main() {
     { name: 'reprise des sessions orphelines', start: () => orphanSweep.start(), stop: () => orphanSweep.stop() },
     { name: 'consolidation du temps CTO', start: () => ctoTimeService.start(), stop: () => ctoTimeService.stop() },
     { name: 'rafraîchissement des artefacts de données', start: () => artifactDataService.start(), stop: () => artifactDataService.stop() },
+    { name: 'réveil des tâches en attente', start: () => taskWaker.start(), stop: () => taskWaker.stop() },
   ];
 
   // Origines autorisées à appeler l'API avec le cookie de session : voir origin.ts (aussi appliqué aux WebSockets).

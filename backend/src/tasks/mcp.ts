@@ -16,7 +16,7 @@ import { traceSessionEvent } from '../sessions/events.js';
 import { sessionService } from '../sessions/service.js';
 import { worksessionPath, worksessionService } from '../worksessions/service.js';
 import { describeAttachments, imageBlocks, type McpContent } from './attachments.js';
-import { assertUnblocked, dependencyText, describeThread, formatPerson, statusTagText, summarizeReactions, taskService } from './service.js';
+import { assertUnblocked, dependencyText, describeThread, formatPerson, formatWakeAt, statusTagText, summarizeReactions, taskService } from './service.js';
 import { TASK_PRIORITIES, TASK_STATUSES, type Task, type TaskActor, type TaskAttachment, type TaskComment, type TaskReaction } from './types.js';
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
@@ -41,8 +41,11 @@ export interface TasksMcpOptions {
 }
 
 const line = (t: Task, sessionId: string) =>
-  `- ${t.id} · [${t.status}${statusTagText(t)}] [${t.priority}] ${t.title}${t.tags.length ? ` · étiquettes ${t.tags.join(', ')}` : ''}${t.sessionIds.includes(sessionId) ? (t.sessionIds.length > 1 ? ' (assignée à cette session et à d’autres)' : ' (assignée à cette session)') : t.sessionIds.length ? ' (prise par une autre session)' : ''}${t.dueDate ? ` · échéance ${t.dueDate}` : ''}${t.assignee ? ` · responsable ${formatPerson(t.assignee)}` : ''}${t.commentCount ? ` · ${t.commentCount} commentaire${t.commentCount > 1 ? 's' : ''}` : ''}${dependencyText(t)}`;
+  `- ${t.id} · [${t.status}${statusTagText(t)}] [${t.priority}] ${t.title}${t.tags.length ? ` · étiquettes ${t.tags.join(', ')}` : ''}${t.sessionIds.includes(sessionId) ? (t.sessionIds.length > 1 ? ' (assignée à cette session et à d’autres)' : ' (assignée à cette session)') : t.sessionIds.length ? ' (prise par une autre session)' : ''}${t.dueDate ? ` · échéance ${t.dueDate}` : ''}${t.assignee ? ` · responsable ${formatPerson(t.assignee)}` : ''}${t.commentCount ? ` · ${t.commentCount} commentaire${t.commentCount > 1 ? 's' : ''}` : ''}${dependencyText(t)}${wakeText(t)}`;
 
+
+/** « · en attente, réveil le … » quand la tâche a une date de réveil. */
+const wakeText = (t: Task) => (t.wakeAt && t.status === 'in_progress' ? ` · ${t.wakeAt > new Date() ? 'en attente, réveil' : 'réveil passé'} ${formatWakeAt(t.wakeAt)}${t.wakeNote ? ` (à vérifier : ${t.wakeNote.slice(0, 200)})` : ''}` : '');
 
 /** Dépendances d'une tâche, et tâches qui dépendent d'elle, avec leur titre et leur statut. */
 function dependencyLines(t: Task, related: Task[]): string[] {
@@ -239,8 +242,15 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
           reporter: personSchema.optional().describe('null pour retirer'),
           depends_on: dependsOnSchema.describe('Remplace TOUTES les dépendances (tâches du même projet dont celle-ci dépend) : envoie la liste complète, [] pour les retirer'),
           auto_start: autoStartSchema.describe('Arme (true) ou désarme (false) le lancement automatique quand la dernière dépendance passe à done'),
+          wake_at: z
+            .string()
+            .optional()
+            .describe(
+              "Date de réveil (ISO 8601 avec fuseau, ex. 2026-11-14T08:00:00+01:00 ; chaîne vide pour retirer) d'une tâche que tu laisses en cours parce que tu attends quelque chose de daté (job de nuit, relevé du lendemain, réponse) : elle est « en attente » (pas « agent arrêté ») jusque-là, puis l'agent qui la tenait est reconvoqué sur la tâche (pour une session pilotée par une personne, elle revient dans « À traiter »). 90 jours au plus",
+            ),
+          wake_note: z.string().optional().describe('Ce qu\'il faudra vérifier au réveil, assez précis pour une session qui repart de zéro (transmis à l\'agent réveillé) ; chaîne vide pour retirer'),
         },
-        async ({ id, status, status_tag, priority, title, description, due_date, tags, custom_fields, assignee, reporter, depends_on, auto_start }) =>
+        async ({ id, status, status_tag, priority, title, description, due_date, tags, custom_fields, assignee, reporter, depends_on, auto_start, wake_at, wake_note }) =>
           run(async () => {
             const current = await own(id);
             // Claim implicite : avancer une tâche que personne n'a prise, c'est la prendre (pas une tâche bloquée).
@@ -259,6 +269,8 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
                 assignee,
                 reporter,
                 dependsOn: depends_on,
+                wakeAt: wake_at,
+                wakeNote: wake_note,
                 ...(auto_start != null ? { autoStartWhenUnblocked: auto_start, autoStartById: auto_start ? await autoStartOwner() : null } : {}),
                 ...(takes ? { sessionId } : {}),
               },

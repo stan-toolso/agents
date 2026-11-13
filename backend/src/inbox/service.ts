@@ -5,7 +5,7 @@ import { requestService } from '../requests/service.js';
 import type { HumanRequest } from '../requests/types.js';
 import { sessionService } from '../sessions/service.js';
 import type { Session } from '../sessions/types.js';
-import { STALLED_SINCE_SQL, taskRepository } from '../tasks/repository.js';
+import { ATTENTION_JOIN, taskRepository } from '../tasks/repository.js';
 import type { Task } from '../tasks/types.js';
 
 /**
@@ -16,7 +16,8 @@ import type { Task } from '../tasks/types.js';
  * Une session dont l'agent a fini son tour et attend des instructions n'y figure pas : elle ne demande
  * rien (le travail est fait ou la personne y reviendra quand elle voudra). Seul ce qui bloque un agent
  * (demande) ou un travail à reprendre (erreur, interruption, tâche en cours dont l'agent s'est arrêté) ou à fusionner
- * (PR) est « à traiter ».
+ * (PR) est « à traiter ». Une tâche que l'agent a mise en attente (réveil daté, étiquette d'état ou compte rendu :
+ * `ATTENTION_JOIN`) est listée à part, hors du total, jusqu'à son réveil.
  */
 
 export interface InboxCounts {
@@ -30,7 +31,10 @@ export interface InboxCounts {
   stalledTasks: number;
   /** Pull requests ouvertes (à fusionner, brouillons compris). */
   pullRequests: number;
+  /** Ce qui est à traiter (sans les tâches en attente). */
   total: number;
+  /** Tâches en cours que l'agent a mises en attente (`Task.waitingSince`) : montrées à part, hors du total. */
+  waitingTasks: number;
 }
 
 export interface Inbox {
@@ -42,6 +46,8 @@ export interface Inbox {
   /** Tâches « agent arrêté », la plus anciennement arrêtée d'abord. */
   tasks: Task[];
   pullRequests: TrackedPullRequest[];
+  /** Tâches en attente (pas à traiter), le réveil le plus proche d'abord, puis les attentes sans date. */
+  waitingTasks: Task[];
 }
 
 /** Fenêtre au-delà de laquelle une session en erreur ou interrompue ne compte plus. */
@@ -51,21 +57,22 @@ const ITEM_LIMIT = 100;
 const FAILED_SQL = `status = 'failed' AND COALESCE(ended_at, updated_at) >= now() - ${RECENT}`;
 const INTERRUPTED_SQL = `status = 'interrupted' AND activity = 'busy' AND COALESCE(ended_at, updated_at) >= now() - ${RECENT}`;
 
-export function totalOf(c: Omit<InboxCounts, 'total'>): number {
+export function totalOf(c: Omit<InboxCounts, 'total' | 'waitingTasks'>): number {
   return c.requests + c.failedSessions + c.interruptedSessions + c.stalledTasks + c.pullRequests;
 }
 
 export const inboxService = {
   async counts(projectIds: string[]): Promise<InboxCounts> {
-    if (!projectIds.length) return { requests: 0, failedSessions: 0, interruptedSessions: 0, stalledTasks: 0, pullRequests: 0, total: 0 };
+    if (!projectIds.length) return { requests: 0, failedSessions: 0, interruptedSessions: 0, stalledTasks: 0, pullRequests: 0, total: 0, waitingTasks: 0 };
     const [{ rows }, prs] = await Promise.all([
-      pool.query<{ requests: string; failed: string; interrupted: string; stalled: string }>(
+      pool.query<{ requests: string; failed: string; interrupted: string; stalled: string; waiting: string }>(
         `SELECT
            (SELECT count(*) FROM requests q JOIN sessions s ON s.id = q.session_id
              WHERE q.status = 'pending' AND s.project_id = ANY($1::uuid[]))::text AS requests,
            (SELECT count(*) FROM sessions WHERE project_id = ANY($1::uuid[]) AND kind = 'session' AND ${FAILED_SQL})::text AS failed,
            (SELECT count(*) FROM sessions WHERE project_id = ANY($1::uuid[]) AND kind = 'session' AND ${INTERRUPTED_SQL})::text AS interrupted,
-           (SELECT count(*) FROM tasks t WHERE t.project_id = ANY($1::uuid[]) AND t.status = 'in_progress' AND ${STALLED_SINCE_SQL} IS NOT NULL)::text AS stalled`,
+           (SELECT count(*) FROM tasks t ${ATTENTION_JOIN} WHERE t.project_id = ANY($1::uuid[]) AND t.status = 'in_progress' AND att.stalled_since IS NOT NULL)::text AS stalled,
+           (SELECT count(*) FROM tasks t ${ATTENTION_JOIN} WHERE t.project_id = ANY($1::uuid[]) AND t.status = 'in_progress' AND att.waiting_since IS NOT NULL)::text AS waiting`,
         [projectIds],
       ),
       trackedPullRequestService.countPending(projectIds),
@@ -77,14 +84,14 @@ export const inboxService = {
       stalledTasks: Number(rows[0].stalled),
       pullRequests: prs.open,
     };
-    return { ...c, total: totalOf(c) };
+    return { ...c, total: totalOf(c), waitingTasks: Number(rows[0].waiting) };
   },
 
   async build(projectIds: string[], now = new Date()): Promise<Inbox> {
     if (!projectIds.length) {
-      return { generatedAt: now, counts: await inboxService.counts(projectIds), requests: [], sessions: [], tasks: [], pullRequests: [] };
+      return { generatedAt: now, counts: await inboxService.counts(projectIds), requests: [], sessions: [], tasks: [], pullRequests: [], waitingTasks: [] };
     }
-    const [counts, requests, sessionIds, stalled, pullRequests] = await Promise.all([
+    const [counts, requests, sessionIds, stalled, pullRequests, waiting] = await Promise.all([
       inboxService.counts(projectIds),
       requestService.list({ projectIds, status: 'pending', limit: ITEM_LIMIT }),
       pool.query<{ id: string }>(
@@ -95,9 +102,11 @@ export const inboxService = {
       ),
       taskRepository.list({ projectIds, status: ['in_progress'], stalled: true, limit: ITEM_LIMIT }),
       trackedPullRequestService.list({ projectIds, stage: ['to_merge', 'draft'], limit: ITEM_LIMIT }),
+      taskRepository.list({ projectIds, status: ['in_progress'], waiting: true, limit: ITEM_LIMIT }),
     ]);
     const sessions = (await Promise.all(sessionIds.rows.map((r) => sessionService.get(r.id)))).filter((s): s is Session => s !== null);
     const tasks = [...stalled].sort((a, b) => (a.stalledSince?.getTime() ?? 0) - (b.stalledSince?.getTime() ?? 0));
-    return { generatedAt: now, counts, requests, sessions, tasks, pullRequests };
+    const waitingTasks = [...waiting].sort((a, b) => (a.wakeAt?.getTime() ?? Infinity) - (b.wakeAt?.getTime() ?? Infinity) || (a.waitingSince?.getTime() ?? 0) - (b.waitingSince?.getTime() ?? 0));
+    return { generatedAt: now, counts, requests, sessions, tasks, pullRequests, waitingTasks };
   },
 };
