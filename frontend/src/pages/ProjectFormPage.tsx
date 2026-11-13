@@ -1,7 +1,8 @@
 import { useMutation, useQuery } from '@apollo/client';
 import PageLoading from '../components/PageLoading';
 import ProjectArchiveCard from '../components/ProjectArchiveCard';
-import { useEffect, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
+import ProjectHeader, { ProjectConfigContext } from '../components/ProjectHeader';
 import { Alert, Button, Card, Col, Collapse, Form, Row, Spinner } from 'react-bootstrap';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { bypassConnectionsWarning, permissionModeLabels } from '../lib/humanize';
@@ -102,8 +103,11 @@ export default function ProjectFormPage() {
     refetchQueries: ['Projects'],
     onCompleted: (res) => navigate(`/projects/${res.createProject.id}`),
   });
+  // Dans la configuration du projet, on reste sur la page après l'enregistrement (avec un mot de confirmation).
+  const inConfig = useContext(ProjectConfigContext);
+  const [saved, setSaved] = useState(false);
   const [updateProject, { loading: updating, error: updateError }] = useMutation<{ updateProject: Project }>(UPDATE_PROJECT, {
-    onCompleted: (res) => navigate(`/projects/${res.updateProject.id}`),
+    onCompleted: (res) => (inConfig ? setSaved(true) : navigate(`/projects/${res.updateProject.id}`)),
   });
 
   const [name, setName] = useState('');
@@ -175,6 +179,7 @@ export default function ProjectFormPage() {
       defaultModel: defaultModel || null,
       taskModels: cleanTaskModels(taskModels),
     };
+    setSaved(false);
     if (isEdit) updateProject({ variables: { id, input: common } });
     else createProject({ variables: { input: { ...common, slug: slug || null } } });
   };
@@ -186,10 +191,23 @@ export default function ProjectFormPage() {
 
   return (
     <>
-      <Link to={isEdit ? `/projects/${id}` : '/projects'} className="small">
-        ← Retour
-      </Link>
-      <h1 className="h3 mb-3">{isEdit ? `Modifier « ${data?.project?.name} »` : 'Nouveau projet'}</h1>
+      {isEdit && inConfig ? (
+        <>
+          <ProjectHeader project={data!.project!} active="edit" />
+          {saved && (
+            <Alert variant="success" dismissible onClose={() => setSaved(false)}>
+              Modifications enregistrées.
+            </Alert>
+          )}
+        </>
+      ) : (
+        <>
+          <Link to={isEdit ? `/projects/${id}` : '/projects'} className="small">
+            ← Retour
+          </Link>
+          <h1 className="h3 mb-3">{isEdit ? `Modifier « ${data?.project?.name} »` : 'Nouveau projet'}</h1>
+        </>
+      )}
       <Card>
         <Card.Body>
           <Form onSubmit={submit}>

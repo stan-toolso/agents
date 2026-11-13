@@ -99,7 +99,7 @@ async function checkArtifacts(user: User, scope: Scope, layout: Layout): Promise
     if (b.kind !== 'artifact') continue;
     const page = await sharedPageService.getFor(user.id, b.artifact).catch(() => null);
     if (!page) throw new AppError(`Artefact ${b.artifact} introuvable, ou non partagé avec vous`, 'VALIDATION');
-    if (scope.kind !== 'home' && !page.linkAccess && !page.projectAccess) warnings.push(`« ${page.title} » n'est ouvert ni aux membres du projet ni par le lien : les autres membres ne le verront pas (ouvrez-le aux membres du projet depuis l'artefact, ou avec updateSharedPage { projectAccess: true }).`);
+    if (scope.kind !== 'home' && !page.linkAccess && !page.projectAccess) warnings.push(`« ${page.title} » n'est ouvert ni aux membres du projet ni par le lien : les autres membres ne le verront pas (son propriétaire l'ouvre aux membres du projet par le bouton Partager de l'artefact, l'outil pages.share avec project_access: true, ou updateSharedPage { projectAccess: true }).`);
     else if (scope.kind !== 'home' && page.projectAccess && page.projectId !== scope.projectId && !page.linkAccess) warnings.push(`« ${page.title} » est ouvert aux membres d'un autre projet : les membres de celui-ci ne le verront pas tous.`);
   }
   return warnings;
