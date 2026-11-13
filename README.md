@@ -241,7 +241,11 @@ backend/
       launch.ts                # confier une tâche à un nouvel agent (refusé tant qu'elle est bloquée)
       dependencyGraph.ts       # dépendances entre tâches : détection des cycles (sans base)
       autoStart.ts             # enchaînement : tâche débloquée lancée automatiquement, notifiée
-      api.ts                   # API REST /api/v1/tasks (clés d'API du projet)
+      api.ts                   # API REST /api/v1/tasks (clés d'API du projet, portées tasks:read / tasks:write)
+    inbound/
+      route.ts                 # point d'entrée entrant POST /api/v1/inbound : tâche et/ou triage par un agent (portées inbound:*, idempotence, débit, signature)
+      signature.ts             # signature HMAC-SHA256 facultative des événements entrants
+      repository.ts            # table inbound_events (idempotence, reprise d'un échec, comptage du débit)
     gitServer/
       paths.ts                 # dépôt Forgejo d'un projet (organisation, URL de clone et web), miroirs locaux
       forgejo.ts               # client Forgejo : API, comptes des personnes et jetons des sessions, dépôts et collaborateurs, webhook, pull requests
@@ -1191,7 +1195,10 @@ reçoit les changements faits par d'autres (`[Mise à jour de la tâche]`) et le
 personne) et `releaseSessionIds`. « Confier à un agent »
 montre la consigne envoyée à l'agent et permet de la modifier avant le lancement. Une **API REST**
 (`/api/v1/tasks`, clés `skp_…` créées sur la fiche du projet, haché en base) permet à un outil externe de
-lister et créer des tâches.
+lister et créer des tâches. Chaque clé a des **portées** (`tasks:read`, `tasks:write`, `inbound:task`, `inbound:triage`) ;
+le **point d'entrée entrant** `POST /api/v1/inbound` crée une tâche et/ou convoque un agent du projet (triage, le
+Product Manager par défaut) avec le payload reçu, de façon idempotente (`Idempotency-Key` ou `externalId`), avec une
+signature HMAC facultative et un débit limité par clé (instruction de contexte dev/points-d-entree-entrants).
 
 **Dépendances entre tâches (« bloquée par »).** Table `task_dependencies (task_id, depends_on_task_id)` (migration
 `20261102T2057_task_dependencies`) : une tâche dépend d'autres tâches **du même projet** ; tant que l'une d'elles n'est pas

@@ -13,6 +13,7 @@ import { liveBrowserService } from '../browser/live.js';
 import { liveDraftService } from '../sessions/live.js';
 import { createLoaders, type Loaders } from './loaders.js';
 import { apiKeyService } from '../apiKeys/service.js';
+import { inboundRepository, type InboundEvent } from '../inbound/repository.js';
 import { chromeBrowserService } from '../chrome/service.js';
 import { contextService, HUMAN } from '../context/service.js';
 import { accountOf, googleAccountService } from '../google/service.js';
@@ -140,6 +141,12 @@ type Ctx = AuthContext;
 /** Message d'un canal enrichi par le résolveur de la liste : ses réactions et ses réponses, lues en une fois. */
 type MessageWithRows = Message & { reactionRows?: MessageReaction[]; attachmentRows?: MessageAttachment[]; replyStat?: { count: number; lastAt: Date | null } | null; authorRole?: ProjectRole | null };
 type GqlRole = Uppercase<ProjectRole>;
+/** L'agent de triage d'une clé d'API doit être un agent actif du projet. */
+async function assertProjectAgent(projectId: string, agentId: string): Promise<void> {
+  const agent = await agentService.get(agentId).catch(() => null);
+  if (!agent || agent.projectId !== projectId || agent.archivedAt) throw new AppError("L'agent de triage doit être un agent du projet");
+}
+
 const fromGqlRole = (r?: GqlRole | null): ProjectRole => ((r ?? 'MEMBER').toLowerCase() as ProjectRole);
 
 // ---- Accès : rôle minimal requis sur le projet auquel appartient l'objet visé -------------------
@@ -584,6 +591,14 @@ export const resolvers = {
 
   ProjectApiKey: {
     createdBy: (k: ProjectApiKey, _: unknown, ctx: Ctx) => userOrNull(ctx, k.createdById),
+    triageAgent: (k: ProjectApiKey, _: unknown, ctx: Ctx) => userOrNull(ctx, k.triageAgentId),
+  },
+
+  InboundEvent: {
+    externalId: (e: InboundEvent) => e.idempotencyKey,
+    task: (e: InboundEvent) => (e.taskId ? taskService.get(e.taskId).catch(() => null) : null),
+    session: (e: InboundEvent) => (e.sessionId ? sessionRepository.findById(e.sessionId) : null),
+    agent: (e: InboundEvent, _: unknown, ctx: Ctx) => userOrNull(ctx, e.agentId),
   },
 
   PullRequest: {
@@ -939,6 +954,7 @@ export const resolvers = {
     vaultItems: (project: Project, _: unknown, ctx: Ctx) => vaultService.projectRows(project.id, requireUser(ctx).id),
     agents: (project: Project) => (isPersonalProject(project) ? [] : agentService.listByProject(project.id)),
     apiKeys: async (project: Project, _: unknown, ctx: Ctx) => ((await roleFor(ctx, project.id)) === 'admin' ? apiKeyService.list(project.id) : []),
+    inboundEvents: async (project: Project, args: { limit?: number | null }, ctx: Ctx) => ((await roleFor(ctx, project.id)) === 'admin' ? inboundRepository.listByProject(project.id, args.limit ?? 30) : []),
     // Un espace personnel n'a pas de canaux (ses chats suffisent).
     conversations: (project: Project, args: { includeArchived?: boolean | null }) => (isPersonalProject(project) ? [] : conversationService.list(project.id, { includeArchived: Boolean(args.includeArchived) })),
     followedTaskThreads: async (project: Project, args: { limit?: number | null }, ctx: Ctx) => {
@@ -2267,9 +2283,20 @@ export const resolvers = {
       await guardTask(ctx, args.id, 'member');
       return resumeTaskSession(args.id, args.text, personAuthor(requireUser(ctx)));
     },
-    createProjectApiKey: async (_: unknown, args: { projectId: string; name: string }, ctx: Ctx) => {
+    createProjectApiKey: async (_: unknown, args: { projectId: string; name: string; scopes?: string[] | null; triageAgentId?: string | null; signed?: boolean | null }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId, 'admin');
-      return apiKeyService.create(args.projectId, args.name, requireUser(ctx).id);
+      if (args.triageAgentId) await assertProjectAgent(args.projectId, args.triageAgentId);
+      return apiKeyService.create(args.projectId, { name: args.name, scopes: args.scopes, triageAgentId: args.triageAgentId || null, signed: !!args.signed }, requireUser(ctx).id);
+    },
+    updateProjectApiKey: async (_: unknown, args: { id: string; name?: string | null; scopes?: string[] | null; triageAgentId?: string | null }, ctx: Ctx) => {
+      const key = await apiKeyService.get(args.id);
+      await requireProject(ctx, key.projectId, 'admin');
+      if (args.triageAgentId) await assertProjectAgent(key.projectId, args.triageAgentId);
+      return apiKeyService.update(args.id, { name: args.name, scopes: args.scopes, triageAgentId: args.triageAgentId === undefined ? undefined : args.triageAgentId || null });
+    },
+    setProjectApiKeySigning: async (_: unknown, args: { id: string; enabled: boolean }, ctx: Ctx) => {
+      await requireProject(ctx, (await apiKeyService.get(args.id)).projectId, 'admin');
+      return apiKeyService.setSigning(args.id, args.enabled);
     },
     deleteProjectApiKey: async (_: unknown, args: { id: string }, ctx: Ctx) => {
       await requireProject(ctx, (await apiKeyService.get(args.id)).projectId, 'admin');

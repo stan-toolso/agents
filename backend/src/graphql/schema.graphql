@@ -175,6 +175,8 @@ type Project {
   vaultItems: [ProjectVaultItem!]!
   "Clés d'API du projet (administrateurs)."
   apiKeys: [ProjectApiKey!]!
+  "Derniers événements reçus par le point d'entrée entrant /api/v1/inbound (administrateurs), les plus récents d'abord."
+  inboundEvents(limit: Int = 30): [InboundEvent!]!
   members: [ProjectMember!]!
   "Rôle de l'utilisateur connecté sur ce projet."
   myRole: ProjectRole!
@@ -517,12 +519,44 @@ type ProjectApiKey {
   createdBy: User
   createdAt: DateTime!
   lastUsedAt: DateTime
+  "Portées : tasks:read, tasks:write (API REST des tâches), inbound:task, inbound:triage (point d'entrée entrant /api/v1/inbound)."
+  scopes: [String!]!
+  "Un secret de signature est défini : les appels à /api/v1/inbound doivent être signés (HMAC-SHA256)."
+  signed: Boolean!
+  "Agent convoqué par défaut pour un triage reçu par cette clé (null : le Product Manager du projet)."
+  triageAgent: User
 }
 
 type CreatedProjectApiKey {
   key: ProjectApiKey!
   "Secret complet, montré cette seule fois."
   secret: String!
+  "Secret de signature HMAC (whs_…), montré cette seule fois ; null sans signature."
+  signingSecret: String
+}
+
+"Résultat d'un changement de secret de signature : le nouveau secret n'est montré qu'une fois."
+type ProjectApiKeySigning {
+  key: ProjectApiKey!
+  signingSecret: String
+}
+
+"Événement reçu par le point d'entrée entrant (/api/v1/inbound)."
+type InboundEvent {
+  id: ID!
+  "Nom de la clé d'API au moment de l'appel."
+  keyName: String!
+  "Clé d'idempotence (Idempotency-Key ou externalId)."
+  externalId: String
+  source: String
+  "processing, done ou failed."
+  status: String!
+  error: String
+  triage: Boolean!
+  task: Task
+  session: Session
+  agent: User
+  createdAt: DateTime!
 }
 
 "Notification affichée dans la cloche de l'interface."
@@ -3463,7 +3497,11 @@ type Mutation {
   "Reprend la tâche dans la conversation de sa session (Task.resumableSession) avec ce message, au lieu d’en lancer une nouvelle."
   resumeTaskSession(id: ID!, text: String!): Session!
   "Crée une clé d'API du projet (administrateurs) ; le secret n'est montré qu'une fois."
-  createProjectApiKey(projectId: ID!, name: String!): CreatedProjectApiKey!
+  createProjectApiKey(projectId: ID!, name: String!, scopes: [String!], triageAgentId: ID, signed: Boolean): CreatedProjectApiKey!
+  "Modifie le nom, les portées ou l'agent de triage d'une clé d'API (administrateurs) ; triageAgentId vide : le Product Manager."
+  updateProjectApiKey(id: ID!, name: String, scopes: [String!], triageAgentId: ID): ProjectApiKey!
+  "Génère un nouveau secret de signature (enabled true, montré une fois) ou le retire (false)."
+  setProjectApiKeySigning(id: ID!, enabled: Boolean!): ProjectApiKeySigning!
   deleteProjectApiKey(id: ID!): Boolean!
 
   "git add (paths vide = tout)."
