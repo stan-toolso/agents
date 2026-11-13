@@ -3,10 +3,10 @@ import { useState } from 'react';
 import { Button, Card, Form, Spinner } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import { useDialogs } from '../components/Dialogs';
-import { TABS } from '../components/ProjectHeader';
+import { WORK_TABS as TABS } from '../components/ProjectHeader';
 import { CREATE_PROJECT_PAGE, DELETE_PROJECT_PAGE, PROJECT_TABS, UPDATE_PROJECT_PAGE, UPDATE_PROJECT_TABS, type ProjectPageInfo, type ProjectTabsSetting } from '../graphql/cockpit';
 
-const NEVER_HIDDEN = new Set(['overview', 'settings']);
+const NEVER_HIDDEN = new Set(['overview']);
 const ICONS = ['bi-layout-text-window', 'bi-graph-up', 'bi-bar-chart-line', 'bi-clipboard-data', 'bi-people', 'bi-rocket-takeoff', 'bi-bug', 'bi-globe', 'bi-star', 'bi-journal-richtext', 'bi-kanban', 'bi-megaphone'];
 const REFETCH = ['ProjectTabs'];
 
@@ -27,8 +27,8 @@ export default function ProjectTabsCard({ projectId, canManage }: { projectId: s
   const setting: ProjectTabsSetting = { hidden: data?.project?.tabs?.hidden ?? [], order: data?.project?.tabs?.order ?? [] };
   const pages = [...(data?.project?.pages ?? [])].sort((a, b) => a.position - b.position);
   const hidden = new Set(setting.hidden);
-  // L'ordre affiché : les clés citées d'abord, puis les natifs dans l'ordre habituel et les pages par position.
-  const keys = [...TABS.map((t) => t.key as string), ...pages.map((p) => `page:${p.slug}`)];
+  // L'ordre affiché : les clés citées d'abord, puis le tableau de bord, les pages par position et les autres natifs (comme effectiveTabs).
+  const keys = ['overview', ...pages.map((p) => `page:${p.slug}`), ...TABS.filter((t) => t.key !== 'overview').map((t) => t.key as string)];
   const rank = new Map(setting.order.map((k, i) => [k, i]));
   const ordered = [...keys].sort((a, b) => {
     const ra = rank.get(a);
@@ -75,7 +75,7 @@ export default function ProjectTabsCard({ projectId, canManage }: { projectId: s
       <Card.Body className="small">
         {loading && !data && <Spinner animation="border" size="sm" />}
         <p className="text-secondary">
-          Masquez les onglets inutiles à ce projet (un projet sans dépôt n’a que faire de Dépôt, Pull requests et Livraisons), ordonnez-les, et ajoutez des <b>pages personnalisées</b> : chacune est un onglet de plus, composé de blocs et d’artefacts avec « Personnaliser » ou par un agent (outil <code>cockpit</code>, portée <code>page:&lt;slug&gt;</code>).
+          Choisissez les onglets du projet : masquez ceux qui lui sont inutiles (un projet sans dépôt n’a que faire de Dépôt, Pull requests et Livraisons), ordonnez-les, et ajoutez des <b>pages personnalisées</b>, affichées juste après le tableau de bord : chacune est un onglet de plus, composé de blocs et d’artefacts avec « Personnaliser » ou par un agent (outil <code>cockpit</code>, portée <code>page:&lt;slug&gt;</code>).
         </p>
         <ul className="list-unstyled ck-tabs-list mb-3">
           {ordered.map((k, i) => {

@@ -105,12 +105,13 @@ export function describeRoute(pathname: string): { title: string; kind: TabKind 
   if (pathname === '/') return { title: 'Tableau de bord', kind: 'dashboard' };
   if (pathname === '/projects') return { title: 'Projets', kind: 'projects' };
   if (pathname === '/projects/new') return { title: 'Nouveau projet', kind: 'project-form' };
-  if (/^\/projects\/[^/]+\/edit$/.test(pathname)) return { title: 'Modifier le projet', kind: 'project-form' };
+  if (/^\/projects\/[^/]+\/edit$/.test(pathname)) return { title: 'Informations du projet', kind: 'project-form' };
   if (/^\/projects\/[^/]+\/context$/.test(pathname)) return { title: 'Contexte', kind: 'context' };
   if (/^\/projects\/[^/]+\/tasks$/.test(pathname)) return { title: 'Tâches', kind: 'tasks' };
   if (/^\/projects\/[^/]+\/conversations(\/[^/]+)?$/.test(pathname)) return { title: 'Conversations', kind: 'conversations' };
   if (/^\/projects\/[^/]+\/settings$/.test(pathname)) return { title: 'Réglages du projet', kind: 'project-settings' };
   if (/^\/projects\/[^/]+\/members$/.test(pathname)) return { title: 'Membres', kind: 'project-members' };
+  if (/^\/projects\/[^/]+\/tabs$/.test(pathname)) return { title: 'Onglets et pages', kind: 'project-settings' };
   if (/^\/projects\/[^/]+\/p\/[^/]+$/.test(pathname)) return { title: 'Page du projet', kind: 'project' };
   if (/^\/projects\/[^/]+\/pull-requests$/.test(pathname)) return { title: 'Pull requests', kind: 'pull-requests' };
   if (/^\/projects\/[^/]+\/deliveries$/.test(pathname)) return { title: 'Livraisons', kind: 'deliveries' };
