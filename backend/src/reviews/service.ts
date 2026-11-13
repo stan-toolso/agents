@@ -1,7 +1,7 @@
 import { config } from '../config.js';
 import { AppError, NotFoundError } from '../errors.js';
 import { pullRequestService } from '../git/pullRequests.js';
-import { gitService } from '../git/service.js';
+import { gitService, headCommitOf } from '../git/service.js';
 import { projectService } from '../projects/service.js';
 import { pubSub } from '../pubsub.js';
 import { foreignRepoOf, projectRepoName, trackedPullRequestService } from '../pullRequests/service.js';
@@ -15,9 +15,9 @@ import { taskService } from '../tasks/service.js';
 import { log } from '../log.js';
 import type { Task } from '../tasks/types.js';
 import { worksessionRepository } from '../worksessions/repository.js';
-import { worksessionService } from '../worksessions/service.js';
+import { worksessionPath, worksessionService } from '../worksessions/service.js';
 import type { Worksession } from '../worksessions/types.js';
-import { reviewOf, type SessionReview } from './types.js';
+import { reviewOf, reviewVerdict, type SessionReview } from './types.js';
 
 /**
  * Revue de code par un agent (« Faire relire par un agent », panneau git et PR suivies) : lance une session Claude en
@@ -79,12 +79,18 @@ async function runningReview(worksessionId: string): Promise<Session | null> {
   return sessions.find((s) => reviewOf(s) && !reviewOf(s)?.reportedAt && (s.status === 'running' || s.status === 'queued' || s.status === 'pending')) ?? null;
 }
 
+type ReportedListener = (session: Session, review: SessionReview) => Promise<void> | void;
+const reportedListeners = new Map<string, ReportedListener>();
+
 export const reviewService = {
+  /** Écoute les rapports publiés (politique de livraison : fusion automatique après une relecture favorable). */
+  onReported: (name: string, fn: ReportedListener) => reportedListeners.set(name, fn),
+
   /**
    * Lance la revue : la session (provider Claude, lecture seule) s'exécute dans le dossier de travail de la branche,
    * à côté de la session qui y travaille. Renvoie la session de relecture.
    */
-  async request(target: ReviewTarget, userId: string): Promise<Session> {
+  async request(target: ReviewTarget, userId: string, opts: { auto?: boolean } = {}): Promise<Session> {
     const project = await projectService.get(target.projectId);
     if (!project.gitUrl) throw new AppError("La revue de code demande un projet relié à un dépôt git");
     const repo = projectRepoName(project);
@@ -130,6 +136,8 @@ export const reviewService = {
         prUrl: pr?.url || null,
         taskId: task?.id ?? null,
         requestedBy: userId,
+        headSha: await headCommitOf(worksessionPath(project, ws)).catch(() => null),
+        ...(opts.auto ? { auto: true } : {}),
       };
       const inline = diff.patch.length <= INLINE_DIFF_CHARS;
       const attachments: AttachmentInput[] = inline
@@ -172,7 +180,7 @@ export const reviewService = {
       await save(session, { ...review, reportedAt: new Date().toISOString(), error: 'Relecture arrêtée avant son rapport' });
       return;
     }
-    let current = await save(session, { ...review, reportedAt: new Date().toISOString(), report: error ? null : text, error });
+    let current = await save(session, { ...review, reportedAt: new Date().toISOString(), report: error ? null : text, error, verdict: error ? null : reviewVerdict(text) });
     const link = `${config.appUrl}/sessions/${session.id}`;
     const scope = `${review.branch ? `branche \`${review.branch}\`` : 'branche courante'} comparée à \`${review.baseBranch}\`, ${review.commits} commit(s)`;
     const body = error
@@ -196,6 +204,13 @@ export const reviewService = {
       }
     }
     if (Object.keys(patch).length) current = await save(current, { ...reviewOf(current)!, ...patch });
+    for (const [name, fn] of reportedListeners) {
+      try {
+        await fn(current, reviewOf(current)!);
+      } catch (err) {
+        log.warn(`[reviews] écouteur ${name}`, err);
+      }
+    }
     // Le rapport est rendu : la session est terminée pour libérer sa place (un message la relance pour en discuter).
     // Le guetteur tourne sur l'instance meneuse : `end` transmet à l'instance qui porte la session.
     if (session.status === 'running') await sessionService.end(session.id).catch((err) => log.warn('[reviews] fin de la session de relecture', err));

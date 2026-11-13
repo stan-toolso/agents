@@ -16,7 +16,7 @@ import {
   type SessionSchedule,
 } from '../graphql/operations';
 import { browserTimeZone, buildCron, cronPresetLabels as presetLabels, describeCron, detectCronPreset as detectPreset, weekdayLabels, type CronPreset as Preset } from '../lib/cron';
-import { permissionModeShortLabels } from '../lib/humanize';
+import { costUnitLabel, formatCost, permissionModeShortLabels } from '../lib/humanize';
 import { modelOptions } from '../lib/models';
 import { useDialogs } from './Dialogs';
 import { RunHistory } from './ScheduleRuns';
@@ -38,6 +38,15 @@ function splitDelay(minutes: number | null | undefined): { amount: string; unit:
   if (m % 60 === 0) return { amount: String(m / 60), unit: 'hours' };
   return { amount: String(m), unit: 'minutes' };
 }
+/** Montant saisi (virgule acceptée) : null si vide ou 0, NaN si illisible. */
+function parseAmount(text: string): number | null {
+  const t = text.replace(',', '.').replace(/\s/g, '');
+  if (!t) return null;
+  const v = Number(t);
+  return v === 0 ? null : v;
+}
+const amountValid = (v: number | null) => v === null || (Number.isFinite(v) && v > 0);
+
 const PERMISSION_MODES = ['default', 'acceptEdits', 'dontAsk', 'bypassPermissions'] as const;
 
 /** Ce que le mode d'autorisation implique pour une exécution sans personne devant l'écran. */
@@ -96,6 +105,11 @@ export default function ScheduleModal({ schedule, projects = [], defaults, onClo
   const archiveAfterMinutes = Math.round(Number(delayAmount) * UNIT_MINUTES[delayUnit]);
   const archiveValid = archivePolicy !== 'AFTER_DELAY' || (Number.isFinite(archiveAfterMinutes) && archiveAfterMinutes >= 1 && archiveAfterMinutes <= 90 * 1440);
   const [allowedTools, setAllowedTools] = useState<string[]>(existing?.allowedTools ?? []);
+  const [maxRunText, setMaxRunText] = useState(existing?.maxRunUsd ? String(existing.maxRunUsd) : '');
+  const [monthlyText, setMonthlyText] = useState(existing?.monthlyBudgetUsd ? String(existing.monthlyBudgetUsd) : '');
+  const maxRunUsd = parseAmount(maxRunText);
+  const monthlyBudgetUsd = parseAmount(monthlyText);
+  const budgetValid = amountValid(maxRunUsd) && amountValid(monthlyBudgetUsd);
   const creating = !existing;
   // Réglages des exécutions : ceux de la planification, sinon ceux de la session d'origine, sinon le défaut du projet.
   const sourceConfig = existing?.config ?? defaults?.config;
@@ -132,7 +146,7 @@ export default function ScheduleModal({ schedule, projects = [], defaults, onClo
   const [runNow, { loading: launching }] = useMutation<{ runScheduleNow: { id: string } | null }>(RUN_SCHEDULE_NOW, { refetchQueries });
   const busy = saving || removing || creatingSchedule;
   const error = saveError ?? removeError ?? createError;
-  const canSubmit = Boolean(cron && prompt.trim() && archiveValid && (!creating || (name.trim() && projectId)));
+  const canSubmit = Boolean(cron && prompt.trim() && archiveValid && budgetValid && (!creating || (name.trim() && projectId)));
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -147,6 +161,8 @@ export default function ScheduleModal({ schedule, projects = [], defaults, onClo
       archivePolicy,
       archiveAfterMinutes: archivePolicy === 'AFTER_DELAY' ? archiveAfterMinutes : null,
       allowedTools,
+      maxRunUsd,
+      monthlyBudgetUsd,
       // Valeur vide : réglage retiré (défaut du projet ou du propriétaire).
       config: { permissionMode, model },
     };
@@ -330,6 +346,21 @@ export default function ScheduleModal({ schedule, projects = [], defaults, onClo
             )}
           </Form.Group>
           <ScheduleTools value={allowedTools} onChange={setAllowedTools} projectId={targetProjectId} scheduleId={existing?.id ?? null} prompt={prompt} permissionMode={permissionMode} />
+          <Form.Group className="mb-3">
+            <Form.Label className="mb-1">Budget ({costUnitLabel()})</Form.Label>
+            <div className="d-flex flex-wrap gap-2">
+              <div style={{ flex: '1 1 10rem' }}>
+                <Form.Control inputMode="decimal" value={maxRunText} onChange={(e) => setMaxRunText(e.target.value)} placeholder="Par exécution" aria-label="Plafond par exécution" isInvalid={!amountValid(maxRunUsd)} />
+              </div>
+              <div style={{ flex: '1 1 10rem' }}>
+                <Form.Control inputMode="decimal" value={monthlyText} onChange={(e) => setMonthlyText(e.target.value)} placeholder="Par mois" aria-label="Budget mensuel" isInvalid={!amountValid(monthlyBudgetUsd)} />
+              </div>
+            </div>
+            <Form.Text>
+              Plafond par exécution : atteint, la session de l’exécution est arrêtée (en cours de tour pour Claude). Budget mensuel : atteint, les échéances sont ignorées jusqu’au mois suivant. Vous êtes prévenu dans les deux cas. Vide : aucun plafond (le budget du projet et celui du propriétaire s’appliquent toujours).
+              {existing && typeof existing.monthUsd === 'number' && <> Ce mois-ci : {formatCost(existing.monthUsd)}{existing.monthlyBudgetUsd ? ` sur ${formatCost(existing.monthlyBudgetUsd)}` : ''}.</>}
+            </Form.Text>
+          </Form.Group>
           <Form.Group className="mb-3">
             <Form.Label className="mb-1">Archivage des sessions d'exécution</Form.Label>
             <div className="d-flex flex-wrap gap-2 align-items-center">

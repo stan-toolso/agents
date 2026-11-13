@@ -1,6 +1,16 @@
 import { pool } from '../db/pool.js';
 import { toJson } from '../db/json.js';
+import type { DeliveryPolicy, DeliveryPolicyRule } from './policy.js';
 import type { Delivery, DeliveryKind, DeliveryStatus, DeliveryStep, DeployConfig, DeployConfigInput } from './types.js';
+
+interface PolicyRow {
+  project_id: string;
+  rules: DeliveryPolicyRule[] | null;
+  merge_user_id: string | null;
+  updated_at: Date;
+}
+
+const toPolicy = (r: PolicyRow): DeliveryPolicy => ({ projectId: r.project_id, rules: Array.isArray(r.rules) ? r.rules : [], mergeUserId: r.merge_user_id, updatedAt: r.updated_at });
 
 interface Row {
   id: string;
@@ -224,6 +234,32 @@ export const deliveryRepository = {
   async linkPullRequests(deliveryId: string, pullRequestIds: string[]): Promise<void> {
     if (!pullRequestIds.length) return;
     await pool.query(`INSERT INTO delivery_pull_requests (delivery_id, pull_request_id) SELECT $1, unnest($2::uuid[]) ON CONFLICT DO NOTHING`, [deliveryId, pullRequestIds]);
+  },
+
+  /** Politique de livraison d'un projet (null : aucune, tout est manuel). */
+  async getPolicy(projectId: string): Promise<DeliveryPolicy | null> {
+    const { rows } = await pool.query<PolicyRow>('SELECT * FROM delivery_policies WHERE project_id = $1', [projectId]);
+    return rows[0] ? toPolicy(rows[0]) : null;
+  },
+
+  /** Projets dont la politique a au moins une règle de fusion automatique. */
+  async autoMergeProjects(): Promise<DeliveryPolicy[]> {
+    const { rows } = await pool.query<PolicyRow>(`SELECT * FROM delivery_policies WHERE rules @> '[{"mode": "auto_merge"}]'::jsonb`);
+    return rows.map(toPolicy);
+  },
+
+  async setPolicy(projectId: string, rules: DeliveryPolicyRule[], mergeUserId: string): Promise<DeliveryPolicy> {
+    const { rows } = await pool.query<PolicyRow>(
+      `INSERT INTO delivery_policies (project_id, rules, merge_user_id, updated_at) VALUES ($1, $2::jsonb, $3, now())
+       ON CONFLICT (project_id) DO UPDATE SET rules = EXCLUDED.rules, merge_user_id = EXCLUDED.merge_user_id, updated_at = now()
+       RETURNING *`,
+      [projectId, toJson(rules), mergeUserId],
+    );
+    return toPolicy(rows[0]);
+  },
+
+  async deletePolicy(projectId: string): Promise<void> {
+    await pool.query('DELETE FROM delivery_policies WHERE project_id = $1', [projectId]);
   },
 
   async getConfig(projectId: string): Promise<DeployConfig | null> {

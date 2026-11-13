@@ -21,6 +21,12 @@ export interface SessionReview {
   taskId: string | null;
   /** Personne qui a demandé la revue (son compte GitHub poste le commentaire de PR). */
   requestedBy: string | null;
+  /** Commit du dossier de travail relu (HEAD au lancement ; null : inconnu, revue d'avant). */
+  headSha?: string | null;
+  /** Revue lancée par la politique de livraison du projet (fusion automatique), pas par une personne. */
+  auto?: boolean;
+  /** Verdict lu dans la première ligne du rapport (`reviewVerdict`) : seul `approved` autorise une fusion automatique. */
+  verdict?: ReviewVerdict | null;
   /** Rapport publié (ou échec constaté) : posé une seule fois, au premier tour terminé. */
   reportedAt?: string | null;
   /** Rapport de l'agent (Markdown), tel que publié. */
@@ -31,6 +37,21 @@ export interface SessionReview {
   githubCommentUrl?: string | null;
   /** Le commentaire GitHub n'a pas pu être posté (compte non connecté, PR fermée...). */
   githubError?: string | null;
+}
+
+export type ReviewVerdict = 'approved' | 'changes' | 'blocking';
+
+/**
+ * Verdict d'un rapport de relecture : sa première ligne non vide commence par « ✅ Rien de bloquant », « ⚠️ À corriger
+ * avant fusion » ou « ❌ Problèmes bloquants » (format demandé par `reviewPrompt`). Null : verdict illisible, jamais
+ * pris pour un accord.
+ */
+export function reviewVerdict(report: string | null | undefined): ReviewVerdict | null {
+  const first = (report ?? '').split('\n').map((l) => l.replace(/^[\s>#*_-]+/, '').trim()).find(Boolean) ?? '';
+  if (first.startsWith('❌')) return 'blocking';
+  if (first.startsWith('⚠')) return 'changes';
+  if (first.startsWith('✅')) return 'approved';
+  return null;
 }
 
 /** La revue portée par une session, null pour une session ordinaire. */

@@ -228,6 +228,7 @@ export const AUDITED: Record<string, MutationAudit> = {
   refreshSharedPageData: { action: 'page.refresh', lookup: ['shared_page', 'id'] },
   duplicateSharedPage: { action: 'page.duplicate', lookup: ['shared_page', 'id'], details: (a, r) => ({ copyId: r?.id, title: r?.title, version: a.version ?? null }) },
   // Livraisons : la configuration du déploiement (livrer, déployer et annuler sont inscrits par deliveries/service.ts).
+  setDeliveryPolicy: { action: 'delivery.policy', project: 'projectId', targetId: () => null, details: (a) => ({ rules: a.rules ?? [] }) },
   setDeployConfig: { action: 'delivery.config', project: 'projectId', targetId: () => null, details: (a) => ({ vaultItem: a.input?.vaultItem ?? null, command: a.input?.command ?? null, branch: a.input?.branch ?? null }) },
   // Application (hors projet).
   inviteUser: { action: 'user.invite', app: true, targetId: (_a, r) => r?.id, label: (a) => a.email, details: (a) => ({ isAdmin: a.isAdmin }) },

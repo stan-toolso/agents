@@ -49,6 +49,8 @@ import { foreignRepoOf, projectRepoName, trackedPullRequestService } from '../pu
 import { pullRequestSession, requestConflictResolution } from '../pullRequests/conflicts.js';
 import { deliveryService } from '../deliveries/service.js';
 import type { Delivery, DeployConfig, DeployConfigInput } from '../deliveries/types.js';
+import { deliveryPolicyService } from '../deliveries/autoMerge.js';
+import type { DeliveryPolicy, DeliveryPolicyRule } from '../deliveries/policy.js';
 import { ciVerdict } from '../git/pullRequests.js';
 import { requestGitConflictResolution } from '../git/conflicts.js';
 import { reviewService } from '../reviews/service.js';
@@ -100,7 +102,7 @@ import { serverSettings } from '../settings/server.js';
 import { sessionRepository } from '../sessions/repository.js';
 import { healthService } from '../health/service.js';
 import type { ClaudeAuthMode } from '../settings/types.js';
-import { usageService } from '../settings/usage.js';
+import { currentMonthStart, usageService } from '../settings/usage.js';
 import { scheduleLabel, scheduleService } from '../schedules/service.js';
 import { cleanupService } from '../sessions/cleanup.js';
 import { CONTEXT_WARN_TOKENS, contextEstimate, contextLedger } from '../sessions/context.js';
@@ -347,6 +349,12 @@ async function sessionOwnerFor(ctx: Ctx, agentId: string | null | undefined, pro
   return { ownerId: agent.id, requestedById: user.id };
 }
 /** État du dépôt hébergé pour le client, avec l'adresse de téléchargement de chaque sauvegarde. */
+/** Plafonds d'une planification saisis dans l'unité d'affichage (crédits ou USD) → USD enregistrés. */
+async function scheduleBudgetInUsd<T extends { maxRunUsd?: number | null; monthlyBudgetUsd?: number | null }>(input: T, ctx: Ctx): Promise<T> {
+  const rate = await costRate(ctx);
+  return { ...input, maxRunUsd: toStoredUsd(input.maxRunUsd, rate), monthlyBudgetUsd: toStoredUsd(input.monthlyBudgetUsd, rate) };
+}
+
 async function hostedGitView(project: Project) {
   const status = await gitServer.status(project);
   const withUrl = (b: GitBackup) => ({ ...b, downloadUrl: `${config.apiUrl}/api/repo-backups/${b.id}` });
@@ -624,6 +632,12 @@ export const resolvers = {
   DeployConfig: {
     updatedBy: (c: DeployConfig, _: unknown, ctx: Ctx) => userOrNull(ctx, c.updatedById),
   },
+  DeliveryPolicy: {
+    mergeUser: (p: DeliveryPolicy, _: unknown, ctx: Ctx) => userOrNull(ctx, p.mergeUserId),
+  },
+  DeliveryPolicyRule: {
+    mode: (r: DeliveryPolicyRule) => r.mode.toUpperCase(),
+  },
 
   VaultItem: {
     kind: (i: VaultItem) => i.kind,
@@ -741,6 +755,7 @@ export const resolvers = {
     owner: (schedule: SessionSchedule, _: unknown, ctx: Ctx) => userOrNull(ctx, schedule.ownerId),
     agent: async (schedule: SessionSchedule, _: unknown, ctx: Ctx) => (schedule.ownerId ? ((await loadersOf(ctx).agent(schedule.ownerId)) ?? null) : null),
     requestedBy: (schedule: SessionSchedule, _: unknown, ctx: Ctx) => userOrNull(ctx, schedule.requestedById),
+    monthUsd: (schedule: SessionSchedule) => scheduleRepository.spentSince(schedule.id, currentMonthStart()),
     runs: (schedule: SessionSchedule, args: { limit?: number | null }) => scheduleService.listRuns(schedule.id, args.limit ?? 20),
     activeSessions: async (schedule: SessionSchedule, _: unknown, ctx: Ctx) => {
       const ids = await scheduleRepository.liveRunSessions(schedule.id);
@@ -1154,6 +1169,10 @@ export const resolvers = {
     deployConfig: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId);
       return deliveryService.getConfig(args.projectId);
+    },
+    deliveryPolicy: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId);
+      return deliveryPolicyService.get(args.projectId);
     },
     ciStatus: async (_: unknown, args: { projectId: string; ref?: string | null }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId);
@@ -1689,6 +1708,10 @@ export const resolvers = {
       await requireProject(ctx, args.projectId, 'admin');
       return deliveryService.setConfig(args.projectId, args.input ?? null, requireUser(ctx).id);
     },
+    setDeliveryPolicy: async (_: unknown, args: { projectId: string; rules: { tag: string; mode: string }[] }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'admin');
+      return deliveryPolicyService.set(args.projectId, args.rules, requireUser(ctx).id);
+    },
     watchPullRequests: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId);
       return trackedPullRequestService.watch(args.projectId, requireUser(ctx).id);
@@ -2075,11 +2098,11 @@ export const resolvers = {
       await requireProject(ctx, args.input.projectId, 'member');
       const { agentId, ...input } = args.input;
       const owner = await sessionOwnerFor(ctx, agentId, input.projectId);
-      return scheduleService.create(input, owner);
+      return scheduleService.create(await scheduleBudgetInUsd(input, ctx), owner);
     },
     updateSchedule: async (_: unknown, args: { id: string; input: SessionScheduleInput }, ctx: Ctx) => {
       await requireProject(ctx, (await scheduleService.require(args.id)).projectId, 'member');
-      return scheduleService.update(args.id, args.input);
+      return scheduleService.update(args.id, await scheduleBudgetInUsd(args.input, ctx));
     },
     deleteSchedule: async (_: unknown, args: { id: string }, ctx: Ctx) => {
       await requireProject(ctx, (await scheduleService.require(args.id)).projectId, 'member');

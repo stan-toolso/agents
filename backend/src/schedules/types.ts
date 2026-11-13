@@ -41,6 +41,10 @@ export interface SessionSchedule {
    * `Bash(git status *)`, `mcp__vault__sql_query(production)`…). Hors exécution planifiée, ils ne valent rien.
    */
   allowedTools: string[];
+  /** Plafond de coût d'une exécution en USD (null : aucun) : atteint, la session de l'exécution est arrêtée. */
+  maxRunUsd: number | null;
+  /** Budget mensuel de la planification en USD (null : aucun) : atteint, les échéances sont ignorées jusqu'au mois suivant. */
+  monthlyBudgetUsd: number | null;
   nextRunAt: Date | null;
   lastRunAt: Date | null;
   /** Compte rendu texte de la dernière exécution (gardé pour compatibilité ; l'historique est dans `ScheduleRun`). */
@@ -65,6 +69,10 @@ export interface SessionScheduleInput {
   allowedTools?: string[] | null;
   /** Réglages du provider fusionnés à ceux de la planification (mode d'autorisation, modèle ; valeur vide : retirée). Absent : inchangés. */
   config?: Record<string, unknown> | null;
+  /** Plafond de coût d'une exécution, en USD (absent : inchangé ; null ou 0 : retiré). */
+  maxRunUsd?: number | null;
+  /** Budget mensuel, en USD (absent : inchangé ; null ou 0 : retiré). */
+  monthlyBudgetUsd?: number | null;
 }
 
 /** Nouvelle planification : son projet, son provider et ses réglages. */

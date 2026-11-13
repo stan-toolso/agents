@@ -65,6 +65,12 @@ export interface SessionSchedule {
   archiveAfterMinutes: number | null;
   /** Outils pré-autorisés pour les seules exécutions de la planification (règles au format Claude Code). */
   allowedTools: string[];
+  /** Plafond de coût d'une exécution (unité d'affichage ; null : aucun). */
+  maxRunUsd?: number | null;
+  /** Budget mensuel de la planification (unité d'affichage ; null : aucun). */
+  monthlyBudgetUsd?: number | null;
+  /** Consommation du mois de ses exécutions (unité d'affichage). */
+  monthUsd?: number;
   nextRunAt: string | null;
   lastRunAt: string | null;
   lastResult: string | null;
@@ -831,6 +837,9 @@ export const SESSION_FIELDS = gql`
       archivePolicy
       archiveAfterMinutes
       allowedTools
+      maxRunUsd
+      monthlyBudgetUsd
+      monthUsd
       nextRunAt
       lastRunAt
       lastResult
@@ -1328,6 +1337,9 @@ const SCHEDULE_FIELDS = gql`
     archivePolicy
     archiveAfterMinutes
     allowedTools
+    maxRunUsd
+    monthlyBudgetUsd
+    monthUsd
     nextRunAt
     lastRunAt
     lastResult

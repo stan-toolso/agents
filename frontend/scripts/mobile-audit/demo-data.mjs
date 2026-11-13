@@ -231,7 +231,7 @@ const schedule = (id, p, name, owner, over = {}) => ({
   __typename: 'SessionSchedule', id, name, customName: name, project: p, owner, agent: null, requestedBy: null, provider: 'claude',
   config: { permissionMode: 'bypassPermissions', model: 'claude-sonnet-5-5' }, cron: '0 8 * * 1', timezone: 'Europe/Paris',
   prompt: 'Prépare le rapport hebdomadaire des inscriptions et publie-le.', enabled: true, endAfterRun: true, archivePolicy: 'PREVIOUS_ON_RUN',
-  archiveAfterMinutes: null, allowedTools: [], nextRunAt: inDays(5), lastRunAt: ago(60 * 9), lastResult: null, createdAt: ago(60 * 24 * 30), updatedAt: ago(60 * 24), runs: [], activeSessions: [], ...over,
+  archiveAfterMinutes: null, allowedTools: [], maxRunUsd: null, monthlyBudgetUsd: null, monthUsd: 0, nextRunAt: inDays(5), lastRunAt: ago(60 * 9), lastResult: null, createdAt: ago(60 * 24 * 30), updatedAt: ago(60 * 24), runs: [], activeSessions: [], ...over,
 });
 const scheduleRun = (id, s, status, startedMin, over = {}) => ({
   __typename: 'ScheduleRun', id, trigger: 'SCHEDULE', triggeredBy: null, status, scheduledFor: ago(startedMin), startedAt: ago(startedMin),
@@ -280,7 +280,7 @@ for (const pg of sharedPagesDemo) if (pg.id === 'page-data-inscriptions' || pg.i
 
 export const schedules = [
   schedule('sch-rapport-lundi', P.data, 'Rapport du lundi', U.hugo, { allowedTools: ['Bash(npm run report *)'], lastRunAt: ago(60 * 24 * 4) }),
-  schedule('sch-revue-bases', P.site, 'Revue des bases', U.me, { cron: '35 12 * * *', prompt: 'Passe en revue les bases de production : tailles, index inutilisés, requêtes lentes. Signale ce qui mérite une action.', nextRunAt: inDays(1), lastRunAt: ago(12) }),
+  schedule('sch-revue-bases', P.site, 'Revue des bases', U.me, { cron: '35 12 * * *', prompt: 'Passe en revue les bases de production : tailles, index inutilisés, requêtes lentes. Signale ce qui mérite une action.', nextRunAt: inDays(1), lastRunAt: ago(12), maxRunUsd: 2, monthlyBudgetUsd: 30, monthUsd: 11.4 }),
 ];
 schedules[0].runs = [scheduleRun('run-lundi-1', S.hebdo, 'DONE', 60 * 24 * 4)];
 schedules[1].runs = [scheduleRun('run-bases-2', S.revueBases, 'RUNNING', 12), scheduleRun('run-bases-1', S.revueBasesHier, 'DONE', 60 * 24)];
@@ -590,6 +590,8 @@ const deliveries = [
   delivery(P.site, 'DEPLOY', 'FAILED', U.lea, 60 * 26, 12, { sha: '1c0ffee42b', error: "CI rouge sur main (1c0ffee) : CI rouge · en échec : Tests ; rien n'est déployé", steps: [step(60 * 26, 'déploiement demandé'), step(60 * 26, "CI rouge sur main (1c0ffee) : CI rouge · en échec : Tests ; rien n'est déployé", 'error')] }),
   delivery(P.site, 'MERGE', 'CONFLICT', U.me, 60 * 27, 25, { branch: 'blog-rss', error: 'Conflit avec la branche de base', steps: [step(60 * 27, 'fusion de la branche de base dans blog-rss'), step(60 * 27, "conflit en fusionnant la branche de base : résolution confiée à l'agent de la session ; relancez « Livrer » une fois la résolution poussée", 'warn')] }),
 ];
+// Politique de livraison du site : les tâches « auto » sont fusionnées après relecture favorable et CI verte.
+const deliveryPolicies = { [P.site.id]: { __typename: 'DeliveryPolicy', rules: [{ __typename: 'DeliveryPolicyRule', tag: 'auto', mode: 'AUTO_MERGE' }, { __typename: 'DeliveryPolicyRule', tag: 'securite', mode: 'MANUAL' }], mergeUser: U.me, updatedAt: ago(60 * 24 * 2) } };
 const deployConfigs = { [P.site.id]: { __typename: 'DeployConfig', vaultItem: 'site-prod', command: './deploy.sh --ref {sha}', branch: null, timeoutMinutes: 30, updatedBy: U.me, updatedAt: ago(60 * 24 * 3) } };
 
 // ---- Notifications ------------------------------------------------------------------------------------------------
@@ -1048,6 +1050,7 @@ export const demoRoot = {
   deliveries: (a = {}) => deliveries.filter((d) => d.projectId === a.projectId && (!a.worksessionId || d.worksessionId === a.worksessionId) && (!a.taskId || d.task?.id === a.taskId) && (!a.kind || d.kind === a.kind.toUpperCase())).slice(0, a.limit ?? 50),
   delivery: (a) => byId(deliveries, a.id),
   deployConfig: (a) => deployConfigs[a.projectId] ?? null,
+  deliveryPolicy: (a) => deliveryPolicies[a.projectId] ?? null,
   ciStatus: (a) => ({ __typename: 'CiStatus', ref: a.ref ?? 'main', sha: '9b1e3d0a2c4f', state: 'SUCCESS', verdict: 'success', checks: [{ __typename: 'PullRequestCheck', name: 'Tests', state: 'SUCCESS', url: null }, { __typename: 'PullRequestCheck', name: 'Typecheck et build', state: 'SUCCESS', url: null }] }),
   worksession: (a) => sessions.map((s) => s.worksession).find((w) => w?.id === a.id) ?? null,
   // Explorateur de fichiers : un dossier de session presque vide, des fichiers dans le dossier principal.

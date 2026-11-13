@@ -48,6 +48,7 @@ import { sessionService } from './sessions/service.js';
 import { containerMonitor } from './runners/monitor.js';
 import { trackedPullRequestService } from './pullRequests/service.js';
 import { reviewService } from './reviews/service.js';
+import { deliveryPolicyService } from './deliveries/autoMerge.js';
 import { healthService } from './health/service.js';
 import { loginService } from './settings/login.js';
 import { migrateLegacyCredentials } from './settings/legacy.js';
@@ -210,6 +211,8 @@ async function main() {
     { name: 'consolidation du temps CTO', start: () => ctoTimeService.start(), stop: () => ctoTimeService.stop() },
     { name: 'rafraîchissement des artefacts de données', start: () => artifactDataService.start(), stop: () => artifactDataService.stop() },
     { name: 'réveil des tâches en attente', start: () => taskWaker.start(), stop: () => taskWaker.stop() },
+    // Après le guetteur des relectures : écoute leurs rapports pour fusionner dès qu'une relecture est favorable.
+    { name: 'politique de livraison', start: () => deliveryPolicyService.start(), stop: () => deliveryPolicyService.stop() },
   ];
 
   // Origines autorisées à appeler l'API avec le cookie de session : voir origin.ts (aussi appliqué aux WebSockets).

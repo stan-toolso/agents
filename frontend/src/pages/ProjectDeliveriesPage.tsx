@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Alert, Badge, Button, ButtonGroup, Card } from 'react-bootstrap';
 import { useParams } from 'react-router-dom';
 import { DeliveryTable, DeployConfigModal } from '../components/Deliveries';
+import { DeliveryPolicyCard } from '../components/DeliveryPolicy';
 import { useDialogs } from '../components/Dialogs';
 import PageLoading from '../components/PageLoading';
 import ProjectHeader, { type ProjectHeaderProject } from '../components/ProjectHeader';
@@ -116,6 +117,7 @@ export default function ProjectDeliveriesPage() {
           </Card.Body>
         </Card>
       )}
+      {project.gitUrl && <DeliveryPolicyCard projectId={id} admin={admin} />}
       <div className="d-flex align-items-center gap-2 mb-2 flex-wrap">
         <ButtonGroup size="sm">
           {(['all', 'merge', 'deploy'] as Kind[]).map((k) => (
