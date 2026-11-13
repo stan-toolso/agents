@@ -67,6 +67,13 @@ export function deployCandidates(prs: TrackedPullRequest[], opts: { branch: stri
   );
 }
 
+/** Livraison lancée par la politique du projet (fusion automatique), pas par un clic. */
+export interface AutoDelivery {
+  tag: string;
+  reviewSessionId: string;
+  prNumber: number | null;
+}
+
 type DeployedListener = (event: DeployedEvent) => Promise<void> | void;
 const deployedListeners = new Map<string, DeployedListener>();
 
@@ -208,7 +215,7 @@ export const deliveryService = {
    * « Livrer » le dossier de travail d'une session ou d'une tâche : vérifications immédiates (erreur renvoyée à la
    * personne), puis la livraison continue en arrière-plan. `deploy` : demander un déploiement une fois fusionnée.
    */
-  async deliver(input: { sessionId?: string | null; taskId?: string | null; userId: string; deploy?: boolean }): Promise<Delivery> {
+  async deliver(input: { sessionId?: string | null; taskId?: string | null; worksessionId?: string | null; userId: string; deploy?: boolean; auto?: AutoDelivery }): Promise<Delivery> {
     let worksessionId: string | null = null;
     let projectId: string;
     let taskId = input.taskId ?? null;
@@ -219,6 +226,11 @@ export const deliveryService = {
       projectId = s.projectId;
       worksessionId = s.worksessionId;
       if (!worksessionId) throw new AppError('Cette session travaille dans le dossier principal du projet : il n’y a pas de branche à livrer');
+    } else if (input.worksessionId) {
+      const ws = await worksessionRepository.findById(input.worksessionId);
+      if (!ws || ws.archivedAt) throw new AppError('Dossier de travail introuvable ou archivé : rien à livrer');
+      projectId = ws.projectId;
+      worksessionId = ws.id;
     } else if (taskId) {
       const t = await taskService.get(taskId);
       projectId = t.projectId;
@@ -259,7 +271,15 @@ export const deliveryService = {
       if (isUniqueViolation(err)) throw new AppError('Une livraison est déjà en cours pour ce dossier de travail');
       throw err;
     }
-    await auditService.record({ projectId, actor: { userId: input.userId }, action: 'delivery.merge', targetType: 'delivery', targetId: d.id, targetLabel: status.branch, details: { sessionId, taskId, deploy: Boolean(input.deploy) } }).catch(() => undefined);
+    if (input.auto) {
+      // Fusion décidée par Skipper (politique du projet) : l'acteur est Skipper, le compte qui fusionne est dans les détails.
+      await auditService
+        .record({ projectId, actor: { label: 'Skipper (politique de livraison)' }, action: 'delivery.auto_merge', targetType: 'delivery', targetId: d.id, targetLabel: status.branch, details: { mergedAs: input.userId, tag: input.auto.tag, reviewSessionId: input.auto.reviewSessionId, prNumber: input.auto.prNumber, sessionId, taskId } })
+        .catch(() => undefined);
+      await step(d, `fusion automatique (politique de livraison, étiquette « ${input.auto.tag} ») : relecture par un agent favorable, CI verte ; fusion avec le compte de l'administrateur qui a activé la politique`);
+    } else {
+      await auditService.record({ projectId, actor: { userId: input.userId }, action: 'delivery.merge', targetType: 'delivery', targetId: d.id, targetLabel: status.branch, details: { sessionId, taskId, deploy: Boolean(input.deploy) } }).catch(() => undefined);
+    }
     track(`livraison ${d.id}`, () => this.runMerge(d, Boolean(input.deploy)));
     return d;
   },

@@ -24,7 +24,7 @@ const m = vi.hoisted(() => ({
 
 vi.mock('../config.js', () => ({ config: { appUrl: 'https://skipper.test' } }));
 vi.mock('../projects/service.js', () => ({ projectService: { get: async () => m.project } }));
-vi.mock('../git/service.js', () => ({ gitService: { fetch: async () => undefined, branchPatch: async () => m.diff } }));
+vi.mock('../git/service.js', () => ({ gitService: { fetch: async () => undefined, branchPatch: async () => m.diff }, headCommitOf: async () => 'abc1234' }));
 vi.mock('../git/pullRequests.js', () => ({
   pullRequestService: {
     comment: async (_projectId: string, userId: string | null, number: number, body: string) => {
@@ -53,6 +53,7 @@ vi.mock('../worksessions/repository.js', () => ({
   },
 }));
 vi.mock('../worksessions/service.js', () => ({
+  worksessionPath: (_p: unknown, ws: { name?: string }) => `/ws/${ws.name ?? ''}`,
   worksessionService: {
     assertUsable: async (_project: unknown, id: string) => {
       const ws = m.worksessions.find((w) => w.id === id);
@@ -189,6 +190,8 @@ describe('reviewService.request', () => {
     m.prs = [{ id: 'pr2', projectId: 'p', repo: 'acme/app', number: 20, url: 'u', title: 'Autre', headBranch: 'autre', baseBranch: 'main', status: 'open', taskId: 't1', worksessionId: null }];
     await reviewService.request({ projectId: 'p', pullRequestId: 'pr2' }, 'u1');
     expect(m.createdWorksessions).toEqual([{ branch: 'autre' }]);
+    // Commit relu noté (fusion automatique : la relecture vaut pour ce commit seulement).
+    expect(reviewOf(m.created[0] as { config: Record<string, unknown> })!.headSha).toBe('abc1234');
     expect(m.created[0]).toMatchObject({ worksessionId: 'ws-autre', name: 'Relecture PR #20' });
 
     m.worksessions = m.worksessions.filter((w) => w.id !== 'ws-autre');
@@ -215,7 +218,7 @@ describe('reviewService.report', () => {
     const review = reviewOf(m.sessions[0])!;
     expect(review.reportedAt).toBeTruthy();
     expect(review.report).toContain('Rien de bloquant');
-    expect(review).toMatchObject({ taskCommentId: 'c1', githubCommentUrl: 'https://github.com/acme/app/pull/12#issuecomment-1', error: null });
+    expect(review).toMatchObject({ taskCommentId: 'c1', githubCommentUrl: 'https://github.com/acme/app/pull/12#issuecomment-1', error: null, verdict: 'approved' });
     expect(m.ended).toEqual(['s1']);
 
     // Une seule publication : les tours suivants (discussion avec l'agent) ne republient rien.
@@ -259,5 +262,17 @@ describe('reviewPrompt', () => {
     expect(inline).toMatch(/Bugs et régressions/);
     expect(inline).toMatch(/verdict/);
     expect(reviewPrompt({ review, task: null, pr: null, stat: '', patch: null })).toContain('fichier joint');
+  });
+});
+
+describe('écouteurs des rapports', () => {
+  it('préviennent après la publication, avec le verdict', async () => {
+    const seen: Array<string | null | undefined> = [];
+    reviewService.onReported('test', (_s, review) => void seen.push(review.verdict));
+    m.prs = [];
+    m.sessions = [reviewSession({})];
+    m.lastResult = { subtype: 'success', is_error: false, result: '⚠️ À corriger avant fusion : un test manque.' };
+    await reviewService.report('s1');
+    expect(seen).toEqual(['changes']);
   });
 });

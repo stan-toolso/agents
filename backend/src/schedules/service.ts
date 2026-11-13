@@ -11,6 +11,8 @@ import { sessionService } from '../sessions/service.js';
 import type { Session } from '../sessions/types.js';
 import { claudeSettings } from '../settings/claude.js';
 import { projectBudget } from '../projects/budget.js';
+import { currentMonthStart } from '../settings/usage.js';
+import { capReached, launchRefusal, normalizeBudgetAmount, providerCap, runCap } from './budget.js';
 import { CronError, isValidTimeZone, nextRun, nextRuns, parseCron } from './cron.js';
 import { RUN_STATUS_LABELS, runOutcome, summarizeEvents } from './outcome.js';
 import { forgetScheduleRules } from './activeRules.js';
@@ -135,13 +137,15 @@ const localRuns = new Map<string, string>();
  * Clôt une exécution : historique, compte rendu texte (compatibilité), jalon du transcript, notification.
  * Ne fait rien si l'exécution était déjà close (une seule clôture, donc une seule notification).
  */
-async function finish(run: ScheduleRun, session: Session, schedule: SessionSchedule, opts: { stillBusy: boolean; startedAt: number; pendingRequest?: string | null }): Promise<ScheduleRun | null> {
+async function finish(run: ScheduleRun, session: Session, schedule: SessionSchedule, opts: { stillBusy: boolean; startedAt: number; pendingRequest?: string | null; budgetStop?: string | null }): Promise<ScheduleRun | null> {
   // `session` : celle de l'exécution.
   const id = session.id;
   const scheduleId = schedule.id;
   const events = run.startEventId ? await sessionRepository.listEvents(id, { after: run.startEventId, limit: 2000 }) : [];
   const summary = summarizeEvents(events);
-  const { status, message } = runOutcome(summary, { stillBusy: opts.stillBusy, pendingRequest: opts.pendingRequest ?? null });
+  const outcome = runOutcome(summary, { stillBusy: opts.stillBusy, pendingRequest: opts.pendingRequest ?? null });
+  // Plafond de coût atteint : l'exécution est en échec, quelle que soit la façon dont l'agent s'est arrêté.
+  const { status, message } = opts.budgetStop ? { status: 'failed' as const, message: opts.budgetStop } : outcome;
   const durationMs = summary.durationMs ?? Date.now() - opts.startedAt;
   const closed = await scheduleRepository.finishRun(run.id, { status, costUsd: summary.cost, durationMs, message, answer: summary.answer });
   forgetScheduleRules(id);
@@ -151,7 +155,7 @@ async function finish(run: ScheduleRun, session: Session, schedule: SessionSched
   await scheduleRepository.setResult(scheduleId, `${RUN_STATUS_LABELS[status]}${message ? ` : ${message}` : ''} · ${details}`);
   await emit(id, 'schedule', { action: 'done', runId: run.id, status, outcome: RUN_STATUS_LABELS[status], message, cost: summary.cost, durationMs, name: schedule.name });
   const label = scheduleLabel(schedule);
-  const n = notificationOf(status, label);
+  const n = opts.budgetStop ? { type: 'schedule.budget_exceeded', title: `« ${label} » arrêtée : plafond de coût atteint` } : notificationOf(status, label);
   void notificationService.notify({
     ...n,
     message: message ? `${message} · ${details}` : details,
@@ -223,7 +227,13 @@ export const scheduleService = {
     const spec = parseOrThrow(input.cron);
     const name = input.name === undefined ? undefined : input.name?.trim().slice(0, 120) || null;
     const enabled = input.enabled ?? true;
-    return { prompt, timezone, spec, name, enabled, allowedTools: validRules(input.allowedTools), archive: validArchive(input) };
+    let budget: { maxRunUsd?: number | null; monthlyBudgetUsd?: number | null };
+    try {
+      budget = { maxRunUsd: normalizeBudgetAmount(input.maxRunUsd, 'Plafond par exécution'), monthlyBudgetUsd: normalizeBudgetAmount(input.monthlyBudgetUsd, 'Budget mensuel') };
+    } catch (err) {
+      throw new AppError((err as Error).message);
+    }
+    return { prompt, timezone, spec, name, enabled, allowedTools: validRules(input.allowedTools), archive: validArchive(input), budget };
   },
 
   /**
@@ -250,6 +260,8 @@ export const scheduleService = {
       nextRunAt: v.enabled ? nextRun(v.spec, new Date(), v.timezone) : null,
       allowedTools: v.allowedTools,
       archive: v.archive,
+      maxRunUsd: v.budget.maxRunUsd ?? null,
+      monthlyBudgetUsd: v.budget.monthlyBudgetUsd ?? null,
     });
     if (input.runNow) await this.run(schedule, { manual: true, userId: owner.requestedById ?? owner.ownerId });
     return schedule;
@@ -272,6 +284,8 @@ export const scheduleService = {
       allowedTools: v.allowedTools,
       archive: v.archive,
       config,
+      maxRunUsd: v.budget.maxRunUsd,
+      monthlyBudgetUsd: v.budget.monthlyBudgetUsd,
     });
     if (!schedule) throw new NotFoundError('Planification introuvable');
     forgetScheduleRules(null);
@@ -311,11 +325,11 @@ export const scheduleService = {
     const label = scheduleLabel(schedule);
     const editLink = `/projects/${projectId}/schedules?edit=${id}`;
     const runBase = { scheduleId: id, trigger: manual ? ('manual' as const) : ('schedule' as const), triggeredBy: opts.userId ?? null, scheduledFor: opts.scheduledFor ?? null };
-    const skip = async (reason: string): Promise<null> => {
+    const skip = async (reason: string, type = 'schedule.skipped'): Promise<null> => {
       if (manual) throw new AppError(`Exécution impossible : ${reason}`);
       await scheduleRepository.createRun({ ...runBase, status: 'skipped', message: reason });
       await scheduleRepository.setResult(id, `Ignorée : ${reason}`);
-      void notificationService.notify({ type: 'schedule.skipped', title: `« ${label} » ignorée`, message: reason, link: editLink, projectId });
+      void notificationService.notify({ type, title: `« ${label} » ignorée`, message: reason, link: editLink, projectId });
       return null;
     };
 
@@ -330,17 +344,32 @@ export const scheduleService = {
     } catch (err) {
       return skip((err as Error).message);
     }
+    // Budget propre à la planification : mensuel au lancement, plafond effectif pendant l'exécution.
+    let cap: number | null = null;
+    if (schedule.maxRunUsd || schedule.monthlyBudgetUsd) {
+      const monthSpent = schedule.monthlyBudgetUsd ? await scheduleRepository.spentSince(id, currentMonthStart()) : 0;
+      const amounts = new Map<number, string>();
+      for (const usd of [monthSpent, schedule.monthlyBudgetUsd ?? 0]) amounts.set(usd, await describeCost(usd));
+      const refusal = launchRefusal(schedule, monthSpent, (usd) => amounts.get(usd) ?? `${usd.toFixed(2)} $`);
+      if (refusal) return skip(refusal, 'schedule.budget_exceeded');
+      cap = runCap(schedule, monthSpent);
+    }
 
     const startedAt = Date.now();
     scheduledRuns.add(id);
     let run = await scheduleRepository.createRun({ ...runBase, status: 'running' });
     let runSession: Session;
     try {
+      const keys = await providerConfigKeys(schedule.provider);
+      const runConfig = pickConfig(schedule.config, keys);
+      // Le CLI Claude arrête lui-même l'agent au plafond, même au milieu d'un tour.
+      const limit = cap !== null && keys.includes('maxBudgetUsd') ? providerCap(runConfig.maxBudgetUsd, cap) : undefined;
+      if (limit !== undefined) runConfig.maxBudgetUsd = Number(limit.toFixed(4));
       runSession = await sessionService.create({
         projectId,
         name: runSessionName(label, new Date(startedAt), schedule.timezone),
         provider: schedule.provider,
-        config: pickConfig(schedule.config, await providerConfigKeys(schedule.provider)),
+        config: runConfig,
         newWorksession: {},
         ownerId: schedule.ownerId,
         requestedById: schedule.requestedById,
@@ -389,9 +418,22 @@ export const scheduleService = {
       try {
         let current = (await sessionRepository.findById(rid)) ?? runSession;
         let pendingRequest: string | null = null;
+        let budgetStop: string | null = null;
+        const overCap = async (): Promise<string | null> => {
+          if (cap === null) return null;
+          const spent = await scheduleRepository.sessionSpent(rid);
+          return capReached(spent, cap) ? `plafond de coût atteint (${await describeCost(spent)} pour un plafond de ${await describeCost(cap)})` : null;
+        };
         while (Date.now() - startedAt < RUN_TIMEOUT_MS) {
           current = await sessionService.waitForIdle(rid, WAIT_STEP_MS);
           if (current.status !== 'running' || current.activity === 'idle') break;
+          // Coût relevé à chaque tour : au plafond, l'exécution est arrêtée (tout provider).
+          budgetStop = await overCap();
+          if (budgetStop) {
+            await sessionService.stop(rid).catch((err) => log.warn(`[schedules] arrêt de l'exécution ${rid} au plafond : ${(err as Error).message}`));
+            current = (await sessionRepository.findById(rid)) ?? current;
+            break;
+          }
           const waiting = (await requestRepository.list({ sessionId: rid, status: 'pending', limit: 1 }))[0];
           if (waiting && Date.now() - waiting.createdAt.getTime() >= BLOCKED_AFTER_MS) {
             // Personne ne répond : l'exécution est notée « bloquée » ; la demande reste ouverte et l'agent repartira si quelqu'un y répond.
@@ -403,9 +445,11 @@ export const scheduleService = {
           await sessionService.end(rid).catch(() => undefined);
           current = await sessionService.waitForIdle(rid, 60_000);
         }
-        const stillBusy = !pendingRequest && current.status === 'running' && current.activity !== 'idle';
+        // Arrêtée par le CLI au plafond (maxBudgetUsd), ou plafond franchi par le dernier tour.
+        budgetStop ??= await overCap();
+        const stillBusy = !budgetStop && !pendingRequest && current.status === 'running' && current.activity !== 'idle';
         // Réglages à jour (archivage modifié pendant l'exécution), sinon ceux du lancement.
-        await finish(tracked, current, (await scheduleRepository.findById(id)) ?? schedule, { stillBusy, startedAt, pendingRequest });
+        await finish(tracked, current, (await scheduleRepository.findById(id)) ?? schedule, { stillBusy, startedAt, pendingRequest, budgetStop });
       } catch (err) {
         log.error("[schedules] suivi de l'exécution", err);
       } finally {

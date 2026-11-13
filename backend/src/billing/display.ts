@@ -54,6 +54,7 @@ export const COST_FIELDS: Record<string, string[]> = {
   TaskSessionCost: ['usd'],
   WorkflowRun: ['costUsd'],
   ScheduleRun: ['costUsd'],
+  SessionSchedule: ['maxRunUsd', 'monthlyBudgetUsd', 'monthUsd'],
   SessionContext: ['coldTurnUsd'],
   ClaudeSettings: ['monthlyBudgetUsd', 'sessionBudgetUsd'],
   OpencodeSettings: ['sessionBudgetUsd'],

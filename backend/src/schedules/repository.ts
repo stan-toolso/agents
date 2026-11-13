@@ -18,6 +18,8 @@ interface Row {
   archive_policy: ScheduleArchivePolicy | null;
   archive_after_minutes: number | null;
   allowed_tools: string[] | null;
+  max_run_usd: string | number | null;
+  monthly_budget_usd: string | number | null;
   next_run_at: Date | null;
   last_run_at: Date | null;
   last_result: string | null;
@@ -58,6 +60,8 @@ const toSchedule = (r: Row): SessionSchedule => ({
   archivePolicy: r.archive_policy ?? 'previous_on_run',
   archiveAfterMinutes: r.archive_after_minutes ?? null,
   allowedTools: r.allowed_tools ?? [],
+  maxRunUsd: r.max_run_usd == null ? null : Number(r.max_run_usd),
+  monthlyBudgetUsd: r.monthly_budget_usd == null ? null : Number(r.monthly_budget_usd),
   nextRunAt: r.next_run_at,
   lastRunAt: r.last_run_at,
   lastResult: r.last_result,
@@ -84,7 +88,7 @@ const toRun = (r: RunRow): ScheduleRun => ({
 
 /** Colonnes d'une planification (sans `session_id`, colonne d'avant gardée pour la version précédente). */
 const COLS = `sc.id, sc.project_id, sc.owner_id, sc.requested_by_id, sc.provider, sc.config, sc.name, sc.cron, sc.timezone, sc.prompt,
-  sc.enabled, sc.end_after_run, sc.archive_policy, sc.archive_after_minutes, sc.allowed_tools, sc.next_run_at, sc.last_run_at,
+  sc.enabled, sc.end_after_run, sc.archive_policy, sc.archive_after_minutes, sc.allowed_tools, sc.max_run_usd, sc.monthly_budget_usd, sc.next_run_at, sc.last_run_at,
   sc.last_result, sc.created_at, sc.updated_at`;
 const RETURNING = COLS.replace(/sc\./g, '');
 
@@ -100,6 +104,9 @@ export interface ScheduleValues {
   allowedTools?: string[];
   archive?: { policy: ScheduleArchivePolicy; afterMinutes: number | null };
   config?: Record<string, unknown>;
+  /** Plafonds de coût en USD : undefined inchangé, null retiré. */
+  maxRunUsd?: number | null;
+  monthlyBudgetUsd?: number | null;
 }
 
 export const scheduleRepository = {
@@ -147,8 +154,8 @@ export const scheduleRepository = {
   async create(values: ScheduleValues & { projectId: string; ownerId: string | null; requestedById: string | null; provider: string }): Promise<SessionSchedule> {
     const { rows } = await pool.query<Row>(
       `INSERT INTO session_schedules (project_id, owner_id, requested_by_id, provider, config, name, cron, timezone, prompt, enabled, end_after_run,
-         next_run_at, allowed_tools, archive_policy, archive_after_minutes)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, COALESCE($13::text[], '{}'), COALESCE($14, 'previous_on_run'), $15)
+         next_run_at, allowed_tools, archive_policy, archive_after_minutes, max_run_usd, monthly_budget_usd)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, COALESCE($13::text[], '{}'), COALESCE($14, 'previous_on_run'), $15, $16, $17)
        RETURNING ${RETURNING}`,
       [
         values.projectId,
@@ -166,6 +173,8 @@ export const scheduleRepository = {
         values.allowedTools ?? null,
         values.archive?.policy ?? null,
         values.archive?.afterMinutes ?? null,
+        values.maxRunUsd ?? null,
+        values.monthlyBudgetUsd ?? null,
       ],
     );
     return toSchedule(rows[0]);
@@ -181,6 +190,8 @@ export const scheduleRepository = {
          archive_policy = COALESCE($11, archive_policy),
          archive_after_minutes = CASE WHEN $11 IS NULL THEN archive_after_minutes ELSE $12 END,
          config = COALESCE($13::jsonb, config),
+         max_run_usd = CASE WHEN $14 THEN $15::numeric ELSE max_run_usd END,
+         monthly_budget_usd = CASE WHEN $16 THEN $17::numeric ELSE monthly_budget_usd END,
          updated_at = now()
        WHERE id = $1 RETURNING ${RETURNING}`,
       [
@@ -197,6 +208,10 @@ export const scheduleRepository = {
         values.archive?.policy ?? null,
         values.archive?.afterMinutes ?? null,
         values.config === undefined ? null : toJson(values.config),
+        values.maxRunUsd !== undefined,
+        values.maxRunUsd ?? null,
+        values.monthlyBudgetUsd !== undefined,
+        values.monthlyBudgetUsd ?? null,
       ],
     );
     return rows[0] ? toSchedule(rows[0]) : null;
@@ -402,6 +417,22 @@ export const scheduleRepository = {
   },
 
   /** Exécutions encore « en cours » ouvertes avant `before` (reprise de celles dont le suivi a été perdu). */
+  /** Consommation comptée (USD, tours `billable` comme le budget des projets) des sessions d'exécution de la planification depuis `since`. */
+  async spentSince(scheduleId: string, since: Date): Promise<number> {
+    const { rows } = await pool.query<{ total: string }>(
+      `SELECT COALESCE(SUM(l.cost_usd), 0) AS total FROM usage_ledger l
+       WHERE l.billable AND l.recorded_at >= $2 AND l.session_id IN (SELECT r.run_session_id FROM session_schedule_runs r WHERE r.schedule_id = $1 AND r.run_session_id IS NOT NULL)`,
+      [scheduleId, since],
+    );
+    return Number(rows[0].total);
+  },
+
+  /** Consommation (USD) d'une session (coût d'une exécution : chaque exécution a sa propre session). */
+  async sessionSpent(sessionId: string): Promise<number> {
+    const { rows } = await pool.query<{ total: string }>('SELECT COALESCE(SUM(cost_usd), 0) AS total FROM usage_ledger WHERE session_id = $1 AND billable', [sessionId]);
+    return Number(rows[0].total);
+  },
+
   async listRunningBefore(before: Date): Promise<ScheduleRun[]> {
     const { rows } = await pool.query<RunRow>(`SELECT * FROM session_schedule_runs WHERE status = 'running' AND started_at < $1 ORDER BY started_at LIMIT 50`, [before]);
     return rows.map(toRun);

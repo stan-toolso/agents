@@ -67,6 +67,8 @@ function schedule(over: Partial<SessionSchedule> = {}): SessionSchedule {
     archivePolicy: 'previous_on_run',
     archiveAfterMinutes: null,
     allowedTools: [],
+    maxRunUsd: null,
+    monthlyBudgetUsd: null,
     nextRunAt: new Date('2026-11-14T07:00:00Z'),
     lastRunAt: null,
     lastResult: null,

@@ -247,6 +247,31 @@ export const SET_DEPLOY_CONFIG = gql`
   }
 `;
 
+export type DeliveryPolicyMode = 'MANUAL' | 'AUTO_MERGE';
+
+export interface DeliveryPolicy {
+  rules: { tag: string; mode: DeliveryPolicyMode }[];
+  /** Compte avec lequel Skipper fusionne : l'administrateur qui a enregistré la politique. */
+  mergeUser: { id: string; name: string } | null;
+  updatedAt: string;
+}
+
+export const DELIVERY_POLICY = gql`
+  query DeliveryPolicy($projectId: ID!) {
+    deliveryPolicy(projectId: $projectId) {
+      rules {
+        tag
+        mode
+      }
+      mergeUser {
+        id
+        name
+      }
+      updatedAt
+    }
+  }
+`;
+
 const QUALITY_SETTINGS_FIELDS = gql`
   fragment DeliveryQualitySettingsFields on DeliveryQualitySettings {
     tags
@@ -356,6 +381,22 @@ export const SET_TASK_DELIVERY = gql`
           id
         }
       }
+    }
+  }
+`;
+
+export const SET_DELIVERY_POLICY = gql`
+  mutation SetDeliveryPolicy($projectId: ID!, $rules: [DeliveryPolicyRuleInput!]!) {
+    setDeliveryPolicy(projectId: $projectId, rules: $rules) {
+      rules {
+        tag
+        mode
+      }
+      mergeUser {
+        id
+        name
+      }
+      updatedAt
     }
   }
 `;

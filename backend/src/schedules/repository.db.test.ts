@@ -131,4 +131,42 @@ describe.skipIf(!adminUrl)('planifications (PostgreSQL)', () => {
     await pool.query(`INSERT INTO session_schedule_runs (session_id, trigger, status) VALUES ($1, 'manual', 'running')`, [holder]);
     expect(await repo.hasRunning(sc.id)).toBe(true);
   });
+
+  it('budget : plafonds enregistrés et modifiés, consommation du mois et d’une exécution', async () => {
+    const sc = await repo.create({ projectId: project, ownerId: alice, requestedById: null, provider: 'claude', config: {}, name: 'Budget', cron: '0 9 * * *', timezone: 'UTC', prompt: 'x', enabled: true, endAfterRun: true, nextRunAt: null, maxRunUsd: 1.5, monthlyBudgetUsd: 20 });
+    expect(sc).toMatchObject({ maxRunUsd: 1.5, monthlyBudgetUsd: 20 });
+    const base = { cron: sc.cron, timezone: sc.timezone, prompt: sc.prompt, enabled: true, endAfterRun: true, nextRunAt: null };
+    expect(await repo.update(sc.id, { ...base })).toMatchObject({ maxRunUsd: 1.5, monthlyBudgetUsd: 20 });
+    expect(await repo.update(sc.id, { ...base, maxRunUsd: null, monthlyBudgetUsd: 30 })).toMatchObject({ maxRunUsd: null, monthlyBudgetUsd: 30 });
+
+    const s1 = await session('Budget · 1');
+    const s2 = await session('Budget · 2');
+    const other = await session('Hors planification');
+    for (const sid of [s1, s2]) {
+      const run = await repo.createRun({ scheduleId: sc.id, trigger: 'schedule', status: 'running' });
+      await repo.setRunSession(run.id, sid);
+    }
+    const ledger = (sid: string, usd: number, at: string, billable = true) =>
+      pool.query(`INSERT INTO usage_ledger (session_id, project_id, cost_usd, recorded_at, billable) VALUES ($1, $2, $3, $4, $5)`, [sid, project, usd, at, billable]);
+    await ledger(s1, 2, '2026-10-30T10:00:00Z');
+    await ledger(s1, 1.25, '2026-11-02T10:00:00Z');
+    await ledger(s2, 0.5, '2026-11-03T10:00:00Z');
+    await ledger(s2, 9, '2026-11-03T11:00:00Z', false);
+    await ledger(other, 5, '2026-11-03T10:00:00Z');
+    expect(await repo.spentSince(sc.id, new Date('2026-11-01T00:00:00Z'))).toBeCloseTo(1.75);
+    expect(await repo.sessionSpent(s1)).toBeCloseTo(3.25);
+    expect(await repo.sessionSpent(s2)).toBeCloseTo(0.5);
+  });
+
+  it('politique de livraison : enregistrée, relue, listée pour la fusion automatique, retirée', async () => {
+    const { deliveryRepository } = await import('../deliveries/repository.js');
+    expect(await deliveryRepository.getPolicy(project)).toBeNull();
+    const saved = await deliveryRepository.setPolicy(project, [{ tag: 'auto', mode: 'auto_merge' }], alice);
+    expect(saved).toMatchObject({ projectId: project, rules: [{ tag: 'auto', mode: 'auto_merge' }], mergeUserId: alice });
+    expect((await deliveryRepository.autoMergeProjects()).map((p) => p.projectId)).toEqual([project]);
+    await deliveryRepository.setPolicy(project, [{ tag: 'auto', mode: 'manual' }], alice);
+    expect(await deliveryRepository.autoMergeProjects()).toEqual([]);
+    await deliveryRepository.deletePolicy(project);
+    expect(await deliveryRepository.getPolicy(project)).toBeNull();
+  });
 });

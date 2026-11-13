@@ -1590,6 +1590,32 @@ type DeployConfig {
   updatedAt: DateTime!
 }
 
+enum DeliveryPolicyMode {
+  "Une personne fusionne (défaut)."
+  MANUAL
+  "Skipper fusionne la pull request quand une relecture par un agent du commit courant est favorable et que la CI est verte. Jamais de déploiement automatique."
+  AUTO_MERGE
+}
+
+type DeliveryPolicyRule {
+  "Étiquette de tâche (sans la casse)."
+  tag: String!
+  mode: DeliveryPolicyMode!
+}
+
+"Politique de livraison d'un projet par étiquette de tâche. Une tâche qui porte une étiquette MANUAL reste manuelle même si une autre est AUTO_MERGE."
+type DeliveryPolicy {
+  rules: [DeliveryPolicyRule!]!
+  "Compte avec lequel Skipper fusionne : l'administrateur qui a enregistré la politique (il doit le rester)."
+  mergeUser: User
+  updatedAt: DateTime!
+}
+
+input DeliveryPolicyRuleInput {
+  tag: String!
+  mode: DeliveryPolicyMode!
+}
+
 input DeployConfigInput {
   vaultItem: String!
   command: String!
@@ -3252,6 +3278,8 @@ type Query {
   delivery(id: ID!): Delivery
   "Commande de déploiement du projet (null : pas de déploiement configuré)."
   deployConfig(projectId: ID!): DeployConfig
+  "Politique de livraison par étiquette du projet (null : aucune, tout est manuel)."
+  deliveryPolicy(projectId: ID!): DeliveryPolicy
   "Réglages qualité du projet (tâches rattachées aux livraisons)."
   deliveryQualitySettings(projectId: ID!): DeliveryQualitySettings!
   "Taux de régression des livraisons du projet sur les derniers jours (90 par défaut), au total et par auteur des PR."
@@ -3597,6 +3625,8 @@ type Mutation {
   cancelDelivery(id: ID!): Delivery!
   "Configure (ou retire, input null) la commande de déploiement du projet (administrateur)."
   setDeployConfig(projectId: ID!, input: DeployConfigInput): DeployConfig
+  "Enregistre la politique de livraison par étiquette (administrateur ; liste vide : retirée). La personne qui enregistre devient le compte de fusion."
+  setDeliveryPolicy(projectId: ID!, rules: [DeliveryPolicyRuleInput!]!): DeliveryPolicy
   "Règle les étiquettes qualité et la fenêtre du projet (administrateurs ; reset : défaut), puis recalcule les rattachements."
   setDeliveryQualitySettings(projectId: ID!, tags: [String!], windowHours: Int, reset: Boolean): DeliveryQualitySettings!
   "Corrige à la main le rattachement d'une tâche : à une livraison du projet, à aucune (deliveryId null), ou retour au calcul (reset)."
@@ -3795,6 +3825,12 @@ type SessionSchedule {
   archiveAfterMinutes: Int
   "Outils pré-autorisés pour les seules exécutions de la planification (règles au format Claude Code : Bash(git log *), mcp__vault__sql_query(production)…)."
   allowedTools: [String!]!
+  "Plafond de coût d'une exécution (unité d'affichage, voir costDisplay) : atteint, la session de l'exécution est arrêtée. Null : aucun."
+  maxRunUsd: Float
+  "Budget mensuel de la planification (unité d'affichage) : atteint, les échéances sont ignorées jusqu'au mois suivant. Null : aucun."
+  monthlyBudgetUsd: Float
+  "Consommation du mois de ses exécutions (unité d'affichage)."
+  monthUsd: Float!
   nextRunAt: DateTime
   lastRunAt: DateTime
   "Compte rendu de la dernière exécution : terminée (durée, coût), ignorée (raison) ou en erreur."
@@ -3864,6 +3900,10 @@ input SessionScheduleInput {
   allowedTools: [String!]
   "Réglages du provider (mode d'autorisation, modèle…), fusionnés à ceux de la planification ; valeur vide : retirée (défaut du projet ou du propriétaire). Absent : inchangés."
   config: JSON
+  "Plafond de coût d'une exécution, dans l'unité d'affichage (absent : inchangé ; null ou 0 : retiré)."
+  maxRunUsd: Float
+  "Budget mensuel de la planification, dans l'unité d'affichage (absent : inchangé ; null ou 0 : retiré)."
+  monthlyBudgetUsd: Float
 }
 
 extend type Session {
@@ -3889,6 +3929,10 @@ input CreateScheduleInput {
   config: JSON
   "Lance une première exécution tout de suite."
   runNow: Boolean
+  "Plafond de coût d'une exécution (unité d'affichage)."
+  maxRunUsd: Float
+  "Budget mensuel de la planification (unité d'affichage)."
+  monthlyBudgetUsd: Float
   "Agent de projet propriétaire des exécutions (ses comptes, son budget)."
   agentId: ID
 }

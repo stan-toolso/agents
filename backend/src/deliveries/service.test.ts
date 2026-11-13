@@ -24,6 +24,7 @@ const m = vi.hoisted(() => ({
   trackedPrs: [] as Array<Record<string, unknown>>,
   links: [] as Array<[string, string]>,
   contained: new Set<string>(),
+  audits: [] as Array<{ action: string; actor: unknown; details?: Record<string, unknown> }>,
   deployedEvents: [] as Array<{ delivery: Delivery; pullRequests: Array<{ id: string }>; tasks: Array<{ id: string }> }>,
 }));
 
@@ -109,13 +110,18 @@ vi.mock('./repository.js', () => {
 
 vi.mock('../instances/registry.js', () => ({ instanceRegistry: { id: 'i1', draining: false } }));
 vi.mock('../log.js', () => ({ log: { error: vi.fn(), warn: vi.fn(), info: vi.fn() } }));
-vi.mock('../audit/service.js', () => ({ auditService: { record: async () => undefined } }));
+vi.mock('../audit/service.js', () => ({ auditService: { record: async (e: { action: string; actor: unknown; details?: Record<string, unknown> }) => void m.audits.push(e) } }));
 vi.mock('../projects/service.js', () => ({ projectService: { get: async (id: string) => ({ id, slug: 'app', gitUrl: 'https://github.com/acme/app.git', gitBranch: 'main' }) } }));
 vi.mock('../worksessions/service.js', () => ({
   worksessionPath: () => '/tmp/ws',
   worksessionService: { get: async (id: string) => ({ id, name: 'ws', branch: 'task/x', projectId: 'p' }) },
 }));
-vi.mock('../worksessions/repository.js', () => ({ worksessionRepository: { listByProject: async () => [{ id: 'ws1', branch: 'task/x' }] } }));
+vi.mock('../worksessions/repository.js', () => ({
+  worksessionRepository: {
+    listByProject: async () => [{ id: 'ws1', branch: 'task/x' }],
+    findById: async (id: string) => (id === 'ws1' ? { id: 'ws1', projectId: 'p', branch: 'task/x', archivedAt: null } : null),
+  },
+}));
 vi.mock('../sessions/service.js', () => ({
   sessionService: { get: async (id: string) => ({ id, projectId: 'p', worksessionId: 'ws1', status: 'running', activity: m.busy ? 'busy' : 'idle' }) },
 }));
@@ -264,6 +270,19 @@ describe('Livrer', () => {
     expect(done.taskId).toBe('t1');
     // Chaque étape apparaît dans le transcript de la session.
     expect(m.events.map(([, msg]) => msg).join('\n')).toMatch(/fusion de la branche de base[\s\S]*push[\s\S]*ouverte[\s\S]*checks verts[\s\S]*fusionnée/);
+  });
+
+  it('fusion automatique (politique de livraison) : depuis le dossier de travail, sans déploiement, inscrite au nom de Skipper', async () => {
+    m.audits = [];
+    m.config = { projectId: 'p', vaultItem: 'srv', command: 'deploy', branch: null, timeoutMinutes: 5, updatedById: null, updatedAt: new Date() };
+    m.prStates = [{ checksState: 'SUCCESS' }];
+    await deliveryService.deliver({ worksessionId: 'ws1', taskId: 't1', userId: 'admin1', deploy: false, auto: { tag: 'auto', reviewSessionId: 'rs1', prNumber: 42 } });
+    await deliveryService.settle();
+    expect(m.merged).toEqual([{ userId: 'admin1', number: 42 }]);
+    expect(m.deliveries.filter((d) => d.kind === 'deploy')).toEqual([]);
+    expect(m.audits).toEqual([expect.objectContaining({ action: 'delivery.auto_merge', actor: { label: 'Skipper (politique de livraison)' }, details: expect.objectContaining({ mergedAs: 'admin1', tag: 'auto', reviewSessionId: 'rs1' }) })]);
+    expect(m.events.map(([, msg]) => msg).join('\n')).toMatch(/fusion automatique/);
+    await expect(deliveryService.deliver({ worksessionId: 'autre', userId: 'admin1' })).rejects.toThrow(/introuvable ou archivé/);
   });
 
   it('reprend une PR déjà ouverte au lieu d’en ouvrir une autre', async () => {

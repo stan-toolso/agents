@@ -44,6 +44,7 @@ const icons: Record<string, string> = {
   'schedule.run': 'bi-alarm',
   'schedule.blocked': 'bi-shield-exclamation',
   'schedule.skipped': 'bi-alarm',
+  'schedule.budget_exceeded': 'bi-piggy-bank',
   'schedule.failed': 'bi-alarm',
   'workflow.run': 'bi-diagram-3',
   'workflow.failed': 'bi-diagram-3',
