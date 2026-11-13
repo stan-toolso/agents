@@ -4,7 +4,7 @@ const query = vi.hoisted(() => vi.fn());
 vi.mock('../db/pool.js', () => ({ pool: { query } }));
 vi.mock('../pullRequests/service.js', () => ({ trackedPullRequestService: { countPending: vi.fn(async () => ({ open: 2, pending: 5 })), list: vi.fn(async () => []) } }));
 vi.mock('../requests/service.js', () => ({ requestService: { list: vi.fn(async () => []) } }));
-const listTasks = vi.hoisted(() => vi.fn(async () => [] as unknown[]));
+const listTasks = vi.hoisted(() => vi.fn(async (_filter?: { waiting?: boolean }) => [] as unknown[]));
 vi.mock('../tasks/repository.js', () => ({ ATTENTION_JOIN: '', taskRepository: { list: listTasks } }));
 vi.mock('../sessions/service.js', () => ({ sessionService: { get: vi.fn(async (id: string) => ({ id })) } }));
 
@@ -53,8 +53,8 @@ describe('file « À traiter »', () => {
 
   it('liste à part les tâches en attente, le réveil le plus proche d’abord, puis celles sans date', async () => {
     query.mockResolvedValue({ rows: [{ requests: '0', failed: '0', interrupted: '0', stalled: '0', waiting: '3' }] });
-    listTasks.mockImplementation(async (f: { waiting?: boolean }) =>
-      f.waiting
+    listTasks.mockImplementation(async (f?: { waiting?: boolean }) =>
+      f?.waiting
         ? [
             { id: 'sans-date', wakeAt: null, waitingSince: new Date('2026-11-01T10:00:00Z') },
             { id: 'tard', wakeAt: new Date('2026-11-20T08:00:00Z'), waitingSince: new Date('2026-11-01T10:00:00Z') },
