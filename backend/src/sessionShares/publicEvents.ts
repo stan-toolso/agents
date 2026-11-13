@@ -55,6 +55,7 @@ function publicPayload(type: string, p: Record<string, unknown>): Record<string,
       if (p.subtype === 'init') return pick(p, ['subtype', 'cwd']);
       return null;
     case 'system':
+      if (p.selfTurn) return pick(p, ['selfTurn', 'message']);
       return p.notice ? pick(p, ['notice', 'message']) : null;
     case 'request':
       return pick(p, ['type', 'title', 'message', 'payload']);

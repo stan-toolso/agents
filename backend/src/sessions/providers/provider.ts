@@ -80,6 +80,11 @@ export interface RunContext {
    * d'autorisation accordé par l'humain en réponse à une demande), pour l'afficher et le conserver au prochain lancement.
    */
   recordConfig(changes: Record<string, unknown>): Promise<void>;
+  /**
+   * Fin d'un tour que l'agent a repris de lui-même (tâche de fond terminée, sans instruction d'une personne) : ce qui
+   * l'a réveillé et son dernier texte. Le service prévient la personne qui pilote la session (`session.self_turn`).
+   */
+  onSelfTurnEnded?(info: { trigger: string; text: string | null }): Promise<void>;
 }
 
 export interface RunResult {

@@ -189,6 +189,7 @@ div.cc-chat-text:not(.cc-md) { white-space: pre-wrap; overflow-wrap: anywhere; }
 .cc-chat .cc-note { font-size: 12px; }
 .cc-note.error { color: var(--cc-red); }
 .cc-note.warn { color: var(--cc-yellow); }
+.cc-note.cc-self-turn { color: var(--cc-accent); margin-top: 14px; padding-top: 8px; border-top: 1px dashed var(--cc-border); }
 
 /* Demandes en attente : sous le transcript, dans leur propre zone qui défile. Sans cela, une demande haute (longue
    commande, règle à retenir, plusieurs options) pousse ses options sous le bord du conteneur .cc (overflow: hidden) :

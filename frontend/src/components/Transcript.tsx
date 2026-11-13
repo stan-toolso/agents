@@ -1073,7 +1073,15 @@ export default function Transcript({ events, draft = null, autoScroll = true, te
         }
         case 'system':
           // Les avis (`notice`, ex. interruption par un redémarrage du serveur) sont toujours affichés ; le reste en mode technique.
-          if (p.notice) {
+          if (p.selfTurn) {
+            // Tour repris par l'agent de lui-même (réveil sur une tâche de fond) : repère en tête du tour, qui ne commence
+            // par aucune instruction (providers/selfTurn.ts).
+            nodes.push(
+              <div key={e.id} className="cc-note cc-self-turn">
+                {stamp(true)}⏰ {String(p.message ?? '')}
+              </div>,
+            );
+          } else if (p.notice) {
             nodes.push(
               <div key={e.id} className="cc-note warn">
                 {stamp(true)}⚠ {String(p.message ?? '')}
