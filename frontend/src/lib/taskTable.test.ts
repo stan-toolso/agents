@@ -69,7 +69,7 @@ describe('disposition des colonnes', () => {
     expect(l.widths.title).toBe(140); // largeur minimale
     expect(l.widths.status).toBeUndefined();
     expect(l.widths.project).toBe(200);
-    expect(l.sort).toEqual({ key: 'createdAt', dir: 'desc' }); // actions n'est pas triable
+    expect(l.sort).toBeNull(); // actions n'est pas triable : retour au tri par pertinence
   });
 
   it('lit un stockage vide ou corrompu sans planter', () => {

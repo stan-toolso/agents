@@ -346,6 +346,7 @@ export const taskRepository = {
     if (filter.assigneeEmail) where.push(`lower(t.assignee_email) = lower($${params.push(filter.assigneeEmail)})`);
     if (filter.stalled) where.push('att.stalled_since IS NOT NULL');
     if (filter.waiting) where.push('att.waiting_since IS NOT NULL');
+    if (filter.closedSince) where.push(`(t.status IN ('todo', 'in_progress') OR COALESCE(t.completed_at, t.cancelled_at, t.updated_at) >= $${params.push(filter.closedSince)})`);
     params.push(Math.min(filter.limit ?? 200, 1000));
     const { rows } = await pool.query<Row>(`${SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ${ORDER} LIMIT $${params.length}`, params);
     return rows.map(toTask);

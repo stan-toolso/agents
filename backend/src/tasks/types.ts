@@ -181,6 +181,8 @@ export interface TaskFilter {
   stalled?: boolean;
   /** Seulement les tâches « en attente » (`waitingSince` non nul). */
   waiting?: boolean;
+  /** Tâches fermées (terminées ou annulées) seulement si elles l'ont été depuis cette date ; les ouvertes passent toujours. */
+  closedSince?: Date;
   limit?: number;
 }
 

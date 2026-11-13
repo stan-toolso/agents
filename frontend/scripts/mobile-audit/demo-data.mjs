@@ -418,6 +418,12 @@ function task(p, title, status, priority, opts = {}) {
     waitingSince: () => (opts.wakeAt ? idleSince() : null),
     wakeAt: opts.wakeAt ?? null,
     wakeNote: opts.wakeNote ?? null,
+    // Sans dépendance (sinon le serveur factice invente des « bloquée par » sur toutes les tâches).
+    dependsOn: opts.blockedBy ?? [],
+    blockedBy: opts.blockedBy ?? [],
+    dependents: [],
+    autoStartWhenUnblocked: false,
+    autoStartBy: null,
     createdAt: ago(opts.age ?? 60 * 24 * 3),
     updatedAt: ago(opts.updated ?? 60 * 2),
     completedAt: status === 'DONE' ? ago(opts.updated ?? 60 * 24) : null,
@@ -447,6 +453,9 @@ const T = {
   hebdo: task(P.data, 'Rapport hebdomadaire des inscriptions par groupe', 'DONE', 'MEDIUM', { sessions: [S.hebdo], assignee: U.me, tags: ['rapport'], updated: 60 * 9 }),
   churn: task(P.data, 'Tableau de bord du churn mensuel dans Metabase', 'TODO', 'HIGH', { tags: ['metabase'], assignee: U.hugo, due: day(7) }),
 };
+// Une dépendance : le mode hors ligne attend le paiement en trois fois (groupe « Bloquées » de la liste).
+T.hors.dependsOn = T.hors.blockedBy = [T.cotis];
+T.cotis.dependents = [T.hors];
 
 let commentSeq = 0;
 const comments = [];

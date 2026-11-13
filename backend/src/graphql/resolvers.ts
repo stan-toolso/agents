@@ -1555,7 +1555,7 @@ export const resolvers = {
       const counts = await conversationService.unreadByProject(projects.map((p) => p.id), user.id);
       return projects.map((project) => ({ project, count: counts.get(project.id) ?? 0 }));
     },
-    tasks: async (_: unknown, args: { projectId?: string | null; status?: GqlTaskStatus[] | null; priority?: GqlTaskPriority | null; assignee?: string | null; reporter?: string | null; tag?: string | null; mine?: boolean | null; limit?: number | null }, ctx: Ctx) => {
+    tasks: async (_: unknown, args: { projectId?: string | null; status?: GqlTaskStatus[] | null; priority?: GqlTaskPriority | null; assignee?: string | null; reporter?: string | null; tag?: string | null; mine?: boolean | null; closedSince?: Date | null; limit?: number | null }, ctx: Ctx) => {
       if (args.projectId) await requireProject(ctx, args.projectId);
       return taskService.list({
         projectId: args.projectId ?? undefined,
@@ -1566,6 +1566,7 @@ export const resolvers = {
         reporter: args.reporter ?? undefined,
         tag: args.tag?.trim() || undefined,
         assigneeEmail: args.mine ? requireUser(ctx).email : undefined,
+        closedSince: args.closedSince ?? undefined,
         limit: args.limit ?? undefined,
       });
     },
