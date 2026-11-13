@@ -645,6 +645,8 @@ export const PROJECT_MEMBERS = gql`
   query ProjectMembers($id: ID!) {
     project(id: $id) {
       id
+      name
+      description
       myRole
       isPersonal
       members {

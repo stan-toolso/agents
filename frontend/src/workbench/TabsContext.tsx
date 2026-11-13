@@ -25,6 +25,7 @@ export type TabKind =
   | 'tasks'
   | 'conversations'
   | 'project-settings'
+  | 'project-members'
   | 'task'
   | 'pull-requests'
   | 'deliveries'
@@ -109,6 +110,7 @@ export function describeRoute(pathname: string): { title: string; kind: TabKind 
   if (/^\/projects\/[^/]+\/tasks$/.test(pathname)) return { title: 'Tâches', kind: 'tasks' };
   if (/^\/projects\/[^/]+\/conversations(\/[^/]+)?$/.test(pathname)) return { title: 'Conversations', kind: 'conversations' };
   if (/^\/projects\/[^/]+\/settings$/.test(pathname)) return { title: 'Réglages du projet', kind: 'project-settings' };
+  if (/^\/projects\/[^/]+\/members$/.test(pathname)) return { title: 'Membres', kind: 'project-members' };
   if (/^\/projects\/[^/]+\/p\/[^/]+$/.test(pathname)) return { title: 'Page du projet', kind: 'project' };
   if (/^\/projects\/[^/]+\/pull-requests$/.test(pathname)) return { title: 'Pull requests', kind: 'pull-requests' };
   if (/^\/projects\/[^/]+\/deliveries$/.test(pathname)) return { title: 'Livraisons', kind: 'deliveries' };

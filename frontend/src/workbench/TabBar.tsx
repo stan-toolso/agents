@@ -40,6 +40,7 @@ const icons: Record<TabKind, string> = {
   tasks: 'bi-check2-square',
   conversations: 'bi-chat-left-text',
   'project-settings': 'bi-gear',
+  'project-members': 'bi-people',
   task: 'bi-check2-square',
   'pull-requests': 'bi-git',
   deliveries: 'bi-rocket-takeoff',

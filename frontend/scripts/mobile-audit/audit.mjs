@@ -18,7 +18,7 @@ const OUT = process.env.OUT || '/tmp/skipper-mobile-shots';
 const only = process.argv.slice(2);
 
 const ROUTES = [
-  '/', '/projects', '/projects/new', '/projects/p1', '/projects/p1/conversations', '/projects/p1/settings', '/projects/p1/edit', '/projects/p1/context', '/projects/p1/context?instruction=i1',
+  '/', '/projects', '/projects/new', '/projects/p1', '/projects/p1/conversations', '/projects/p1/settings', '/projects/p1/members', '/projects/p1/edit', '/projects/p1/context', '/projects/p1/context?instruction=i1',
   '/projects/p1/tasks', '/projects/p1/artifacts', '/projects/p1/vault', '/projects/p1/history', '/tasks', '/tasks/t1', '/vault', '/agents', '/agents/a1',
   '/workflows', '/workflows/w1', '/workflows/w1/runs/r1', '/shared', '/shared/s1', '/sessions', '/sessions/s1', '/sessions/s1/browser',
   '/requests', '/terminals/t1', '/settings', '/users', '/projects/p1/files', '/projects/p1/files/previsionnel/Previsionnel_2026-2027.html',
@@ -47,7 +47,7 @@ const SCENARIOS = [
   ['vault-new', '/vault', async (p) => p.click('text=Ajouter un élément')],
   ['vault-expanded', '/vault', async (p) => p.click('.vault-row')],
   ['project-worktrees', '/projects/p1/settings', async (p) => p.locator('text=Nouvelle work session').first().scrollIntoViewIfNeeded()],
-  ['project-members', '/projects/p1/settings', async (p) => p.locator('text=Membres').first().scrollIntoViewIfNeeded()],
+  ['project-members', '/projects/p1/members', async () => {}],
   ['file-code', '/projects/p1/files/previsionnel/Previsionnel_2026-2027.html', async (p) => p.locator('button', { hasText: /^Code$/ }).click()],
   ['file-publish', '/projects/p1/files/previsionnel/Previsionnel_2026-2027.html', async (p) => p.locator('button', { hasText: 'Publier' }).first().click()],
   ['workflow-runs', '/workflows/w1', async (p) => p.locator('table').first().scrollIntoViewIfNeeded()],

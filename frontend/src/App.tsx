@@ -8,6 +8,7 @@ import TabPages from './workbench/TabPages';
 import ProjectsPage from './pages/ProjectsPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
 const ProjectSettingsPage = lazy(() => import('./pages/ProjectSettingsPage'));
+const ProjectMembersPage = lazy(() => import('./pages/ProjectMembersPage'));
 const ProjectCustomPage = lazy(() => import('./pages/ProjectCustomPage'));
 import LoginPage from './pages/LoginPage';
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'));
@@ -82,6 +83,7 @@ function PageRoutes({ location, isAdmin, restricted }: { location: Location; isA
       <Route path="/projects/:id" element={<ProjectRoleGate><ProjectDetailPage /></ProjectRoleGate>} />
       <Route path="/projects/:id/edit" element={<ProjectRoleGate><ProjectFormPage /></ProjectRoleGate>} />
       <Route path="/projects/:id/settings" element={<ProjectRoleGate><ProjectSettingsPage /></ProjectRoleGate>} />
+      <Route path="/projects/:id/members" element={<ProjectRoleGate><ProjectMembersPage /></ProjectRoleGate>} />
       <Route path="/projects/:id/p/:slug" element={<ProjectRoleGate><ProjectCustomPage /></ProjectRoleGate>} />
       <Route path="/projects/:id/context" element={<ProjectRoleGate><ContextPage /></ProjectRoleGate>} />
       <Route path="/projects/:id/tasks" element={<ProjectRoleGate><TasksPage /></ProjectRoleGate>} />
