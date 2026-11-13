@@ -15,6 +15,7 @@ import { handlePushActionRoute } from './notifications/pushActions.js';
 import { notificationChannelService } from './notifications/channels.js';
 import { handleFileViewRoute } from './files/viewRoute.js';
 import { handleTasksApiRoute } from './tasks/api.js';
+import { handleInboundRoute } from './inbound/route.js';
 import { handleExportRoute } from './exports/routes.js';
 import { handleSessionShareRoute } from './sessionShares/route.js';
 import { handleGitHttpRoute } from './gitServer/httpRoute.js';
@@ -252,6 +253,7 @@ async function main() {
       .then((handled) => handled || handlePushActionRoute(req, res))
       .then((handled) => handled || handleFileViewRoute(req, res))
       .then((handled) => handled || handlePreviewOpenRoute(req, res))
+      .then((handled) => handled || handleInboundRoute(req, res))
       .then((handled) => handled || handleTasksApiRoute(req, res))
       .then((handled) => handled || handleExportRoute(req, res))
       .then((handled) => handled || handleSessionShareRoute(req, res))

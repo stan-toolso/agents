@@ -21,7 +21,7 @@ const statusSchema = z.enum(TASK_STATUSES as [TaskStatus, ...TaskStatus[]]);
 const prioritySchema = z.enum(TASK_PRIORITIES as [string, ...string[]]);
 const personSchema = z.object({ name: z.string().nullable().optional(), email: z.string().nullable().optional() }).strict().nullable();
 const fieldSchema = z.object({ key: z.string(), value: z.string() }).strict();
-const createSchema = z
+export const createSchema = z
   .object({
     title: z.string(),
     description: z.string().optional(),
@@ -39,13 +39,13 @@ const createSchema = z
   .strict();
 const updateSchema = createSchema.partial().strict();
 
-function json(res: ServerResponse, status: number, body: unknown): void {
+export function json(res: ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body);
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(text), 'Cache-Control': 'no-store' });
   res.end(text);
 }
 
-function error(res: ServerResponse, status: number, message: string, code: string, extra: Record<string, unknown> = {}): void {
+export function error(res: ServerResponse, status: number, message: string, code: string, extra: Record<string, unknown> = {}): void {
   json(res, status, { error: message, code, ...extra });
 }
 
@@ -77,7 +77,8 @@ function publicTask(t: Task) {
   };
 }
 
-async function readBody(req: IncomingMessage): Promise<unknown> {
+/** Corps brut de la requête (texte UTF-8), 1 Mo au plus. */
+export async function readRawBody(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
@@ -85,7 +86,11 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
     if (size > MAX_BODY) throw new AppError('Corps trop volumineux (1 Mo au plus)');
     chunks.push(chunk as Buffer);
   }
-  const text = Buffer.concat(chunks).toString('utf8').trim();
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+async function readBody(req: IncomingMessage): Promise<unknown> {
+  const text = (await readRawBody(req)).trim();
   if (!text) return {};
   try {
     return JSON.parse(text);
@@ -94,7 +99,7 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
   }
 }
 
-function keyFrom(req: IncomingMessage): string | null {
+export function keyFrom(req: IncomingMessage): string | null {
   const auth = req.headers.authorization;
   if (auth?.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim();
   const header = req.headers['x-api-key'];
@@ -102,7 +107,7 @@ function keyFrom(req: IncomingMessage): string | null {
 }
 
 /** Codes HTTP des erreurs métier. */
-function statusOf(err: AppError): number {
+export function statusOf(err: AppError): number {
   switch (err.code) {
     case 'NOT_FOUND':
       return 404;
@@ -127,6 +132,8 @@ export async function handleTasksApiRoute(req: IncomingMessage, res: ServerRespo
     if (!key) return error(res, 401, "Clé d'API invalide", 'UNAUTHENTICATED'), true;
     if (serverSettings.maintenance) return error(res, 503, 'Serveur en maintenance', 'MAINTENANCE'), true;
     const actor = { type: 'human' as const, name: `Clé d'API « ${key.name} »` };
+    const scope = req.method === 'GET' ? 'tasks:read' : 'tasks:write';
+    if (!key.scopes.includes(scope)) return error(res, 403, `Cette clé n'a pas la portée ${scope}`, 'FORBIDDEN', { requiredScope: scope }), true;
     const parts = url.pathname.split('/').filter(Boolean); // api, v1, tasks, id?
     if (parts[2] !== 'tasks' || parts.length > 4) return error(res, 404, 'Route inconnue', 'NOT_FOUND'), true;
     const id = parts[3];

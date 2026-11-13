@@ -71,7 +71,18 @@ const project = (id, name, slug, description, gitUrl, extra = {}) => ({
   contextInstructions: () => contextInstructions.filter((i) => i.projectId === id),
   contextChanges: [],
   vaultItems: () => (id === 'p-perso' ? [] : vaultItems.filter((v) => v.ownerProject === P[key(id)] || v.shared).map((item) => ({ __typename: 'ProjectVaultItem', item, via: item.ownerProject ? 'PROJECT' : 'OWN', link: null, forAgents: true }))),
-  apiKeys: [],
+  apiKeys: () =>
+    id === 'p-perso'
+      ? []
+      : [
+          { __typename: 'ProjectApiKey', id: `${id}-key-1`, name: 'Formulaire du site', prefix: 'skp_Ab12Cd34', createdAt: ago(60 * 24 * 30), lastUsedAt: ago(90), scopes: ['tasks:read', 'tasks:write'], signed: false, triageAgent: null, createdBy: U.me },
+          { __typename: 'ProjectApiKey', id: `${id}-key-2`, name: 'Curso', prefix: 'skp_Zx98Yw76', createdAt: ago(60 * 24 * 2), lastUsedAt: ago(12), scopes: ['inbound:task', 'inbound:triage'], signed: true, triageAgent: null, createdBy: U.me },
+        ],
+  inboundEvents: () => {
+    if (id === 'p-perso') return [];
+    const t = filterTasks({ projectId: id, status: null }).slice(0, 2);
+    return t.map((task, i) => ({ __typename: 'InboundEvent', id: `${id}-in-${i}`, keyName: 'Curso', externalId: `evt-${1042 - i}`, source: 'curso', status: i === 0 ? 'done' : 'failed', error: i === 0 ? null : 'L’agent Chris est en pause', triage: true, createdAt: ago(12 + i * 60), task: { __typename: 'Task', id: task.id, title: task.title }, session: null, agent: null }));
+  },
   conversations: () => conversations.filter((c) => c.project.id === id),
   unreadMessages: () => conversations.filter((c) => c.project.id === id).reduce((n, c) => n + c.unreadCount, 0),
   // Fils de tâches suivis : les tâches du projet qui ont des messages, la plus récemment commentée d'abord.

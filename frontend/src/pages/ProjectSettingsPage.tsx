@@ -11,8 +11,7 @@ import WorksessionDiskCard from '../components/WorksessionDiskCard';
 import BrowserCheckCard from '../components/BrowserCheckCard';
 import NotificationChannelsCard from '../components/settings/NotificationChannelsCard';
 
-import { CREATE_PROJECT_API_KEY, DELETE_PROJECT_API_KEY, PROJECT_API_KEYS, type ProjectApiKey } from '../graphql/tasks';
-import { apiBaseUrl } from '../apollo';
+import ApiKeysCard from '../components/settings/ApiKeysCard';
 import StatusBadge from '../components/StatusBadge';
 import { useDialogs } from '../components/Dialogs';
 import { formatDuration as formatSeconds, formatMb, Gauge } from '../components/ServerHealthCard';
@@ -433,77 +432,6 @@ function PermissionRulesCard({ projectId, canManage }: { projectId: string; canM
             {error.message}
           </Alert>
         )}
-      </Card.Body>
-    </Card>
-  );
-}
-
-/** Clés d'API du projet : accès REST aux tâches (`/api/v1/tasks`) pour les outils externes. */
-function ApiKeysCard({ projectId }: { projectId: string }) {
-  const { data } = useQuery<{ project: { id: string; apiKeys: ProjectApiKey[] } | null }>(PROJECT_API_KEYS, { variables: { id: projectId } });
-  const { confirm, prompt, showError } = useDialogs();
-  const [created, setCreated] = useState<{ name: string; secret: string } | null>(null);
-  const [create] = useMutation<{ createProjectApiKey: { secret: string; key: ProjectApiKey } }>(CREATE_PROJECT_API_KEY, { refetchQueries: ['ProjectApiKeys'], onError: (e) => void showError(e) });
-  const [remove] = useMutation(DELETE_PROJECT_API_KEY, { refetchQueries: ['ProjectApiKeys'], onError: (e) => void showError(e) });
-  const keys = data?.project?.apiKeys ?? [];
-  const base = apiBaseUrl || window.location.origin;
-  return (
-    <Card className="mt-3">
-      <Card.Header>Clés d'API (tâches)</Card.Header>
-      <Card.Body className="small">
-        <p className="text-secondary">
-          Une clé d'API permet à un outil externe (formulaire, CRM, script) de lister et créer les tâches de ce projet par REST, sans compte Skipper. Le secret n'est montré qu'à la création.
-        </p>
-        {created && (
-          <Alert variant="success" className="py-2" onClose={() => setCreated(null)} dismissible>
-            <div>
-              Clé « {created.name} » créée. Copiez le secret maintenant, il ne sera plus affiché :
-            </div>
-            <code className="user-select-all d-block my-1">{created.secret}</code>
-            <pre className="mb-0 mt-2 pre-dark p-2" style={{ whiteSpace: 'pre-wrap' }}>{`curl -X POST ${base}/api/v1/tasks \\\n  -H "Authorization: Bearer ${created.secret}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"title": "Nouvelle tâche", "description": "…", "priority": "MEDIUM"}'`}</pre>
-          </Alert>
-        )}
-        {keys.length > 0 && (
-          <Table size="sm" className="mb-2 table-stack">
-            <tbody>
-              {keys.map((k) => (
-                <tr key={k.id}>
-                  <td>
-                    <strong>{k.name}</strong> <code className="text-secondary">{k.prefix}…</code>
-                  </td>
-                  <td className="text-secondary">
-                    créée {new Date(k.createdAt).toLocaleDateString()}
-                    {k.createdBy && ` par ${k.createdBy.name}`} · {k.lastUsedAt ? `utilisée le ${new Date(k.lastUsedAt).toLocaleString()}` : 'jamais utilisée'}
-                  </td>
-                  <td className="text-end">
-                    <Button
-                      size="sm"
-                      variant="link"
-                      className="p-0 text-danger"
-                      onClick={async () => {
-                        if (await confirm({ title: 'Révoquer la clé', message: `Révoquer la clé « ${k.name} » ? Les outils qui l'utilisent n'auront plus accès.`, confirmLabel: 'Révoquer', danger: true })) remove({ variables: { id: k.id } });
-                      }}
-                    >
-                      Révoquer
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        )}
-        <Button
-          size="sm"
-          variant="outline-secondary"
-          onClick={async () => {
-            const name = await prompt({ title: "Nouvelle clé d'API", message: 'Nom de la clé, pour la reconnaître (ex. le nom de l’outil qui l’utilisera).', placeholder: 'Formulaire site web', confirmLabel: 'Créer' });
-            if (!name) return;
-            const res = await create({ variables: { projectId, name } });
-            if (res.data) setCreated({ name, secret: res.data.createProjectApiKey.secret });
-          }}
-        >
-          <i className="bi bi-key me-1" /> Nouvelle clé
-        </Button>
       </Card.Body>
     </Card>
   );
