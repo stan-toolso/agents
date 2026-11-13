@@ -49,6 +49,13 @@ export interface VersionSource {
   config: Record<string, unknown>;
 }
 
+/** Définition d'une alerte gardée avec une version (sans son état). */
+export interface VersionAlert {
+  name: string;
+  source: string;
+  config: Record<string, unknown>;
+}
+
 export interface SharedPageVersion {
   pageId: string;
   version: number;
@@ -62,6 +69,8 @@ export interface SharedPageVersion {
   refreshMinutes: number | null;
   /** Données : définition des sources à cette version ; null : inconnue (on retombe sur les sources actuelles). */
   sources: VersionSource[] | null;
+  /** Données : définition des alertes à cette version ; null : inconnue (publiée avant les alertes). */
+  alerts?: VersionAlert[] | null;
 }
 
 export interface SharedPageMember {

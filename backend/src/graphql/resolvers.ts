@@ -24,6 +24,8 @@ import { searchService, type SearchKind } from '../search/service.js';
 import { sharedPageCommentService } from '../sharedPages/commentService.js';
 import { sharedPageService } from '../sharedPages/service.js';
 import { artifactDataService } from '../sharedPages/dataService.js';
+import { alertService } from '../sharedPages/alertService.js';
+import { describeCondition, type DataAlert } from '../sharedPages/alerts.js';
 import type { AgentSourceConfig, DataSource, GraphqlSourceConfig, ScriptSourceConfig, SqlSourceConfig } from '../sharedPages/dataSources.js';
 import { sharedPageUpdateService } from '../sharedPages/updateRequest.js';
 import { envFileService } from '../envFiles/service.js';
@@ -806,6 +808,12 @@ export const resolvers = {
       if (kind !== 'data') return [];
       const full = sharedPageService.canManage(p, user);
       return (await artifactDataService.sourcesAt(p, version)).map((s) => sourceView(s, full));
+    },
+    alerts: async (p: SharedPage, _: unknown, ctx: Ctx) => {
+      const user = requireUser(ctx);
+      if (p.kind !== 'data') return [];
+      const full = sharedPageService.canManage(p, user);
+      return (await alertService.list(p.id)).map((a) => alertView(a, full));
     },
   },
   SharedPageComment: {
@@ -2523,6 +2531,36 @@ export const resolvers = {
 
 // Coûts rendus dans l'unité d'affichage (crédits quand la facturation de la cellule est configurée).
 applyCostConversion(resolvers);
+
+/** Alerte d'un artefact telle que l'API la montre : consigne réservée à qui administre l'artefact. */
+function alertView(a: DataAlert, full: boolean) {
+  return {
+    id: a.id,
+    name: a.name,
+    source: a.source,
+    path: a.config.path,
+    op: a.config.op,
+    value: a.config.value,
+    match: a.config.match,
+    for: a.config.for,
+    condition: describeCondition(a),
+    notify: a.config.notify,
+    notifyResolved: a.config.notifyResolved,
+    agent: a.config.agent,
+    launchesSession: Boolean(a.config.prompt || a.config.agent),
+    prompt: full ? a.config.prompt : null,
+    message: a.config.message,
+    state: a.state,
+    streak: a.streak,
+    lastValue: a.lastValue,
+    evaluatedAt: a.evaluatedAt,
+    triggeredAt: a.triggeredAt,
+    resolvedAt: a.resolvedAt,
+    fireCount: a.fireCount,
+    sessionId: a.sessionId,
+    error: a.error,
+  };
+}
 
 /** Source de données telle que l'API la montre : requête et script réservés à qui administre l'artefact. */
 function sourceView(s: DataSource, full: boolean) {

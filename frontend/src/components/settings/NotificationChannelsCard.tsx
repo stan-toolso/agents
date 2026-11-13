@@ -45,7 +45,7 @@ const KINDS: {
 const kindOf = (k: Kind) => KINDS.find((x) => x.kind === k) ?? KINDS[0];
 
 /** Familles cochées par défaut à l'ajout d'un canal (comme le serveur). */
-const DEFAULT_CATEGORIES = ['requests', 'sessions', 'tasks', 'budget'];
+const DEFAULT_CATEGORIES = ['requests', 'sessions', 'tasks', 'budget', 'artifact_alerts'];
 
 function CategoryChecks({
   categories,

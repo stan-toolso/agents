@@ -58,7 +58,7 @@ const toChannel = (r: Row): NotificationChannel => ({
 });
 
 /** Familles relayées par défaut à la création d'un canal. */
-export const DEFAULT_CHANNEL_CATEGORIES = ['requests', 'sessions', 'tasks', 'budget'];
+export const DEFAULT_CHANNEL_CATEGORIES = ['requests', 'sessions', 'tasks', 'budget', 'artifact_alerts'];
 
 export const BATCH_WINDOW_MS = 60_000;
 

@@ -16,6 +16,7 @@ const state = vi.hoisted(() => ({
   summoned: [] as { agentId: string; text: string }[],
   sent: [] as string[],
   sessions: {} as Record<string, { status: string; activity: string | null; archivedAt: Date | null }>,
+  evaluated: [] as string[][],
 }));
 
 vi.mock('./dataRepository.js', () => ({
@@ -29,6 +30,8 @@ vi.mock('./dataRepository.js', () => ({
     saveAgentData: async (id: string, data: unknown) => void state.agentData.push({ id, data }),
   },
 }));
+vi.mock('./alertRepository.js', () => ({ alertRepository: { pruneMissingSources: async () => [] } }));
+vi.mock('./alertService.js', () => ({ alertService: { evaluate: async (_p: unknown, names: string[]) => (state.evaluated.push(names), []) } }));
 vi.mock('../sessions/repository.js', () => ({ sessionRepository: { findById: async (id: string) => state.sessions[id] ?? null } }));
 vi.mock('../sessions/service.js', () => ({
   sessionService: {
@@ -92,6 +95,7 @@ beforeEach(() => {
   state.summoned = [];
   state.sent = [];
   state.sessions = {};
+  state.evaluated = [];
 });
 
 describe('artifactDataService.refresh', () => {
@@ -101,6 +105,8 @@ describe('artifactDataService.refresh', () => {
     expect(state.saved).toEqual([{ id: 's1', status: 'ok', data: { columns: ['jour', 'n'], rows: [{ jour: '2026-11-01', n: 3 }, { jour: '2026-11-02', n: 5 }] } }]);
     expect(state.audits[0]).toMatch(/^ok data_refresh : \[artefact Tableau\] SELECT 1$/);
     expect(state.marked).toBe(1);
+    // Les alertes des sources exécutées sont évaluées après le rafraîchissement.
+    expect(state.evaluated).toEqual([['ventes']]);
   });
 
   it('garde une erreur SQL sur la source (données précédentes conservées) et continue avec les autres', async () => {
@@ -201,6 +207,7 @@ describe('sources agent', () => {
     await artifactDataService.setAgentData(page(), 'resultat', { total: 3 }, { id: 'x', ownerId: 'owner' });
     await artifactDataService.setAgentData(page(), 'resultat', { total: 4 }, { id: 'agent-session', ownerId: 'agent' });
     expect(state.agentData).toEqual([{ id: 'sa', data: { total: 3 } }, { id: 'sa', data: { total: 4 } }]);
+    expect(state.evaluated).toEqual([['resultat'], ['resultat']]);
     await expect(artifactDataService.setAgentData(page(), 'resultat', {}, { id: 'autre', ownerId: 'quelqu-un' })).rejects.toThrow(/propriétaire/);
     await expect(artifactDataService.setAgentData(page(), 'ventes', {}, { id: 'x', ownerId: 'owner' })).rejects.toThrow(/type sql/);
     await expect(artifactDataService.setAgentData(page(), 'inconnue', {}, { id: 'x', ownerId: 'owner' })).rejects.toThrow(/introuvable/);

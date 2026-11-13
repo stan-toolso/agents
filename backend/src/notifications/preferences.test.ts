@@ -48,6 +48,8 @@ const KNOWN_TYPES = [
   'context.created',
   'page.shared',
   'page.commented',
+  'page.alert',
+  'page.alert_resolved',
   'container.memory_high',
   'container.cpu_saturated',
   'claude.rate_limit',

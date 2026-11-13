@@ -39,3 +39,13 @@
 .pd-state.live { color: var(--cc-blue); background: color-mix(in srgb, var(--cc-blue) 14%, transparent); }
 .pd-version-note { margin: 10px 14px 0; padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.4; color: var(--cc-dim); background: var(--cc-bg-hover); }
 .pd-version-note .bi { margin-right: 4px; }
+
+/* Alertes des sources : section sous les sources, carte bordée de rouge quand l'alerte est déclenchée. */
+.pd-section { margin-top: 6px; font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--cc-dim); display: flex; align-items: center; gap: 6px; }
+.pd-alert.firing { border-color: color-mix(in srgb, var(--cc-red) 55%, var(--cc-border)); }
+.pd-alert.firing .pd-src-kind { color: var(--cc-red); background: color-mix(in srgb, var(--cc-red) 12%, transparent); }
+.pd-state.alert-firing { color: var(--cc-red); background: color-mix(in srgb, var(--cc-red) 14%, transparent); }
+.pd-state.alert-ok { color: var(--cc-green); background: color-mix(in srgb, var(--cc-green) 14%, transparent); }
+.pc-count.pd-firing { color: var(--cc-red); background: color-mix(in srgb, var(--cc-red) 14%, transparent); }
+.pd-list > * { flex-shrink: 0; }
+.pd-alert-cond { margin: -2px 10px 6px 44px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--cc-fg); overflow-wrap: anywhere; }
