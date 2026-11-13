@@ -254,7 +254,7 @@ const demoSharedPage = (id, title, owner, members, extra = {}) => ({
   __typename: 'SharedPage', id, title, description: null, owner, linkAccess: false, projectAccess: false, version: 1, createdAt: ago(60 * 24), updatedAt: ago(60 * 3),
   members: members.map(([u, message]) => ({ __typename: 'SharedPageMember', user: u, addedBy: owner, addedAt: ago(60 * 20), message })),
   versions: [{ __typename: 'SharedPageVersion', version: 1, size: 18_400, createdBy: owner, createdAt: ago(60 * 24), kind: extra.kind ?? 'PAGE', refreshMinutes: extra.refreshMinutes ?? null, sourceCount: extra.kind === 'DATA' ? (extra.sources ?? []).length : null }],
-  project: null, session: null, sourcePath: null, comments: [], openComments: 0, agentHandoff: 'MANUAL', historyEnabled: true, kind: 'PAGE', refreshMinutes: null, dataRefreshedAt: null, sources: [], favorite: false,
+  project: null, session: null, sourcePath: null, comments: [], openComments: 0, agentHandoff: 'MANUAL', historyEnabled: true, kind: 'PAGE', refreshMinutes: null, dataRefreshedAt: null, sources: [], alerts: [], favorite: false,
   viewerAccess: { __typename: 'SharedPageViewerAccess', owner: owner === U.me, member: owner !== U.me, admin: owner === U.me },
   ...extra,
 });
@@ -279,7 +279,14 @@ const dataSourcesDemo = [
   { __typename: 'SharedPageSource', id: 'src-camps', name: 'camps', kind: 'sql', item: 'base', database: null, query: 'SELECT camp, count(*) AS n FROM inscriptions GROUP BY 1 ORDER BY 2 DESC LIMIT 8', interpreter: null, code: null, timeoutSeconds: null, status: 'error', error: 'relation « inscriptions_v2 » inexistante', rowCount: 8, durationMs: 35, refreshedAt: ago(60 * 25), attemptedAt: ago(12) },
   { __typename: 'SharedPageSource', id: 'src-meteo', name: 'meteo', kind: 'script', item: null, database: null, query: null, interpreter: 'node', code: "const r = await fetch('https://api.open-meteo.com/v1/forecast?latitude=45.9&longitude=6.1&daily=temperature_2m_max');\nconsole.log(JSON.stringify(await r.json()));", timeoutSeconds: 60, status: 'ok', error: null, rowCount: null, durationMs: 1210, refreshedAt: ago(12), attemptedAt: ago(12) },
 ];
-S.hebdo.pages.unshift(demoSharedPage('page-data-inscriptions', 'Inscriptions : tableau de bord', U.me, [[U.hugo, null]], { kind: 'DATA', refreshMinutes: 60, dataRefreshedAt: ago(12), sources: dataSourcesDemo, session: S.hebdo, project: P.data, version: 4 }));
+// Alertes des sources : une déclenchée (convoque un agent), une normale avec anti-rebond, une sur l'échec d'une source.
+const demoAlert = (extra) => ({ __typename: 'SharedPageAlert', path: '', value: null, match: 'any', for: 1, notify: 'owner', notifyResolved: true, agent: null, launchesSession: false, prompt: null, message: null, streak: 0, lastValue: null, evaluatedAt: ago(12), triggeredAt: null, resolvedAt: null, fireCount: 0, sessionId: null, error: null, ...extra });
+const dataAlertsDemo = [
+  demoAlert({ id: 'alert-baisse', name: 'baisse_inscriptions', source: 'inscriptions', path: 'rows.*.n', op: '<', value: 5, condition: 'inscriptions.rows.*.n < 5 (au moins une valeur)', message: 'Moins de 5 inscriptions sur une journée', state: 'firing', lastValue: 3, triggeredAt: ago(12), fireCount: 2, agent: 'Ben', launchesSession: true, prompt: 'Regarde ce qui a freiné les inscriptions ce jour-là et ouvre une tâche.', sessionId: S.hebdo.id }),
+  demoAlert({ id: 'alert-pic', name: 'pic_inscriptions', source: 'inscriptions', path: 'rows.*.n', op: '>', value: 200, for: 2, condition: 'inscriptions.rows.*.n > 200 (au moins une valeur), 2 fois de suite', notify: 'project', state: 'ok', lastValue: [42, 38, 51], resolvedAt: ago(60 * 30), fireCount: 1 }),
+  demoAlert({ id: 'alert-camps', name: 'camps_en_panne', source: 'camps', op: 'failed', condition: 'source camps en erreur', state: 'unknown', evaluatedAt: null }),
+];
+S.hebdo.pages.unshift(demoSharedPage('page-data-inscriptions', 'Inscriptions : tableau de bord', U.me, [[U.hugo, null]], { kind: 'DATA', refreshMinutes: 60, dataRefreshedAt: ago(12), sources: dataSourcesDemo, alerts: dataAlertsDemo, session: S.hebdo, project: P.data, version: 4 }));
 // Chaque version d'un artefact garde son type et ses sources : quatre versions du tableau de bord, la première en page simple.
 S.hebdo.pages[0].versions = [4, 3, 2, 1].map((v) => ({ __typename: 'SharedPageVersion', version: v, size: 21_000 - v * 600, createdBy: U.me, createdAt: ago(60 * 24 * (5 - v)), kind: v === 1 ? 'PAGE' : 'DATA', refreshMinutes: v >= 3 ? 60 : null, sourceCount: v === 1 ? null : v === 2 ? 2 : 3 }));
 S.tarifs.pages.push(demoSharedPage('page-slides-offres', 'Présentation des trois offres', U.me, [[U.hugo, null]], { kind: 'SLIDES', session: S.tarifs, project: P.site, version: 2 }));

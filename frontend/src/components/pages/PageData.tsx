@@ -1,6 +1,6 @@
 import { Button, Form } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
-import type { SharedPage, SharedPageSource } from '../../graphql/misc';
+import type { SharedPage, SharedPageAlert, SharedPageSource } from '../../graphql/misc';
 import { timeAgo } from '../../lib/humanize';
 import { REFRESH_CHOICES, refreshLabel } from '../../lib/refreshChoices';
 import './pageData.css';
@@ -77,6 +77,64 @@ function SourceCard({ s, full }: { s: SharedPageSource; full: boolean }) {
   );
 }
 
+const ALERT_STATE: Record<SharedPageAlert['state'], { label: string; icon: string }> = {
+  firing: { label: 'Déclenchée', icon: 'bi-exclamation-triangle-fill' },
+  ok: { label: 'Normale', icon: 'bi-check2' },
+  unknown: { label: 'Pas encore évaluée', icon: 'bi-hourglass' },
+};
+
+const shortJson = (v: unknown) => {
+  const s = typeof v === 'string' ? v : JSON.stringify(v);
+  return s && s.length > 80 ? `${s.slice(0, 80)}…` : s;
+};
+
+/** Une règle d'alerte : condition, actions, état (déclenchée ou normale) et dernière valeur évaluée. */
+function AlertCard({ a, full }: { a: SharedPageAlert; full: boolean }) {
+  const st = ALERT_STATE[a.state] ?? ALERT_STATE.unknown;
+  const actions = [a.notify === 'owner' ? 'notifie le propriétaire' : a.notify === 'project' ? 'notifie le projet' : null, a.agent ? `convoque ${a.agent}` : a.launchesSession ? 'lance une session' : null].filter(Boolean).join(' · ');
+  return (
+    <div className={`pd-src pd-alert ${a.state}`}>
+      <div className="pd-src-head">
+        <span className="pd-src-kind" title="Règle d'alerte">
+          <i className="bi bi-bell" />
+        </span>
+        <span className="pd-src-name" title={a.name}>
+          {a.name}
+        </span>
+        <span className={`pd-state alert-${a.state}`}>
+          <i className={`bi ${st.icon}`} /> {st.label}
+        </span>
+      </div>
+      <div className="pd-alert-cond" title={a.condition}>
+        Si {a.condition}
+      </div>
+      <div className="pd-src-meta">
+        {a.message && <span>{a.message}</span>}
+        {actions && <span>{actions}</span>}
+        {a.state === 'firing' && a.triggeredAt && <span title={new Date(a.triggeredAt).toLocaleString()}>Depuis {timeAgo(a.triggeredAt)}</span>}
+        {a.state === 'ok' && a.resolvedAt && <span title={new Date(a.resolvedAt).toLocaleString()}>Revenue à la normale {timeAgo(a.resolvedAt)}</span>}
+        {a.evaluatedAt && a.lastValue != null && <span title={typeof a.lastValue === 'string' ? a.lastValue : JSON.stringify(a.lastValue)}>Valeur {shortJson(a.lastValue)}</span>}
+        {a.streak > 0 && a.for > 1 && <span title="Anti-rebond : évaluations de suite nécessaires pour basculer">{a.streak}/{a.for} avant bascule</span>}
+        {a.fireCount > 0 && <span>Déclenchée {a.fireCount} fois</span>}
+        {a.sessionId && (
+          <Link to={`/sessions/${a.sessionId}`} title="Dernière session lancée par l'alerte">
+            Dernière session
+          </Link>
+        )}
+      </div>
+      {a.error && <div className="pd-src-error skipped">{a.error}</div>}
+      {full && a.prompt && (
+        <details className="pd-src-code">
+          <summary>
+            <i className="bi bi-chevron-right" /> Consigne
+          </summary>
+          <pre>{a.prompt}</pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
 export interface PageDataProps {
   page: SharedPage;
   /** Propriétaire ou administrateur : rafraîchir, régler l'intervalle, voir les requêtes. */
@@ -98,12 +156,20 @@ export default function PageData({ page, manage: canManage, refreshing, onRefres
   const failing = page.sources.filter((s) => s.status === 'error' || s.status === 'skipped').length;
   // Une source agent lance une session à chaque rafraîchissement : une heure au moins entre deux.
   const hasAgent = page.sources.some((s) => s.kind === 'agent');
+  // Alertes : celles de la dernière version (une ancienne version se consulte sans elles).
+  const alerts = oldVersion ? [] : (page.alerts ?? []);
+  const firing = alerts.filter((a) => a.state === 'firing').length;
   return (
     <aside className="pc-panel pd-panel" aria-label="Données de l'artefact">
       <div className="pc-head">
         <span className="pc-title">
           <i className="bi bi-bar-chart-line" /> Données
           {failing > 0 && <span className="pc-count" title={`${failing} source${failing > 1 ? 's' : ''} en défaut`}>{failing}</span>}
+          {firing > 0 && (
+            <span className="pc-count pd-firing" title={`${firing} alerte${firing > 1 ? 's' : ''} déclenchée${firing > 1 ? 's' : ''}`}>
+              <i className="bi bi-bell-fill" /> {firing}
+            </span>
+          )}
         </span>
         <Button variant="link" size="sm" className="pc-close ms-auto text-secondary" onClick={onClose} aria-label="Fermer le panneau des données">
           <i className="bi bi-x-lg" />
@@ -152,10 +218,21 @@ export default function PageData({ page, manage: canManage, refreshing, onRefres
       )}
       <div className="pd-list">
         {page.sources.length === 0 ? <div className="pd-empty">Aucune source de données : la page n'a rien à afficher. Demandez à l'agent d'en déclarer (pages.publish, sources).</div> : page.sources.map((s) => <SourceCard key={s.id} s={s} full={canManage} />)}
+        {alerts.length > 0 && (
+          <>
+            <div className="pd-section">
+              <i className="bi bi-bell" /> Alertes
+            </div>
+            {alerts.map((a) => (
+              <AlertCard key={a.id} a={a} full={canManage} />
+            ))}
+          </>
+        )}
       </div>
       <div className="pd-foot">
         Les sources sont exécutées au nom du propriétaire, en lecture seule ; une source en erreur garde ses dernières données.
         {hasAgent && ' Une source « agent » lance une session à chaque rafraîchissement (bouton ou intervalle) : elle consomme comme une session.'}
+        {alerts.length > 0 && ' Les alertes sont évaluées à chaque rafraîchissement et ne préviennent qu’au franchissement (déclenchée, puis revenue à la normale).'}
         {onAskAgent && (
           <>
             {' '}

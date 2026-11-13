@@ -88,6 +88,42 @@ describe.skipIf(!adminUrl)('versions des artefacts (PostgreSQL)', () => {
     expect(await data.dataOf(c2.id)).toEqual({ ventes: null, pays: { columns: ['n'], rows: [{ n: 3 }] } });
   });
 
+  it('alertes : définitions versionnées, état gardé tant que la règle ne change pas, copie et sources disparues', async () => {
+    const { alertRepository } = await import('./alertRepository.js');
+    const { parseAlerts } = await import('./alerts.js');
+    const sql = (query: string) => ({ item: 'base', database: null, query });
+    const sources = [{ name: 'stats', kind: 'sql' as const }];
+    const rule = (value: number) => parseAlerts([{ name: 'taux', source: 'stats', path: 'rows.0.taux', op: '>', value }], sources);
+    const page = await repo.create({ ownerId: alice, title: 'Alertes', description: null, linkAccess: false, projectId: project, sessionId: null, sourcePath: null, html: Buffer.from('<p>v1</p>'), kind: 'data' });
+    await data.replace(page.id, [{ name: 'stats', kind: 'sql', config: sql('SELECT 1') }]);
+    await alertRepository.replace(page.id, rule(5));
+    await repo.snapshotLatest(page.id);
+    const [a] = await alertRepository.list(page.id);
+    await alertRepository.saveEvaluation(a.id, { state: 'firing', streak: 0, value: 7, event: 'triggered', error: null });
+    expect((await alertRepository.list(page.id))[0]).toMatchObject({ state: 'firing', lastValue: 7, fireCount: 1 });
+    expect((await alertRepository.list(page.id))[0].triggeredAt).not.toBeNull();
+
+    // Même règle : l'état reste ; règle changée : « jamais évaluée ».
+    await alertRepository.replace(page.id, rule(5));
+    expect((await alertRepository.list(page.id))[0]).toMatchObject({ state: 'firing', fireCount: 1 });
+    await repo.addVersion(page.id, { title: 'Alertes', description: null, linkAccess: null, projectId: project, sessionId: null, sourcePath: null, html: Buffer.from('<p>v2</p>'), createdBy: alice });
+    await alertRepository.replace(page.id, rule(10));
+    await repo.snapshotLatest(page.id);
+    expect((await alertRepository.list(page.id))[0]).toMatchObject({ state: 'unknown', lastValue: null, evaluatedAt: null });
+    expect((await repo.version(page.id, 1))?.alerts).toEqual([{ name: 'taux', source: 'stats', config: rule(5)[0].config }]);
+    expect((await repo.version(page.id, 2))?.alerts?.[0]?.config).toMatchObject({ value: 10 });
+
+    // Copie de la v1 : sa règle, état remis à zéro.
+    const copy = (await repo.duplicate(page.id, 1, { ownerId: alice, title: 'Copie', description: null, projectId: project, sessionId: null, sourcePath: null }))!;
+    expect((await alertRepository.list(copy.id)).map((x) => [x.name, x.state, (x.config as { value: number }).value])).toEqual([['taux', 'unknown', 5]]);
+    expect((await repo.version(copy.id, 1))?.alerts).toHaveLength(1);
+
+    // Source retirée : l'alerte part avec elle.
+    await data.replace(page.id, [{ name: 'autre', kind: 'sql', config: sql('SELECT 2') }]);
+    expect(await alertRepository.pruneMissingSources(page.id)).toEqual(['taux']);
+    expect(await alertRepository.list(page.id)).toEqual([]);
+  });
+
   it('garde le type de chaque version quand une republication le change', async () => {
     const page = await repo.create({ ownerId: alice, title: 'Deck', description: null, linkAccess: false, projectId: project, sessionId: null, sourcePath: null, html: Buffer.from('<p>page</p>') });
     await repo.snapshotLatest(page.id);

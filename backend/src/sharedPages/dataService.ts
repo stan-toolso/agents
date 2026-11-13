@@ -11,6 +11,9 @@ import { dataSourceRepository } from './dataRepository.js';
 import { DATA_LIMITS, assertDataSize, countRows, normalizeSqlResult, parseRefreshMinutes, parseScriptOutput, parseSources, scriptCommand, type AgentSourceConfig, type DataSource, type DataSourceInput, type ScriptSourceConfig, type SqlSourceConfig } from './dataSources.js';
 import { sharedPageRepository } from './repository.js';
 import { sharedPageService } from './service.js';
+import { alertRepository } from './alertRepository.js';
+import { alertService } from './alertService.js';
+import { launchArtifactSession, sessionBusy } from './launch.js';
 import type { SharedPage, SharedPageVersion } from './types.js';
 
 /**
@@ -131,10 +134,6 @@ export function agentSourceInstruction(page: Pick<SharedPage, 'id' | 'title'>, s
   ].join('\n');
 }
 
-/** La session est-elle encore en train de travailler (ni terminée, ni archivée, ni au repos) ? */
-const sessionBusy = (s: { status: string; activity: string | null; archivedAt: Date | null } | null) =>
-  Boolean(s && !s.archivedAt && (s.status === 'pending' || s.status === 'queued' || (s.status === 'running' && s.activity !== 'idle')));
-
 /**
  * Source agent : lance une session (au nom de l'agent choisi, sinon du propriétaire de l'artefact) chargée de calculer
  * la source et de l'écrire avec pages.set_data. Une session encore au travail sur la source n'est pas doublée ; une
@@ -151,47 +150,20 @@ async function launchAgentSource(page: SharedPage, project: Project, source: Dat
       return;
     }
   }
-  const { sessionService } = await import('../sessions/service.js');
-  const { agentService } = await import('../agents/service.js');
-  const { autoArchiveConfig } = await import('../sessions/autoArchive.js');
-  const { claudeSettings } = await import('../settings/claude.js');
-  const { projectBudget } = await import('../projects/budget.js');
-  const { systemAuthor } = await import('../sessions/instructionAuthor.js');
   const previous = (await dataSourceRepository.list(page.id, true)).find((s) => s.id === source.id)?.data ?? null;
   const text = agentSourceInstruction(page, source, cfg, previous);
-  const agent = cfg.agent ? await agentService.resolve(project.id, cfg.agent) : null;
-  // Mêmes contrôles qu'une planification : identifiants et plafonds de qui joue la session, budget du projet.
-  const settings = await claudeSettings.forSession(agent ? agent.id : page.ownerId);
-  settings.assertCredentials();
-  await settings.assertBudgetAvailable();
-  await projectBudget.assertAvailable(project.id);
-  let sessionId: string;
-  if (agent) {
-    const owner = await userService.get(page.ownerId).catch(() => null);
-    const session = await agentService.summon(agent.id, { text, autoArchive: true, requestedById: owner && owner.kind !== 'agent' ? owner.id : null, actor: { type: 'human' } });
-    sessionId = session.id;
-  } else {
-    const session = await sessionService.create({
-      projectId: project.id,
-      name: `Données · ${page.title} · ${source.name}`.slice(0, 80),
-      provider: 'claude',
-      config: autoArchiveConfig(),
-      newWorksession: {},
-      ownerId: page.ownerId,
-      autoStart: false,
-    });
-    sessionId = session.id;
-    await sessionService.sendMessage(sessionId, text, null, { author: systemAuthor(`Artefact « ${page.title} »`) });
-  }
+  const sessionId = await launchArtifactSession(page, project, { agent: cfg.agent, text, name: `Données · ${page.title} · ${source.name}` });
   await dataSourceRepository.markRunning(source.id, sessionId);
   log.info(`[artifacts] ${page.title} · ${source.name} : session ${sessionId} lancée`);
   // Suivi : une session qui s'arrête sans avoir écrit la source la passe en erreur (les données précédentes restent).
+  const { sessionService } = await import('../sessions/service.js');
   void (async () => {
     try {
       await sessionService.waitForIdle(sessionId, AGENT_RUN_TIMEOUT_MS);
       const now = (await dataSourceRepository.list(page.id)).find((s) => s.id === source.id);
       if (now?.status === 'running' && now.sessionId === sessionId) {
         await dataSourceRepository.saveFailure(source.id, 'error', `La session ${sessionId} a fini son tour sans écrire les données (pages.set_data)`, null);
+        await alertService.evaluate(page, [source.name], project);
       }
     } catch (err) {
       log.warn(`[artifacts] suivi de la session ${sessionId} : ${(err as Error).message}`);
@@ -231,6 +203,8 @@ export const artifactDataService = {
     const parsed = parseSources(inputs);
     if (page.refreshMinutes && parsed.some((s) => s.kind === 'agent')) parseRefreshMinutes(page.refreshMinutes, true);
     await dataSourceRepository.replace(page.id, parsed);
+    // Une alerte dont la source disparaît (ou devient vivante) n'a plus rien à évaluer.
+    await alertRepository.pruneMissingSources(page.id);
     // La dernière version garde la définition de ses sources (versionnage complet des artefacts).
     await sharedPageRepository.snapshotLatest(page.id);
     return dataSourceRepository.list(page.id);
@@ -257,6 +231,9 @@ export const artifactDataService = {
       const project = page.projectId ? await projectService.get(page.projectId).catch(() => null) : null;
       const memberOk = project ? (await userService.memberRoleFor(page.ownerId, project.id)) !== null || Boolean((await userService.get(page.ownerId).catch(() => null))?.isAdmin) : false;
       for (const s of sources) await refreshOne(page, project, s, trigger, memberOk, opts);
+      // Alertes des sources qui viennent d'être exécutées (sql, script) : évaluées sur leur nouvel état, actions au franchissement.
+      const ran = sources.filter((s) => s.kind === 'sql' || s.kind === 'script').map((s) => s.name);
+      if (ran.length) await alertService.evaluate(page, ran, project);
       return dataSourceRepository.list(page.id);
     })().finally(() => {
       if (locks.get(page.id) === run) locks.delete(page.id);
@@ -290,6 +267,7 @@ export const artifactDataService = {
     // Date des données de l'artefact : les cadres (page, tuiles du cockpit) se rechargent sur elle.
     await sharedPageRepository.markDataRefreshed(page.id);
     log.info(`[artifacts] ${page.title} · ${source.name} écrite par la session ${session.id}`);
+    await alertService.evaluate(page, [source.name]);
     return (await dataSourceRepository.list(page.id)).find((s) => s.id === source.id) ?? source;
   },
 

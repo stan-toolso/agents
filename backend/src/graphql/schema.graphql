@@ -2648,6 +2648,55 @@ type SharedPage {
   dataRefreshedAt: DateTime
   "Données : les sources (état pour qui voit la page ; requête et script pour le propriétaire ou un administrateur). Avec version : celles de cette version (une source dont la définition a changé depuis est INACTIVE : status inactive, sans données)."
   sources(version: Int): [SharedPageSource!]!
+  "Données : règles d'alerte sur les sources (dernière version), avec leur état ; consigne réservée au propriétaire ou à un administrateur."
+  alerts: [SharedPageAlert!]!
+}
+
+"""
+Règle d'alerte d'un artefact de données : évaluée à chaque rafraîchissement de sa source, elle ne notifie (et ne lance
+de session) qu'au franchissement : passage à « déclenchée », puis retour à la normale.
+"""
+type SharedPageAlert {
+  id: ID!
+  name: String!
+  "Nom de la source surveillée."
+  source: String!
+  "Chemin dans les données de la source (vide : la donnée entière)."
+  path: String!
+  "> >= < <= == != contains not_contains empty not_empty changed failed."
+  op: String!
+  "Valeur comparée, en JSON."
+  value: JSON
+  "any ou all (chemin avec *)."
+  match: String!
+  "Anti-rebond : évaluations consécutives nécessaires pour basculer."
+  for: Int!
+  "Condition lisible."
+  condition: String!
+  "owner, project ou none."
+  notify: String!
+  notifyResolved: Boolean!
+  "Agent du projet convoqué au déclenchement."
+  agent: String
+  "Une session est lancée au déclenchement (consigne ou agent)."
+  launchesSession: Boolean!
+  "Consigne de la session (propriétaire ou administrateur seulement)."
+  prompt: String
+  message: String
+  "unknown (jamais évaluée), ok (normale) ou firing (déclenchée)."
+  state: String!
+  "Évaluations contraires à l'état courant comptées vers la bascule."
+  streak: Int!
+  "Dernières valeurs sélectionnées, en JSON."
+  lastValue: JSON
+  evaluatedAt: DateTime
+  triggeredAt: DateTime
+  resolvedAt: DateTime
+  fireCount: Int!
+  "Dernière session lancée par l'alerte."
+  sessionId: ID
+  "Dernier problème : chemin introuvable, source en erreur, session non lancée…"
+  error: String
 }
 
 "Type d'artefact."
