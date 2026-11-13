@@ -3,7 +3,7 @@ import { isOpus, shortModel } from '../lib/models';
 import { useMutation, useQuery } from '@apollo/client';
 import PopMenu, { type MenuItem } from '../components/PopMenu';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, NavLink, useLocation } from 'react-router-dom';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { Spinner } from 'react-bootstrap';
 import { useAuth } from '../auth/AuthContext';
 import { CLOSE_TERMINAL, INBOX_COUNTS, SIDEBAR, SIDEBAR_PULL_REQUESTS, STOP_SESSION } from '../graphql/operations';
@@ -519,6 +519,7 @@ function TerminalRow({ t, indent }: { t: SidebarTerminal; indent: number }) {
  */
 function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOthers, onShowOthers, label }: { ws: Workspace; pr: PullRequestRef | null | undefined; expanded: boolean; onToggle: () => void; tabUrl: string | null; filterMine: boolean; showOthers: boolean; onShowOthers: () => void; /** Nom affiché à la place de celui du dossier (session d'exécution sous sa planification : la date seule). */ label?: string }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { activeKey, workspaces } = useTabs();
   const [menu, setMenu] = useState(false);
@@ -675,7 +676,14 @@ function WorkspaceCard({ ws, pr, expanded, onToggle, tabUrl, filterMine, showOth
         </span>
       </div>
       {hasMeta && (
-        <div className="wb-ws-meta">
+        // Sur mobile, les étiquettes (PR, tâche, puces) ne captent pas le toucher (CSS) : toute la ligne ouvre la session,
+        // pour qu'un doigt un peu bas n'ouvre pas la tâche ou la PR. Sur ordinateur, seul le vide entre elles y mène.
+        <div
+          className="wb-ws-meta"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) navigate(headTo);
+          }}
+        >
           {hint && session && <span className={`wb-meta-state ${sessionDotClass(session)}`}>{hint}</span>}
           {pr && prPill && (
             <button type="button" className={`wb-meta-pr wt-pr-${prState(pr)}`} title={`${icon.title} · ${prPill} · ${pr.number == null ? 'créer la pull request' : 'voir la pull request'}`} disabled={!prWindow} onClick={() => setPrOpen(true)}>
