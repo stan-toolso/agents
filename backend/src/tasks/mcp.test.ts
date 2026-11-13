@@ -24,6 +24,7 @@ const m = vi.hoisted(() => ({
   },
 }));
 vi.mock('./service.js', () => ({ taskService: m.tasks, describeThread: () => ['Fil de discussion :'], summarizeReactions: () => '', formatPerson: () => '', statusTagText: () => '', dependencyText: () => '', formatWakeAt: () => '', assertUnblocked: m.assertUnblocked }));
+vi.mock('../deliveries/qualityService.js', () => ({ deliveryQualityService: { linkOf: async () => null } }));
 vi.mock('./attachments.js', () => ({ describeAttachments: () => [], imageBlocks: async () => [] }));
 vi.mock('../pullRequests/service.js', () => ({ trackedPullRequestService: m.prs, foreignRepoOf: (p: { repo: string }, projectRepo: string) => (p.repo && p.repo !== projectRepo ? { owner: p.repo.split('/')[0], name: p.repo.split('/')[1] } : null) }));
 vi.mock('../git/pullRequests.js', () => ({

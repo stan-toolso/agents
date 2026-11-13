@@ -1300,6 +1300,9 @@ a.task-mention:hover { background: rgba(var(--cc-accent-rgb), 0.24); color: var(
 .delivery-step-success { color: var(--cc-green); }
 .delivery-step-warn { color: var(--cc-yellow); }
 .delivery-step-error { color: var(--cc-red); }
+.delivery-quality-count { font-family: var(--cc-font-mono); font-size: 0.75rem; color: var(--cc-red); white-space: nowrap; }
+.delivery-quality { border-top: 1px solid var(--cc-border); padding-top: 0.5rem; }
+.delivery-quality-value { font-size: 1.5rem; font-weight: 600; line-height: 1.2; }
 .delivery-output { max-height: 20rem; overflow: auto; white-space: pre-wrap; background: var(--cc-bg); border: 1px solid var(--cc-border); border-radius: 4px; padding: 0.5rem; color: var(--cc-dim); }
 @media (max-width: 767.98px) {
   .delivery-last-step, .delivery-table td:first-child .text-truncate { max-width: 10rem; }

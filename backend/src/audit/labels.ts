@@ -109,6 +109,8 @@ export const ACTION_LABELS: Record<string, string> = {
   'delivery.cancel': 'a annulé la livraison',
   'delivery.deploy_recorded': 'a déclaré le déploiement',
   'delivery.config': 'a configuré le déploiement du projet',
+  'delivery.quality_settings': 'a réglé les tâches qualité des livraisons',
+  'delivery.task_link': 'a corrigé le rattachement de la tâche à une livraison',
   'worksession.create': 'a créé le dossier de travail',
   'worksession.rename': 'a renommé le dossier de travail',
   'worksession.archive': 'a archivé le dossier de travail',

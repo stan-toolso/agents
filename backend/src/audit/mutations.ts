@@ -229,6 +229,8 @@ export const AUDITED: Record<string, MutationAudit> = {
   duplicateSharedPage: { action: 'page.duplicate', lookup: ['shared_page', 'id'], details: (a, r) => ({ copyId: r?.id, title: r?.title, version: a.version ?? null }) },
   // Livraisons : la configuration du déploiement (livrer, déployer et annuler sont inscrits par deliveries/service.ts).
   setDeployConfig: { action: 'delivery.config', project: 'projectId', targetId: () => null, details: (a) => ({ vaultItem: a.input?.vaultItem ?? null, command: a.input?.command ?? null, branch: a.input?.branch ?? null }) },
+  setDeliveryQualitySettings: { action: 'delivery.quality_settings', project: 'projectId', targetId: () => null, details: (a) => ({ tags: a.tags ?? null, windowHours: a.windowHours ?? null, reset: Boolean(a.reset) }) },
+  setTaskDelivery: { action: 'delivery.task_link', lookup: ['task', 'taskId'], details: (a) => ({ deliveryId: a.deliveryId ?? null, reset: Boolean(a.reset) }) },
   // Application (hors projet).
   inviteUser: { action: 'user.invite', app: true, targetId: (_a, r) => r?.id, label: (a) => a.email, details: (a) => ({ isAdmin: a.isAdmin }) },
   setUserAdmin: { action: 'user.admin', app: true, lookup: ['user', 'userId'], details: (a) => ({ isAdmin: a.isAdmin }) },
@@ -288,7 +290,7 @@ export const NOT_AUDITED = new Set([
   'setSharedPageFavorite',
   'postMessage', 'updateMessage', 'deleteMessage', 'toggleMessageReaction', 'markConversationRead',
   // Git sans effet durable, synchronisations et lectures.
-  'gitStage', 'gitUnstage', 'gitFetch', 'backupHostedGit', 'syncPullRequests', 'watchPullRequests',
+  'gitStage', 'gitUnstage', 'gitFetch', 'backupHostedGit', 'syncPullRequests', 'watchPullRequests', 'backfillDeliveryQualityTasks',
   'prepareProjectWorkspace', 'shareWorksessionDeps',
   // Terminaux et aperçus.
   'closeTerminal', 'deleteTerminal', 'startPreview', 'stopPreview', 'previewAccessUrl',

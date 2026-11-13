@@ -574,6 +574,7 @@ const pullRequests = [
 
 // ---- Livraisons (bouton « Livrer », déploiements) -----------------------------------------------------------------
 
+const qualitySettings = { __typename: 'DeliveryQualitySettings', tags: ['bug', 'regression', 'qualite'], windowHours: 48, custom: false, updatedBy: null, updatedAt: null };
 let deliverySeq = 0;
 const step = (minutesAgo, message, level = 'info') => ({ __typename: 'DeliveryStep', at: ago(minutesAgo), message, level });
 const delivery = (p, kind, status, by, minutesAgo, durationSeconds, opts = {}) => ({
@@ -581,15 +582,21 @@ const delivery = (p, kind, status, by, minutesAgo, durationSeconds, opts = {}) =
   worksessionId: opts.session?.worksession?.id ?? null, branch: opts.branch ?? 'main', prNumber: opts.prNumber ?? null, prUrl: opts.prNumber ? `${p.gitUrl}/pull/${opts.prNumber}` : null,
   sha: opts.sha ?? null, steps: opts.steps ?? [], output: opts.output ?? null, error: opts.error ?? null, cancellable: status === 'QUEUED' || status === 'RUNNING',
   createdAt: ago(minutesAgo), startedAt: ago(minutesAgo), finishedAt: status === 'RUNNING' || status === 'QUEUED' ? null : ago(minutesAgo - Math.max(1, Math.round(durationSeconds / 60))), durationSeconds,
+  // Tâches qualité (bug, régression…) créées dans les 48 h qui ont suivi la livraison.
+  qualityTasks: (opts.qualityTasks ?? []).map((t) => ({ __typename: 'DeliveryQualityTask', task: t, delivery: null, source: 'AUTO', linkedBy: null, linkedAt: t.createdAt })),
 });
 const deliveries = [
   delivery(P.api, 'MERGE', 'FAILED', U.me, 60 * 2, 4, { session: S.relances, branch: 'relances-impayes', sha: '7d3e1a90bc', error: 'les checks de la pull request sont en échec : Tests', steps: [step(60 * 2, 'fusion de la branche de base dans relances-impayes'), step(60 * 2, 'push de la branche'), step(60 * 2, 'pull request #52 ouverte'), step(60 * 2 - 3, 'les checks de la pull request sont en échec : Tests', 'error')] }),
   delivery(P.site, 'MERGE', 'RUNNING', U.me, 3, 170, { task: T.contact, session: S.contact, branch: 'formulaire-contact', prNumber: 87, sha: '4f2a9c1e7b', steps: [step(3, 'fusion de la branche de base dans formulaire-contact'), step(3, 'push de la branche'), step(3, 'pull request #87 reprise'), step(2, 'attente des checks de la pull request'), step(1, 'CI en cours · en cours : Tests')] }),
-  delivery(P.site, 'DEPLOY', 'SUCCEEDED', U.me, 60 * 5, 214, { sha: '9b1e3d0a2c', joinedBy: [U.hugo], steps: [step(60 * 5, 'déploiement demandé'), step(60 * 5, 'vérification de la CI de main'), step(60 * 5 - 1, 'CI verte sur main (9b1e3d0)', 'success'), step(60 * 5 - 1, 'commande lancée sur « site-prod » : ./deploy.sh --ref 9b1e3d0a2c'), step(60 * 5 - 4, 'déployé (9b1e3d0, 214 s)', 'success')], output: 'build… ok\npublication… ok\ndéployé 9b1e3d0a2c' }),
+  delivery(P.site, 'DEPLOY', 'SUCCEEDED', U.me, 60 * 5, 214, { sha: '9b1e3d0a2c', joinedBy: [U.hugo], qualityTasks: [T.contact], steps: [step(60 * 5, 'déploiement demandé'), step(60 * 5, 'vérification de la CI de main'), step(60 * 5 - 1, 'CI verte sur main (9b1e3d0)', 'success'), step(60 * 5 - 1, 'commande lancée sur « site-prod » : ./deploy.sh --ref 9b1e3d0a2c'), step(60 * 5 - 4, 'déployé (9b1e3d0, 214 s)', 'success')], output: 'build… ok\npublication… ok\ndéployé 9b1e3d0a2c' }),
   delivery(P.site, 'MERGE', 'SUCCEEDED', U.hugo, 60 * 5 + 10, 340, { task: T.tarifs, branch: 'page-tarifs-v1', prNumber: 84, sha: '9b1e3d0a2c', steps: [step(60 * 5 + 10, 'fusion de la branche de base dans page-tarifs-v1'), step(60 * 5 + 9, 'pull request #84 ouverte'), step(60 * 5 + 5, 'checks verts', 'success'), step(60 * 5 + 4, 'pull request #84 fusionnée (9b1e3d0)', 'success')] }),
   delivery(P.site, 'DEPLOY', 'FAILED', U.lea, 60 * 26, 12, { sha: '1c0ffee42b', error: "CI rouge sur main (1c0ffee) : CI rouge · en échec : Tests ; rien n'est déployé", steps: [step(60 * 26, 'déploiement demandé'), step(60 * 26, "CI rouge sur main (1c0ffee) : CI rouge · en échec : Tests ; rien n'est déployé", 'error')] }),
   delivery(P.site, 'MERGE', 'CONFLICT', U.me, 60 * 27, 25, { branch: 'blog-rss', error: 'Conflit avec la branche de base', steps: [step(60 * 27, 'fusion de la branche de base dans blog-rss'), step(60 * 27, "conflit en fusionnant la branche de base : résolution confiée à l'agent de la session ; relancez « Livrer » une fois la résolution poussée", 'warn')] }),
 ];
+// Tâche qualité rattachée au dernier déploiement du site (créée dans les 48 h qui l'ont suivi).
+for (const t of tasks) t.qualityDelivery = null;
+T.contact.qualityDelivery = { __typename: 'DeliveryQualityTask', task: T.contact, delivery: deliveries.find((d) => d.kind === 'DEPLOY' && d.status === 'SUCCEEDED'), source: 'AUTO', linkedBy: null, linkedAt: ago(60 * 4) };
+
 const deployConfigs = { [P.site.id]: { __typename: 'DeployConfig', vaultItem: 'site-prod', command: './deploy.sh --ref {sha}', branch: null, timeoutMinutes: 30, updatedBy: U.me, updatedAt: ago(60 * 24 * 3) } };
 
 // ---- Notifications ------------------------------------------------------------------------------------------------
@@ -1048,6 +1055,15 @@ export const demoRoot = {
   deliveries: (a = {}) => deliveries.filter((d) => d.projectId === a.projectId && (!a.worksessionId || d.worksessionId === a.worksessionId) && (!a.taskId || d.task?.id === a.taskId) && (!a.kind || d.kind === a.kind.toUpperCase())).slice(0, a.limit ?? 50),
   delivery: (a) => byId(deliveries, a.id),
   deployConfig: (a) => deployConfigs[a.projectId] ?? null,
+  deliveryQualitySettings: () => qualitySettings,
+  deliveryQualityReport: () => ({
+    __typename: 'DeliveryQualityReport', since: ago(60 * 24 * 90), settings: qualitySettings, deliveries: 12, deliveriesWithQualityTasks: 3, qualityTasks: 4, regressionRate: 0.25,
+    byAuthor: [
+      { __typename: 'DeliveryQualityAuthor', user: U.chris, isAgent: true, pullRequests: 9, deliveries: 7, deliveriesWithQualityTasks: 2, qualityTasks: 3, regressionRate: 2 / 7 },
+      { __typename: 'DeliveryQualityAuthor', user: U.hugo, isAgent: false, pullRequests: 5, deliveries: 4, deliveriesWithQualityTasks: 1, qualityTasks: 1, regressionRate: 0.25 },
+      { __typename: 'DeliveryQualityAuthor', user: U.me, isAgent: false, pullRequests: 2, deliveries: 2, deliveriesWithQualityTasks: 0, qualityTasks: 0, regressionRate: 0 },
+    ],
+  }),
   ciStatus: (a) => ({ __typename: 'CiStatus', ref: a.ref ?? 'main', sha: '9b1e3d0a2c4f', state: 'SUCCESS', verdict: 'success', checks: [{ __typename: 'PullRequestCheck', name: 'Tests', state: 'SUCCESS', url: null }, { __typename: 'PullRequestCheck', name: 'Typecheck et build', state: 'SUCCESS', url: null }] }),
   worksession: (a) => sessions.map((s) => s.worksession).find((w) => w?.id === a.id) ?? null,
   // Explorateur de fichiers : un dossier de session presque vide, des fichiers dans le dossier principal.
