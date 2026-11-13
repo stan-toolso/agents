@@ -205,17 +205,58 @@ export const TASK_PEOPLE = gql`
   }
 `;
 
+const API_KEY_FIELDS = gql`
+  fragment ApiKeyFields on ProjectApiKey {
+    id
+    name
+    prefix
+    createdAt
+    lastUsedAt
+    scopes
+    signed
+    triageAgent {
+      id
+      name
+    }
+    createdBy {
+      id
+      name
+    }
+  }
+`;
+
 export const PROJECT_API_KEYS = gql`
+  ${API_KEY_FIELDS}
   query ProjectApiKeys($id: ID!) {
     project(id: $id) {
       id
       apiKeys {
+        ...ApiKeyFields
+      }
+      agents {
         id
         name
-        prefix
+        kind
+        enabled
+      }
+      inboundEvents(limit: 10) {
+        id
+        keyName
+        externalId
+        source
+        status
+        error
+        triage
         createdAt
-        lastUsedAt
-        createdBy {
+        task {
+          id
+          title
+        }
+        session {
+          id
+          name
+        }
+        agent {
           id
           name
         }
@@ -225,14 +266,34 @@ export const PROJECT_API_KEYS = gql`
 `;
 
 export const CREATE_PROJECT_API_KEY = gql`
-  mutation CreateProjectApiKey($projectId: ID!, $name: String!) {
-    createProjectApiKey(projectId: $projectId, name: $name) {
+  ${API_KEY_FIELDS}
+  mutation CreateProjectApiKey($projectId: ID!, $name: String!, $scopes: [String!], $triageAgentId: ID, $signed: Boolean) {
+    createProjectApiKey(projectId: $projectId, name: $name, scopes: $scopes, triageAgentId: $triageAgentId, signed: $signed) {
       secret
+      signingSecret
       key {
-        id
-        name
-        prefix
-        createdAt
+        ...ApiKeyFields
+      }
+    }
+  }
+`;
+
+export const UPDATE_PROJECT_API_KEY = gql`
+  ${API_KEY_FIELDS}
+  mutation UpdateProjectApiKey($id: ID!, $name: String, $scopes: [String!], $triageAgentId: ID) {
+    updateProjectApiKey(id: $id, name: $name, scopes: $scopes, triageAgentId: $triageAgentId) {
+      ...ApiKeyFields
+    }
+  }
+`;
+
+export const SET_PROJECT_API_KEY_SIGNING = gql`
+  ${API_KEY_FIELDS}
+  mutation SetProjectApiKeySigning($id: ID!, $enabled: Boolean!) {
+    setProjectApiKeySigning(id: $id, enabled: $enabled) {
+      signingSecret
+      key {
+        ...ApiKeyFields
       }
     }
   }
@@ -244,13 +305,38 @@ export const DELETE_PROJECT_API_KEY = gql`
   }
 `;
 
+/** Portées d'une clé d'API (voir backend tasks/types.ts API_KEY_SCOPES). */
+export const API_KEY_SCOPES = [
+  { value: 'tasks:read', label: 'Lire les tâches', hint: 'GET /api/v1/tasks' },
+  { value: 'tasks:write', label: 'Créer et modifier les tâches', hint: 'POST, PATCH, DELETE /api/v1/tasks' },
+  { value: 'inbound:task', label: 'Événements entrants : créer une tâche', hint: 'POST /api/v1/inbound avec task' },
+  { value: 'inbound:triage', label: 'Événements entrants : convoquer un agent (triage)', hint: 'POST /api/v1/inbound avec triage' },
+] as const;
+
 export interface ProjectApiKey {
   id: string;
   name: string;
   prefix: string;
   createdAt: string;
   lastUsedAt: string | null;
+  scopes: string[];
+  signed: boolean;
+  triageAgent: { id: string; name: string } | null;
   createdBy: { id: string; name: string } | null;
+}
+
+export interface InboundEventRow {
+  id: string;
+  keyName: string;
+  externalId: string | null;
+  source: string | null;
+  status: string;
+  error: string | null;
+  triage: boolean;
+  createdAt: string;
+  task: { id: string; title: string } | null;
+  session: { id: string; name: string } | null;
+  agent: { id: string; name: string } | null;
 }
 
 /**

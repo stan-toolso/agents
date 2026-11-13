@@ -126,7 +126,9 @@ export const AUDITED: Record<string, MutationAudit> = {
   updateProjectPermissionRule: { action: 'permission.update', lookup: ['permission_rule', 'id'], details: (a) => ({ rule: a.rule }) },
   deleteProjectPermissionRule: { action: 'permission.delete', lookup: ['permission_rule', 'id'] },
   deleteProjectPermissionRules: { action: 'permission.delete', project: 'projectId', targetId: () => null, details: (a, r) => ({ ids: r ?? a.ids }) },
-  createProjectApiKey: { action: 'api_key.create', project: 'projectId', targetId: (_a, r) => r?.key?.id ?? r?.id, label: (a) => a.name },
+  createProjectApiKey: { action: 'api_key.create', project: 'projectId', targetId: (_a, r) => r?.key?.id ?? r?.id, label: (a) => a.name, details: (a) => ({ scopes: a.scopes ?? undefined, signed: a.signed ?? undefined }) },
+  updateProjectApiKey: { action: 'api_key.update', lookup: ['api_key', 'id'], details: (a) => ({ name: a.name ?? undefined, scopes: a.scopes ?? undefined, triageAgentId: a.triageAgentId ?? undefined }) },
+  setProjectApiKeySigning: { action: 'api_key.signing', lookup: ['api_key', 'id'], details: (a) => ({ enabled: a.enabled }) },
   deleteProjectApiKey: { action: 'api_key.delete', lookup: ['api_key', 'id'] },
   // Canaux de notification d'un projet (Slack, Discord, e-mail) ; un canal personnel n'a pas de projet : rien n'est inscrit.
   createNotificationChannel: { action: 'notification_channel.create', project: 'input.projectId', targetId: (_a, r) => r?.id, label: (_a, r) => (r ? `${r.kind} ${r.targetHint}` : null), details: (a) => ({ kind: a.input?.kind, categories: a.input?.categories }) },
@@ -230,6 +232,8 @@ export const AUDITED: Record<string, MutationAudit> = {
   // Livraisons : la configuration du déploiement (livrer, déployer et annuler sont inscrits par deliveries/service.ts).
   setDeliveryPolicy: { action: 'delivery.policy', project: 'projectId', targetId: () => null, details: (a) => ({ rules: a.rules ?? [] }) },
   setDeployConfig: { action: 'delivery.config', project: 'projectId', targetId: () => null, details: (a) => ({ vaultItem: a.input?.vaultItem ?? null, command: a.input?.command ?? null, branch: a.input?.branch ?? null }) },
+  setDeliveryQualitySettings: { action: 'delivery.quality_settings', project: 'projectId', targetId: () => null, details: (a) => ({ tags: a.tags ?? null, windowHours: a.windowHours ?? null, reset: Boolean(a.reset) }) },
+  setTaskDelivery: { action: 'delivery.task_link', lookup: ['task', 'taskId'], details: (a) => ({ deliveryId: a.deliveryId ?? null, reset: Boolean(a.reset) }) },
   // Application (hors projet).
   inviteUser: { action: 'user.invite', app: true, targetId: (_a, r) => r?.id, label: (a) => a.email, details: (a) => ({ isAdmin: a.isAdmin }) },
   setUserAdmin: { action: 'user.admin', app: true, lookup: ['user', 'userId'], details: (a) => ({ isAdmin: a.isAdmin }) },
@@ -289,7 +293,7 @@ export const NOT_AUDITED = new Set([
   'setSharedPageFavorite',
   'postMessage', 'updateMessage', 'deleteMessage', 'toggleMessageReaction', 'markConversationRead',
   // Git sans effet durable, synchronisations et lectures.
-  'gitStage', 'gitUnstage', 'gitFetch', 'backupHostedGit', 'syncPullRequests', 'watchPullRequests',
+  'gitStage', 'gitUnstage', 'gitFetch', 'backupHostedGit', 'syncPullRequests', 'watchPullRequests', 'backfillDeliveryQualityTasks',
   'prepareProjectWorkspace', 'shareWorksessionDeps',
   // Terminaux et aperçus.
   'closeTerminal', 'deleteTerminal', 'startPreview', 'stopPreview', 'previewAccessUrl',

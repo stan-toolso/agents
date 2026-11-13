@@ -71,7 +71,18 @@ const project = (id, name, slug, description, gitUrl, extra = {}) => ({
   contextInstructions: () => contextInstructions.filter((i) => i.projectId === id),
   contextChanges: [],
   vaultItems: () => (id === 'p-perso' ? [] : vaultItems.filter((v) => v.ownerProject === P[key(id)] || v.shared).map((item) => ({ __typename: 'ProjectVaultItem', item, via: item.ownerProject ? 'PROJECT' : 'OWN', link: null, forAgents: true }))),
-  apiKeys: [],
+  apiKeys: () =>
+    id === 'p-perso'
+      ? []
+      : [
+          { __typename: 'ProjectApiKey', id: `${id}-key-1`, name: 'Formulaire du site', prefix: 'skp_Ab12Cd34', createdAt: ago(60 * 24 * 30), lastUsedAt: ago(90), scopes: ['tasks:read', 'tasks:write'], signed: false, triageAgent: null, createdBy: U.me },
+          { __typename: 'ProjectApiKey', id: `${id}-key-2`, name: 'Curso', prefix: 'skp_Zx98Yw76', createdAt: ago(60 * 24 * 2), lastUsedAt: ago(12), scopes: ['inbound:task', 'inbound:triage'], signed: true, triageAgent: null, createdBy: U.me },
+        ],
+  inboundEvents: () => {
+    if (id === 'p-perso') return [];
+    const t = filterTasks({ projectId: id, status: null }).slice(0, 2);
+    return t.map((task, i) => ({ __typename: 'InboundEvent', id: `${id}-in-${i}`, keyName: 'Curso', externalId: `evt-${1042 - i}`, source: 'curso', status: i === 0 ? 'done' : 'failed', error: i === 0 ? null : 'L’agent Chris est en pause', triage: true, createdAt: ago(12 + i * 60), task: { __typename: 'Task', id: task.id, title: task.title }, session: null, agent: null }));
+  },
   conversations: () => conversations.filter((c) => c.project.id === id),
   unreadMessages: () => conversations.filter((c) => c.project.id === id).reduce((n, c) => n + c.unreadCount, 0),
   // Fils de tâches suivis : les tâches du projet qui ont des messages, la plus récemment commentée d'abord.
@@ -243,7 +254,7 @@ const demoSharedPage = (id, title, owner, members, extra = {}) => ({
   __typename: 'SharedPage', id, title, description: null, owner, linkAccess: false, projectAccess: false, version: 1, createdAt: ago(60 * 24), updatedAt: ago(60 * 3),
   members: members.map(([u, message]) => ({ __typename: 'SharedPageMember', user: u, addedBy: owner, addedAt: ago(60 * 20), message })),
   versions: [{ __typename: 'SharedPageVersion', version: 1, size: 18_400, createdBy: owner, createdAt: ago(60 * 24), kind: extra.kind ?? 'PAGE', refreshMinutes: extra.refreshMinutes ?? null, sourceCount: extra.kind === 'DATA' ? (extra.sources ?? []).length : null }],
-  project: null, session: null, sourcePath: null, comments: [], openComments: 0, agentHandoff: 'MANUAL', historyEnabled: true, kind: 'PAGE', refreshMinutes: null, dataRefreshedAt: null, sources: [], favorite: false,
+  project: null, session: null, sourcePath: null, comments: [], openComments: 0, agentHandoff: 'MANUAL', historyEnabled: true, kind: 'PAGE', refreshMinutes: null, dataRefreshedAt: null, sources: [], alerts: [], favorite: false,
   viewerAccess: { __typename: 'SharedPageViewerAccess', owner: owner === U.me, member: owner !== U.me, admin: owner === U.me },
   ...extra,
 });
@@ -268,7 +279,14 @@ const dataSourcesDemo = [
   { __typename: 'SharedPageSource', id: 'src-camps', name: 'camps', kind: 'sql', item: 'base', database: null, query: 'SELECT camp, count(*) AS n FROM inscriptions GROUP BY 1 ORDER BY 2 DESC LIMIT 8', interpreter: null, code: null, timeoutSeconds: null, status: 'error', error: 'relation « inscriptions_v2 » inexistante', rowCount: 8, durationMs: 35, refreshedAt: ago(60 * 25), attemptedAt: ago(12) },
   { __typename: 'SharedPageSource', id: 'src-meteo', name: 'meteo', kind: 'script', item: null, database: null, query: null, interpreter: 'node', code: "const r = await fetch('https://api.open-meteo.com/v1/forecast?latitude=45.9&longitude=6.1&daily=temperature_2m_max');\nconsole.log(JSON.stringify(await r.json()));", timeoutSeconds: 60, status: 'ok', error: null, rowCount: null, durationMs: 1210, refreshedAt: ago(12), attemptedAt: ago(12) },
 ];
-S.hebdo.pages.unshift(demoSharedPage('page-data-inscriptions', 'Inscriptions : tableau de bord', U.me, [[U.hugo, null]], { kind: 'DATA', refreshMinutes: 60, dataRefreshedAt: ago(12), sources: dataSourcesDemo, session: S.hebdo, project: P.data, version: 4 }));
+// Alertes des sources : une déclenchée (convoque un agent), une normale avec anti-rebond, une sur l'échec d'une source.
+const demoAlert = (extra) => ({ __typename: 'SharedPageAlert', path: '', value: null, match: 'any', for: 1, notify: 'owner', notifyResolved: true, agent: null, launchesSession: false, prompt: null, message: null, streak: 0, lastValue: null, evaluatedAt: ago(12), triggeredAt: null, resolvedAt: null, fireCount: 0, sessionId: null, error: null, ...extra });
+const dataAlertsDemo = [
+  demoAlert({ id: 'alert-baisse', name: 'baisse_inscriptions', source: 'inscriptions', path: 'rows.*.n', op: '<', value: 5, condition: 'inscriptions.rows.*.n < 5 (au moins une valeur)', message: 'Moins de 5 inscriptions sur une journée', state: 'firing', lastValue: 3, triggeredAt: ago(12), fireCount: 2, agent: 'Ben', launchesSession: true, prompt: 'Regarde ce qui a freiné les inscriptions ce jour-là et ouvre une tâche.', sessionId: S.hebdo.id }),
+  demoAlert({ id: 'alert-pic', name: 'pic_inscriptions', source: 'inscriptions', path: 'rows.*.n', op: '>', value: 200, for: 2, condition: 'inscriptions.rows.*.n > 200 (au moins une valeur), 2 fois de suite', notify: 'project', state: 'ok', lastValue: [42, 38, 51], resolvedAt: ago(60 * 30), fireCount: 1 }),
+  demoAlert({ id: 'alert-camps', name: 'camps_en_panne', source: 'camps', op: 'failed', condition: 'source camps en erreur', state: 'unknown', evaluatedAt: null }),
+];
+S.hebdo.pages.unshift(demoSharedPage('page-data-inscriptions', 'Inscriptions : tableau de bord', U.me, [[U.hugo, null]], { kind: 'DATA', refreshMinutes: 60, dataRefreshedAt: ago(12), sources: dataSourcesDemo, alerts: dataAlertsDemo, session: S.hebdo, project: P.data, version: 4 }));
 // Chaque version d'un artefact garde son type et ses sources : quatre versions du tableau de bord, la première en page simple.
 S.hebdo.pages[0].versions = [4, 3, 2, 1].map((v) => ({ __typename: 'SharedPageVersion', version: v, size: 21_000 - v * 600, createdBy: U.me, createdAt: ago(60 * 24 * (5 - v)), kind: v === 1 ? 'PAGE' : 'DATA', refreshMinutes: v >= 3 ? 60 : null, sourceCount: v === 1 ? null : v === 2 ? 2 : 3 }));
 S.tarifs.pages.push(demoSharedPage('page-slides-offres', 'Présentation des trois offres', U.me, [[U.hugo, null]], { kind: 'SLIDES', session: S.tarifs, project: P.site, version: 2 }));
@@ -574,6 +592,7 @@ const pullRequests = [
 
 // ---- Livraisons (bouton « Livrer », déploiements) -----------------------------------------------------------------
 
+const qualitySettings = { __typename: 'DeliveryQualitySettings', tags: ['bug', 'regression', 'qualite'], windowHours: 48, custom: false, updatedBy: null, updatedAt: null };
 let deliverySeq = 0;
 const step = (minutesAgo, message, level = 'info') => ({ __typename: 'DeliveryStep', at: ago(minutesAgo), message, level });
 const delivery = (p, kind, status, by, minutesAgo, durationSeconds, opts = {}) => ({
@@ -581,17 +600,23 @@ const delivery = (p, kind, status, by, minutesAgo, durationSeconds, opts = {}) =
   worksessionId: opts.session?.worksession?.id ?? null, branch: opts.branch ?? 'main', prNumber: opts.prNumber ?? null, prUrl: opts.prNumber ? `${p.gitUrl}/pull/${opts.prNumber}` : null,
   sha: opts.sha ?? null, steps: opts.steps ?? [], output: opts.output ?? null, error: opts.error ?? null, cancellable: status === 'QUEUED' || status === 'RUNNING',
   createdAt: ago(minutesAgo), startedAt: ago(minutesAgo), finishedAt: status === 'RUNNING' || status === 'QUEUED' ? null : ago(minutesAgo - Math.max(1, Math.round(durationSeconds / 60))), durationSeconds,
+  // Tâches qualité (bug, régression…) créées dans les 48 h qui ont suivi la livraison.
+  qualityTasks: (opts.qualityTasks ?? []).map((t) => ({ __typename: 'DeliveryQualityTask', task: t, delivery: null, source: 'AUTO', linkedBy: null, linkedAt: t.createdAt })),
 });
 const deliveries = [
   delivery(P.api, 'MERGE', 'FAILED', U.me, 60 * 2, 4, { session: S.relances, branch: 'relances-impayes', sha: '7d3e1a90bc', error: 'les checks de la pull request sont en échec : Tests', steps: [step(60 * 2, 'fusion de la branche de base dans relances-impayes'), step(60 * 2, 'push de la branche'), step(60 * 2, 'pull request #52 ouverte'), step(60 * 2 - 3, 'les checks de la pull request sont en échec : Tests', 'error')] }),
   delivery(P.site, 'MERGE', 'RUNNING', U.me, 3, 170, { task: T.contact, session: S.contact, branch: 'formulaire-contact', prNumber: 87, sha: '4f2a9c1e7b', steps: [step(3, 'fusion de la branche de base dans formulaire-contact'), step(3, 'push de la branche'), step(3, 'pull request #87 reprise'), step(2, 'attente des checks de la pull request'), step(1, 'CI en cours · en cours : Tests')] }),
-  delivery(P.site, 'DEPLOY', 'SUCCEEDED', U.me, 60 * 5, 214, { sha: '9b1e3d0a2c', joinedBy: [U.hugo], steps: [step(60 * 5, 'déploiement demandé'), step(60 * 5, 'vérification de la CI de main'), step(60 * 5 - 1, 'CI verte sur main (9b1e3d0)', 'success'), step(60 * 5 - 1, 'commande lancée sur « site-prod » : ./deploy.sh --ref 9b1e3d0a2c'), step(60 * 5 - 4, 'déployé (9b1e3d0, 214 s)', 'success')], output: 'build… ok\npublication… ok\ndéployé 9b1e3d0a2c' }),
+  delivery(P.site, 'DEPLOY', 'SUCCEEDED', U.me, 60 * 5, 214, { sha: '9b1e3d0a2c', joinedBy: [U.hugo], qualityTasks: [T.contact], steps: [step(60 * 5, 'déploiement demandé'), step(60 * 5, 'vérification de la CI de main'), step(60 * 5 - 1, 'CI verte sur main (9b1e3d0)', 'success'), step(60 * 5 - 1, 'commande lancée sur « site-prod » : ./deploy.sh --ref 9b1e3d0a2c'), step(60 * 5 - 4, 'déployé (9b1e3d0, 214 s)', 'success')], output: 'build… ok\npublication… ok\ndéployé 9b1e3d0a2c' }),
   delivery(P.site, 'MERGE', 'SUCCEEDED', U.hugo, 60 * 5 + 10, 340, { task: T.tarifs, branch: 'page-tarifs-v1', prNumber: 84, sha: '9b1e3d0a2c', steps: [step(60 * 5 + 10, 'fusion de la branche de base dans page-tarifs-v1'), step(60 * 5 + 9, 'pull request #84 ouverte'), step(60 * 5 + 5, 'checks verts', 'success'), step(60 * 5 + 4, 'pull request #84 fusionnée (9b1e3d0)', 'success')] }),
   delivery(P.site, 'DEPLOY', 'FAILED', U.lea, 60 * 26, 12, { sha: '1c0ffee42b', error: "CI rouge sur main (1c0ffee) : CI rouge · en échec : Tests ; rien n'est déployé", steps: [step(60 * 26, 'déploiement demandé'), step(60 * 26, "CI rouge sur main (1c0ffee) : CI rouge · en échec : Tests ; rien n'est déployé", 'error')] }),
   delivery(P.site, 'MERGE', 'CONFLICT', U.me, 60 * 27, 25, { branch: 'blog-rss', error: 'Conflit avec la branche de base', steps: [step(60 * 27, 'fusion de la branche de base dans blog-rss'), step(60 * 27, "conflit en fusionnant la branche de base : résolution confiée à l'agent de la session ; relancez « Livrer » une fois la résolution poussée", 'warn')] }),
 ];
 // Politique de livraison du site : les tâches « auto » sont fusionnées après relecture favorable et CI verte.
 const deliveryPolicies = { [P.site.id]: { __typename: 'DeliveryPolicy', rules: [{ __typename: 'DeliveryPolicyRule', tag: 'auto', mode: 'AUTO_MERGE' }, { __typename: 'DeliveryPolicyRule', tag: 'securite', mode: 'MANUAL' }], mergeUser: U.me, updatedAt: ago(60 * 24 * 2) } };
+// Tâche qualité rattachée au dernier déploiement du site (créée dans les 48 h qui l'ont suivi).
+for (const t of tasks) t.qualityDelivery = null;
+T.contact.qualityDelivery = { __typename: 'DeliveryQualityTask', task: T.contact, delivery: deliveries.find((d) => d.kind === 'DEPLOY' && d.status === 'SUCCEEDED'), source: 'AUTO', linkedBy: null, linkedAt: ago(60 * 4) };
+
 const deployConfigs = { [P.site.id]: { __typename: 'DeployConfig', vaultItem: 'site-prod', command: './deploy.sh --ref {sha}', branch: null, timeoutMinutes: 30, updatedBy: U.me, updatedAt: ago(60 * 24 * 3) } };
 
 // ---- Notifications ------------------------------------------------------------------------------------------------
@@ -1051,6 +1076,15 @@ export const demoRoot = {
   delivery: (a) => byId(deliveries, a.id),
   deployConfig: (a) => deployConfigs[a.projectId] ?? null,
   deliveryPolicy: (a) => deliveryPolicies[a.projectId] ?? null,
+  deliveryQualitySettings: () => qualitySettings,
+  deliveryQualityReport: () => ({
+    __typename: 'DeliveryQualityReport', since: ago(60 * 24 * 90), settings: qualitySettings, deliveries: 12, deliveriesWithQualityTasks: 3, qualityTasks: 4, regressionRate: 0.25,
+    byAuthor: [
+      { __typename: 'DeliveryQualityAuthor', user: U.chris, isAgent: true, pullRequests: 9, deliveries: 7, deliveriesWithQualityTasks: 2, qualityTasks: 3, regressionRate: 2 / 7 },
+      { __typename: 'DeliveryQualityAuthor', user: U.hugo, isAgent: false, pullRequests: 5, deliveries: 4, deliveriesWithQualityTasks: 1, qualityTasks: 1, regressionRate: 0.25 },
+      { __typename: 'DeliveryQualityAuthor', user: U.me, isAgent: false, pullRequests: 2, deliveries: 2, deliveriesWithQualityTasks: 0, qualityTasks: 0, regressionRate: 0 },
+    ],
+  }),
   ciStatus: (a) => ({ __typename: 'CiStatus', ref: a.ref ?? 'main', sha: '9b1e3d0a2c4f', state: 'SUCCESS', verdict: 'success', checks: [{ __typename: 'PullRequestCheck', name: 'Tests', state: 'SUCCESS', url: null }, { __typename: 'PullRequestCheck', name: 'Typecheck et build', state: 'SUCCESS', url: null }] }),
   worksession: (a) => sessions.map((s) => s.worksession).find((w) => w?.id === a.id) ?? null,
   // Explorateur de fichiers : un dossier de session presque vide, des fichiers dans le dossier principal.

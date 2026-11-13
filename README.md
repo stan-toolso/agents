@@ -208,6 +208,7 @@ backend/
       outcome.ts               # issue d'une exécution (terminée, bloquée, en erreur…) lue dans le transcript
       permissions.ts           # outils pré-autorisés d'une planification : validation, couverture d'un appel, suggestions
       activeRules.ts           # règles applicables pendant une exécution planifiée en cours (lues par les providers)
+      mcp.ts                   # serveur MCP `schedules` des agents : lister, créer, modifier, suspendre, exécuter, supprimer
     settings/
       userStore.ts             # réglages par personne (table user_settings)
       claude.ts                # réglages Claude d'une personne : mode, jetons du coffre, modèles, budgets, vérification
@@ -241,7 +242,11 @@ backend/
       launch.ts                # confier une tâche à un nouvel agent (refusé tant qu'elle est bloquée)
       dependencyGraph.ts       # dépendances entre tâches : détection des cycles (sans base)
       autoStart.ts             # enchaînement : tâche débloquée lancée automatiquement, notifiée
-      api.ts                   # API REST /api/v1/tasks (clés d'API du projet)
+      api.ts                   # API REST /api/v1/tasks (clés d'API du projet, portées tasks:read / tasks:write)
+    inbound/
+      route.ts                 # point d'entrée entrant POST /api/v1/inbound : tâche et/ou triage par un agent (portées inbound:*, idempotence, débit, signature)
+      signature.ts             # signature HMAC-SHA256 facultative des événements entrants
+      repository.ts            # table inbound_events (idempotence, reprise d'un échec, comptage du débit)
     gitServer/
       paths.ts                 # dépôt Forgejo d'un projet (organisation, URL de clone et web), miroirs locaux
       forgejo.ts               # client Forgejo : API, comptes des personnes et jetons des sessions, dépôts et collaborateurs, webhook, pull requests
@@ -1191,7 +1196,10 @@ reçoit les changements faits par d'autres (`[Mise à jour de la tâche]`) et le
 personne) et `releaseSessionIds`. « Confier à un agent »
 montre la consigne envoyée à l'agent et permet de la modifier avant le lancement. Une **API REST**
 (`/api/v1/tasks`, clés `skp_…` créées sur la fiche du projet, haché en base) permet à un outil externe de
-lister et créer des tâches.
+lister et créer des tâches. Chaque clé a des **portées** (`tasks:read`, `tasks:write`, `inbound:task`, `inbound:triage`) ;
+le **point d'entrée entrant** `POST /api/v1/inbound` crée une tâche et/ou convoque un agent du projet (triage, le
+Product Manager par défaut) avec le payload reçu, de façon idempotente (`Idempotency-Key` ou `externalId`), avec une
+signature HMAC facultative et un débit limité par clé (instruction de contexte dev/points-d-entree-entrants).
 
 **Dépendances entre tâches (« bloquée par »).** Table `task_dependencies (task_id, depends_on_task_id)` (migration
 `20261102T2057_task_dependencies`) : une tâche dépend d'autres tâches **du même projet** ; tant que l'une d'elles n'est pas
@@ -1715,6 +1723,17 @@ le transcript avec le nom de la planification et l'issue. Le compte rendu texte 
 pour compatibilité. Le coût est exprimé dans l'unité d'affichage (`ScheduleRun.costUsd` dans `COST_FIELDS`,
 champ `cost` des événements `schedule` converti, `describeCost` dans les messages).
 
+**Depuis un agent** (serveur MCP `schedules`, `backend/src/schedules/mcp.ts`, tâche edf79449) : une session
+d'agent gère les planifications de son projet sans passer par l'interface. Outils libres (lecture) : `list`,
+`get` (réglages, prochaines échéances, instruction), `runs` (historique : issue, coût, session), `preview`
+(échéances d'une expression cron). Outils soumis à l'autorisation de la personne : `create` (nom, cron, instruction,
+fuseau, modèle, mode d'autorisation, archivage, outils pré-autorisés, `run_now`), `update` (seuls les champs donnés
+changent), `pause`, `resume`, `run_now`, `delete`. Mêmes droits que l'interface (lecteur pour lire, membre pour
+écrire), évalués pour la personne qui pilote la session (celle qui a pris la main, sinon le propriétaire) ; la
+planification créée appartient au propriétaire de la session (personne ou agent ; pour un agent, la personne qui
+l'a convoqué en est le demandeur). Les écritures sont inscrites au journal d'audit (`schedule.*`, acteur = la
+session). Pas de serveur `schedules` dans l'espace personnel.
+
 **Plusieurs instances** : la réservation d'une échéance est atomique en base (`session_schedules.next_run_at` avancé
 sous condition), donc une seule instance l'exécute. Le suivi d'une exécution vit dans le processus qui l'a lancée ;
 si ce processus disparaît (déploiement, arrêt), la reprise (`scheduleService.reconcile`, à chaque passage de
@@ -2119,6 +2138,20 @@ dessine elle-même à partir de ces données (jamais de chiffres en dur). Outils
 `components/pages/PageData.tsx` : état de chaque source, requête ou script pour le propriétaire et les
 administrateurs, intervalle, « Rafraîchir »), mutation `refreshSharedPageData`, `SharedPageInput.refreshMinutes`.
 
+**Alertes des artefacts de données** (`alerts` de `pages.publish`, table `shared_page_alerts`, `sharedPages/alerts.ts`
+pur et testé, `alertService.ts`) : une règle porte sur une source (sql, script ou agent ; pas graphql, vivante) —
+un chemin dans ses données (`rows.0.taux`, `rows.*.status`, `rows.length`), un opérateur (`>`, `>=`, `<`, `<=`,
+`==`, `!=`, `contains`, `not_contains`, `empty`, `not_empty`, `changed`, `failed`) et une valeur, `match: any|all`
+pour un chemin avec `*`. Elle est évaluée à chaque rafraîchissement de sa source (planificateur, bouton, `pages.refresh`,
+publication, `pages.set_data`) et n'agit qu'au **franchissement** : passage à « déclenchée », puis retour à la normale,
+avec un anti-rebond (`for` : N évaluations de suite pour basculer). Actions : notification `page.alert` /
+`page.alert_resolved` (famille « Alertes des artefacts de données », au propriétaire ou à tout le projet : `notify`),
+et/ou une session lancée avec le contexte de l'alerte (valeur, lignes en cause) : consigne `prompt` au nom du
+propriétaire, ou agent du projet convoqué (`agent`) — une par alerte et par heure au plus, jamais tant que la
+précédente travaille, après contrôle du budget. Pas d'expression JavaScript (rien n'isole `vm` du serveur). Les
+définitions sont versionnées avec les sources (`shared_page_versions.alerts`) ; l'état se lit dans le panneau Données
+(section « Alertes ») et par `SharedPage.alerts`.
+
 **Diapositives** (`kind: slides`) : l'agent écrit un seul fichier HTML, une `<section class="slide">` (ou
 `[data-slide]`) de **1280 × 720** par diapositive, `data-title` pour le titre, `<aside class="notes">` pour les notes
 de l'orateur (jamais affichées). À la lecture, Skipper injecte le **lecteur** `sharedPages/slides-client.js`
@@ -2205,7 +2238,7 @@ met à jour le badge de l'icône et ouvre la page concernée au clic. « Tester 
 dans la cloche) : les notifications sont regroupées en familles (`backend/src/notifications/preferences.ts`,
 `PUSH_CATEGORIES` : demandes d'un agent, sessions terminées ou en erreur, sessions lancées par un agent,
 tâches, mentions et réponses dans le fil d'une tâche, pull requests, planifications, workflows, contexte, pages
-partagées, budget des projets, ressources des projets et,
+partagées, alertes des artefacts de données, budget des projets, ressources des projets et,
 pour les administrateurs, alertes du serveur et de l'abonnement), chacune activable ou non. Le choix suit
 la personne sur tous ses appareils (`user_settings`, clé `notifications.push`, qui ne garde que les
 familles coupées : une famille ajoutée plus tard est reçue par défaut). Il filtre l'envoi push
@@ -2223,7 +2256,7 @@ la demande en son nom et l'inscrit au journal d'audit (`request.answer`, `via: p
 **Discord** ou **e-mail**, en plus de la cloche et du push. Un canal appartient à un projet (Réglages du projet,
 administrateurs : les notifications adressées à tous ses membres y sont relayées) ou à une personne (Paramètres ›
 Notifications : tout ce qu'elle verrait dans sa cloche). Chaque canal choisit ses familles (mêmes clés que
-`PUSH_CATEGORIES` ; par défaut demandes, sessions, tâches et budget), peut être mis en pause et testé ; l'adresse du
+`PUSH_CATEGORIES` ; par défaut demandes, sessions, tâches, budget et alertes des artefacts), peut être mis en pause et testé ; l'adresse du
 webhook est chiffrée et n'est jamais renvoyée (seuls l'hôte et ses quatre derniers caractères). Seules les adresses
 `https://hooks.slack.com/…` et `https://discord.com/api/webhooks/…` sont acceptées. Le message porte un lien absolu
 (`APP_URL`) vers la demande ou la session. **Anti-rafale** (`notifications/batcher.ts`) : par canal, la première

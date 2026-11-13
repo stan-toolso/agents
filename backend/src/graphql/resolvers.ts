@@ -13,6 +13,7 @@ import { liveBrowserService } from '../browser/live.js';
 import { liveDraftService } from '../sessions/live.js';
 import { createLoaders, type Loaders } from './loaders.js';
 import { apiKeyService } from '../apiKeys/service.js';
+import { inboundRepository, type InboundEvent } from '../inbound/repository.js';
 import { chromeBrowserService } from '../chrome/service.js';
 import { contextService, HUMAN } from '../context/service.js';
 import { accountOf, googleAccountService } from '../google/service.js';
@@ -24,6 +25,8 @@ import { searchService, type SearchKind } from '../search/service.js';
 import { sharedPageCommentService } from '../sharedPages/commentService.js';
 import { sharedPageService } from '../sharedPages/service.js';
 import { artifactDataService } from '../sharedPages/dataService.js';
+import { alertService } from '../sharedPages/alertService.js';
+import { describeCondition, type DataAlert } from '../sharedPages/alerts.js';
 import type { AgentSourceConfig, DataSource, GraphqlSourceConfig, ScriptSourceConfig, SqlSourceConfig } from '../sharedPages/dataSources.js';
 import { sharedPageUpdateService } from '../sharedPages/updateRequest.js';
 import { envFileService } from '../envFiles/service.js';
@@ -48,6 +51,8 @@ import { parseRepoFullName, pullRequestService, type MergeCleanup, type MergeMet
 import { foreignRepoOf, projectRepoName, trackedPullRequestService } from '../pullRequests/service.js';
 import { pullRequestSession, requestConflictResolution } from '../pullRequests/conflicts.js';
 import { deliveryService } from '../deliveries/service.js';
+import { deliveryQualityService, type QualityReport, type QualitySettings } from '../deliveries/qualityService.js';
+import type { DeliveryTaskLink } from '../deliveries/qualityRepository.js';
 import type { Delivery, DeployConfig, DeployConfigInput } from '../deliveries/types.js';
 import { deliveryPolicyService } from '../deliveries/autoMerge.js';
 import type { DeliveryPolicy, DeliveryPolicyRule } from '../deliveries/policy.js';
@@ -140,6 +145,12 @@ type Ctx = AuthContext;
 /** Message d'un canal enrichi par le résolveur de la liste : ses réactions et ses réponses, lues en une fois. */
 type MessageWithRows = Message & { reactionRows?: MessageReaction[]; attachmentRows?: MessageAttachment[]; replyStat?: { count: number; lastAt: Date | null } | null; authorRole?: ProjectRole | null };
 type GqlRole = Uppercase<ProjectRole>;
+/** L'agent de triage d'une clé d'API doit être un agent actif du projet. */
+async function assertProjectAgent(projectId: string, agentId: string): Promise<void> {
+  const agent = await agentService.get(agentId).catch(() => null);
+  if (!agent || agent.projectId !== projectId || agent.archivedAt) throw new AppError("L'agent de triage doit être un agent du projet");
+}
+
 const fromGqlRole = (r?: GqlRole | null): ProjectRole => ((r ?? 'MEMBER').toLowerCase() as ProjectRole);
 
 // ---- Accès : rôle minimal requis sur le projet auquel appartient l'objet visé -------------------
@@ -492,6 +503,7 @@ export const resolvers = {
       return t.sessionIds.map((id) => sessions.find((s) => s.id === id)).filter((s): s is Session => Boolean(s));
     },
     resumableSession: (t: Task) => resumableTaskSession(t),
+    qualityDelivery: async (t: Task, _: unknown, ctx: Ctx) => (await loadersOf(ctx).taskDeliveryLink(t.id)) ?? null,
     sessions: async (t: Task) => {
       const ids = await taskService.sessionIds(t.id);
       const sessions = ids.length ? await sessionService.list({ ids, archived: 'all', limit: 500 }) : [];
@@ -589,6 +601,14 @@ export const resolvers = {
 
   ProjectApiKey: {
     createdBy: (k: ProjectApiKey, _: unknown, ctx: Ctx) => userOrNull(ctx, k.createdById),
+    triageAgent: (k: ProjectApiKey, _: unknown, ctx: Ctx) => userOrNull(ctx, k.triageAgentId),
+  },
+
+  InboundEvent: {
+    externalId: (e: InboundEvent) => e.idempotencyKey,
+    task: (e: InboundEvent) => (e.taskId ? taskService.get(e.taskId).catch(() => null) : null),
+    session: (e: InboundEvent) => (e.sessionId ? sessionRepository.findById(e.sessionId) : null),
+    agent: (e: InboundEvent, _: unknown, ctx: Ctx) => userOrNull(ctx, e.agentId),
   },
 
   PullRequest: {
@@ -628,6 +648,21 @@ export const resolvers = {
     task: (d: Delivery) => (d.taskId ? taskService.get(d.taskId).catch(() => null) : null),
     cancellable: (d: Delivery) => (d.status === 'queued' || d.status === 'running') && !d.steps.some((st) => st.phase === 'command'),
     durationSeconds: (d: Delivery) => (d.startedAt ? Math.round(((d.finishedAt ?? new Date()).getTime() - d.startedAt.getTime()) / 1000) : null),
+    qualityTasks: async (d: Delivery, _: unknown, ctx: Ctx) => (await loadersOf(ctx).deliveryQualityTasks(d.id)) ?? [],
+  },
+  DeliveryQualityTask: {
+    task: (l: DeliveryTaskLink, _: unknown, ctx: Ctx) => loadersOf(ctx).task(l.taskId).then((t) => t ?? null),
+    delivery: (l: DeliveryTaskLink) => (l.deliveryId ? deliveryService.get(l.deliveryId) : null),
+    source: (l: DeliveryTaskLink) => l.source.toUpperCase(),
+    linkedBy: (l: DeliveryTaskLink, _: unknown, ctx: Ctx) => userOrNull(ctx, l.linkedById),
+    linkedAt: (l: DeliveryTaskLink) => l.createdAt,
+  },
+  DeliveryQualitySettings: {
+    updatedBy: (s: QualitySettings, _: unknown, ctx: Ctx) => userOrNull(ctx, s.updatedById),
+  },
+  DeliveryQualityAuthor: {
+    user: (a: QualityReport['byAuthor'][number], _: unknown, ctx: Ctx) => userOrNull(ctx, a.authorId),
+    isAgent: async (a: QualityReport['byAuthor'][number], _: unknown, ctx: Ctx) => (await userOrNull(ctx, a.authorId))?.kind === 'agent',
   },
   DeployConfig: {
     updatedBy: (c: DeployConfig, _: unknown, ctx: Ctx) => userOrNull(ctx, c.updatedById),
@@ -822,6 +857,12 @@ export const resolvers = {
       const full = sharedPageService.canManage(p, user);
       return (await artifactDataService.sourcesAt(p, version)).map((s) => sourceView(s, full));
     },
+    alerts: async (p: SharedPage, _: unknown, ctx: Ctx) => {
+      const user = requireUser(ctx);
+      if (p.kind !== 'data') return [];
+      const full = sharedPageService.canManage(p, user);
+      return (await alertService.list(p.id)).map((a) => alertView(a, full));
+    },
   },
   SharedPageComment: {
     author: (c: SharedPageComment, _: unknown, ctx: Ctx) => userOrNull(ctx, c.authorId),
@@ -936,6 +977,7 @@ export const resolvers = {
     vaultItems: (project: Project, _: unknown, ctx: Ctx) => vaultService.projectRows(project.id, requireUser(ctx).id),
     agents: (project: Project) => (isPersonalProject(project) ? [] : agentService.listByProject(project.id)),
     apiKeys: async (project: Project, _: unknown, ctx: Ctx) => ((await roleFor(ctx, project.id)) === 'admin' ? apiKeyService.list(project.id) : []),
+    inboundEvents: async (project: Project, args: { limit?: number | null }, ctx: Ctx) => ((await roleFor(ctx, project.id)) === 'admin' ? inboundRepository.listByProject(project.id, args.limit ?? 30) : []),
     // Un espace personnel n'a pas de canaux (ses chats suffisent).
     conversations: (project: Project, args: { includeArchived?: boolean | null }) => (isPersonalProject(project) ? [] : conversationService.list(project.id, { includeArchived: Boolean(args.includeArchived) })),
     followedTaskThreads: async (project: Project, args: { limit?: number | null }, ctx: Ctx) => {
@@ -1173,6 +1215,14 @@ export const resolvers = {
     deliveryPolicy: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId);
       return deliveryPolicyService.get(args.projectId);
+    },
+    deliveryQualitySettings: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId);
+      return deliveryQualityService.settings(args.projectId);
+    },
+    deliveryQualityReport: async (_: unknown, args: { projectId: string; days?: number | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId);
+      return deliveryQualityService.report(args.projectId, args.days ?? 90);
     },
     ciStatus: async (_: unknown, args: { projectId: string; ref?: string | null }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId);
@@ -1712,6 +1762,20 @@ export const resolvers = {
       await requireProject(ctx, args.projectId, 'admin');
       return deliveryPolicyService.set(args.projectId, args.rules, requireUser(ctx).id);
     },
+    setDeliveryQualitySettings: async (_: unknown, args: { projectId: string; tags?: string[] | null; windowHours?: number | null; reset?: boolean | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'admin');
+      return deliveryQualityService.setSettings(args.projectId, args.reset ? null : { tags: args.tags, windowHours: args.windowHours }, requireUser(ctx).id);
+    },
+    setTaskDelivery: async (_: unknown, args: { taskId: string; deliveryId?: string | null; reset?: boolean | null }, ctx: Ctx) => {
+      const task = await taskService.get(args.taskId);
+      await requireProject(ctx, task.projectId, 'member');
+      await deliveryQualityService.setLink(task.id, args.deliveryId ?? null, requireUser(ctx).id, { reset: Boolean(args.reset) });
+      return task;
+    },
+    backfillDeliveryQualityTasks: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'admin');
+      return deliveryQualityService.backfill(args.projectId);
+    },
     watchPullRequests: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId);
       return trackedPullRequestService.watch(args.projectId, requireUser(ctx).id);
@@ -2250,9 +2314,20 @@ export const resolvers = {
       await guardTask(ctx, args.id, 'member');
       return resumeTaskSession(args.id, args.text, personAuthor(requireUser(ctx)));
     },
-    createProjectApiKey: async (_: unknown, args: { projectId: string; name: string }, ctx: Ctx) => {
+    createProjectApiKey: async (_: unknown, args: { projectId: string; name: string; scopes?: string[] | null; triageAgentId?: string | null; signed?: boolean | null }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId, 'admin');
-      return apiKeyService.create(args.projectId, args.name, requireUser(ctx).id);
+      if (args.triageAgentId) await assertProjectAgent(args.projectId, args.triageAgentId);
+      return apiKeyService.create(args.projectId, { name: args.name, scopes: args.scopes, triageAgentId: args.triageAgentId || null, signed: !!args.signed }, requireUser(ctx).id);
+    },
+    updateProjectApiKey: async (_: unknown, args: { id: string; name?: string | null; scopes?: string[] | null; triageAgentId?: string | null }, ctx: Ctx) => {
+      const key = await apiKeyService.get(args.id);
+      await requireProject(ctx, key.projectId, 'admin');
+      if (args.triageAgentId) await assertProjectAgent(key.projectId, args.triageAgentId);
+      return apiKeyService.update(args.id, { name: args.name, scopes: args.scopes, triageAgentId: args.triageAgentId === undefined ? undefined : args.triageAgentId || null });
+    },
+    setProjectApiKeySigning: async (_: unknown, args: { id: string; enabled: boolean }, ctx: Ctx) => {
+      await requireProject(ctx, (await apiKeyService.get(args.id)).projectId, 'admin');
+      return apiKeyService.setSigning(args.id, args.enabled);
     },
     deleteProjectApiKey: async (_: unknown, args: { id: string }, ctx: Ctx) => {
       await requireProject(ctx, (await apiKeyService.get(args.id)).projectId, 'admin');
@@ -2546,6 +2621,36 @@ export const resolvers = {
 
 // Coûts rendus dans l'unité d'affichage (crédits quand la facturation de la cellule est configurée).
 applyCostConversion(resolvers);
+
+/** Alerte d'un artefact telle que l'API la montre : consigne réservée à qui administre l'artefact. */
+function alertView(a: DataAlert, full: boolean) {
+  return {
+    id: a.id,
+    name: a.name,
+    source: a.source,
+    path: a.config.path,
+    op: a.config.op,
+    value: a.config.value,
+    match: a.config.match,
+    for: a.config.for,
+    condition: describeCondition(a),
+    notify: a.config.notify,
+    notifyResolved: a.config.notifyResolved,
+    agent: a.config.agent,
+    launchesSession: Boolean(a.config.prompt || a.config.agent),
+    prompt: full ? a.config.prompt : null,
+    message: a.config.message,
+    state: a.state,
+    streak: a.streak,
+    lastValue: a.lastValue,
+    evaluatedAt: a.evaluatedAt,
+    triggeredAt: a.triggeredAt,
+    resolvedAt: a.resolvedAt,
+    fireCount: a.fireCount,
+    sessionId: a.sessionId,
+    error: a.error,
+  };
+}
 
 /** Source de données telle que l'API la montre : requête et script réservés à qui administre l'artefact. */
 function sourceView(s: DataSource, full: boolean) {

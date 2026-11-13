@@ -1,5 +1,5 @@
 import { pool } from '../db/pool.js';
-import type { AgentHandoff, ArtifactKind, SharedPage, SharedPageMember, SharedPageVersion, VersionSource } from './types.js';
+import type { AgentHandoff, ArtifactKind, SharedPage, SharedPageMember, SharedPageVersion, VersionAlert, VersionSource } from './types.js';
 
 interface Row {
   id: string;
@@ -52,6 +52,7 @@ interface VersionRow {
   kind: ArtifactKind | null;
   refresh_minutes: number | null;
   sources: VersionSource[] | null;
+  alerts?: VersionAlert[] | null;
 }
 const toVersion = (r: VersionRow): SharedPageVersion => ({
   pageId: r.page_id,
@@ -63,12 +64,13 @@ const toVersion = (r: VersionRow): SharedPageVersion => ({
   kind: r.kind ?? null,
   refreshMinutes: r.refresh_minutes ?? null,
   sources: r.sources ?? null,
+  alerts: r.alerts ?? null,
 });
-const VERSION_META = 'page_id, version, size, created_by, session_id, created_at, kind, refresh_minutes, sources';
+const VERSION_META = 'page_id, version, size, created_by, session_id, created_at, kind, refresh_minutes, sources, alerts';
 
 /**
  * Fige dans la dernière version l'état de l'artefact qui n'est pas dans son HTML : type, rafraîchissement, définition des
- * sources (nom, type, requête ou script ; pas les données). Appelé à chaque publication et à chaque changement des
+ * sources (nom, type, requête ou script ; pas les données) et des alertes (sans leur état). Appelé à chaque publication et à chaque changement des
  * sources ou du rafraîchissement de la dernière version.
  */
 const SNAPSHOT_SQL = `UPDATE shared_page_versions v
@@ -76,7 +78,10 @@ const SNAPSHOT_SQL = `UPDATE shared_page_versions v
         refresh_minutes = p.refresh_minutes,
         sources = CASE WHEN p.kind = 'data' THEN
           (SELECT COALESCE(jsonb_agg(jsonb_build_object('name', s.name, 'kind', s.kind, 'config', s.config) ORDER BY s.position, s.name), '[]'::jsonb)
-             FROM shared_page_sources s WHERE s.page_id = p.id) END
+             FROM shared_page_sources s WHERE s.page_id = p.id) END,
+        alerts = CASE WHEN p.kind = 'data' THEN
+          (SELECT COALESCE(jsonb_agg(jsonb_build_object('name', a.name, 'source', a.source, 'config', a.config) ORDER BY a.position, a.name), '[]'::jsonb)
+             FROM shared_page_alerts a WHERE a.page_id = p.id) END
    FROM shared_pages p
   WHERE p.id = v.page_id AND v.page_id = $1 AND v.version = p.version`;
 
@@ -197,7 +202,8 @@ export const sharedPageRepository = {
 
   /**
    * Copie d'une page : nouvelle page (version 1 = le contenu de `version` de la source) avec le type, le réglage du
-   * rafraîchissement et les sources de données (définition, dernières données et état), dans une même transaction.
+   * rafraîchissement, les sources de données (définition, dernières données et état) et les alertes (définition, état
+   * remis à « jamais évaluée »), dans une même transaction.
    * Ni les membres, ni le lien ouvert, ni les commentaires, ni l'historique ne suivent.
    */
   async duplicate(sourceId: string, version: number, input: { ownerId: string; title: string; description: string | null; projectId: string | null; sessionId: string | null; sourcePath: string | null }): Promise<SharedPage | null> {
@@ -226,7 +232,7 @@ export const sharedPageRepository = {
         await client.query('ROLLBACK');
         return null;
       }
-      const snapshot = await client.query<{ sources: VersionSource[] | null }>('SELECT sources FROM shared_page_versions WHERE page_id = $1 AND version = $2', [sourceId, version]);
+      const snapshot = await client.query<{ sources: VersionSource[] | null; alerts: VersionAlert[] | null }>('SELECT sources, alerts FROM shared_page_versions WHERE page_id = $1 AND version = $2', [sourceId, version]);
       if (copy.kind === 'data' && snapshot.rows[0]?.sources) {
         // Sources de la version copiée ; les données suivent pour celles dont la définition n'a pas changé depuis.
         await client.query(
@@ -243,6 +249,21 @@ export const sharedPageRepository = {
           `INSERT INTO shared_page_sources (page_id, name, kind, config, position, data, row_count, status, error, duration_ms, refreshed_at, attempted_at)
            SELECT $1, name, kind, config, position, data, row_count, CASE WHEN status = 'running' THEN (CASE WHEN data IS NULL THEN 'pending' ELSE 'ok' END) ELSE status END, error, duration_ms, refreshed_at, attempted_at FROM shared_page_sources WHERE page_id = $2`,
           [copy.id, sourceId],
+        );
+      }
+      if (copy.kind === 'data') {
+        // Alertes de la version copiée (ou actuelles si elle ne les a pas gardées) : définitions seulement, état « jamais
+        // évaluée » ; celles dont la source n'existe pas dans la copie sont laissées de côté.
+        const defs = snapshot.rows[0]?.alerts ?? null;
+        await client.query(
+          `INSERT INTO shared_page_alerts (page_id, name, source, config, position)
+           SELECT $1, d.name, d.source, d.config, d.position
+             FROM (SELECT def->>'name' AS name, def->>'source' AS source, def->'config' AS config, (ord - 1)::int AS position
+                     FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY AS x(def, ord) WHERE $3::jsonb IS NOT NULL
+                   UNION ALL
+                   SELECT name, source, config, position FROM shared_page_alerts WHERE page_id = $2 AND $3::jsonb IS NULL) d
+            WHERE EXISTS (SELECT 1 FROM shared_page_sources s WHERE s.page_id = $1 AND s.name = d.source)`,
+          [copy.id, sourceId, defs ? JSON.stringify(defs) : null],
         );
       }
       await client.query(SNAPSHOT_SQL, [copy.id]);

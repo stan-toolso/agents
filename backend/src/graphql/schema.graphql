@@ -175,6 +175,8 @@ type Project {
   vaultItems: [ProjectVaultItem!]!
   "Clés d'API du projet (administrateurs)."
   apiKeys: [ProjectApiKey!]!
+  "Derniers événements reçus par le point d'entrée entrant /api/v1/inbound (administrateurs), les plus récents d'abord."
+  inboundEvents(limit: Int = 30): [InboundEvent!]!
   members: [ProjectMember!]!
   "Rôle de l'utilisateur connecté sur ce projet."
   myRole: ProjectRole!
@@ -450,6 +452,8 @@ type Task {
   startedAt: DateTime
   "Passage en annulée, null hors de ce statut."
   cancelledAt: DateTime
+  "Tâche qualité : livraison à laquelle elle est rattachée (calculé ou corrigé à la main) ; null si aucune."
+  qualityDelivery: DeliveryQualityTask
 }
 
 input CreateTaskInput {
@@ -515,12 +519,44 @@ type ProjectApiKey {
   createdBy: User
   createdAt: DateTime!
   lastUsedAt: DateTime
+  "Portées : tasks:read, tasks:write (API REST des tâches), inbound:task, inbound:triage (point d'entrée entrant /api/v1/inbound)."
+  scopes: [String!]!
+  "Un secret de signature est défini : les appels à /api/v1/inbound doivent être signés (HMAC-SHA256)."
+  signed: Boolean!
+  "Agent convoqué par défaut pour un triage reçu par cette clé (null : le Product Manager du projet)."
+  triageAgent: User
 }
 
 type CreatedProjectApiKey {
   key: ProjectApiKey!
   "Secret complet, montré cette seule fois."
   secret: String!
+  "Secret de signature HMAC (whs_…), montré cette seule fois ; null sans signature."
+  signingSecret: String
+}
+
+"Résultat d'un changement de secret de signature : le nouveau secret n'est montré qu'une fois."
+type ProjectApiKeySigning {
+  key: ProjectApiKey!
+  signingSecret: String
+}
+
+"Événement reçu par le point d'entrée entrant (/api/v1/inbound)."
+type InboundEvent {
+  id: ID!
+  "Nom de la clé d'API au moment de l'appel."
+  keyName: String!
+  "Clé d'idempotence (Idempotency-Key ou externalId)."
+  externalId: String
+  source: String
+  "processing, done ou failed."
+  status: String!
+  error: String
+  triage: Boolean!
+  task: Task
+  session: Session
+  agent: User
+  createdAt: DateTime!
 }
 
 "Notification affichée dans la cloche de l'interface."
@@ -1479,6 +1515,61 @@ type Delivery {
   finishedAt: DateTime
   "Durée en secondes (jusqu'à maintenant si elle tourne encore)."
   durationSeconds: Int
+  "Tâches qualité rattachées à cette livraison (régressions constatées après elle)."
+  qualityTasks: [DeliveryQualityTask!]!
+}
+
+"""
+Tâche « qualité » (étiquette bug, regression, qualite… réglable par projet) rattachée à une livraison : créée dans la
+fenêtre (48 h par défaut) qui suit la livraison, la plus récente terminée avant sa création ; corrigeable à la main.
+"""
+type DeliveryQualityTask {
+  task: Task
+  "Null : rattachement retiré à la main (la tâche n'est comptée pour aucune livraison)."
+  delivery: Delivery
+  "AUTO (calculé) ou MANUAL (corrigé par une personne : le calcul n'y touche plus)."
+  source: String!
+  linkedBy: User
+  linkedAt: DateTime!
+}
+
+"Réglages qualité d'un projet : étiquettes qui font d'une tâche une tâche qualité, fenêtre après une livraison."
+type DeliveryQualitySettings {
+  tags: [String!]!
+  windowHours: Int!
+  "Réglages propres au projet (sinon : défaut bug, regression, qualite et 48 h)."
+  custom: Boolean!
+  updatedBy: User
+  updatedAt: DateTime
+}
+
+"Taux de régression des livraisons d'un auteur de pull requests (personne ou agent)."
+type DeliveryQualityAuthor {
+  user: User
+  isAgent: Boolean!
+  "Pull requests de cet auteur emportées par les livraisons de la période."
+  pullRequests: Int!
+  "Livraisons qui emportent au moins une de ses pull requests."
+  deliveries: Int!
+  deliveriesWithQualityTasks: Int!
+  qualityTasks: Int!
+  "deliveriesWithQualityTasks / deliveries (null sans livraison)."
+  regressionRate: Float
+}
+
+"""
+Régressions des livraisons d'un projet sur une période : livraisons de référence (déploiements réussis, ou fusions
+« Livrer » pour un projet qui ne déploie pas par Skipper) et tâches qualité rattachées.
+"""
+type DeliveryQualityReport {
+  since: DateTime!
+  settings: DeliveryQualitySettings!
+  deliveries: Int!
+  deliveriesWithQualityTasks: Int!
+  qualityTasks: Int!
+  "Part des livraisons suivies d'au moins une tâche qualité (null sans livraison)."
+  regressionRate: Float
+  byAuthor: [DeliveryQualityAuthor!]!
 }
 
 type DeliveryStep {
@@ -2583,6 +2674,55 @@ type SharedPage {
   dataRefreshedAt: DateTime
   "Données : les sources (état pour qui voit la page ; requête et script pour le propriétaire ou un administrateur). Avec version : celles de cette version (une source dont la définition a changé depuis est INACTIVE : status inactive, sans données)."
   sources(version: Int): [SharedPageSource!]!
+  "Données : règles d'alerte sur les sources (dernière version), avec leur état ; consigne réservée au propriétaire ou à un administrateur."
+  alerts: [SharedPageAlert!]!
+}
+
+"""
+Règle d'alerte d'un artefact de données : évaluée à chaque rafraîchissement de sa source, elle ne notifie (et ne lance
+de session) qu'au franchissement : passage à « déclenchée », puis retour à la normale.
+"""
+type SharedPageAlert {
+  id: ID!
+  name: String!
+  "Nom de la source surveillée."
+  source: String!
+  "Chemin dans les données de la source (vide : la donnée entière)."
+  path: String!
+  "> >= < <= == != contains not_contains empty not_empty changed failed."
+  op: String!
+  "Valeur comparée, en JSON."
+  value: JSON
+  "any ou all (chemin avec *)."
+  match: String!
+  "Anti-rebond : évaluations consécutives nécessaires pour basculer."
+  for: Int!
+  "Condition lisible."
+  condition: String!
+  "owner, project ou none."
+  notify: String!
+  notifyResolved: Boolean!
+  "Agent du projet convoqué au déclenchement."
+  agent: String
+  "Une session est lancée au déclenchement (consigne ou agent)."
+  launchesSession: Boolean!
+  "Consigne de la session (propriétaire ou administrateur seulement)."
+  prompt: String
+  message: String
+  "unknown (jamais évaluée), ok (normale) ou firing (déclenchée)."
+  state: String!
+  "Évaluations contraires à l'état courant comptées vers la bascule."
+  streak: Int!
+  "Dernières valeurs sélectionnées, en JSON."
+  lastValue: JSON
+  evaluatedAt: DateTime
+  triggeredAt: DateTime
+  resolvedAt: DateTime
+  fireCount: Int!
+  "Dernière session lancée par l'alerte."
+  sessionId: ID
+  "Dernier problème : chemin introuvable, source en erreur, session non lancée…"
+  error: String
 }
 
 "Type d'artefact."
@@ -3140,6 +3280,10 @@ type Query {
   deployConfig(projectId: ID!): DeployConfig
   "Politique de livraison par étiquette du projet (null : aucune, tout est manuel)."
   deliveryPolicy(projectId: ID!): DeliveryPolicy
+  "Réglages qualité du projet (tâches rattachées aux livraisons)."
+  deliveryQualitySettings(projectId: ID!): DeliveryQualitySettings!
+  "Taux de régression des livraisons du projet sur les derniers jours (90 par défaut), au total et par auteur des PR."
+  deliveryQualityReport(projectId: ID!, days: Int): DeliveryQualityReport!
   "État de la CI d'une branche ou d'un commit du dépôt du projet (GitHub) ; défaut : branche principale."
   ciStatus(projectId: ID!, ref: String): CiStatus
   pullRequest(id: ID!): TrackedPullRequest
@@ -3430,7 +3574,11 @@ type Mutation {
   "Reprend la tâche dans la conversation de sa session (Task.resumableSession) avec ce message, au lieu d’en lancer une nouvelle."
   resumeTaskSession(id: ID!, text: String!): Session!
   "Crée une clé d'API du projet (administrateurs) ; le secret n'est montré qu'une fois."
-  createProjectApiKey(projectId: ID!, name: String!): CreatedProjectApiKey!
+  createProjectApiKey(projectId: ID!, name: String!, scopes: [String!], triageAgentId: ID, signed: Boolean): CreatedProjectApiKey!
+  "Modifie le nom, les portées ou l'agent de triage d'une clé d'API (administrateurs) ; triageAgentId vide : le Product Manager."
+  updateProjectApiKey(id: ID!, name: String, scopes: [String!], triageAgentId: ID): ProjectApiKey!
+  "Génère un nouveau secret de signature (enabled true, montré une fois) ou le retire (false)."
+  setProjectApiKeySigning(id: ID!, enabled: Boolean!): ProjectApiKeySigning!
   deleteProjectApiKey(id: ID!): Boolean!
 
   "git add (paths vide = tout)."
@@ -3479,6 +3627,12 @@ type Mutation {
   setDeployConfig(projectId: ID!, input: DeployConfigInput): DeployConfig
   "Enregistre la politique de livraison par étiquette (administrateur ; liste vide : retirée). La personne qui enregistre devient le compte de fusion."
   setDeliveryPolicy(projectId: ID!, rules: [DeliveryPolicyRuleInput!]!): DeliveryPolicy
+  "Règle les étiquettes qualité et la fenêtre du projet (administrateurs ; reset : défaut), puis recalcule les rattachements."
+  setDeliveryQualitySettings(projectId: ID!, tags: [String!], windowHours: Int, reset: Boolean): DeliveryQualitySettings!
+  "Corrige à la main le rattachement d'une tâche : à une livraison du projet, à aucune (deliveryId null), ou retour au calcul (reset)."
+  setTaskDelivery(taskId: ID!, deliveryId: ID, reset: Boolean): Task!
+  "Recalcule les rattachements automatiques des tâches qualité du projet (rattrapage) ; renvoie le nombre de changements."
+  backfillDeliveryQualityTasks(projectId: ID!): Int!
   "Demande à la session rattachée à la PR (TrackedPullRequest.session) de résoudre ses conflits avec la base : l'instruction lui est envoyée (la session est relancée si elle était terminée). Renvoie la session."
   resolvePullRequestConflicts(id: ID!): Session!
   "Fait relire une branche (dossier de travail) ou une PR suivie par un agent : session Claude en lecture seule dans le dossier de la branche, avec le diff par rapport à la base ; son rapport est publié dans le fil de la tâche et, pour une PR ouverte, en commentaire GitHub. Renvoie la session de relecture."

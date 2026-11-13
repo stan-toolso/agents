@@ -237,6 +237,13 @@ export type TaskChange =
   | { kind: 'commented'; task: Task; comment: TaskComment; attachments: TaskAttachment[]; parent: TaskComment | null }
   | { kind: 'reacted'; task: Task; reaction: TaskReaction; comment: TaskComment | null; added: boolean };
 
+/**
+ * Portées d'une clé d'API : `tasks:read` / `tasks:write` pour l'API REST des tâches, `inbound:task` pour créer une tâche
+ * par le point d'entrée entrant, `inbound:triage` pour y convoquer un agent du projet (triage).
+ */
+export const API_KEY_SCOPES = ['tasks:read', 'tasks:write', 'inbound:task', 'inbound:triage'] as const;
+export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];
+
 export interface ProjectApiKey {
   id: string;
   projectId: string;
@@ -245,4 +252,9 @@ export interface ProjectApiKey {
   createdById: string | null;
   createdAt: Date;
   lastUsedAt: Date | null;
+  scopes: ApiKeyScope[];
+  /** Un secret de signature est défini : les appels à /api/v1/inbound doivent être signés (HMAC-SHA256). */
+  signed: boolean;
+  /** Agent convoqué par défaut pour un triage reçu par cette clé (null : le Product Manager du projet). */
+  triageAgentId: string | null;
 }

@@ -36,6 +36,36 @@ export interface Delivery {
   startedAt: string | null;
   finishedAt: string | null;
   durationSeconds: number | null;
+  qualityTasks: DeliveryQualityTask[];
+}
+
+/** Tâche qualité (bug, régression…) rattachée à une livraison : calculée, ou corrigée à la main. */
+export interface DeliveryQualityTask {
+  task: { id: string; title: string; status: 'TODO' | 'IN_PROGRESS' | 'DONE' | 'CANCELLED'; tags: string[]; createdAt: string } | null;
+  source: 'AUTO' | 'MANUAL';
+  linkedBy: { id: string; name: string } | null;
+  linkedAt: string;
+}
+
+export interface DeliveryQualitySettings {
+  tags: string[];
+  windowHours: number;
+  custom: boolean;
+  updatedBy: { id: string; name: string } | null;
+  updatedAt: string | null;
+}
+
+export interface DeliveryQualityLine {
+  deliveries: number;
+  deliveriesWithQualityTasks: number;
+  qualityTasks: number;
+  regressionRate: number | null;
+}
+
+export interface DeliveryQualityReport extends DeliveryQualityLine {
+  since: string;
+  settings: DeliveryQualitySettings;
+  byAuthor: (DeliveryQualityLine & { user: { id: string; name: string } | null; isAgent: boolean; pullRequests: number })[];
 }
 
 export interface DeployConfig {
@@ -105,6 +135,21 @@ const DELIVERY_FIELDS = gql`
     startedAt
     finishedAt
     durationSeconds
+    qualityTasks {
+      task {
+        id
+        title
+        status
+        tags
+        createdAt
+      }
+      source
+      linkedBy {
+        id
+        name
+      }
+      linkedAt
+    }
   }
 `;
 
@@ -227,6 +272,119 @@ export const DELIVERY_POLICY = gql`
   }
 `;
 
+const QUALITY_SETTINGS_FIELDS = gql`
+  fragment DeliveryQualitySettingsFields on DeliveryQualitySettings {
+    tags
+    windowHours
+    custom
+    updatedBy {
+      id
+      name
+    }
+    updatedAt
+  }
+`;
+
+export const DELIVERY_QUALITY_REPORT = gql`
+  ${QUALITY_SETTINGS_FIELDS}
+  query DeliveryQualityReport($projectId: ID!, $days: Int) {
+    deliveryQualityReport(projectId: $projectId, days: $days) {
+      since
+      settings {
+        ...DeliveryQualitySettingsFields
+      }
+      deliveries
+      deliveriesWithQualityTasks
+      qualityTasks
+      regressionRate
+      byAuthor {
+        user {
+          id
+          name
+        }
+        isAgent
+        pullRequests
+        deliveries
+        deliveriesWithQualityTasks
+        qualityTasks
+        regressionRate
+      }
+    }
+  }
+`;
+
+export const SET_DELIVERY_QUALITY_SETTINGS = gql`
+  ${QUALITY_SETTINGS_FIELDS}
+  mutation SetDeliveryQualitySettings($projectId: ID!, $tags: [String!], $windowHours: Int, $reset: Boolean) {
+    setDeliveryQualitySettings(projectId: $projectId, tags: $tags, windowHours: $windowHours, reset: $reset) {
+      ...DeliveryQualitySettingsFields
+    }
+  }
+`;
+
+export const BACKFILL_DELIVERY_QUALITY_TASKS = gql`
+  mutation BackfillDeliveryQualityTasks($projectId: ID!) {
+    backfillDeliveryQualityTasks(projectId: $projectId)
+  }
+`;
+
+/** Rattachement d'une tâche à une livraison (fiche de la tâche). */
+export const TASK_QUALITY_DELIVERY = gql`
+  query TaskQualityDelivery($taskId: ID!, $projectId: ID!) {
+    task(id: $taskId) {
+      id
+      tags
+      qualityDelivery {
+        source
+        linkedBy {
+          id
+          name
+        }
+        linkedAt
+        delivery {
+          id
+          kind
+          sha
+          branch
+          prNumber
+          createdAt
+          finishedAt
+        }
+      }
+    }
+    deliveryQualitySettings(projectId: $projectId) {
+      tags
+      windowHours
+    }
+  }
+`;
+
+export interface TaskQualityDelivery {
+  id: string;
+  tags: string[];
+  qualityDelivery: {
+    source: 'AUTO' | 'MANUAL';
+    linkedBy: { id: string; name: string } | null;
+    linkedAt: string;
+    delivery: Pick<Delivery, 'id' | 'kind' | 'sha' | 'branch' | 'prNumber' | 'createdAt' | 'finishedAt'> | null;
+  } | null;
+}
+
+export const SET_TASK_DELIVERY = gql`
+  mutation SetTaskDelivery($taskId: ID!, $deliveryId: ID, $reset: Boolean) {
+    setTaskDelivery(taskId: $taskId, deliveryId: $deliveryId, reset: $reset) {
+      id
+      qualityDelivery {
+        source
+        linkedAt
+        delivery {
+          id
+        }
+      }
+    }
+  }
+`;
+
 export const SET_DELIVERY_POLICY = gql`
   mutation SetDeliveryPolicy($projectId: ID!, $rules: [DeliveryPolicyRuleInput!]!) {
     setDeliveryPolicy(projectId: $projectId, rules: $rules) {
@@ -242,3 +400,11 @@ export const SET_DELIVERY_POLICY = gql`
     }
   }
 `;
+
+/** Étiquette comparable (minuscules, sans accents), comme le backend (deliveries/quality.ts). */
+export const normalizeQualityTag = (tag: string) =>
+  tag
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();

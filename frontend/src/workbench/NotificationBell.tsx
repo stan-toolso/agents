@@ -32,6 +32,8 @@ const icons: Record<string, string> = {
   'session.created': 'bi-chat-dots',
   'page.shared': 'bi-file-earmark-richtext',
   'page.commented': 'bi-chat-left-text',
+  'page.alert': 'bi-exclamation-triangle',
+  'page.alert_resolved': 'bi-check2-circle',
   'claude.rate_limit': 'bi-speedometer2',
   'server.memory_low': 'bi-memory',
   'container.memory_high': 'bi-memory',

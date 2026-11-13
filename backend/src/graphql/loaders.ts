@@ -15,6 +15,7 @@ import { taskRepository } from '../tasks/repository.js';
 import type { Task } from '../tasks/types.js';
 import { agentRepository } from '../agents/repository.js';
 import type { Agent } from '../agents/types.js';
+import { deliveryQualityRepository, type DeliveryTaskLink } from '../deliveries/qualityRepository.js';
 import { userRepository } from '../users/repository.js';
 import type { User } from '../users/types.js';
 import { worksessionRepository } from '../worksessions/repository.js';
@@ -117,6 +118,9 @@ export function createLoaders() {
     }, (k) => `${k.userId}:${k.pageId}`),
     sharedPageOpenComments: createBatcher<string, number>((ids) => sharedPageCommentRepository.countOpenByPages(ids)),
     taskForBranch: createBatcher<{ projectId: string; branch: string }, Task>((keys) => taskRepository.findForBranches(keys), branchKey),
+    /** Tâches qualité rattachées à une livraison (onglet Livraisons : une centaine de livraisons par relevé). */
+    deliveryQualityTasks: createBatcher<string, DeliveryTaskLink[]>((ids) => deliveryQualityRepository.linksOfDeliveries(ids)),
+    taskDeliveryLink: createBatcher<string, DeliveryTaskLink>((ids) => deliveryQualityRepository.linksOfTasks(ids)),
   };
 }
 

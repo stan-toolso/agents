@@ -1,8 +1,28 @@
-import { useApolloClient, useMutation } from '@apollo/client';
+import { useApolloClient, useMutation, useQuery } from '@apollo/client';
 import { Fragment, useState } from 'react';
-import { Badge, Button, Form, Modal, Table } from 'react-bootstrap';
+import { Badge, Button, ButtonGroup, Card, Form, Modal, Table } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
-import { CANCEL_DELIVERY, DELIVER, DELIVERIES, DELIVERY_ACTIVE, DELIVERY_STATUS_LABELS, DEPLOY_CONFIG, SET_DEPLOY_CONFIG, type Delivery, type DeployConfig } from '../graphql/deliveries';
+import {
+  BACKFILL_DELIVERY_QUALITY_TASKS,
+  CANCEL_DELIVERY,
+  DELIVER,
+  DELIVERIES,
+  DELIVERY_ACTIVE,
+  DELIVERY_QUALITY_REPORT,
+  DELIVERY_STATUS_LABELS,
+  DEPLOY_CONFIG,
+  normalizeQualityTag,
+  SET_DELIVERY_QUALITY_SETTINGS,
+  SET_DEPLOY_CONFIG,
+  SET_TASK_DELIVERY,
+  TASK_QUALITY_DELIVERY,
+  type Delivery,
+  type DeliveryQualityReport,
+  type DeliveryQualitySettings,
+  type DeliveryQualityTask,
+  type DeployConfig,
+  type TaskQualityDelivery,
+} from '../graphql/deliveries';
 import { formatDuration, timeAgo } from '../lib/humanize';
 import { usePollingQuery } from '../lib/usePollingQuery';
 import { useDialogs } from './Dialogs';
@@ -118,10 +138,16 @@ export function DeliverButton({ projectId, sessionId, taskId, worksessionId, bra
 }
 
 /** Historique des livraisons d'un projet : qui, quoi, quel commit, durée, résultat ; étapes et sortie dépliables. */
-export function DeliveryTable({ deliveries, canCancel }: { deliveries: Delivery[]; canCancel: (d: Delivery) => boolean }) {
+export function DeliveryTable({ deliveries, canCancel, canEditQuality = false }: { deliveries: Delivery[]; canCancel: (d: Delivery) => boolean; canEditQuality?: boolean }) {
   const { confirm, showError } = useDialogs();
   const [open, setOpen] = useState<string | null>(null);
   const [cancel] = useMutation(CANCEL_DELIVERY, { refetchQueries: ['Deliveries'] });
+  const [setTaskDelivery] = useMutation(SET_TASK_DELIVERY, { refetchQueries: ['Deliveries', 'DeliveryQualityReport'] });
+  const detach = async (q: DeliveryQualityTask) => {
+    if (!q.task) return;
+    if (!(await confirm({ title: 'Détacher la tâche', message: `« ${q.task.title} » ne sera plus comptée comme une régression de cette livraison (correction gardée : le calcul automatique n'y revient pas).`, confirmLabel: 'Détacher' }))) return;
+    setTaskDelivery({ variables: { taskId: q.task.id, deliveryId: null } }).catch((err) => void showError(err as Error));
+  };
   const onCancel = async (d: Delivery) => {
     if (!(await confirm({ title: 'Annuler', message: d.kind === 'DEPLOY' ? 'Ce déploiement ne sera pas lancé.' : "La livraison s'arrête (rien n'est fusionné ensuite).", confirmLabel: 'Annuler', cancelLabel: 'Continuer', danger: true }))) return;
     cancel({ variables: { id: d.id } }).catch((err) => void showError(err as Error));
@@ -163,6 +189,12 @@ export function DeliveryTable({ deliveries, canCancel }: { deliveries: Delivery[
               </td>
               <td>
                 <DeliveryStatusBadge status={d.status} />
+                {(d.qualityTasks?.length ?? 0) > 0 && (
+                  <span className="delivery-quality-count ms-1" title={`${d.qualityTasks.length} tâche(s) qualité créée(s) après cette livraison :\n${d.qualityTasks.map((q) => q.task?.title ?? '?').join('\n')}`}>
+                    <i className="bi bi-bug me-1" />
+                    {d.qualityTasks.length}
+                  </span>
+                )}
                 {(d.status === 'RUNNING' || d.status === 'QUEUED') && lastStep(d) && <div className="small text-secondary text-truncate delivery-last-step">{lastStep(d)}</div>}
                 {d.error && d.status !== 'CANCELLED' && <div className="small text-danger text-truncate delivery-last-step" title={d.error}>{d.error}</div>}
               </td>
@@ -209,6 +241,28 @@ export function DeliveryTable({ deliveries, canCancel }: { deliveries: Delivery[
                     ))}
                   </ol>
                   {d.output && <pre className="delivery-output small mb-0">{d.output}</pre>}
+                  {(d.qualityTasks?.length ?? 0) > 0 && (
+                    <div className="delivery-quality small mt-2">
+                      <div className="fw-semibold mb-1">
+                        <i className="bi bi-bug me-1" />
+                        Tâches qualité créées après cette livraison
+                      </div>
+                      <ul className="list-unstyled mb-0">
+                        {d.qualityTasks.map((q, i) => (
+                          <li key={q.task?.id ?? i} className="d-flex align-items-center gap-2 flex-wrap">
+                            {q.task ? <Link to={`/tasks/${q.task.id}`}>{q.task.title}</Link> : <span className="text-secondary">tâche supprimée</span>}
+                            {q.task && <span className="text-secondary">créée {timeAgo(q.task.createdAt)}</span>}
+                            <span className="text-secondary">· {q.source === 'MANUAL' ? `rattachée par ${q.linkedBy?.name ?? 'une personne'}` : 'rattachement calculé'}</span>
+                            {canEditQuality && q.task && (
+                              <Button size="sm" variant="link" className="p-0" onClick={() => void detach(q)}>
+                                Détacher
+                              </Button>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </td>
               </tr>
             )}
@@ -290,5 +344,232 @@ export function DeployConfigModal({ projectId, config, onClose }: { projectId: s
         </Modal.Footer>
       </Form>
     </Modal>
+  );
+}
+
+const pct = (rate: number | null) => (rate == null ? '—' : `${Math.round(rate * 100)} %`);
+
+/**
+ * Régressions des livraisons (onglet Livraisons) : part des livraisons suivies d'au moins une tâche qualité dans la
+ * fenêtre réglée, au total et par auteur des pull requests emportées (personnes et agents). Réglages : administrateurs.
+ */
+export function DeliveryQualityPanel({ projectId, admin }: { projectId: string; admin: boolean }) {
+  const [days, setDays] = useState(90);
+  const [configuring, setConfiguring] = useState(false);
+  const q = useQuery<{ deliveryQualityReport: DeliveryQualityReport }>(DELIVERY_QUALITY_REPORT, { variables: { projectId, days }, fetchPolicy: 'cache-and-network' });
+  const r = q.data?.deliveryQualityReport;
+  return (
+    <Card className="mb-3 delivery-quality-card">
+      <Card.Body>
+        <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+          <div className="fw-semibold flex-grow-1">
+            <i className="bi bi-bug me-1" />
+            Régressions après livraison
+          </div>
+          <ButtonGroup size="sm">
+            {[30, 90, 365].map((n) => (
+              <Button key={n} variant={days === n ? 'primary' : 'outline-secondary'} onClick={() => setDays(n)}>
+                {n} j
+              </Button>
+            ))}
+          </ButtonGroup>
+          {admin && (
+            <Button size="sm" variant="outline-secondary" onClick={() => setConfiguring(true)}>
+              <i className="bi bi-gear me-1" />
+              Réglages
+            </Button>
+          )}
+        </div>
+        {q.error && <div className="small text-danger">{q.error.message}</div>}
+        {r && (
+          <>
+            <div className="small text-secondary mb-2">
+              Tâches étiquetées {r.settings.tags.map((t) => `« ${t} »`).join(', ')} créées dans les {r.settings.windowHours} h qui suivent une livraison, rattachées à la plus récente.
+            </div>
+            <div className="d-flex flex-wrap gap-4 mb-2">
+              <div>
+                <div className="delivery-quality-value">{pct(r.regressionRate)}</div>
+                <div className="small text-secondary">des livraisons suivies d'une tâche qualité</div>
+              </div>
+              <div>
+                <div className="delivery-quality-value">
+                  {r.deliveriesWithQualityTasks} / {r.deliveries}
+                </div>
+                <div className="small text-secondary">livraisons concernées</div>
+              </div>
+              <div>
+                <div className="delivery-quality-value">{r.qualityTasks}</div>
+                <div className="small text-secondary">tâches qualité</div>
+              </div>
+            </div>
+            {r.byAuthor.length > 0 && (
+              <Table size="sm" responsive className="small mb-0 align-middle">
+                <thead>
+                  <tr>
+                    <th>Auteur des PR</th>
+                    <th className="text-end d-none d-md-table-cell">PR livrées</th>
+                    <th className="text-end">Livraisons</th>
+                    <th className="text-end d-none d-md-table-cell">Avec tâche qualité</th>
+                    <th className="text-end">Taux</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {r.byAuthor.map((a, i) => (
+                    <tr key={a.user?.id ?? i}>
+                      <td>
+                        {a.isAgent && <i className="bi bi-robot me-1 text-secondary" title="Agent" />}
+                        {a.user?.name ?? 'inconnu'}
+                      </td>
+                      <td className="text-end d-none d-md-table-cell">{a.pullRequests}</td>
+                      <td className="text-end">{a.deliveries}</td>
+                      <td className="text-end d-none d-md-table-cell">{a.deliveriesWithQualityTasks}</td>
+                      <td className="text-end fw-semibold text-nowrap">{pct(a.regressionRate)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            )}
+          </>
+        )}
+      </Card.Body>
+      {configuring && r && <DeliveryQualitySettingsModal projectId={projectId} settings={r.settings} onClose={() => setConfiguring(false)} />}
+    </Card>
+  );
+}
+
+/** Réglages qualité d'un projet (administrateurs) : étiquettes, fenêtre, rattrapage. */
+export function DeliveryQualitySettingsModal({ projectId, settings, onClose }: { projectId: string; settings: DeliveryQualitySettings; onClose: () => void }) {
+  const { alert, showError } = useDialogs();
+  const [tags, setTags] = useState(settings.tags.join(', '));
+  const [windowHours, setWindowHours] = useState(String(settings.windowHours));
+  const refetchQueries = ['DeliveryQualityReport', 'Deliveries'];
+  const [save, { loading }] = useMutation(SET_DELIVERY_QUALITY_SETTINGS, { refetchQueries });
+  const [backfill, { loading: backfilling }] = useMutation<{ backfillDeliveryQualityTasks: number }>(BACKFILL_DELIVERY_QUALITY_TASKS, { refetchQueries });
+  const submit = async (reset: boolean) => {
+    try {
+      const list = tags.split(',').map((t) => t.trim()).filter(Boolean);
+      await save({ variables: reset ? { projectId, reset: true } : { projectId, tags: list, windowHours: Number(windowHours) } });
+      onClose();
+    } catch (err) {
+      void showError(err as Error);
+    }
+  };
+  const recompute = async () => {
+    try {
+      const res = await backfill({ variables: { projectId } });
+      const n = res.data?.backfillDeliveryQualityTasks ?? 0;
+      await alert({ title: 'Rattachements recalculés', message: n ? `${n} rattachement(s) mis à jour.` : 'Rien à changer.' });
+    } catch (err) {
+      void showError(err as Error);
+    }
+  };
+  return (
+    <Modal show onHide={onClose} centered>
+      <Modal.Header closeButton>
+        <Modal.Title>Tâches qualité des livraisons</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        <p className="small text-secondary">
+          Une tâche portant l'une de ces étiquettes, créée dans la fenêtre qui suit une livraison réussie (un déploiement, ou une fusion « Livrer » si le projet ne déploie pas par Skipper), est rattachée à la plus récente. Les corrections faites à la main sont gardées.
+        </p>
+        <Form.Group className="mb-3">
+          <Form.Label>Étiquettes qualité</Form.Label>
+          <Form.Control value={tags} onChange={(e) => setTags(e.target.value)} placeholder="bug, regression, qualite" />
+          <Form.Text>Séparées par des virgules ; sans tenir compte des majuscules ni des accents.</Form.Text>
+        </Form.Group>
+        <Form.Group>
+          <Form.Label>Fenêtre après la livraison (heures)</Form.Label>
+          <Form.Control type="number" min={1} max={720} value={windowHours} onChange={(e) => setWindowHours(e.target.value)} />
+        </Form.Group>
+      </Modal.Body>
+      <Modal.Footer>
+        <Button variant="link" className="me-auto" onClick={() => void recompute()} disabled={backfilling} title="Recalcule les rattachements automatiques de toutes les tâches du projet">
+          Recalculer
+        </Button>
+        {settings.custom && (
+          <Button variant="outline-secondary" onClick={() => void submit(true)} disabled={loading}>
+            Revenir au défaut
+          </Button>
+        )}
+        <Button onClick={() => void submit(false)} disabled={loading}>
+          Enregistrer
+        </Button>
+      </Modal.Footer>
+    </Modal>
+  );
+}
+
+const deliveryLabel = (d: { kind: string; sha: string | null; finishedAt: string | null; createdAt: string; prNumber?: number | null }) =>
+  `${d.kind === 'DEPLOY' ? 'Déploiement' : 'Livraison'}${d.sha ? ` ${d.sha.slice(0, 7)}` : d.prNumber != null ? ` #${d.prNumber}` : ''} · ${new Date(d.finishedAt ?? d.createdAt).toLocaleString()}`;
+
+/**
+ * Fiche d'une tâche : la livraison à laquelle elle est rattachée comme tâche qualité, et la correction à la main
+ * (autre livraison, aucune, ou retour au calcul). Affichée pour une tâche rattachée ou portant une étiquette qualité.
+ */
+export function TaskQualityDelivery({ taskId, projectId, canWrite }: { taskId: string; projectId: string; canWrite: boolean }) {
+  const { showError } = useDialogs();
+  const [editing, setEditing] = useState(false);
+  const q = useQuery<{ task: TaskQualityDelivery | null; deliveryQualitySettings: { tags: string[]; windowHours: number } }>(TASK_QUALITY_DELIVERY, { variables: { taskId, projectId }, fetchPolicy: 'cache-and-network' });
+  const deliveriesQ = useQuery<{ deliveries: Delivery[] }>(DELIVERIES, { variables: { projectId, limit: 50 }, skip: !editing });
+  const [setLink, { loading }] = useMutation(SET_TASK_DELIVERY, { refetchQueries: ['TaskQualityDelivery'] });
+  const task = q.data?.task;
+  const settings = q.data?.deliveryQualitySettings;
+  if (!task || !settings) return null;
+  const link = task.qualityDelivery;
+  const wanted = new Set(settings.tags.map(normalizeQualityTag));
+  const isQuality = task.tags.some((t) => wanted.has(normalizeQualityTag(t)));
+  if (!link && !isQuality) return null;
+  const apply = (variables: Record<string, unknown>) =>
+    setLink({ variables: { taskId, ...variables } })
+      .then(() => setEditing(false))
+      .catch((err) => void showError(err as Error));
+  const choices = (deliveriesQ.data?.deliveries ?? []).filter((d) => d.status === 'SUCCEEDED');
+  return (
+    <div className="task-quality-delivery small mt-2">
+      <i className="bi bi-bug me-1 text-secondary" />
+      {link?.delivery ? (
+        <>
+          Tâche qualité rattachée au{' '}
+          <Link to={`/projects/${projectId}/deliveries`}>{deliveryLabel(link.delivery).replace(/^Déploiement/, 'déploiement').replace(/^Livraison/, 'livraison')}</Link>
+        </>
+      ) : link ? (
+        <>Tâche qualité rattachée à aucune livraison</>
+      ) : (
+        <>Tâche qualité créée hors des {settings.windowHours} h qui suivent une livraison : rattachée à aucune</>
+      )}
+      {link && <span className="text-secondary"> ({link.source === 'MANUAL' ? `corrigé par ${link.linkedBy?.name ?? 'une personne'}` : 'calculé'})</span>}
+      {canWrite && !editing && (
+        <Button size="sm" variant="link" className="p-0 ms-2 align-baseline" onClick={() => setEditing(true)}>
+          Corriger
+        </Button>
+      )}
+      {editing && (
+        <div className="d-flex flex-wrap gap-2 align-items-center mt-1">
+          <Form.Select
+            size="sm"
+            style={{ maxWidth: 360 }}
+            disabled={loading || deliveriesQ.loading}
+            value={link?.delivery?.id ?? ''}
+            onChange={(e) => void apply({ deliveryId: e.target.value || null })}
+          >
+            <option value="">Aucune livraison</option>
+            {link?.delivery && !choices.some((d) => d.id === link.delivery!.id) && <option value={link.delivery.id}>{deliveryLabel(link.delivery)}</option>}
+            {choices.map((d) => (
+              <option key={d.id} value={d.id}>
+                {deliveryLabel(d)}
+              </option>
+            ))}
+          </Form.Select>
+          {link?.source === 'MANUAL' && (
+            <Button size="sm" variant="outline-secondary" disabled={loading} onClick={() => void apply({ reset: true })}>
+              Revenir au calcul
+            </Button>
+          )}
+          <Button size="sm" variant="link" className="p-0" onClick={() => setEditing(false)}>
+            Fermer
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }

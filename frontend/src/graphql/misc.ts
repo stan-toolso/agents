@@ -132,6 +132,8 @@ export interface SharedPage {
   refreshMinutes: number | null;
   dataRefreshedAt: string | null;
   sources: SharedPageSource[];
+  /** Données : règles d'alerte sur les sources, avec leur état (dernière version). */
+  alerts?: SharedPageAlert[];
   /** Mis en favori par la personne connectée : son lien reste dans la sidebar. */
   favorite: boolean;
 }
@@ -162,6 +164,36 @@ export interface SharedPageSource {
   durationMs: number | null;
   refreshedAt: string | null;
   attemptedAt: string | null;
+}
+
+/** Règle d'alerte d'un artefact de données : actions au franchissement seulement (déclenchée, puis revenue à la normale). */
+export interface SharedPageAlert {
+  id: string;
+  name: string;
+  source: string;
+  path: string;
+  op: string;
+  value: unknown;
+  match: 'any' | 'all';
+  for: number;
+  /** Condition lisible (« stats.rows.0.taux > 5 »). */
+  condition: string;
+  notify: 'owner' | 'project' | 'none';
+  notifyResolved: boolean;
+  agent: string | null;
+  launchesSession: boolean;
+  /** Propriétaire ou administrateur seulement. */
+  prompt: string | null;
+  message: string | null;
+  state: 'unknown' | 'ok' | 'firing';
+  streak: number;
+  lastValue: unknown;
+  evaluatedAt: string | null;
+  triggeredAt: string | null;
+  resolvedAt: string | null;
+  fireCount: number;
+  sessionId: string | null;
+  error: string | null;
 }
 
 /** Renvoi des commentaires à l'agent : désactivé, sur demande (bouton), ou automatique (chaque commentaire). */
@@ -228,6 +260,32 @@ export const SHARED_PAGE_FIELDS = gql`
       durationMs
       refreshedAt
       attemptedAt
+    }
+    alerts {
+      id
+      name
+      source
+      path
+      op
+      value
+      match
+      for
+      condition
+      notify
+      notifyResolved
+      agent
+      launchesSession
+      prompt
+      message
+      state
+      streak
+      lastValue
+      evaluatedAt
+      triggeredAt
+      resolvedAt
+      fireCount
+      sessionId
+      error
     }
     version
     createdAt

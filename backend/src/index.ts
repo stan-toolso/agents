@@ -15,6 +15,7 @@ import { handlePushActionRoute } from './notifications/pushActions.js';
 import { notificationChannelService } from './notifications/channels.js';
 import { handleFileViewRoute } from './files/viewRoute.js';
 import { handleTasksApiRoute } from './tasks/api.js';
+import { handleInboundRoute } from './inbound/route.js';
 import { handleExportRoute } from './exports/routes.js';
 import { handleSessionShareRoute } from './sessionShares/route.js';
 import { handleGitHttpRoute } from './gitServer/httpRoute.js';
@@ -72,6 +73,7 @@ import { handlePreviewOpenRoute, handlePreviewRoute, previewUpgrade } from './pr
 import { previewRepository } from './previews/repository.js';
 import { previewService } from './previews/service.js';
 import { deliveryService } from './deliveries/service.js';
+import { deliveryQualityService } from './deliveries/qualityService.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -148,6 +150,7 @@ async function main() {
   registerStalledTasks();
   registerWorkflowTriggers();
   registerAgentTriggers();
+  deliveryQualityService.register();
   registerConversationSessionFeed();
   // Une session qui s'archive elle-même (outil sessions.archive) l'est en fin de tour, avec son dossier de travail.
   sessionService.onArchiveWhenDone(archiveSessionCascade);
@@ -213,6 +216,8 @@ async function main() {
     { name: 'réveil des tâches en attente', start: () => taskWaker.start(), stop: () => taskWaker.stop() },
     // Après le guetteur des relectures : écoute leurs rapports pour fusionner dès qu'une relecture est favorable.
     { name: 'politique de livraison', start: () => deliveryPolicyService.start(), stop: () => deliveryPolicyService.stop() },
+    // Rattrapage des tâches qualité rattachées aux livraisons (une fois, à la prise du rôle de meneuse).
+    { name: 'rattrapage des tâches qualité', start: () => void deliveryQualityService.backfillAll().catch((err) => log.warn('[deliveries] rattrapage des tâches qualité', err)), stop: () => undefined },
   ];
 
   // Origines autorisées à appeler l'API avec le cookie de session : voir origin.ts (aussi appliqué aux WebSockets).
@@ -255,6 +260,7 @@ async function main() {
       .then((handled) => handled || handlePushActionRoute(req, res))
       .then((handled) => handled || handleFileViewRoute(req, res))
       .then((handled) => handled || handlePreviewOpenRoute(req, res))
+      .then((handled) => handled || handleInboundRoute(req, res))
       .then((handled) => handled || handleTasksApiRoute(req, res))
       .then((handled) => handled || handleExportRoute(req, res))
       .then((handled) => handled || handleSessionShareRoute(req, res))

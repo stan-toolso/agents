@@ -2,7 +2,7 @@ import { useMutation, useQuery } from '@apollo/client';
 import { useState } from 'react';
 import { Alert, Badge, Button, ButtonGroup, Card } from 'react-bootstrap';
 import { useParams } from 'react-router-dom';
-import { DeliveryTable, DeployConfigModal } from '../components/Deliveries';
+import { DeliveryQualityPanel, DeliveryTable, DeployConfigModal } from '../components/Deliveries';
 import { DeliveryPolicyCard } from '../components/DeliveryPolicy';
 import { useDialogs } from '../components/Dialogs';
 import PageLoading from '../components/PageLoading';
@@ -118,6 +118,7 @@ export default function ProjectDeliveriesPage() {
         </Card>
       )}
       {project.gitUrl && <DeliveryPolicyCard projectId={id} admin={admin} />}
+      {project.gitUrl && <DeliveryQualityPanel projectId={id} admin={admin} />}
       <div className="d-flex align-items-center gap-2 mb-2 flex-wrap">
         <ButtonGroup size="sm">
           {(['all', 'merge', 'deploy'] as Kind[]).map((k) => (
@@ -129,7 +130,7 @@ export default function ProjectDeliveriesPage() {
         <span className="small text-secondary ms-auto">« Livrer » se lance depuis une session ou une tâche.</span>
       </div>
       {deliveriesQ.error && <Alert variant="danger">Erreur : {deliveriesQ.error.message}</Alert>}
-      <DeliveryTable deliveries={deliveries} canCancel={(d) => (d.kind === 'DEPLOY' ? admin : project.myRole !== 'VIEWER')} />
+      <DeliveryTable deliveries={deliveries} canCancel={(d) => (d.kind === 'DEPLOY' ? admin : project.myRole !== 'VIEWER')} canEditQuality={project.myRole === 'ADMIN' || project.myRole === 'MEMBER'} />
       {configuring && <DeployConfigModal projectId={id} config={config} onClose={() => setConfiguring(false)} />}
     </>
   );
