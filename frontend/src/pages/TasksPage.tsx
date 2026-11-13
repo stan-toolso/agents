@@ -1,6 +1,6 @@
 import { useQuery } from '@apollo/client';
 import PageLoading from '../components/PageLoading';
-import { useEffect, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { Alert, Badge, Button, ButtonGroup, Card, Col, Form, Row } from 'react-bootstrap';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
@@ -17,6 +17,7 @@ import TaskActions from '../components/TaskActions';
 import TaskDashboard from '../components/TaskDashboard';
 import TaskGrid from '../components/TaskGrid';
 import type { TaskColumnKey, TaskFilters } from '../lib/taskTable';
+import { RECENT_DAYS } from '../lib/taskGroups';
 import { isOverdue, PersonChip, TaskBlockedBadge, TaskStalledBadge, TaskWaitingBadge, TaskPriorityBadge, TaskStatusBadge, TaskTags } from '../components/TaskBadges';
 import TaskModal from '../components/TaskModal';
 import type { LaunchTarget } from '../components/TaskLaunchModal';
@@ -24,11 +25,20 @@ import type { LaunchTarget } from '../components/TaskLaunchModal';
 const columns: { status: TaskStatus; label: string; hint: string }[] = [
   { status: 'TODO', label: 'À faire', hint: 'Prêtes à être confiées à un agent' },
   { status: 'IN_PROGRESS', label: 'En cours', hint: 'Un agent ou vous y travaillez' },
-  { status: 'DONE', label: 'Terminées', hint: 'Faites et vérifiées' },
+  { status: 'DONE', label: 'Terminées', hint: `Fermées ces ${RECENT_DAYS} derniers jours` },
 ];
 const priorities: TaskPriority[] = ['URGENT', 'HIGH', 'MEDIUM', 'LOW'];
 const VIEW_KEY = 'skipper.tasks.view';
 type View = 'board' | 'table' | 'dashboard';
+type Scope = 'open' | 'history';
+
+/** Début du jour, il y a `days` jours : stable dans la journée (la variable de la requête ne change pas à chaque rendu). */
+function daysAgoIso(days: number): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - days);
+  return d.toISOString();
+}
 
 function useDebounced(value: string, ms: number): string {
   const [v, setV] = useState(value);
@@ -129,6 +139,10 @@ export default function TasksPage() {
   const [tag, setTag] = useState('');
   // Vue liste : filtres par colonne, appliqués côté client sur les tâches chargées (le projet, lui, filtre la requête).
   const [filters, setFilters] = useState<TaskFilters>({});
+  // Vue liste : recherche libre et portée (tâches actives et fermées récemment, ou historique des fermées).
+  const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search);
+  const [scope, setScope] = useState<Scope>('open');
   const [view, setView] = useState<View>(() => {
     try {
       // Le tableau (liste) est la vue par défaut ; le kanban et le pilotage restent au choix.
@@ -159,13 +173,23 @@ export default function TasksPage() {
   const targets = useMemo(() => new Map((targetsData?.projects ?? []).map((p) => [p.id, p])), [targetsData]);
   const table = view === 'table';
   const dashboard = view === 'dashboard';
-  const withCancelled = showCancelled || (table && filters.status === 'CANCELLED');
+  const history = table && scope === 'history';
+  // Fermées récemment seulement (liste et kanban) : l'historique complet a sa propre portée, le pilotage prend tout.
+  const closedSince = useMemo(() => daysAgoIso(RECENT_DAYS), []);
   // Le pilotage a besoin de tout (terminées et annulées comprises, « mes tâches » aussi) pour mesurer débit et délais.
-  const statuses: TaskStatus[] = dashboard || withCancelled ? ['TODO', 'IN_PROGRESS', 'DONE', 'CANCELLED'] : mine ? ['TODO', 'IN_PROGRESS'] : ['TODO', 'IN_PROGRESS', 'DONE'];
+  const statuses: TaskStatus[] = history
+    ? ['DONE', 'CANCELLED']
+    : table
+      ? ['TODO', 'IN_PROGRESS', 'DONE']
+      : dashboard || showCancelled
+        ? ['TODO', 'IN_PROGRESS', 'DONE', 'CANCELLED']
+        : mine
+          ? ['TODO', 'IN_PROGRESS']
+          : ['TODO', 'IN_PROGRESS', 'DONE'];
   const { data, loading, error } = usePollingQuery<{ tasks: Task[] }>(TASKS, {
     variables: table
-      ? { projectId: projectId || null, status: statuses, priority: null, assignee: null, reporter: null, tag: null, mine, limit: null }
-      : { projectId: projectId || null, status: statuses, priority: priority || null, assignee: mine ? null : assigneeQ || null, reporter: reporterQ || null, tag: tagQ.trim() || null, mine, limit: dashboard ? 1000 : null },
+      ? { projectId: projectId || null, status: statuses, priority: null, assignee: null, reporter: null, tag: null, mine, closedSince: history ? null : closedSince, limit: history ? 500 : 1000 }
+      : { projectId: projectId || null, status: statuses, priority: priority || null, assignee: mine ? null : assigneeQ || null, reporter: reporterQ || null, tag: tagQ.trim() || null, mine, closedSince: dashboard ? null : closedSince, limit: 1000 },
     pollInterval: 3000,
   });
 
@@ -183,7 +207,13 @@ export default function TasksPage() {
       setEditing(found);
       searchParams.delete('task');
       setSearchParams(searchParams, { replace: true });
-    } else if (!showCancelled || mine || assignee || reporter || priority || tag || Object.values(filters).some(Boolean)) {
+    } else if (table && scope === 'open') {
+      // Fermée depuis longtemps : on la cherche dans l'historique, sans filtre.
+      setScope('history');
+      setMine(false);
+      setSearch('');
+      setFilters({});
+    } else if (!table && (!showCancelled || mine || assignee || reporter || priority || tag)) {
       setShowCancelled(true);
       setMine(false);
       setTag('');
@@ -211,6 +241,7 @@ export default function TasksPage() {
   };
   const clearFilters = () => {
     setFilters({});
+    setSearch('');
     if (!routeProjectId) setProjectId('');
   };
   const onTag = (t: string) => (table ? setFilters((f) => ({ ...f, tags: t })) : setTag(t));
@@ -218,8 +249,35 @@ export default function TasksPage() {
   return (
     <>
       {routeProjectId && project && <ProjectHeader project={project} active="tasks" />}
-      <div className="d-flex align-items-center justify-content-between mb-2 flex-wrap gap-2">
+      <div className="d-flex align-items-center justify-content-between mb-2 flex-wrap gap-2 tasks-toolbar">
         {!(routeProjectId && project) && <h1 className="h3 mb-0">Tâches</h1>}
+        {table && (
+          <div className="d-flex gap-2 align-items-center flex-wrap tasks-toolbar-left">
+            <div className="tasks-search">
+              <i className="bi bi-search" />
+              <Form.Control
+                size="sm"
+                type="search"
+                placeholder="Rechercher une tâche…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') setSearch('');
+                }}
+                aria-label="Rechercher dans le titre, la description, les étiquettes, le responsable, la branche ou le numéro de PR"
+                title="Titre, description, étiquettes, responsable, branche, n° de PR"
+              />
+            </div>
+            <ButtonGroup size="sm">
+              <Button variant={scope === 'open' ? 'secondary' : 'outline-secondary'} onClick={() => setScope('open')} title={`Tâches ouvertes et fermées ces ${RECENT_DAYS} derniers jours`}>
+                Actives
+              </Button>
+              <Button variant={scope === 'history' ? 'secondary' : 'outline-secondary'} onClick={() => setScope('history')} title="Tâches terminées et annulées, les plus récentes d'abord">
+                Historique
+              </Button>
+            </ButtonGroup>
+          </div>
+        )}
         <div className="d-flex gap-2 align-items-center flex-wrap ms-auto">
           {!routeProjectId && !table && (
             <Form.Select size="sm" value={projectId} onChange={(e) => setProjectId(e.target.value)} style={{ width: 'auto' }}>
@@ -255,10 +313,10 @@ export default function TasksPage() {
               </datalist>
             </>
           )}
-          <Button size="sm" variant={mine ? 'primary' : 'outline-primary'} disabled={!user} title="Tâches dont je suis responsable et qui ne sont pas terminées" onClick={() => setMine((v) => !v)}>
-            <i className="bi bi-person-check me-1" /> Mes tâches ouvertes
+          <Button size="sm" variant={mine ? 'primary' : 'outline-primary'} disabled={!user} title={table ? 'Tâches dont je suis responsable' : 'Tâches dont je suis responsable et qui ne sont pas terminées'} onClick={() => setMine((v) => !v)}>
+            <i className="bi bi-person-check me-1" /> {table ? 'Mes tâches' : 'Mes tâches ouvertes'}
           </Button>
-          {!dashboard && <Form.Check type="switch" id="showCancelled" label="Voir les annulées" className="small" checked={showCancelled} disabled={mine} onChange={(e) => setShowCancelled(e.target.checked)} />}
+          {!dashboard && !table && <Form.Check type="switch" id="showCancelled" label="Voir les annulées" className="small" checked={showCancelled} disabled={mine} onChange={(e) => setShowCancelled(e.target.checked)} />}
           <ButtonGroup size="sm">
             <Button variant={view === 'table' ? 'secondary' : 'outline-secondary'} title="Liste" onClick={() => setViewPersist('table')}>
               <i className="bi bi-list-ul" />
@@ -275,11 +333,13 @@ export default function TasksPage() {
           </Button>
         </div>
       </div>
-      <p className="text-secondary small">
-        {dashboard
-          ? 'Vue de pilotage : où en est le projet, à quel rythme il avance et quand le reste à faire devrait être terminé. Les filtres de la barre s’appliquent à tous les indicateurs.'
-          : 'Les agents voient ces tâches, peuvent en créer, les commenter et les mettre à jour. « Confier à un agent » lance une session avec la tâche comme consigne.'}
-      </p>
+      {!table && (
+        <p className="text-secondary small">
+          {dashboard
+            ? 'Vue de pilotage : où en est le projet, à quel rythme il avance et quand le reste à faire devrait être terminé. Les filtres de la barre s’appliquent à tous les indicateurs.'
+            : 'Les agents voient ces tâches, peuvent en créer, les commenter et les mettre à jour. « Confier à un agent » lance une session avec la tâche comme consigne.'}
+        </p>
+      )}
 
       {error && <Alert variant="danger">Erreur : {error.message}</Alert>}
       {loading && !data && <PageLoading />}
@@ -294,6 +354,8 @@ export default function TasksPage() {
           filters={{ ...filters, project: routeProjectId ? '' : projectId }}
           onFilterChange={setFilter}
           onClearFilters={clearFilters}
+          search={deferredSearch}
+          history={history}
           onEdit={setEditing}
           onTag={onTag}
           targets={targets}

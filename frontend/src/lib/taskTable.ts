@@ -63,19 +63,19 @@ export const DUE_FILTER_OPTIONS = [
 ];
 
 export const TASK_COLUMNS: TaskColumn[] = [
-  { key: 'title', label: 'Titre', width: 280, minWidth: 140, defaultVisible: true, sortable: true, filter: { kind: 'text' } },
+  { key: 'title', label: 'Titre', width: 360, minWidth: 140, defaultVisible: true, sortable: true, filter: { kind: 'text' } },
   { key: 'project', label: 'Projet', width: 105, minWidth: 70, defaultVisible: true, sortable: true, filter: { kind: 'select', options: [] } },
-  { key: 'status', label: 'Statut', width: 125, minWidth: 80, defaultVisible: true, sortable: true, filter: { kind: 'select', options: STATUS_ORDER.map((s) => ({ value: s, label: STATUS_LABELS[s] })) } },
+  { key: 'status', label: 'Statut', width: 120, minWidth: 80, defaultVisible: true, sortable: true, filter: { kind: 'select', options: STATUS_ORDER.map((s) => ({ value: s, label: STATUS_LABELS[s] })) } },
   { key: 'statusTag', label: 'État', width: 110, minWidth: 70, defaultVisible: false, sortable: true, filter: { kind: 'text' } },
   { key: 'priority', label: 'Priorité', width: 92, minWidth: 60, defaultVisible: true, sortable: true, filter: { kind: 'select', options: PRIORITY_ORDER.map((p) => ({ value: p, label: PRIORITY_LABELS[p] })) } },
   { key: 'tags', label: 'Étiquettes', width: 125, minWidth: 70, defaultVisible: true, sortable: true, filter: { kind: 'text' } },
   { key: 'assignee', label: 'Responsable', width: 115, minWidth: 70, defaultVisible: true, sortable: true, filter: { kind: 'text' } },
   { key: 'reporter', label: 'Rapporteur', width: 130, minWidth: 70, defaultVisible: false, sortable: true, filter: { kind: 'text' } },
-  { key: 'dueDate', label: 'Échéance', width: 100, minWidth: 80, defaultVisible: true, sortable: true, filter: { kind: 'select', options: DUE_FILTER_OPTIONS } },
+  { key: 'dueDate', label: 'Échéance', width: 100, minWidth: 80, defaultVisible: false, sortable: true, filter: { kind: 'select', options: DUE_FILTER_OPTIONS } },
   { key: 'session', label: 'Session', width: 160, minWidth: 80, defaultVisible: false, sortable: true, filter: { kind: 'text' } },
   { key: 'branch', label: 'Branche', width: 160, minWidth: 80, defaultVisible: false, sortable: true, filter: { kind: 'text' } },
   { key: 'pullRequest', label: 'PR', width: 96, minWidth: 60, defaultVisible: true, sortable: true, filter: { kind: 'text' } },
-  { key: 'comments', label: 'Comm.', width: 76, minWidth: 50, defaultVisible: true, sortable: true, filter: null, align: 'end' },
+  { key: 'comments', label: 'Comm.', width: 76, minWidth: 50, defaultVisible: false, sortable: true, filter: null, align: 'end' },
   { key: 'cost', label: 'Coût', width: 80, minWidth: 50, defaultVisible: false, sortable: true, filter: null, align: 'end' },
   { key: 'attachments', label: 'Fichiers', width: 70, minWidth: 50, defaultVisible: false, sortable: true, filter: null, align: 'end' },
   {
@@ -110,14 +110,15 @@ export interface TaskTableLayout {
   hidden: TaskColumnKey[];
   /** Largeurs choisies à la souris ; une colonne absente garde sa largeur par défaut. */
   widths: Partial<Record<TaskColumnKey, number>>;
-  sort: { key: TaskColumnKey; dir: SortDir };
+  /** Tri choisi en cliquant un en-tête ; null = par pertinence (ordre propre à chaque groupe, lib/taskGroups.ts). */
+  sort: { key: TaskColumnKey; dir: SortDir } | null;
 }
 
-export const DEFAULT_SORT: TaskTableLayout['sort'] = { key: 'createdAt', dir: 'desc' };
-export const LAYOUT_KEY = 'skipper.tasks.table.v1';
+/** v2 depuis la refonte de la liste (13/11/2026) : nouvelles colonnes par défaut et tri par pertinence pour tous. */
+export const LAYOUT_KEY = 'skipper.tasks.table.v2';
 
 export function defaultLayout(): TaskTableLayout {
-  return { order: [...ALL_KEYS], hidden: TASK_COLUMNS.filter((c) => !c.defaultVisible).map((c) => c.key), widths: {}, sort: { ...DEFAULT_SORT } };
+  return { order: [...ALL_KEYS], hidden: TASK_COLUMNS.filter((c) => !c.defaultVisible).map((c) => c.key), widths: {}, sort: null };
 }
 
 /** Remet d'aplomb une disposition lue du stockage : colonnes inconnues ignorées, nouvelles colonnes ajoutées, épinglée en dernier. */
@@ -155,7 +156,7 @@ export function normalizeLayout(raw: unknown): TaskTableLayout {
     }
   }
   const s = r.sort as { key?: unknown; dir?: unknown } | undefined;
-  const sort: TaskTableLayout['sort'] = s && isKey(s.key) && COLUMN_BY_KEY[s.key].sortable ? { key: s.key, dir: s.dir === 'asc' ? 'asc' : 'desc' } : { ...DEFAULT_SORT };
+  const sort: TaskTableLayout['sort'] = s && isKey(s.key) && COLUMN_BY_KEY[s.key].sortable ? { key: s.key, dir: s.dir === 'asc' ? 'asc' : 'desc' } : null;
   return { order: cleanOrder, hidden, widths, sort };
 }
 
@@ -354,7 +355,7 @@ export function sortValue(t: Task, key: TaskColumnKey): string | number | null {
   }
 }
 
-export function sortTasks(tasks: Task[], sort: TaskTableLayout['sort']): Task[] {
+export function sortTasks(tasks: Task[], sort: NonNullable<TaskTableLayout['sort']>): Task[] {
   const list = tasks.map((t, i) => ({ t, i, v: sortValue(t, sort.key) }));
   const sign = sort.dir === 'asc' ? 1 : -1;
   list.sort((a, b) => {

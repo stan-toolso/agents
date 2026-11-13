@@ -1179,6 +1179,7 @@ a.task-mention:hover { background: rgba(var(--cc-accent-rgb), 0.24); color: var(
 
 /* ---- Vue liste des tâches (components/TaskGrid.tsx) : une tâche par ligne, colonnes réglables ----------------- */
 .task-grid-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+.task-grid-bar > .text-secondary { white-space: nowrap; }
 .task-grid { overflow: auto; max-height: calc(100vh - 230px); border: 1px solid var(--cc-border); border-radius: var(--cc-radius); background: var(--cc-bg-elevated); box-shadow: var(--cc-card-shadow); }
 .task-grid-table > tbody > tr > td { padding-top: 9px; padding-bottom: 9px; border-color: var(--cc-border-soft); }
 .task-grid-title { font-weight: 500; }
@@ -1228,10 +1229,42 @@ a.task-mention:hover { background: rgba(var(--cc-accent-rgb), 0.24); color: var(
 .task-grid-chooser-row .form-check { min-width: 0; }
 .task-grid-chooser-row .form-check-label { white-space: nowrap; }
 .task-grid-chooser-foot { padding: 6px 12px 2px; color: var(--cc-dimmer); font-size: 11px; border-top: 1px solid var(--cc-border); margin-top: 4px; }
+/* Liste rangée par ce qui est attendu (lib/taskGroups.ts) : bandeau de synthèse, en-têtes de groupe, motif « à traiter ». */
+.tasks-toolbar-left { flex: 1 1 320px; min-width: 0; }
+.tasks-search { position: relative; flex: 1 1 220px; max-width: 360px; }
+.tasks-search > i { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--cc-dimmer); font-size: 12px; pointer-events: none; }
+.tasks-search .form-control { padding-left: 28px; }
+.task-lanes { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.task-lane-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border: 1px solid var(--cc-border); border-radius: 999px; background: var(--cc-bg-elevated); color: var(--cc-dim); font-size: 12.5px; line-height: 1.5; transition: border-color .15s, background .15s; }
+.task-lane-chip:hover:not(:disabled) { border-color: var(--lane-tone, var(--cc-accent)); color: var(--cc-fg); }
+.task-lane-chip.on { border-color: var(--lane-tone, var(--cc-accent)); background: var(--cc-bg-hover); color: var(--cc-fg); }
+.task-lane-chip.empty { opacity: .55; }
+.task-lane-chip:disabled { cursor: default; }
+.task-lane-count { font-family: var(--cc-font-mono); font-weight: 600; color: var(--cc-fg); }
+.task-lane-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--lane-tone, var(--cc-dim)); flex: none; }
+.task-grid-groupby.form-select { width: auto; max-width: 240px; }
+.task-grid-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--cc-accent); margin-left: 5px; vertical-align: middle; }
+.task-grid-table > tbody > tr.task-grid-group > th { padding: 0; background: var(--cc-bg); border-bottom: 1px solid var(--cc-border); position: static; overflow: visible; }
+.task-grid-table > tbody + tbody > tr.task-grid-group > th { border-top: 1px solid var(--cc-border); }
+.task-grid-group-toggle { position: sticky; left: 0; display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 9px 10px 7px; border: 0; background: none; color: var(--cc-fg); font-size: 13px; text-align: left; white-space: nowrap; }
+.task-grid-group-toggle:hover .task-grid-group-label { color: var(--cc-accent); }
+.task-grid-group-chevron { font-size: 10px; color: var(--cc-dim); width: 10px; }
+.task-grid-group-label { font-weight: 600; }
+.task-grid-group-count { font-family: var(--cc-font-mono); font-size: 12px; color: var(--cc-dim); }
+.task-grid-group-hint { color: var(--cc-dimmer); font-size: 12px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
+.task-grid-table > tbody > tr.task-grid-more > td { padding: 6px 12px; background: var(--cc-bg); }
+.task-grid-empty { padding: 14px 12px !important; }
+/* Les fermées se lisent en retrait : elles informent, elles ne demandent rien. */
+.task-grid-row.lane-done > td, .task-grid-row.lane-cancelled > td { color: var(--cc-dim); }
+.task-grid-row.lane-cancelled .task-grid-title { text-decoration: line-through !important; text-decoration-color: var(--cc-dimmer) !important; }
+.task-grid-row.lane-attention > td:first-child { box-shadow: inset 3px 0 0 var(--cc-red); }
+.task-reason { display: inline-block; padding: 0 6px; border-radius: 4px; background: var(--cc-red-soft); color: var(--cc-red); font-family: var(--cc-font-mono); font-size: 11px; line-height: 18px; vertical-align: 1px; }
 @media (max-width: 767.98px) {
   .task-grid { max-height: none; }
   /* La première colonne (figée) laisse de la place aux suivantes : 180 px au plus, quelle que soit la largeur réglée. */
   .task-grid-table col:first-child { width: 180px !important; }
+  .task-grid-group-hint { display: none; }
+  .tasks-search { max-width: none; }
 }
 /* Bandeau de contexte (au-delà du seuil) dans l'onglet Session : empilé, texte puis boutons pleine largeur */
 .session-panel .cc-context-banner { margin: 2px 10px 6px; padding: 6px 8px; border: 1px solid var(--cc-border); border-left-width: 3px; border-radius: 6px; flex-direction: column; align-items: stretch; gap: 6px; }

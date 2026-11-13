@@ -1906,8 +1906,8 @@ export const TASK_FIELDS = gql`
 export const TASKS = gql`
   ${TASK_FIELDS}
   ${TASK_PULL_REQUEST_FIELDS}
-  query Tasks($projectId: ID, $status: [TaskStatus!], $priority: TaskPriority, $assignee: String, $reporter: String, $tag: String, $mine: Boolean, $limit: Int) {
-    tasks(projectId: $projectId, status: $status, priority: $priority, assignee: $assignee, reporter: $reporter, tag: $tag, mine: $mine, limit: $limit) {
+  query Tasks($projectId: ID, $status: [TaskStatus!], $priority: TaskPriority, $assignee: String, $reporter: String, $tag: String, $mine: Boolean, $closedSince: DateTime, $limit: Int) {
+    tasks(projectId: $projectId, status: $status, priority: $priority, assignee: $assignee, reporter: $reporter, tag: $tag, mine: $mine, closedSince: $closedSince, limit: $limit) {
       ...TaskFields
       pullRequest {
         number

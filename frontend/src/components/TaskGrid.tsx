@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Button, Form } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import type { Task } from '../graphql/operations';
 import { formatCost, timeAgo } from '../lib/humanize';
+import { groupTasks, GROUP_BY_OPTIONS, laneCounts, LANES, matchesSearch, placeTask, RECENT_DAYS, type GroupBy, type TaskGroup, type TaskLane } from '../lib/taskGroups';
 import {
   applyFilters,
   cellText,
@@ -16,6 +17,7 @@ import {
   sortTasks,
   TASK_COLUMNS,
   visibleColumns,
+  type SortDir,
   type TaskColumn,
   type TaskColumnKey,
   type TaskFilters,
@@ -35,29 +37,103 @@ export interface TaskGridProps {
   filters: TaskFilters;
   onFilterChange: (key: TaskColumnKey, value: string) => void;
   onClearFilters: () => void;
+  /** Recherche libre de la barre d'outils (titre, description, étiquettes…), appliquée ici. */
+  search: string;
+  /** Historique (tâches fermées) : groupes dépliés, pas de « terminées récemment ». */
+  history: boolean;
   onEdit: (t: Task) => void;
   onTag: (tag: string) => void;
   targets: Map<string, LaunchTarget>;
 }
 
+const GROUP_BY_KEY = 'skipper.tasks.groupBy';
+const COLLAPSED_KEY = 'skipper.tasks.collapsed.v1';
+/** Lignes rendues d'emblée par groupe : au-delà, « Afficher les suivantes » (la page reste fluide avec des centaines de tâches). */
+const PAGE = 40;
+
+function readJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function writeJson(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* stockage indisponible */
+  }
+}
+
 /**
- * Vue liste des tâches : une ligne par tâche, toujours sur une seule ligne (le texte se tronque). Les colonnes se
- * réordonnent (glisser l'en-tête, ou flèches du choix des colonnes), se redimensionnent (poignée à droite de l'en-tête,
- * double clic pour revenir à la largeur par défaut), se trient (clic sur l'en-tête) et se choisissent (bouton
- * « Colonnes ») ; la plupart se filtrent (ligne sous les en-têtes). La disposition est mémorisée dans localStorage
- * (lib/taskTable.ts).
+ * Vue liste des tâches, rangée par ce qui est attendu (lib/taskGroups.ts) : à traiter, en cours, en attente, à faire,
+ * bloquées, terminées récemment (repliées). Un bandeau compte chaque groupe et permet de n'en montrer qu'un ; on peut
+ * grouper autrement (priorité, projet, responsable) ou pas du tout. Dans les groupes, une ligne par tâche, toujours sur
+ * une seule ligne ; les colonnes se réordonnent, se redimensionnent, se trient (un troisième clic revient à l'ordre
+ * par pertinence) et se choisissent ; la ligne de filtres par colonne s'ouvre avec « Filtres ». La disposition est
+ * mémorisée dans localStorage (lib/taskTable.ts).
  */
-export default function TaskGrid({ tasks, showProject, projects, filters, onFilterChange, onClearFilters, onEdit, onTag, targets }: TaskGridProps) {
+export default function TaskGrid({ tasks, showProject, projects, filters, onFilterChange, onClearFilters, search, history, onEdit, onTag, targets }: TaskGridProps) {
   const [layout, setLayout] = useState<TaskTableLayout>(() => loadLayout());
   useEffect(() => saveLayout(layout), [layout]);
+  const [groupBy, setGroupByState] = useState<GroupBy>(() => {
+    const v = readJson<string>(GROUP_BY_KEY, 'lane');
+    return GROUP_BY_OPTIONS.some((o) => o.value === v) ? (v as GroupBy) : 'lane';
+  });
+  const setGroupBy = (g: GroupBy) => {
+    setGroupByState(g);
+    writeJson(GROUP_BY_KEY, g);
+  };
+  const [collapsedMap, setCollapsedMap] = useState<Record<string, boolean>>(() => readJson(COLLAPSED_KEY, {}));
+  const [focus, setFocus] = useState<TaskLane | null>(null);
+  const [pages, setPages] = useState<Record<string, number>>({});
+  const filtering = Object.values(filters).some((v) => v && v.trim());
+  const [showFilters, setShowFilters] = useState(filtering);
+  useEffect(() => {
+    if (filtering) setShowFilters(true);
+  }, [filtering]);
+
   const available = useCallback((k: TaskColumnKey) => k !== 'project' || showProject, [showProject]);
   const cols = useMemo(() => visibleColumns(layout, available), [layout, available]);
-  const rows = useMemo(() => sortTasks(applyFilters(tasks, filters), layout.sort), [tasks, filters, layout.sort]);
-  const filtering = Object.values(filters).some((v) => v && v.trim());
+  const effectiveGroupBy: GroupBy = groupBy === 'project' && !showProject ? 'lane' : groupBy;
+  const placements = useMemo(() => {
+    const now = new Date();
+    return new Map(tasks.map((t) => [t.id, placeTask(t, now)]));
+  }, [tasks]);
+  const matching = useMemo(() => applyFilters(tasks, filters).filter((t) => matchesSearch(t, search)), [tasks, filters, search]);
+  const counts = useMemo(() => laneCounts(matching, placements), [matching, placements]);
+  const sort = layout.sort;
+  const groups = useMemo(() => {
+    const list = focus ? matching.filter((t) => placements.get(t.id)?.lane === focus) : matching;
+    return groupTasks(list, effectiveGroupBy, placements, sort ? (l) => sortTasks(l, sort) : null);
+  }, [matching, placements, focus, effectiveGroupBy, sort]);
+  const shown = groups.reduce((n, g) => n + g.tasks.length, 0);
   const totalWidth = cols.reduce((sum, c) => sum + (layout.widths[c.key] ?? c.width), 0);
+  const narrowed = filtering || search.trim() !== '' || focus !== null;
 
+  const isCollapsed = (g: TaskGroup) => {
+    if (focus) return false;
+    const v = collapsedMap[g.key];
+    if (v !== undefined) return v;
+    return !history && (g.lane === 'done' || g.lane === 'cancelled');
+  };
+  const toggleGroup = (g: TaskGroup) =>
+    setCollapsedMap((m) => {
+      const next = { ...m, [g.key]: !isCollapsed(g) };
+      writeJson(COLLAPSED_KEY, next);
+      return next;
+    });
+
+  // Clic sur un en-tête : croissant, décroissant (ou l'inverse pour les dates et nombres), puis retour à la pertinence.
   const toggleSort = (key: TaskColumnKey) =>
-    setLayout((l) => ({ ...l, sort: l.sort.key === key ? { key, dir: l.sort.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'createdAt' || key === 'updatedAt' || key === 'completedAt' || key === 'comments' || key === 'cost' ? 'desc' : 'asc' } }));
+    setLayout((l) => {
+      const first: SortDir = key === 'createdAt' || key === 'updatedAt' || key === 'completedAt' || key === 'comments' || key === 'cost' ? 'desc' : 'asc';
+      if (!l.sort || l.sort.key !== key) return { ...l, sort: { key, dir: first } };
+      if (l.sort.dir === first) return { ...l, sort: { key, dir: first === 'asc' ? 'desc' : 'asc' } };
+      return { ...l, sort: null };
+    });
   const setWidth = (key: TaskColumnKey, width: number | null) =>
     setLayout((l) => {
       const widths = { ...l.widths };
@@ -77,39 +153,84 @@ export default function TaskGrid({ tasks, showProject, projects, filters, onFilt
   };
 
   const [chooser, setChooser] = useState(false);
+  const summaryLanes = LANES.filter((l) => counts[l.key] > 0 || (!history && (l.key === 'attention' || l.key === 'active' || l.key === 'ready')));
 
   return (
     <div className="task-grid-root">
+      <div className="task-lanes" role="toolbar" aria-label="Où en sont les tâches">
+        {summaryLanes.map((l) => (
+          <button
+            key={l.key}
+            type="button"
+            className={`task-lane-chip${focus === l.key ? ' on' : ''}${counts[l.key] === 0 ? ' empty' : ''}`}
+            style={{ '--lane-tone': l.tone } as CSSProperties}
+            title={focus === l.key ? 'Montrer tous les groupes' : `${l.hint || l.label} : ne montrer que ce groupe`}
+            aria-pressed={focus === l.key}
+            disabled={counts[l.key] === 0 && focus !== l.key}
+            onClick={() => setFocus((f) => (f === l.key ? null : l.key))}
+          >
+            <span className="task-lane-dot" />
+            <span className="task-lane-count">{counts[l.key]}</span>
+            <span className="task-lane-label">{l.key === 'done' && !history ? `terminées · ${RECENT_DAYS} j` : l.label.toLowerCase()}</span>
+          </button>
+        ))}
+      </div>
       <div className="task-grid-bar">
         <span className="text-secondary small">
-          {rows.length === tasks.length ? `${tasks.length} tâche${tasks.length > 1 ? 's' : ''}` : `${rows.length} sur ${tasks.length} tâche${tasks.length > 1 ? 's' : ''}`}
+          {narrowed ? `${shown} sur ${tasks.length} tâche${tasks.length > 1 ? 's' : ''}` : `${tasks.length} tâche${tasks.length > 1 ? 's' : ''}`}
         </span>
-        {filtering && (
-          <Button size="sm" variant="link" className="p-0 small" onClick={onClearFilters}>
+        {(filtering || focus) && (
+          <Button
+            size="sm"
+            variant="link"
+            className="p-0 small"
+            onClick={() => {
+              setFocus(null);
+              onClearFilters();
+            }}
+          >
             <i className="bi bi-x-circle me-1" />
-            Effacer les filtres
+            Tout montrer
           </Button>
         )}
-        <div className="position-relative ms-auto">
-          <Button size="sm" variant="outline-secondary" title="Choisir et ordonner les colonnes" onClick={(e) => {
-              e.stopPropagation();
-              setChooser((v) => !v);
-            }}
-            aria-expanded={chooser}
-          >
-            <i className="bi bi-layout-three-columns me-1" />
-            Colonnes
+        <div className="d-flex align-items-center gap-2 ms-auto">
+          <Form.Select size="sm" className="task-grid-groupby" value={effectiveGroupBy} onChange={(e) => setGroupBy(e.target.value as GroupBy)} aria-label="Grouper par" title="Grouper par">
+            {GROUP_BY_OPTIONS.filter((o) => o.value !== 'project' || showProject).map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.value === 'none' ? o.label : `Grouper : ${o.label.toLowerCase()}`}
+              </option>
+            ))}
+          </Form.Select>
+          <Button size="sm" variant={showFilters ? 'secondary' : 'outline-secondary'} title="Filtrer colonne par colonne" aria-pressed={showFilters} onClick={() => setShowFilters((v) => !v)}>
+            <i className="bi bi-funnel" />
+            <span className="d-none d-md-inline ms-1">Filtres</span>
+            {filtering && <span className="task-grid-dot" />}
           </Button>
-          {chooser && (
-            <ColumnChooser
-              layout={layout}
-              available={available}
-              onToggle={toggleHidden}
-              onShift={(key, delta) => setLayout((l) => ({ ...l, order: shiftColumn(l.order, key, delta) }))}
-              onReset={() => setLayout(defaultLayout())}
-              onClose={() => setChooser(false)}
-            />
-          )}
+          <div className="position-relative">
+            <Button
+              size="sm"
+              variant="outline-secondary"
+              title="Choisir et ordonner les colonnes"
+              onClick={(e) => {
+                e.stopPropagation();
+                setChooser((v) => !v);
+              }}
+              aria-expanded={chooser}
+            >
+              <i className="bi bi-layout-three-columns" />
+              <span className="d-none d-md-inline ms-1">Colonnes</span>
+            </Button>
+            {chooser && (
+              <ColumnChooser
+                layout={layout}
+                available={available}
+                onToggle={toggleHidden}
+                onShift={(key, delta) => setLayout((l) => ({ ...l, order: shiftColumn(l.order, key, delta) }))}
+                onReset={() => setLayout(defaultLayout())}
+                onClose={() => setChooser(false)}
+              />
+            )}
+          </div>
         </div>
       </div>
       <div className="task-grid table-responsive">
@@ -140,32 +261,67 @@ export default function TaskGrid({ tasks, showProject, projects, filters, onFilt
                 />
               ))}
             </tr>
-            <tr className="task-grid-filters">
-              {cols.map((c) => (
-                <th key={c.key} className={c.pinned ? 'text-end' : undefined}>
-                  <FilterCell col={c} value={filters[c.key] ?? ''} projects={projects} onChange={(v) => onFilterChange(c.key, v)} />
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((t) => (
-              <tr key={t.id}>
+            {showFilters && (
+              <tr className="task-grid-filters">
                 {cols.map((c) => (
-                  <td key={c.key} className={`task-grid-cell${c.align === 'end' ? ' text-end' : ''}${c.key === 'actions' ? ' task-grid-actions' : ''}`} title={c.key === 'actions' || c.key === 'pullRequest' ? undefined : cellTitle(t, c.key)}>
-                    <Cell task={t} col={c} onEdit={() => onEdit(t)} onTag={onTag} target={targets.get(t.project.id)} />
-                  </td>
+                  <th key={c.key} className={c.pinned ? 'text-end' : undefined}>
+                    <FilterCell col={c} value={filters[c.key] ?? ''} projects={projects} onChange={(v) => onFilterChange(c.key, v)} />
+                  </th>
                 ))}
               </tr>
-            ))}
-            {rows.length === 0 && (
+            )}
+          </thead>
+          {groups.map((g) => {
+            const collapsed = isCollapsed(g);
+            const limit = pages[g.key] ?? PAGE;
+            const rows = collapsed ? [] : g.tasks.slice(0, limit);
+            const rest = collapsed ? 0 : g.tasks.length - rows.length;
+            return (
+              <tbody key={g.key} className={`task-grid-group-body${collapsed ? ' collapsed' : ''}`}>
+                {effectiveGroupBy !== 'none' && (
+                  <tr className="task-grid-group">
+                    <th colSpan={cols.length} scope="rowgroup">
+                      <button type="button" className="task-grid-group-toggle" onClick={() => toggleGroup(g)} aria-expanded={!collapsed}>
+                        <i className={`bi ${collapsed ? 'bi-chevron-right' : 'bi-chevron-down'} task-grid-group-chevron`} />
+                        {g.tone && <span className="task-lane-dot" style={{ '--lane-tone': g.tone } as CSSProperties} />}
+                        <span className="task-grid-group-label">{g.lane === 'done' && !history ? `${g.label} · ${RECENT_DAYS} derniers jours` : g.label}</span>
+                        <span className="task-grid-group-count">{g.tasks.length}</span>
+                        {g.hint && <span className="task-grid-group-hint">{g.hint}</span>}
+                      </button>
+                    </th>
+                  </tr>
+                )}
+                {rows.map((t) => (
+                  <tr key={t.id} className={`task-grid-row lane-${placements.get(t.id)?.lane ?? 'ready'}`}>
+                    {cols.map((c) => (
+                      <td key={c.key} className={`task-grid-cell${c.align === 'end' ? ' text-end' : ''}${c.key === 'actions' ? ' task-grid-actions' : ''}`} title={c.key === 'actions' || c.key === 'pullRequest' ? undefined : cellTitle(t, c.key)}>
+                        <Cell task={t} col={c} reason={placements.get(t.id)?.reason ?? null} onEdit={() => onEdit(t)} onTag={onTag} target={targets.get(t.project.id)} />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+                {rest > 0 && (
+                  <tr className="task-grid-more">
+                    <td colSpan={cols.length}>
+                      <button type="button" className="btn btn-link btn-sm p-0" onClick={() => setPages((p) => ({ ...p, [g.key]: limit + PAGE * 5 }))}>
+                        Afficher {Math.min(rest, PAGE * 5)} de plus
+                      </button>
+                      <span className="text-secondary small ms-2">({rest} masquée{rest > 1 ? 's' : ''})</span>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            );
+          })}
+          {groups.length === 0 && (
+            <tbody>
               <tr>
-                <td colSpan={cols.length} className="text-secondary fst-italic">
-                  {tasks.length === 0 ? 'Aucune tâche.' : 'Aucune tâche ne correspond aux filtres.'}
+                <td colSpan={cols.length} className="text-secondary fst-italic task-grid-empty">
+                  {tasks.length === 0 ? (history ? 'Aucune tâche fermée.' : 'Aucune tâche ouverte.') : 'Aucune tâche ne correspond à la recherche ou aux filtres.'}
                 </td>
               </tr>
-            )}
-          </tbody>
+            </tbody>
+          )}
         </table>
       </div>
     </div>
@@ -217,12 +373,12 @@ function HeaderCell({
 }) {
   const ref = useRef<HTMLTableCellElement>(null);
   const start = useRef<{ x: number; w: number } | null>(null);
-  const sorted = sort.key === col.key;
+  const sorted = sort?.key === col.key;
   return (
     <th
       ref={ref}
       className={`task-grid-th${col.align === 'end' ? ' text-end' : ''}${dropHere && dragging !== col.key ? ' task-grid-drop' : ''}${dragging === col.key ? ' task-grid-dragging' : ''}`}
-      aria-sort={sorted ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+      aria-sort={sorted ? (sort!.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
       draggable={!col.pinned}
       onDragStart={(e) => {
         if (col.pinned) return;
@@ -243,9 +399,9 @@ function HeaderCell({
       onDragEnd={onDragEnd}
     >
       {col.sortable ? (
-        <button type="button" className="task-grid-sort" onClick={onSort} title={`Trier par ${col.label.toLowerCase()}`}>
+        <button type="button" className="task-grid-sort" onClick={onSort} title={sorted ? 'Cliquer pour inverser, puis revenir au tri par pertinence' : `Trier par ${col.label.toLowerCase()}`}>
           <span className="task-grid-label">{col.label}</span>
-          <i className={`bi ${sorted ? (sort.dir === 'asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill') : 'bi-caret-down'} task-grid-caret${sorted ? ' on' : ''}`} />
+          <i className={`bi ${sorted ? (sort!.dir === 'asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill') : 'bi-caret-down'} task-grid-caret${sorted ? ' on' : ''}`} />
         </button>
       ) : (
         <span className="task-grid-label">{col.label}</span>
@@ -305,7 +461,7 @@ function FilterCell({ col, value, projects, onChange }: { col: TaskColumn; value
   return <Form.Control size="sm" className={`task-grid-filter${value ? ' on' : ''}`} type="search" value={value} placeholder="Filtrer…" onChange={(e) => onChange(e.target.value)} aria-label={label} title={label} />;
 }
 
-function Cell({ task: t, col, onEdit, onTag, target }: { task: Task; col: TaskColumn; onEdit: () => void; onTag: (tag: string) => void; target: LaunchTarget | undefined }) {
+function Cell({ task: t, col, reason, onEdit, onTag, target }: { task: Task; col: TaskColumn; reason: string | null; onEdit: () => void; onTag: (tag: string) => void; target: LaunchTarget | undefined }) {
   switch (col.key) {
     case 'title':
       return (
@@ -313,6 +469,7 @@ function Cell({ task: t, col, onEdit, onTag, target }: { task: Task; col: TaskCo
           <TaskBlockedBadge task={t} short className="me-1" />
           <TaskStalledBadge task={t} short className="me-1" />
           <TaskWaitingBadge task={t} short className="me-1" />
+          {reason && !t.stalledSince && <span className="task-reason me-1">{reason}</span>}
           <Link to={`/tasks/${t.id}`} className="task-grid-title text-reset text-decoration-none">
             {t.title}
           </Link>
