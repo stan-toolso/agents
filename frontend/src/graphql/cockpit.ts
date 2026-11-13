@@ -13,6 +13,11 @@ export interface CockpitArtifactInfo {
   projectAccess: boolean | null;
   owner: { id: string; name: string } | null;
   canManage: boolean;
+  /** Artefact de données : intervalle du rafraîchissement automatique (null : à la demande). */
+  refreshMinutes: number | null;
+  /** Une source agent est en cours de calcul par une session. */
+  refreshing: boolean;
+  failingSources: number;
 }
 
 /** Un artefact qu'on peut épingler (catalogue du mode « Personnaliser »). */
@@ -101,6 +106,9 @@ export const COCKPIT_LAYOUT_FIELDS = gql`
         name
       }
       canManage
+      refreshMinutes
+      refreshing
+      failingSources
     }
     warnings
   }

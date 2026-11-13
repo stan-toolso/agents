@@ -53,7 +53,8 @@ export default function SharedPagePage() {
   const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(Boolean(focusComment));
-  const [dataOpen, setDataOpen] = useState(false);
+  // ?panel=data (menu d'une tuile du tableau de bord) : le panneau Données ouvert d'emblée.
+  const [dataOpen, setDataOpen] = useState(search.get('panel') === 'data');
   const [picking, setPicking] = useState(false);
   const [details, setDetails] = useState(false);
   const [menuAt, setMenuAt] = useState<{ top: number; right: number } | null>(null);

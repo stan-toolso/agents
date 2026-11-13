@@ -1,6 +1,7 @@
 import { AppError } from '../errors.js';
 import { agentRepository } from '../agents/repository.js';
 import { projectPageRepository } from './projectPages.js';
+import { dataSourceRepository } from '../sharedPages/dataRepository.js';
 import { sharedPageService } from '../sharedPages/service.js';
 import { userService } from '../users/service.js';
 import type { User } from '../users/types.js';
@@ -120,8 +121,23 @@ export const cockpitService = {
     return Promise.all(
       ids.map(async (id) => {
         const page = await sharedPageService.getFor(user.id, id).catch(() => null);
-        if (!page) return { id, viewable: false, title: null, kind: null, version: null, dataRefreshedAt: null, linkAccess: null, projectAccess: null, ownerId: null, canManage: false };
-        return { id, viewable: true, title: page.title, kind: page.kind, version: page.version, dataRefreshedAt: page.dataRefreshedAt, linkAccess: page.linkAccess, projectAccess: page.projectAccess, ownerId: page.ownerId, canManage: sharedPageService.canManage(page, user) };
+        if (!page) return { id, viewable: false, title: null, kind: null, version: null, dataRefreshedAt: null, linkAccess: null, projectAccess: null, ownerId: null, canManage: false, refreshMinutes: null, refreshing: false, failingSources: 0 };
+        const sources = page.kind === 'data' ? await dataSourceRepository.list(page.id) : [];
+        return {
+          id,
+          viewable: true,
+          title: page.title,
+          kind: page.kind,
+          version: page.version,
+          dataRefreshedAt: page.dataRefreshedAt,
+          linkAccess: page.linkAccess,
+          projectAccess: page.projectAccess,
+          ownerId: page.ownerId,
+          canManage: sharedPageService.canManage(page, user),
+          refreshMinutes: page.refreshMinutes,
+          refreshing: sources.some((s) => s.status === 'running'),
+          failingSources: sources.filter((s) => s.status === 'error' || s.status === 'skipped').length,
+        };
       }),
     );
   },

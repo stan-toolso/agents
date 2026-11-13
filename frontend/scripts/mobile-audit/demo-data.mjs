@@ -777,8 +777,8 @@ const cockpitLayout = (scope) => {
     artifacts: (st?.layout ?? cockpitDefault(scope)).blocks.filter((b) => b.kind === 'artifact').map((b) => {
       const pg = sharedPagesDemo.find((x) => x.id === b.artifact);
       return pg
-        ? { __typename: 'CockpitArtifact', id: pg.id, viewable: true, title: pg.title, kind: pg.kind, version: pg.version, dataRefreshedAt: pg.dataRefreshedAt, linkAccess: pg.linkAccess, projectAccess: pg.projectAccess, owner: pg.owner, canManage: pg.owner === U.me }
-        : { __typename: 'CockpitArtifact', id: b.artifact, viewable: false, title: null, kind: null, version: null, dataRefreshedAt: null, linkAccess: null, projectAccess: null, owner: null, canManage: false };
+        ? { __typename: 'CockpitArtifact', id: pg.id, viewable: true, title: pg.title, kind: pg.kind, version: pg.version, dataRefreshedAt: pg.dataRefreshedAt, linkAccess: pg.linkAccess, projectAccess: pg.projectAccess, owner: pg.owner, canManage: pg.owner === U.me, refreshMinutes: pg.refreshMinutes ?? null, refreshing: false, failingSources: (pg.sources ?? []).filter((s) => s.status === 'error' || s.status === 'skipped').length }
+        : { __typename: 'CockpitArtifact', id: b.artifact, viewable: false, title: null, kind: null, version: null, dataRefreshedAt: null, linkAccess: null, projectAccess: null, owner: null, canManage: false, refreshMinutes: null, refreshing: false, failingSources: 0 };
     }),
     warnings: st?.warnings ?? [],
   };
@@ -1090,7 +1090,10 @@ export const demoRoot = {
   sharedPage: (a = {}) => sharedPagesDemo.find((pg) => pg.id === a.id) ?? sharedPageDemo(a.id),
   updateSharedPage: (a) => {
     const mine = sharedPagesDemo.find((pg) => pg.id === a.id);
-    if (mine) return mine;
+    if (mine) {
+      if (a.input && 'refreshMinutes' in a.input) mine.refreshMinutes = a.input.refreshMinutes || null;
+      return mine;
+    }
     if (a.input?.agentHandoff) sharedPageState.agentHandoff = a.input.agentHandoff;
     return sharedPageDemo(a.id);
   },

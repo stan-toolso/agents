@@ -127,6 +127,12 @@ export interface CockpitArtifactView {
   projectAccess: boolean | null;
   ownerId: string | null;
   canManage: boolean;
+  /** Artefact de données : intervalle du rafraîchissement automatique (null : à la demande). */
+  refreshMinutes: number | null;
+  /** Artefact de données : une source agent est en cours de calcul par une session. */
+  refreshing: boolean;
+  /** Artefact de données : sources en erreur ou non rafraîchies. */
+  failingSources: number;
 }
 
 export interface LayoutVersion {

@@ -287,6 +287,8 @@ export const artifactDataService = {
     if (!allowed) throw new AppError("Seules une session du propriétaire de l'artefact ou la session lancée pour cette source peuvent écrire ses données");
     assertDataSize(data);
     await dataSourceRepository.saveAgentData(source.id, data, countRows(data));
+    // Date des données de l'artefact : les cadres (page, tuiles du cockpit) se rechargent sur elle.
+    await sharedPageRepository.markDataRefreshed(page.id);
     log.info(`[artifacts] ${page.title} · ${source.name} écrite par la session ${session.id}`);
     return (await dataSourceRepository.list(page.id)).find((s) => s.id === source.id) ?? source;
   },

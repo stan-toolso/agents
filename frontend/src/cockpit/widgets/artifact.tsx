@@ -1,8 +1,15 @@
+import { useMutation } from '@apollo/client';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import { sharedPageUrl } from '../../apollo';
+import { useDialogs } from '../../components/Dialogs';
+import PopMenu, { type MenuItem } from '../../components/PopMenu';
 import { useSessionLauncher } from '../../components/SessionLauncher';
 import type { CockpitArtifactInfo } from '../../graphql/cockpit';
+import { REFRESH_SHARED_PAGE_DATA, UPDATE_SHARED_PAGE } from '../../graphql/misc';
+import { timeAgo } from '../../lib/humanize';
+import { refreshLabel } from '../../lib/refreshChoices';
 import { useTheme } from '../../lib/theme';
 import type { CockpitContext } from '../registry';
 import type { ArtifactBlock } from '../types';
@@ -21,6 +28,84 @@ const DEFAULT_HEIGHT = 220;
 /** Hauteur d'un artefact en tuile : un indicateur, pas une page (au-delà, la tuile défile). */
 const TILE_DEFAULT_HEIGHT = 64;
 const TILE_MAX_HEIGHT = 160;
+
+/** Intervalles proposés depuis une tuile : un tableau de bord n'a pas besoin de plus fin qu'une heure. */
+const TILE_REFRESH_CHOICES: [number, string][] = [
+  [0, 'À la demande'],
+  [60, 'Toutes les heures'],
+  [360, 'Toutes les 6 heures'],
+  [1440, 'Tous les jours'],
+  [10080, 'Toutes les semaines'],
+];
+
+/**
+ * Contrôles d'un artefact de données dans un bloc : état (dernière mise à jour, intervalle, calcul en cours, sources en
+ * défaut) au survol ; pour qui l'administre, « Rafraîchir » (lance aussi les sessions des sources agent) et le menu de
+ * l'intervalle. Le reste (sources, sessions, erreurs) est dans le panneau Données de l'artefact.
+ */
+function DataControls({ info }: { info: CockpitArtifactInfo }) {
+  const { showError } = useDialogs();
+  const [menuAt, setMenuAt] = useState<{ top: number; right: number } | null>(null);
+  const refetchQueries = ['CockpitLayout'];
+  const [refresh, { loading: refreshingNow }] = useMutation(REFRESH_SHARED_PAGE_DATA, { refetchQueries, onError: (e) => void showError(e) });
+  const [update] = useMutation(UPDATE_SHARED_PAGE, { refetchQueries, onError: (e) => void showError(e) });
+  const busy = refreshingNow || info.refreshing;
+  const state = [
+    info.dataRefreshedAt ? `Mis à jour ${timeAgo(info.dataRefreshedAt)}` : 'Pas encore rafraîchi',
+    `rafraîchissement ${refreshLabel(info.refreshMinutes)}`,
+    info.refreshing ? 'une session calcule les données' : null,
+    info.failingSources ? `${info.failingSources} source${info.failingSources > 1 ? 's' : ''} en défaut` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const items: MenuItem[] = [
+    { label: busy ? 'Rafraîchissement en cours…' : 'Rafraîchir maintenant', icon: 'bi-arrow-repeat', onClick: () => void (busy ? undefined : refresh({ variables: { id: info.id } })) },
+    ...TILE_REFRESH_CHOICES.map(([m, label], i) => ({
+      label,
+      icon: (info.refreshMinutes ?? 0) === m ? 'bi-check2' : 'bi-clock',
+      separatorBefore: i === 0,
+      onClick: () => void update({ variables: { id: info.id, input: { refreshMinutes: m } } }),
+    })),
+    { label: 'Données, sources et sessions', icon: 'bi-bar-chart-line', to: `/shared/${info.id}?panel=data`, separatorBefore: true },
+  ];
+  return (
+    <span className={`ck-data-controls${busy || info.failingSources > 0 ? '' : ' quiet'}${menuAt ? ' open' : ''}`}>
+      {info.failingSources > 0 && (
+        <span className="ck-data-warn" title={state}>
+          <i className="bi bi-exclamation-triangle" />
+        </span>
+      )}
+      {info.canManage ? (
+        <>
+          <button type="button" className="ck-data-btn" title={`${state}\nRafraîchir maintenant`} aria-label="Rafraîchir les données" disabled={busy} onClick={() => void refresh({ variables: { id: info.id } })}>
+            <i className={`bi bi-arrow-repeat${busy ? ' spin' : ''}`} />
+          </button>
+          <button
+            type="button"
+            className="ck-data-btn"
+            title={`Rafraîchissement ${refreshLabel(info.refreshMinutes)} : changer l'intervalle`}
+            aria-label="Intervalle de rafraîchissement"
+            onClick={(e) => {
+              e.stopPropagation();
+              const r = e.currentTarget.getBoundingClientRect();
+              setMenuAt(menuAt ? null : { top: r.bottom + 4, right: window.innerWidth - r.right });
+            }}
+          >
+            <i className="bi bi-clock" />
+          </button>
+          {/* Portail : hors du libellé de la tuile (police mono, majuscules) et de son cadre. */}
+          {menuAt && createPortal(<PopMenu items={items} at={menuAt} onClose={() => setMenuAt(null)} />, document.body)}
+        </>
+      ) : (
+        busy && (
+          <span className="ck-data-btn" title={state}>
+            <i className="bi bi-arrow-repeat spin" />
+          </span>
+        )
+      )}
+    </span>
+  );
+}
 
 export function ArtifactWidget({ block, info, ctx, scope }: { block: ArtifactBlock; info: CockpitArtifactInfo | null | undefined; ctx: CockpitContext; scope: string }) {
   const theme = useTheme();
@@ -99,6 +184,7 @@ export function ArtifactWidget({ block, info, ctx, scope }: { block: ArtifactBlo
       <div className="dash-tile ck-artifact-tile">
         <div className="dash-tile-label">
           <span>{title}</span>
+          {info.kind === 'DATA' && <DataControls info={info} />}
           <Link to={`/shared/${block.artifact}`} className="ck-artifact-tile-open" title="Ouvrir l’artefact en page entière (commentaires, versions, données)">
             <i className="bi bi-box-arrow-up-right" />
           </Link>
@@ -111,6 +197,7 @@ export function ArtifactWidget({ block, info, ctx, scope }: { block: ArtifactBlo
     <section className="dash-section ck-artifact">
       <h2 className="dash-section-title">
         <span>{title}</span>
+        {info.kind === 'DATA' && <DataControls info={info} />}
         <Link to={`/shared/${block.artifact}`} title="Ouvrir l’artefact en page entière (commentaires, versions, données)">Ouvrir</Link>
       </h2>
       <div className="ck-artifact-frame" style={{ height: block.height ?? height }}>
