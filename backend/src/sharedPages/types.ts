@@ -90,6 +90,8 @@ export interface PublishInput {
   /** Nouvelle version d'une page existante. */
   pageId?: string | null;
   linkAccess?: boolean | null;
+  /** Ouvre (true) ou ferme (false) l'artefact aux membres de son projet ; absent : inchangé (fermé à la création). */
+  projectAccess?: boolean | null;
   projectId?: string | null;
   sessionId?: string | null;
   sourcePath?: string | null;

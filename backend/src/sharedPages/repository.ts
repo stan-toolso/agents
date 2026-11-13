@@ -154,13 +154,13 @@ export const sharedPageRepository = {
   },
 
   /** Crée la page et sa première version dans une même transaction. */
-  async create(input: { ownerId: string; title: string; description: string | null; linkAccess: boolean; projectId: string | null; sessionId: string | null; sourcePath: string | null; html: Buffer; kind?: ArtifactKind }): Promise<SharedPage> {
+  async create(input: { ownerId: string; title: string; description: string | null; linkAccess: boolean; projectAccess?: boolean; projectId: string | null; sessionId: string | null; sourcePath: string | null; html: Buffer; kind?: ArtifactKind }): Promise<SharedPage> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       const { rows } = await client.query<Row>(
-        `INSERT INTO shared_pages (owner_id, title, description, link_access, project_id, session_id, source_path, kind) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-        [input.ownerId, input.title, input.description, input.linkAccess, input.projectId, input.sessionId, input.sourcePath, input.kind ?? 'page'],
+        `INSERT INTO shared_pages (owner_id, title, description, link_access, project_id, session_id, source_path, kind, project_access) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+        [input.ownerId, input.title, input.description, input.linkAccess, input.projectId, input.sessionId, input.sourcePath, input.kind ?? 'page', input.projectAccess ?? false],
       );
       await client.query('INSERT INTO shared_page_versions (page_id, version, html, size, created_by, session_id) VALUES ($1, 1, $2, $3, $4, $5)', [rows[0].id, input.html, input.html.length, input.ownerId, input.sessionId]);
       await client.query('COMMIT');
@@ -174,15 +174,16 @@ export const sharedPageRepository = {
   },
 
   /** Nouvelle version (la ligne est verrouillée : deux publications concurrentes se suivent). */
-  async addVersion(pageId: string, input: { title: string; description: string | null | undefined; linkAccess: boolean | null; projectId: string | null; sessionId: string | null; sourcePath: string | null; html: Buffer; createdBy: string; kind?: ArtifactKind | null }): Promise<SharedPage | null> {
+  async addVersion(pageId: string, input: { title: string; description: string | null | undefined; linkAccess: boolean | null; projectAccess?: boolean | null; projectId: string | null; sessionId: string | null; sourcePath: string | null; html: Buffer; createdBy: string; kind?: ArtifactKind | null }): Promise<SharedPage | null> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       const { rows } = await client.query<Row>(
         `UPDATE shared_pages SET version = version + 1, title = $2, description = COALESCE($3, description), link_access = COALESCE($4, link_access),
-                project_id = COALESCE($5, project_id), session_id = $6, source_path = $7, kind = COALESCE($8, kind), updated_at = now()
+                project_id = COALESCE($5, project_id), session_id = $6, source_path = $7, kind = COALESCE($8, kind),
+                project_access = COALESCE($9, project_access), updated_at = now()
          WHERE id = $1 RETURNING *`,
-        [pageId, input.title, input.description ?? null, input.linkAccess, input.projectId, input.sessionId, input.sourcePath, input.kind ?? null],
+        [pageId, input.title, input.description ?? null, input.linkAccess, input.projectId, input.sessionId, input.sourcePath, input.kind ?? null, input.projectAccess ?? null],
       );
       if (!rows[0]) {
         await client.query('ROLLBACK');
