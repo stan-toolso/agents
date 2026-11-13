@@ -648,6 +648,11 @@
 .wb-meta-chip .wb-dot { width: 6px; height: 6px; }
 .wb-meta-sub { background: none; border: 0; padding: 0; font: inherit; cursor: pointer; }
 .wb-meta-sub .wb-chip-sub { background: none; padding: 0; font-size: 11px; }
+/* Mobile : la ligne de méta fait partie de la zone de la session ; ses étiquettes ne s'ouvrent pas au toucher (trop petites, touchées par erreur). */
+.wb-ws-meta { cursor: pointer; }
+@media (max-width: 767.98px) {
+  .wb-ws-meta > * { pointer-events: none; }
+}
 
 .wb-ws-meta .bi { font-size: 10.5px; flex: 0 0 auto; }
 .wb-meta-state { flex: 0 0 auto; }
