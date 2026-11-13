@@ -45,7 +45,7 @@ const TILE_REFRESH_CHOICES: [number, string][] = [
  */
 function DataControls({ info }: { info: CockpitArtifactInfo }) {
   const { showError } = useDialogs();
-  const [menuAt, setMenuAt] = useState<{ top: number; right: number } | null>(null);
+  const [menuAt, setMenuAt] = useState<{ which: 'info' | 'menu'; top: number; right: number } | null>(null);
   const refetchQueries = ['CockpitLayout'];
   const [refresh, { loading: refreshingNow }] = useMutation(REFRESH_SHARED_PAGE_DATA, { refetchQueries, onError: (e) => void showError(e) });
   const [update] = useMutation(UPDATE_SHARED_PAGE, { refetchQueries, onError: (e) => void showError(e) });
@@ -68,41 +68,45 @@ function DataControls({ info }: { info: CockpitArtifactInfo }) {
     })),
     { label: 'Données, sources et sessions', icon: 'bi-bar-chart-line', to: `/shared/${info.id}?panel=data`, separatorBefore: true },
   ];
+  const updatedAt = info.dataRefreshedAt ? new Date(info.dataRefreshedAt) : null;
+  const infoItems: MenuItem[] = [
+    {
+      label: updatedAt ? `Mis à jour le ${updatedAt.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} à ${updatedAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} (${timeAgo(info.dataRefreshedAt!)})` : 'Pas encore rafraîchi',
+      icon: 'bi-clock-history',
+    },
+    { label: `Rafraîchissement ${refreshLabel(info.refreshMinutes)}`, icon: 'bi-arrow-repeat' },
+    ...(info.refreshing ? [{ label: 'Une session calcule les données', icon: 'bi-robot' }] : []),
+    ...(info.failingSources ? [{ label: `${info.failingSources} source${info.failingSources > 1 ? 's' : ''} en défaut`, icon: 'bi-exclamation-triangle' }] : []),
+    { label: 'Données, sources et sessions', icon: 'bi-bar-chart-line', to: `/shared/${info.id}?panel=data`, separatorBefore: true },
+  ];
+  const toggle = (e: React.MouseEvent<HTMLButtonElement>, which: 'info' | 'menu') => {
+    e.stopPropagation();
+    const r = e.currentTarget.getBoundingClientRect();
+    setMenuAt(menuAt?.which === which ? null : { which, top: r.bottom + 4, right: window.innerWidth - r.right });
+  };
   return (
-    <span className={`ck-data-controls${busy || info.failingSources > 0 ? '' : ' quiet'}${menuAt ? ' open' : ''}`}>
+    <span className="ck-data-controls">
       {info.failingSources > 0 && (
         <span className="ck-data-warn" title={state}>
           <i className="bi bi-exclamation-triangle" />
         </span>
       )}
-      {info.canManage ? (
-        <>
+      {/* Info : pour tout lecteur, la date des données (bulle au survol, panneau au clic ou au toucher). */}
+      <button type="button" className="ck-data-btn" title={state} aria-label="Dernière mise à jour des données" onClick={(e) => toggle(e, 'info')}>
+        <i className={`bi ${busy ? 'bi-arrow-repeat spin' : 'bi-info-circle'}`} />
+      </button>
+      {info.canManage && (
+        <span className={`ck-data-actions${busy || info.failingSources > 0 ? '' : ' quiet'}${menuAt?.which === 'menu' ? ' open' : ''}`}>
           <button type="button" className="ck-data-btn" title={`${state}\nRafraîchir maintenant`} aria-label="Rafraîchir les données" disabled={busy} onClick={() => void refresh({ variables: { id: info.id } })}>
             <i className={`bi bi-arrow-repeat${busy ? ' spin' : ''}`} />
           </button>
-          <button
-            type="button"
-            className="ck-data-btn"
-            title={`Rafraîchissement ${refreshLabel(info.refreshMinutes)} : changer l'intervalle`}
-            aria-label="Intervalle de rafraîchissement"
-            onClick={(e) => {
-              e.stopPropagation();
-              const r = e.currentTarget.getBoundingClientRect();
-              setMenuAt(menuAt ? null : { top: r.bottom + 4, right: window.innerWidth - r.right });
-            }}
-          >
+          <button type="button" className="ck-data-btn" title={`Rafraîchissement ${refreshLabel(info.refreshMinutes)} : changer l'intervalle`} aria-label="Intervalle de rafraîchissement" onClick={(e) => toggle(e, 'menu')}>
             <i className="bi bi-clock" />
           </button>
-          {/* Portail : hors du libellé de la tuile (police mono, majuscules) et de son cadre. */}
-          {menuAt && createPortal(<PopMenu items={items} at={menuAt} onClose={() => setMenuAt(null)} />, document.body)}
-        </>
-      ) : (
-        busy && (
-          <span className="ck-data-btn" title={state}>
-            <i className="bi bi-arrow-repeat spin" />
-          </span>
-        )
+        </span>
       )}
+      {/* Portail : hors du libellé de la tuile (police mono, majuscules) et de son cadre. */}
+      {menuAt && createPortal(<PopMenu items={menuAt.which === 'info' ? infoItems : items} at={menuAt} onClose={() => setMenuAt(null)} />, document.body)}
     </span>
   );
 }
