@@ -4,7 +4,7 @@ import { Alert, Badge, Button, Card, Col, Row, Table } from 'react-bootstrap';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import PageLoading from '../components/PageLoading';
 import { PullRequestChip } from '../components/PullRequests';
-import { DeliverButton } from '../components/Deliveries';
+import { DeliverButton, TaskQualityDelivery } from '../components/Deliveries';
 import { RegisterPullRequestModal, TrackedPullRequestActions, TrackedPullRequestIndicators, PullRequestStageBadge } from '../components/TrackedPullRequests';
 import { forgeOfUrl, prRef, PULL_REQUESTS, type TrackedPullRequest } from '../graphql/pullRequests';
 import StatusBadge from '../components/StatusBadge';
@@ -360,6 +360,7 @@ export default function TaskPage() {
                 ) : (
                   <div className="text-secondary fst-italic mt-1">Aucune pull request suivie.</div>
                 )}
+                <TaskQualityDelivery taskId={task.id} projectId={task.project.id} canWrite={canWrite} />
               </Card.Body>
             </Card>
           )}
