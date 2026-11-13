@@ -71,6 +71,7 @@ import { handlePreviewOpenRoute, handlePreviewRoute, previewUpgrade } from './pr
 import { previewRepository } from './previews/repository.js';
 import { previewService } from './previews/service.js';
 import { deliveryService } from './deliveries/service.js';
+import { deliveryQualityService } from './deliveries/qualityService.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -147,6 +148,7 @@ async function main() {
   registerStalledTasks();
   registerWorkflowTriggers();
   registerAgentTriggers();
+  deliveryQualityService.register();
   registerConversationSessionFeed();
   // Une session qui s'archive elle-même (outil sessions.archive) l'est en fin de tour, avec son dossier de travail.
   sessionService.onArchiveWhenDone(archiveSessionCascade);
@@ -210,6 +212,8 @@ async function main() {
     { name: 'consolidation du temps CTO', start: () => ctoTimeService.start(), stop: () => ctoTimeService.stop() },
     { name: 'rafraîchissement des artefacts de données', start: () => artifactDataService.start(), stop: () => artifactDataService.stop() },
     { name: 'réveil des tâches en attente', start: () => taskWaker.start(), stop: () => taskWaker.stop() },
+    // Rattrapage des tâches qualité rattachées aux livraisons (une fois, à la prise du rôle de meneuse).
+    { name: 'rattrapage des tâches qualité', start: () => void deliveryQualityService.backfillAll().catch((err) => log.warn('[deliveries] rattrapage des tâches qualité', err)), stop: () => undefined },
   ];
 
   // Origines autorisées à appeler l'API avec le cookie de session : voir origin.ts (aussi appliqué aux WebSockets).

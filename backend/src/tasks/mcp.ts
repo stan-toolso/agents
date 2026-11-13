@@ -7,6 +7,9 @@ import { z } from 'zod';
 import { inScope, targetProject, withProjectParam, type ProjectScope } from '../personal/scope.js';
 import type { Project } from '../projects/types.js';
 import { deliveryService } from '../deliveries/service.js';
+import { deliveryQualityService } from '../deliveries/qualityService.js';
+import type { Delivery } from '../deliveries/types.js';
+import type { DeliveryTaskLink } from '../deliveries/qualityRepository.js';
 import { describeCi, pullRequestService, type MergeMethod } from '../git/pullRequests.js';
 import type { MergeApproval } from '../pullRequests/mergeApproval.js';
 import { localCheck, localCheckRefusal } from '../pullRequests/localCheck.js';
@@ -66,7 +69,17 @@ function dependencyLines(t: Task, related: Task[]): string[] {
   return parts;
 }
 
-function detail(t: Task, comments: TaskComment[], attachments: TaskAttachment[], pullRequests: TrackedPullRequest[] = [], reactions: TaskReaction[] = [], projectRepo = '', related: Task[] = []): string {
+/** Rattachement d'une tâche qualité à une livraison (mesure des régressions), en une ligne. */
+export function qualityLinkLine(link: DeliveryTaskLink | null, delivery: Delivery | null): string | null {
+  if (!link) return null;
+  const how = link.source === 'manual' ? 'corrigé à la main' : 'calculé';
+  if (!delivery) return `Tâche qualité rattachée à aucune livraison (${how}).`;
+  const what = delivery.kind === 'deploy' ? 'déploiement' : 'livraison';
+  const at = (delivery.finishedAt ?? delivery.createdAt).toISOString().slice(0, 16).replace('T', ' ');
+  return `Tâche qualité rattachée au ${what} ${delivery.sha ? `${delivery.sha.slice(0, 7)} ` : ''}du ${at} UTC (livraison ${delivery.id}, ${how}).`;
+}
+
+function detail(t: Task, comments: TaskComment[], attachments: TaskAttachment[], pullRequests: TrackedPullRequest[] = [], reactions: TaskReaction[] = [], projectRepo = '', related: Task[] = [], quality: string | null = null): string {
   const own = attachments.filter((a) => !a.commentId);
   const parts = [t.description || '(pas de description)'];
   parts.push(...dependencyLines(t, related));
@@ -74,6 +87,7 @@ function detail(t: Task, comments: TaskComment[], attachments: TaskAttachment[],
   if (t.assignee) parts.push(`Responsable : ${formatPerson(t.assignee)}`);
   if (t.reporter) parts.push(`Rapporteur : ${formatPerson(t.reporter)}`);
   if (t.branch) parts.push(`Branche : ${t.branch}`);
+  if (quality) parts.push(quality);
   if (pullRequests.length) parts.push('Pull requests suivies (pr_update pour les tenir à jour) :', ...pullRequests.map((pr) => describePullRequest(pr, projectRepo)));
   if (t.customFields.length) parts.push('Champs personnalisés :', ...t.customFields.map((f) => `- ${f.key} : ${f.value}`));
   const own_reactions = reactions.filter((r) => !r.commentId);
@@ -171,7 +185,9 @@ export function createTasksMcpServer(project: Project, sessionId: string, sessio
             taskService.reactions(id),
             taskService.findByIds([...t.dependsOnIds, ...t.dependentIds]),
           ]);
-          const content: McpContent[] = [{ type: 'text', text: `${line(t, sessionId)}\n\n${detail(t, comments, attachments, pullRequests, reactions, projectRepo, related)}` }, ...(await imageBlocks([...attachments.filter((a) => !a.commentId), ...attachments.filter((a) => a.commentId)]))];
+          const link = await deliveryQualityService.linkOf(id).catch(() => null);
+          const quality = qualityLinkLine(link, link?.deliveryId ? await deliveryService.get(link.deliveryId).catch(() => null) : null);
+          const content: McpContent[] = [{ type: 'text', text: `${line(t, sessionId)}\n\n${detail(t, comments, attachments, pullRequests, reactions, projectRepo, related, quality)}` }, ...(await imageBlocks([...attachments.filter((a) => !a.commentId), ...attachments.filter((a) => a.commentId)]))];
           return { content };
         } catch (err) {
           return failure(`Erreur : ${(err as Error).message}`);

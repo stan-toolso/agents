@@ -48,6 +48,8 @@ import { parseRepoFullName, pullRequestService, type MergeCleanup, type MergeMet
 import { foreignRepoOf, projectRepoName, trackedPullRequestService } from '../pullRequests/service.js';
 import { pullRequestSession, requestConflictResolution } from '../pullRequests/conflicts.js';
 import { deliveryService } from '../deliveries/service.js';
+import { deliveryQualityService, type QualityReport, type QualitySettings } from '../deliveries/qualityService.js';
+import type { DeliveryTaskLink } from '../deliveries/qualityRepository.js';
 import type { Delivery, DeployConfig, DeployConfigInput } from '../deliveries/types.js';
 import { ciVerdict } from '../git/pullRequests.js';
 import { requestGitConflictResolution } from '../git/conflicts.js';
@@ -484,6 +486,7 @@ export const resolvers = {
       return t.sessionIds.map((id) => sessions.find((s) => s.id === id)).filter((s): s is Session => Boolean(s));
     },
     resumableSession: (t: Task) => resumableTaskSession(t),
+    qualityDelivery: async (t: Task, _: unknown, ctx: Ctx) => (await loadersOf(ctx).taskDeliveryLink(t.id)) ?? null,
     sessions: async (t: Task) => {
       const ids = await taskService.sessionIds(t.id);
       const sessions = ids.length ? await sessionService.list({ ids, archived: 'all', limit: 500 }) : [];
@@ -620,6 +623,21 @@ export const resolvers = {
     task: (d: Delivery) => (d.taskId ? taskService.get(d.taskId).catch(() => null) : null),
     cancellable: (d: Delivery) => (d.status === 'queued' || d.status === 'running') && !d.steps.some((st) => st.phase === 'command'),
     durationSeconds: (d: Delivery) => (d.startedAt ? Math.round(((d.finishedAt ?? new Date()).getTime() - d.startedAt.getTime()) / 1000) : null),
+    qualityTasks: async (d: Delivery, _: unknown, ctx: Ctx) => (await loadersOf(ctx).deliveryQualityTasks(d.id)) ?? [],
+  },
+  DeliveryQualityTask: {
+    task: (l: DeliveryTaskLink, _: unknown, ctx: Ctx) => loadersOf(ctx).task(l.taskId).then((t) => t ?? null),
+    delivery: (l: DeliveryTaskLink) => (l.deliveryId ? deliveryService.get(l.deliveryId) : null),
+    source: (l: DeliveryTaskLink) => l.source.toUpperCase(),
+    linkedBy: (l: DeliveryTaskLink, _: unknown, ctx: Ctx) => userOrNull(ctx, l.linkedById),
+    linkedAt: (l: DeliveryTaskLink) => l.createdAt,
+  },
+  DeliveryQualitySettings: {
+    updatedBy: (s: QualitySettings, _: unknown, ctx: Ctx) => userOrNull(ctx, s.updatedById),
+  },
+  DeliveryQualityAuthor: {
+    user: (a: QualityReport['byAuthor'][number], _: unknown, ctx: Ctx) => userOrNull(ctx, a.authorId),
+    isAgent: async (a: QualityReport['byAuthor'][number], _: unknown, ctx: Ctx) => (await userOrNull(ctx, a.authorId))?.kind === 'agent',
   },
   DeployConfig: {
     updatedBy: (c: DeployConfig, _: unknown, ctx: Ctx) => userOrNull(ctx, c.updatedById),
@@ -1155,6 +1173,14 @@ export const resolvers = {
       await requireProject(ctx, args.projectId);
       return deliveryService.getConfig(args.projectId);
     },
+    deliveryQualitySettings: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId);
+      return deliveryQualityService.settings(args.projectId);
+    },
+    deliveryQualityReport: async (_: unknown, args: { projectId: string; days?: number | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId);
+      return deliveryQualityService.report(args.projectId, args.days ?? 90);
+    },
     ciStatus: async (_: unknown, args: { projectId: string; ref?: string | null }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId);
       const project = await projectService.get(args.projectId);
@@ -1688,6 +1714,20 @@ export const resolvers = {
     setDeployConfig: async (_: unknown, args: { projectId: string; input?: DeployConfigInput | null }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId, 'admin');
       return deliveryService.setConfig(args.projectId, args.input ?? null, requireUser(ctx).id);
+    },
+    setDeliveryQualitySettings: async (_: unknown, args: { projectId: string; tags?: string[] | null; windowHours?: number | null; reset?: boolean | null }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'admin');
+      return deliveryQualityService.setSettings(args.projectId, args.reset ? null : { tags: args.tags, windowHours: args.windowHours }, requireUser(ctx).id);
+    },
+    setTaskDelivery: async (_: unknown, args: { taskId: string; deliveryId?: string | null; reset?: boolean | null }, ctx: Ctx) => {
+      const task = await taskService.get(args.taskId);
+      await requireProject(ctx, task.projectId, 'member');
+      await deliveryQualityService.setLink(task.id, args.deliveryId ?? null, requireUser(ctx).id, { reset: Boolean(args.reset) });
+      return task;
+    },
+    backfillDeliveryQualityTasks: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
+      await requireProject(ctx, args.projectId, 'admin');
+      return deliveryQualityService.backfill(args.projectId);
     },
     watchPullRequests: async (_: unknown, args: { projectId: string }, ctx: Ctx) => {
       await requireProject(ctx, args.projectId);
