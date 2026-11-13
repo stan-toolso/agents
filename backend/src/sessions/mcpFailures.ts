@@ -27,6 +27,7 @@ const LABELS: Record<string, string> = {
   conversations: 'Outils des conversations',
   projects: 'Outils des projets',
   chrome: 'Outils du navigateur Chrome',
+  schedules: 'Outils des planifications',
 };
 
 export interface McpServerFailure {
