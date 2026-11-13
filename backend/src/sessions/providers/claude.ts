@@ -67,6 +67,7 @@ import type { Attachment } from '../types.js';
 import type { DescribeContext, ProviderDescription, RunContext, RunningHandle, RunResult, SessionProvider } from './provider.js';
 import { isNoise } from './claudeNoise.js';
 import { BackgroundHold, describeBackgroundTasks } from './backgroundTasks.js';
+import { assistantText, selfTurnNotice, wakeTrigger } from './selfTurn.js';
 import { conversationJournalPath, missedMessages, readJournal, readSubagentEntries } from './cliJournal.js';
 import { isEmptyNotificationResult, isLastResultEcho, resultError } from './claudeResult.js';
 import { liveDraftService } from '../live.js';
@@ -503,6 +504,12 @@ export class ClaudeProvider implements SessionProvider {
     let lastStreamedAt = new Date().toISOString();
     // Conversation du CLI (reprise, ou nouvelle dès son premier message) : nom de son journal.
     let conversationId: string | null = resumeId;
+    // Tâche de fond terminée entre deux tours (commande Bash, sous-agent, surveillance) : le CLI va relancer l'agent de
+    // lui-même, sans instruction d'une personne. Résumé de la notification, oublié dès qu'une instruction arrive.
+    let pendingWake: string | null = null;
+    // Tour en cours ouvert par le CLI lui-même (réveil sur une tâche de fond) : ce qui l'a déclenché et le dernier texte
+    // de l'agent, pour prévenir la personne à sa fin (selfTurn.ts).
+    let selfTurn: { trigger: string; text: string | null } | null = null;
     await ctx.setActivity('busy');
     // Sous-agents en arrière-plan encore vivants (backgroundTasks.ts) : après la fin d'un tour, la session reste « au
     // travail » tant qu'il en reste, puis jusqu'au tour que le CLI ouvre pour traiter leur compte rendu.
@@ -548,8 +555,15 @@ export class ClaudeProvider implements SessionProvider {
           if (!turnInProgress && (message.type === 'stream_event' || message.type === 'assistant') && !message.parent_tool_use_id) {
             turnInProgress = true;
             hold.turnStarted();
+            // Réveil sur une tâche de fond : repère dans le transcript (le tour ne commence par aucune instruction).
+            if (pendingWake !== null) {
+              selfTurn = { trigger: pendingWake, text: null };
+              pendingWake = null;
+              await ctx.emit('system', { selfTurn: true, trigger: selfTurn.trigger, message: selfTurnNotice(selfTurn.trigger) });
+            }
             await ctx.setActivity('busy');
           }
+          if (!turnInProgress && message.type === 'system' && message.subtype === 'task_notification') pendingWake = wakeTrigger(message);
           if (message.type === 'system' && message.subtype === 'background_tasks_changed') hold.setTasks(message.tasks);
           if (message.type === 'stream_event') {
             liveDraftService.apply(ctx.session.id, message.event, message.parent_tool_use_id);
@@ -558,6 +572,10 @@ export class ClaudeProvider implements SessionProvider {
           if (message.type === 'assistant' || message.type === 'result') liveDraftService.clear(ctx.session.id);
           await this.handleMessage(ctx, message, run);
           await this.trackRuleUsage(ctx, message, ruleUsage).catch((e) => log.error('[permissions] suivi des règles', e));
+          if (selfTurn && message.type === 'assistant' && !message.parent_tool_use_id) {
+            const text = assistantText(message);
+            if (text) selfTurn.text = text;
+          }
           if (message.type === 'assistant' && !message.parent_tool_use_id) {
             const u = (message.message as { usage?: { input_tokens?: number; cache_creation_input_tokens?: number | null; cache_read_input_tokens?: number | null } }).usage;
             if (u && typeof u.input_tokens === 'number') contextTokens = u.input_tokens + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
@@ -579,6 +597,10 @@ export class ClaudeProvider implements SessionProvider {
             // Tour clos, sous-agents encore au travail : la session n'est pas inactive (pas de garage pendant un drainage,
             // de fin d'exécution planifiée, d'archivage ni de fin pour inactivité).
             const held = hold.turnEnded();
+            // Fin d'un tour que l'agent a repris de lui-même : personne ne l'attendait, Skipper prévient (selfTurn.ts).
+            const woke = selfTurn;
+            selfTurn = null;
+            if (woke && !message.is_error) void ctx.onSelfTurnEnded?.(woke).catch((err) => log.error('[sessions] notification de reprise autonome', err));
             if (held.hold) {
               if (held.first) await ctx.emit('system', { notice: true, message: `Tour terminé, ${describeBackgroundTasks(hold.live)} : la session reste au travail jusqu'à leur compte rendu.` });
               continue;
@@ -640,6 +662,7 @@ export class ClaudeProvider implements SessionProvider {
         await (await claudeSettings.forSession(accounts?.claudeUserId ?? null)).assertBudgetAvailable();
         await projectBudget.assertAvailable(ctx.project.id);
         queue.push(await this.instruction(ctx, text, attachments, null, takeNotes(), author));
+        pendingWake = null;
         turnInProgress = true;
         hold.turnStarted();
         await ctx.setActivity('busy');

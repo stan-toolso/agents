@@ -28,6 +28,7 @@ const icons: Record<string, string> = {
   'pull_request.closed': 'bi-x-circle',
   'session.completed': 'bi-check-circle',
   'session.failed': 'bi-x-octagon',
+  'session.self_turn': 'bi-alarm',
   'session.created': 'bi-chat-dots',
   'page.shared': 'bi-file-earmark-richtext',
   'page.commented': 'bi-chat-left-text',

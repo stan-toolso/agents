@@ -21,6 +21,7 @@ const KNOWN_TYPES = [
   'request.created',
   'session.completed',
   'session.failed',
+  'session.self_turn',
   'session.created',
   'task.created',
   'task.completed',

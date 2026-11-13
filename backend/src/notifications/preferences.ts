@@ -21,7 +21,7 @@ export interface PushCategory {
 
 export const PUSH_CATEGORIES: readonly PushCategory[] = [
   { key: 'requests', label: 'Demandes d’un agent', description: 'Autorisation d’un outil, question ou saisie attendue : la session reste en attente jusqu’à votre réponse.', types: ['request.created'], adminsOnly: false },
-  { key: 'sessions', label: 'Sessions terminées ou en erreur', description: 'Fin de tour d’une session, ou arrêt sur une erreur.', types: ['session.completed', 'session.failed'], adminsOnly: false },
+  { key: 'sessions', label: 'Sessions terminées ou en erreur', description: 'Fin de tour d’une session, arrêt sur une erreur, ou agent qui a repris de lui-même (réveil qu’il s’était programmé, fin d’une tâche de fond) et rendu compte.', types: ['session.completed', 'session.failed', 'session.self_turn'], adminsOnly: false },
   { key: 'subagents', label: 'Sessions lancées par un agent', description: 'Un agent a délégué du travail à une autre session.', types: ['session.created'], adminsOnly: false },
   { key: 'tasks', label: 'Tâches', description: 'Tâche créée ou terminée par un agent, agent arrêté sans terminer sa tâche, tâche débloquée lancée automatiquement (ou lancement impossible), réveil d’une tâche mise en attente.', types: ['task.created', 'task.completed', 'task.stalled', 'task.unblocked', 'task.autostart_failed', 'task.woken', 'task.wake_due'], adminsOnly: false },
   { key: 'mentions', label: 'Mentions et réponses', description: 'Quelqu’un vous mentionne dans le fil d’une tâche ou dans un canal de conversation, ou répond à l’un de vos messages.', types: ['task.mentioned', 'task.replied', 'conversation.mentioned', 'conversation.replied'], adminsOnly: false },

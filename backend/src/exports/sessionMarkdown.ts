@@ -270,7 +270,8 @@ export function sessionToMarkdown(session: MarkdownSession, events: MarkdownEven
         else if (p.subtype === 'task_notification' && p.summary) push(`_⏺ ${String(p.summary)}_`);
         break;
       case 'system':
-        if (p.notice) push(`_⚠ ${String(p.message ?? '')}_`);
+        if (p.selfTurn) push(`_⏰ ${String(p.message ?? '')}_`);
+        else if (p.notice) push(`_⚠ ${String(p.message ?? '')}_`);
         break;
       case 'stdout':
         push(fence(String(p.text ?? '')));

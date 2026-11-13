@@ -5,6 +5,8 @@ import { namesFromText } from '../worksessions/names.js';
 import { worksessionService } from '../worksessions/service.js';
 import { pubSub } from '../pubsub.js';
 import { notificationService } from '../notifications/service.js';
+import { userRepository } from '../users/repository.js';
+import { selfTurnExcerpt, selfTurnNotice } from './providers/selfTurn.js';
 import { ANSWERED_BY, requestService } from '../requests/service.js';
 import { removeSessionAttachments, storeAttachments } from './attachments.js';
 import { sessionRepository } from './repository.js';
@@ -60,6 +62,18 @@ const finishing = new Map<string, Promise<void>>();
  */
 const archiveWhenDone = new Set<string>();
 let archiveWhenDoneListener: ((id: string) => Promise<unknown>) | null = null;
+
+/**
+ * Personne à prévenir quand l'agent reprend de lui-même : celle qui a pris la main, sinon celle qui a demandé le travail,
+ * sinon la propriétaire quand c'est une personne. Personne pour un agent qui travaille seul.
+ */
+async function selfTurnRecipient(session: Pick<Session, 'takenOverById' | 'requestedById' | 'ownerId'>): Promise<string | null> {
+  if (session.takenOverById) return session.takenOverById;
+  if (session.requestedById) return session.requestedById;
+  if (!session.ownerId) return null;
+  const owner = await userRepository.findById(session.ownerId);
+  return owner && owner.kind !== 'agent' ? owner.id : null;
+}
 
 /** Fin d'une session (processus terminé : terminée, arrêtée ou en erreur ; ni garée ni interrompue). */
 export interface SessionEnd {
@@ -733,6 +747,23 @@ export const sessionService = {
           return response;
         },
         isServerStopping: () => stopping,
+        onSelfTurnEnded: async ({ trigger, text }) => {
+          // Exécution planifiée : son compte rendu de fin a sa propre notification.
+          if (scheduledRuns.has(id)) return;
+          const current = (await sessionRepository.findById(id)) ?? started;
+          const userId = await selfTurnRecipient(current);
+          if (!userId) return;
+          await notificationService.notify({
+            type: 'session.self_turn',
+            title: `« ${current.name} » a repris de lui-même`,
+            message: selfTurnExcerpt(text) ?? selfTurnNotice(trigger),
+            link: `/sessions/${id}`,
+            projectId: current.projectId,
+            sessionId: id,
+            userId,
+            payload: { trigger },
+          });
+        },
       });
     } catch (err) {
       slots.delete(id);
