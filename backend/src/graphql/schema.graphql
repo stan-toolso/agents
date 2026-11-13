@@ -435,8 +435,14 @@ type Task {
   autoStartWhenUnblocked: Boolean!
   "Personne (ou agent) au nom de qui la session sera lancée : celle qui a armé l'option."
   autoStartBy: User
-  "« Agent arrêté » : en cours, des sessions en ont la charge mais aucune ne tourne plus (et aucune pull request n'est ouverte) ; fin de la plus récente. Null : rien à signaler."
+  "« Agent arrêté » (à traiter) : en cours, des sessions en ont la charge mais aucune ne tourne plus (et aucune pull request n'est ouverte), et rien ne dit qu'elle attend (arrêt en erreur, réveil passé, ou parti sans étiquette d'état ni compte rendu) ; fin de la plus récente. Null : rien à signaler."
   stalledSince: DateTime
+  "« En attente » : même situation, mais l'agent a dit qu'il attendait (date de réveil future, étiquette d'état ou compte rendu d'une session dans le fil, 7 jours au plus sans date) ; pas à traiter. Null sinon."
+  waitingSince: DateTime
+  "Date de réveil : l'agent qui tenait la tâche est alors reconvoqué (une session de personne revient dans « À traiter »)."
+  wakeAt: DateTime
+  "Ce qu'il faudra vérifier au réveil."
+  wakeNote: String
   createdAt: DateTime!
   updatedAt: DateTime!
   completedAt: DateTime
@@ -494,6 +500,10 @@ input UpdateTaskInput {
   dependsOnIds: [ID!]
   "Arme (au nom de la personne connectée) ou désarme le lancement automatique quand la tâche est débloquée."
   autoStartWhenUnblocked: Boolean
+  "Date de réveil ISO 8601 (absente : inchangée ; null ou vide : retirée), dans les 90 jours."
+  wakeAt: String
+  "Ce qu'il faudra vérifier au réveil (null ou vide : retirée)."
+  wakeNote: String
 }
 
 "Clé d'API d'un projet (API REST des tâches) ; le secret n'est montré qu'à la création."
@@ -2195,7 +2205,10 @@ type InboxCounts {
   stalledTasks: Int!
   "Pull requests ouvertes (à fusionner, brouillons compris)."
   pullRequests: Int!
+  "Ce qui est à traiter (sans les tâches en attente)."
   total: Int!
+  "Tâches mises en attente par leur agent : montrées à part, hors du total."
+  waitingTasks: Int!
 }
 
 "Ce qui attend une action humaine sur les projets de l'utilisateur."
@@ -2209,6 +2222,8 @@ type Inbox {
   "Tâches en cours dont l'agent s'est arrêté sans les terminer (la plus anciennement arrêtée d'abord)."
   tasks: [Task!]!
   pullRequests: [TrackedPullRequest!]!
+  "Tâches mises en attente par leur agent (pas à traiter), le réveil le plus proche d'abord."
+  waitingTasks: [Task!]!
 }
 
 # ---- Tableau de bord ----------------------------------------------------------------------------

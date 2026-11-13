@@ -448,8 +448,14 @@ export interface Task {
   /** Confiée automatiquement à une session quand sa dernière dépendance est terminée. */
   autoStartWhenUnblocked: boolean;
   autoStartBy: { id: string; name: string } | null;
-  /** « Agent arrêté » : en cours, mais aucune session en charge ne tourne plus (ni PR ouverte) ; fin de la plus récente. */
+  /** « Agent arrêté » (à traiter) : en cours, aucune session en charge ne tourne plus (ni PR ouverte), et rien ne dit qu'elle attend. */
   stalledSince: string | null;
+  /** « En attente » : même situation, mais l'agent a dit ce qu'il attendait (réveil daté, étiquette d'état, compte rendu). */
+  waitingSince: string | null;
+  /** Date de réveil : l'agent qui la tenait est alors reconvoqué. */
+  wakeAt: string | null;
+  /** Ce qu'il faudra vérifier au réveil. */
+  wakeNote: string | null;
 }
 
 /** Tâche citée par une autre (dépendance). */
@@ -1877,6 +1883,9 @@ export const TASK_FIELDS = gql`
       name
     }
     stalledSince
+    waitingSince
+    wakeAt
+    wakeNote
   }
 `;
 
@@ -2833,7 +2842,10 @@ export interface InboxCounts {
   interruptedSessions: number;
   stalledTasks: number;
   pullRequests: number;
+  /** Ce qui est à traiter (sans les tâches en attente). */
   total: number;
+  /** Tâches mises en attente par leur agent, hors du total. */
+  waitingTasks: number;
 }
 
 export interface Inbox {
@@ -2844,6 +2856,8 @@ export interface Inbox {
   /** Tâches « agent arrêté » : en cours, sans session qui tourne. */
   tasks: Task[];
   pullRequests: TrackedPullRequest[];
+  /** Tâches en attente (pas à traiter), le réveil le plus proche d'abord. */
+  waitingTasks: Task[];
 }
 
 /** Compteurs seuls, sondés par la sidebar (badge de « À traiter »). */
@@ -2856,6 +2870,7 @@ export const INBOX_COUNTS = gql`
       stalledTasks
       pullRequests
       total
+      waitingTasks
     }
   }
 `;
@@ -2874,6 +2889,7 @@ export const INBOX = gql`
         interruptedSessions
         pullRequests
         total
+        waitingTasks
       }
       requests {
         ...RequestFields
@@ -2886,6 +2902,9 @@ export const INBOX = gql`
       }
       pullRequests {
         ...TrackedPullRequestFields
+      }
+      waitingTasks {
+        ...TaskFields
       }
     }
   }

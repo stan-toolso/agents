@@ -5,7 +5,8 @@ import { Link } from 'react-router-dom';
 import RequestCard from '../components/RequestCard';
 import { TrackedPullRequestChip } from '../components/TrackedPullRequests';
 import { useDialogs } from '../components/Dialogs';
-import { INBOX, RESUME_SESSION, UPDATE_TASK, type Inbox } from '../graphql/operations';
+import { INBOX, RESUME_SESSION, UPDATE_TASK, type Inbox, type Task } from '../graphql/operations';
+import { waitingText } from '../components/TaskBadges';
 import { useTaskLauncher } from '../components/TaskLaunchModal';
 import { buildInboxItems, filterInboxItems, inboxProjects, type InboxItem, type InboxKind, type SessionReason } from '../lib/inbox';
 import { timeAgo } from '../lib/humanize';
@@ -74,7 +75,39 @@ export default function InboxPage() {
       {items.map((item) => (
         <InboxRow key={item.key} item={item} />
       ))}
+      {inbox && (kind === '' || kind === 'task') && <WaitingTasks tasks={(inbox.waitingTasks ?? []).filter((t) => !effectiveProject || t.project.id === effectiveProject)} />}
     </>
+  );
+}
+
+/**
+ * Tâches en attente : en cours, sans agent au travail, mais l'agent a dit ce qu'il attendait (réveil daté, étiquette
+ * d'état, compte rendu). Rien à faire avant le réveil : listées à part, repliées, hors du compteur. Au réveil, l'agent
+ * qui la tenait est reconvoqué (ou elle revient en « Tâches sans agent » pour une personne).
+ */
+function WaitingTasks({ tasks }: { tasks: Task[] }) {
+  const [open, setOpen] = useState(false);
+  if (!tasks.length) return null;
+  return (
+    <div className="inbox-waiting mt-4">
+      <button type="button" className="btn btn-link p-0 text-secondary text-decoration-none" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        <i className={`bi bi-chevron-${open ? 'down' : 'right'} me-1`} />
+        En attente ({tasks.length}) <span className="small">· pas à traiter : l’agent attend quelque chose, il sera réveillé</span>
+      </button>
+      {open &&
+        tasks.map((task) => (
+          <div key={task.id} className="inbox-item">
+            <i className="bi bi-hourglass-split icon text-secondary" />
+            <div className="main">
+              <Link to={`/tasks/${task.id}`} className="title">{task.title}</Link>
+              <div className="meta">
+                {task.project.name} · {waitingText(task)}
+                {task.session && <> · <Link to={`/sessions/${task.session.id}`}>{task.session.name}</Link></>}
+              </div>
+            </div>
+          </div>
+        ))}
+    </div>
   );
 }
 
@@ -129,7 +162,7 @@ function StalledTaskItem({ item }: { item: Extract<InboxItem, { kind: 'task' }> 
       <div className="main">
         <Link to={`/tasks/${task.id}`} className="title">{task.title}</Link>
         <div className="meta">
-          {task.project.name} · en cours, mais l’agent s’est arrêté sans la terminer
+          {task.project.name} · {task.wakeAt && new Date(task.wakeAt) <= new Date() ? `réveil passé (${timeAgo(task.wakeAt)})${task.wakeNote ? ` : ${task.wakeNote.slice(0, 160)}` : ''}` : 'en cours, mais l’agent s’est arrêté sans la terminer'}
           {task.session && <> · <Link to={`/sessions/${task.session.id}`}>{task.session.name}</Link></>}
           {' · '}{timeAgo(item.at)}
         </div>

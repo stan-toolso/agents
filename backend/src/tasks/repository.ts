@@ -33,6 +33,9 @@ interface Row {
   auto_start_when_unblocked: boolean | null;
   auto_start_by_id: string | null;
   stalled_since?: Date | null;
+  waiting_since?: Date | null;
+  wake_at?: Date | null;
+  wake_note?: string | null;
   created_at: Date;
   updated_at: Date;
   completed_at: Date | null;
@@ -118,6 +121,9 @@ const toTask = (r: Row): Task => ({
   autoStartWhenUnblocked: Boolean(r.auto_start_when_unblocked),
   autoStartById: r.auto_start_by_id ?? null,
   stalledSince: r.stalled_since ?? null,
+  waitingSince: r.waiting_since ?? null,
+  wakeAt: r.wake_at ?? null,
+  wakeNote: r.wake_note ?? null,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
   completedAt: r.completed_at,
@@ -128,17 +134,47 @@ const toTask = (r: Row): Task => ({
 /** Statuts d'une session qui travaille encore (ou va travailler) : elle tient la tâche. */
 export const ACTIVE_SESSION_STATUSES = ['pending', 'queued', 'running'] as const;
 
+/** Durée d'une attente implicite (étiquette d'état ou compte rendu d'agent, sans date de réveil) avant le retour dans « À traiter ». */
+export const IMPLICIT_WAIT_DAYS = 7;
+
 /**
- * « Agent arrêté » (expression SQL sur l'alias `t`) : tâche en cours dont des sessions ont la charge, mais aucune ne
- * tourne plus (terminée, arrêtée, en erreur, interrompue), et sans pull request ouverte (la suite est alors la fusion,
- * pas l'agent). Vaut la fin la plus récente de ces sessions, null sinon.
+ * Tâche en cours sans agent au travail (jointure latérale sur l'alias `t`, colonnes `att.stalled_since` et
+ * `att.waiting_since`) : des sessions en ont la charge mais aucune ne tourne plus (terminée, arrêtée, en erreur,
+ * interrompue), et aucune pull request n'est ouverte (la suite est alors la fusion, pas l'agent). Deux cas :
+ *
+ * - « agent arrêté » (`stalled_since`, à traiter) : la dernière session en charge s'est arrêtée en erreur ou a été
+ *   interrompue ; ou la date de réveil posée est passée ; ou l'agent est parti sans rien dire (ni étiquette d'état, ni
+ *   compte rendu dans le fil) ; ou l'attente implicite dure depuis plus de IMPLICIT_WAIT_DAYS jours ;
+ * - « en attente » (`waiting_since`, pas à traiter) : l'agent s'est arrêté proprement en posant une date de réveil
+ *   future (`wake_at`), ou en laissant une étiquette d'état ou un compte rendu d'une session dans le fil depuis sa prise
+ *   en charge (un agent de passage, une exécution planifiée qui rend compte, comptent aussi).
+ *
+ * Les deux valent la fin la plus récente des sessions en charge (le réveil, s'il est passé et plus récent).
  */
-export const STALLED_SINCE_SQL = `(CASE WHEN t.status = 'in_progress'
-    AND NOT EXISTS (SELECT 1 FROM pull_requests pr WHERE pr.task_id = t.id AND pr.status = 'open')
-  THEN (SELECT CASE WHEN count(*) > 0 AND bool_and(s.status NOT IN (${ACTIVE_SESSION_STATUSES.map((x) => `'${x}'`).join(', ')}))
-                    THEN max(COALESCE(s.ended_at, s.updated_at)) END
-          FROM task_sessions ts JOIN sessions s ON s.id = ts.session_id
-         WHERE ts.task_id = t.id AND ts.in_charge_since IS NOT NULL) END)`;
+export const ATTENTION_JOIN = `LEFT JOIN LATERAL (
+  SELECT CASE WHEN x.kind = 'stalled' THEN x.since END AS stalled_since, CASE WHEN x.kind = 'waiting' THEN x.since END AS waiting_since
+    FROM (
+      SELECT CASE
+               WHEN c.last_status IN ('failed', 'interrupted') THEN 'stalled'
+               WHEN t.wake_at IS NOT NULL THEN CASE WHEN t.wake_at > now() THEN 'waiting' ELSE 'stalled' END
+               WHEN (t.status_tag IS NOT NULL OR c.last_note >= c.charge_start)
+                    AND GREATEST(c.ended, c.last_note) > now() - interval '${IMPLICIT_WAIT_DAYS} days' THEN 'waiting'
+               ELSE 'stalled'
+             END AS kind,
+             CASE WHEN t.wake_at IS NOT NULL AND t.wake_at <= now() THEN GREATEST(c.ended, t.wake_at) ELSE c.ended END AS since
+        FROM (
+          SELECT max(COALESCE(s.ended_at, s.updated_at)) AS ended,
+                 (array_agg(s.status::text ORDER BY COALESCE(s.ended_at, s.updated_at) DESC))[1] AS last_status,
+                 max(ts.in_charge_since) AS charge_start,
+                 (SELECT max(m.created_at) FROM messages m JOIN conversations cv ON cv.id = m.conversation_id
+                   WHERE cv.task_id = t.id AND m.author_session_id IS NOT NULL) AS last_note
+            FROM task_sessions ts JOIN sessions s ON s.id = ts.session_id
+           WHERE ts.task_id = t.id AND ts.in_charge_since IS NOT NULL
+          HAVING bool_and(s.status NOT IN (${ACTIVE_SESSION_STATUSES.map((x) => `'${x}'`).join(', ')}))
+        ) c
+    ) x
+   WHERE t.status = 'in_progress' AND NOT EXISTS (SELECT 1 FROM pull_requests pr WHERE pr.task_id = t.id AND pr.status = 'open')
+) att ON true`;
 
 /** Colonnes d'une tâche avec le nombre de messages de son fil (conversation de la tâche). */
 const SELECT = `SELECT t.*, (SELECT count(*) FROM messages m JOIN conversations cv ON cv.id = m.conversation_id WHERE cv.task_id = t.id) AS comment_count,
@@ -147,7 +183,7 @@ const SELECT = `SELECT t.*, (SELECT count(*) FROM messages m JOIN conversations 
   (SELECT array_agg(d.depends_on_task_id ORDER BY d.created_at, d.depends_on_task_id) FROM task_dependencies d JOIN tasks dt ON dt.id = d.depends_on_task_id
     WHERE d.task_id = t.id AND dt.status <> 'done') AS blocked_by_ids,
   (SELECT array_agg(d.task_id ORDER BY d.created_at, d.task_id) FROM task_dependencies d WHERE d.depends_on_task_id = t.id) AS dependent_ids,
-  ${STALLED_SINCE_SQL} AS stalled_since FROM tasks t`;
+  att.stalled_since, att.waiting_since FROM tasks t ${ATTENTION_JOIN}`;
 /** Tri : urgent d'abord, puis par date de création. */
 const ORDER = `ORDER BY CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, t.created_at ASC`;
 
@@ -308,7 +344,8 @@ export const taskRepository = {
       where.push(`(t.reporter_name ILIKE $${p} OR t.reporter_email ILIKE $${p})`);
     }
     if (filter.assigneeEmail) where.push(`lower(t.assignee_email) = lower($${params.push(filter.assigneeEmail)})`);
-    if (filter.stalled) where.push(`${STALLED_SINCE_SQL} IS NOT NULL`);
+    if (filter.stalled) where.push('att.stalled_since IS NOT NULL');
+    if (filter.waiting) where.push('att.waiting_since IS NOT NULL');
     params.push(Math.min(filter.limit ?? 200, 1000));
     const { rows } = await pool.query<Row>(`${SELECT} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ${ORDER} LIMIT $${params.length}`, params);
     return rows.map(toTask);
@@ -349,9 +386,17 @@ export const taskRepository = {
       sets.push(`auto_start_when_unblocked = $${params.push(input.autoStartWhenUnblocked)}`);
       sets.push(`auto_start_by_id = $${params.push(input.autoStartWhenUnblocked ? (input.autoStartById ?? null) : null)}`);
     }
+    if (input.wakeAt !== undefined) {
+      // Une nouvelle date de réveil sera traitée à son tour (woken_at oublié) ; sans date, la note n'a plus d'objet.
+      sets.push(`wake_at = $${params.push(input.wakeAt)}`, 'woken_at = NULL');
+      if (input.wakeAt === null && input.wakeNote === undefined) sets.push('wake_note = NULL');
+    }
+    if (input.wakeNote !== undefined) sets.push(`wake_note = $${params.push(input.wakeNote)}`);
     if (input.status != null) {
       sets.push(`status = $${params.push(input.status)}`);
       sets.push(...statusDateSets(input.status));
+      // L'attente ne vaut que pour une tâche en cours : elle tombe quand la tâche change de statut.
+      if (input.status !== 'in_progress' && input.wakeAt === undefined) sets.push('wake_at = NULL', 'wake_note = NULL', 'woken_at = NULL');
     }
     const client = await pool.connect();
     try {
@@ -407,6 +452,21 @@ export const taskRepository = {
       [id],
     );
     return rows[0] ? { armed: true, byId: rows[0].auto_start_by_id } : { armed: false, byId: null };
+  },
+
+  /**
+   * Réveils échus (tâches en cours dont la date de réveil est passée et pas encore traitée) : marqués traités d'un
+   * coup, pour qu'un seul appelant réveille chaque tâche (bleu/vert, tours qui se chevauchent).
+   */
+  async claimDueWakes(limit = 20): Promise<string[]> {
+    const { rows } = await pool.query<{ id: string }>(
+      `UPDATE tasks SET woken_at = now() WHERE id IN (
+         SELECT id FROM tasks WHERE status = 'in_progress' AND wake_at IS NOT NULL AND wake_at <= now() AND (woken_at IS NULL OR woken_at < wake_at)
+          ORDER BY wake_at LIMIT $1 FOR UPDATE SKIP LOCKED)
+       RETURNING id`,
+      [limit],
+    );
+    return rows.map((r) => r.id);
   },
 
   /** Étiquettes distinctes des tâches des projets (les plus utilisées d'abord), pour les suggestions. */

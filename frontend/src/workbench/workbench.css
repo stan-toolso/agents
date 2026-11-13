@@ -1259,6 +1259,7 @@ a.task-mention:hover { background: rgba(var(--cc-accent-rgb), 0.24); color: var(
 /* Tâche bloquée par des dépendances non terminées (TaskBlockedBadge), et listes de tâches liées (TaskRefList). */
 .task-blocked { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 600; white-space: nowrap; color: var(--cc-yellow); }
 .task-stalled { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 600; white-space: nowrap; color: var(--cc-red); }
+.task-waiting { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 600; white-space: nowrap; color: var(--cc-dim); }
 .task-ref-list { list-style: none; padding: 0; margin: 0; }
 .task-ref-list li { display: flex; align-items: center; gap: 6px; padding: 1px 0; min-width: 0; }
 .task-ref-list li .task-status { flex: 0 0 auto; }

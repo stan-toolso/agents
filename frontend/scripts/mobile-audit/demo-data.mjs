@@ -356,6 +356,12 @@ const defaultEvents = (s) => {
 let taskSeq = 0;
 const tasks = [];
 function task(p, title, status, priority, opts = {}) {
+  const idleSince = () => {
+    const own = opts.sessions ?? [];
+    if (status !== 'IN_PROGRESS' || !own.length || own.some((s) => ['RUNNING', 'PENDING', 'QUEUED'].includes(s.status))) return null;
+    if (pullRequests.some((pr) => pr.task === t && pr.status === 'OPEN')) return null;
+    return own.map((s) => s.endedAt ?? s.updatedAt).sort().at(-1) ?? null;
+  };
   const t = {
     __typename: 'Task',
     id: `t-${++taskSeq}`,
@@ -387,13 +393,13 @@ function task(p, title, status, priority, opts = {}) {
     worksession: () => opts.sessions?.[0]?.worksession ?? null,
     pullRequest: null,
     pullRequests: () => pullRequests.filter((pr) => pr.task === t),
-    // « Agent arrêté » (backend : STALLED_SINCE_SQL) : en cours, des sessions en charge, aucune ne tourne, pas de PR ouverte.
-    stalledSince: () => {
-      const own = opts.sessions ?? [];
-      if (status !== 'IN_PROGRESS' || !own.length || own.some((s) => ['RUNNING', 'PENDING', 'QUEUED'].includes(s.status))) return null;
-      if (pullRequests.some((pr) => pr.task === t && pr.status === 'OPEN')) return null;
-      return own.map((s) => s.endedAt ?? s.updatedAt).sort().at(-1) ?? null;
-    },
+    // Sans agent au travail (backend : ATTENTION_JOIN) : en cours, des sessions en charge, aucune ne tourne, pas de PR
+    // ouverte. « En attente » avec une date de réveil future (opts.wakeAt), « agent arrêté » sinon (simplifié : le
+    // backend tient aussi compte de l'étiquette d'état, d'un compte rendu dans le fil et des sessions en erreur).
+    stalledSince: () => (opts.wakeAt ? null : idleSince()),
+    waitingSince: () => (opts.wakeAt ? idleSince() : null),
+    wakeAt: opts.wakeAt ?? null,
+    wakeNote: opts.wakeNote ?? null,
     createdAt: ago(opts.age ?? 60 * 24 * 3),
     updatedAt: ago(opts.updated ?? 60 * 2),
     completedAt: status === 'DONE' ? ago(opts.updated ?? 60 * 24) : null,
@@ -416,7 +422,7 @@ const T = {
   stripe: task(P.api, 'Passer à l’API Stripe 2026-10', 'DONE', 'HIGH', { sessions: [S.stripe], assignee: U.me, tags: ['stripe'], updated: 60 * 22, statusTag: 'à livrer' }),
   relances: task(P.api, 'Relances automatiques des factures impayées (J+7, J+15, J+30)', 'IN_PROGRESS', 'HIGH', { sessions: [S.relances], assignee: U.me, tags: ['factures'], statusTag: 'bloquée', due: day(-1) }),
   tva: task(P.api, 'TVA intracommunautaire sur les factures B2B', 'TODO', 'MEDIUM', { tags: ['compta'] }),
-  push: task(P.mobile, 'Rappel push la veille du départ en camp', 'IN_PROGRESS', 'HIGH', { sessions: [S.push], assignee: U.lea, tags: ['notifications'] }),
+  push: task(P.mobile, 'Rappel push la veille du départ en camp', 'IN_PROGRESS', 'HIGH', { sessions: [S.push], assignee: U.lea, tags: ['notifications'], statusTag: 'surveillance', wakeAt: ago(-60 * 14), wakeNote: 'vérifier que le rappel de 18 h est bien parti et compter les ouvertures' }),
   cotis: task(P.mobile, 'Paiement des cotisations en trois fois', 'IN_PROGRESS', 'MEDIUM', { sessions: [S.revue], assignee: U.max, tags: ['paiement'], reporter: U.lea }),
   hors: task(P.mobile, 'Mode hors ligne pour la fiche sanitaire', 'TODO', 'LOW', { tags: ['offline'] }),
   ios: task(P.mobile, 'Publier la version 2.4 sur l’App Store', 'CANCELLED', 'MEDIUM', { updated: 60 * 24 * 5 }),
@@ -652,12 +658,14 @@ const live = () => sessions.filter((s) => s.kind === 'SESSION' && !s.archivedAt)
 const pending = () => requests.filter((r) => r.status === 'PENDING');
 const usageDays = Array.from({ length: 30 }, (_, i) => ({ __typename: 'DashboardUsageDay', day: day(i - 29), usd: Math.round((4 + 6 * Math.abs(Math.sin(i * 1.7)) + (i % 7 < 5 ? 3 : 0)) * 100) / 100 }));
 const stalledTasks = () => tasks.filter((t) => t.stalledSince());
+const waitingTasks = () => tasks.filter((t) => t.waitingSince());
 const inboxCounts = () => {
   const c = {
     __typename: 'InboxCounts', requests: pending().length,
     failedSessions: live().filter((s) => s.status === 'FAILED').length, interruptedSessions: live().filter((s) => s.status === 'INTERRUPTED').length,
     stalledTasks: stalledTasks().length,
     pullRequests: pullRequests.filter((x) => x.stage === 'TO_MERGE').length,
+    waitingTasks: waitingTasks().length,
   };
   c.total = c.requests + c.failedSessions + c.interruptedSessions + c.stalledTasks + c.pullRequests;
   return c;
@@ -1030,6 +1038,7 @@ export const demoRoot = {
     __typename: 'Inbox', generatedAt: new Date().toISOString(), counts: inboxCounts(), requests: pending(),
     sessions: live().filter((s) => ['FAILED', 'INTERRUPTED'].includes(s.status)),
     tasks: stalledTasks(),
+    waitingTasks: waitingTasks(),
     pullRequests: pullRequests.filter((x) => x.stage === 'TO_MERGE'),
   }),
   inboxCounts,

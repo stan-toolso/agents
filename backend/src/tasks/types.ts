@@ -59,9 +59,19 @@ export interface Task {
   autoStartById: string | null;
   /**
    * « Agent arrêté » : la tâche est en cours, des sessions en ont la charge mais aucune ne tourne plus (et aucune pull
-   * request n'est ouverte) ; date de fin de la plus récente. Null : rien à signaler.
+   * request n'est ouverte), et rien ne dit qu'elle attend quelque chose (voir `ATTENTION_JOIN`) : à traiter. Date de
+   * fin de la plus récente (ou du réveil passé). Null : rien à signaler.
    */
   stalledSince: Date | null;
+  /**
+   * « En attente » : même situation, mais l'agent a dit qu'il attendait (date de réveil future, étiquette d'état ou
+   * compte rendu dans le fil) ; pas à traiter avant le réveil. Null sinon.
+   */
+  waitingSince: Date | null;
+  /** Date de réveil posée par l'agent (ou une personne) : la tâche revient alors à l'agent qui la tenait, ou dans « À traiter ». */
+  wakeAt: Date | null;
+  /** Ce qu'il faudra vérifier au réveil (transmis à l'agent réveillé). */
+  wakeNote: string | null;
   createdAt: Date;
   updatedAt: Date;
   completedAt: Date | null;
@@ -145,6 +155,10 @@ export interface UpdateTaskInput {
   autoStartWhenUnblocked?: boolean | null;
   /** Rempli par le service d'après l'acteur. */
   autoStartById?: string | null;
+  /** Date de réveil (null : retirée ; absente : inchangée). Une nouvelle date sera traitée même si une précédente l'a été. */
+  wakeAt?: Date | string | null;
+  /** Ce qu'il faudra vérifier au réveil (null : retirée). */
+  wakeNote?: string | null;
 }
 
 export interface TaskFilter {
@@ -165,6 +179,8 @@ export interface TaskFilter {
   tag?: string;
   /** Seulement les tâches « agent arrêté » (`stalledSince` non nul). */
   stalled?: boolean;
+  /** Seulement les tâches « en attente » (`waitingSince` non nul). */
+  waiting?: boolean;
   limit?: number;
 }
 

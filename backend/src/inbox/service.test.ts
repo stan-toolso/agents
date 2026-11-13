@@ -5,7 +5,7 @@ vi.mock('../db/pool.js', () => ({ pool: { query } }));
 vi.mock('../pullRequests/service.js', () => ({ trackedPullRequestService: { countPending: vi.fn(async () => ({ open: 2, pending: 5 })), list: vi.fn(async () => []) } }));
 vi.mock('../requests/service.js', () => ({ requestService: { list: vi.fn(async () => []) } }));
 const listTasks = vi.hoisted(() => vi.fn(async () => [] as unknown[]));
-vi.mock('../tasks/repository.js', () => ({ STALLED_SINCE_SQL: '(stalled)', taskRepository: { list: listTasks } }));
+vi.mock('../tasks/repository.js', () => ({ ATTENTION_JOIN: '', taskRepository: { list: listTasks } }));
 vi.mock('../sessions/service.js', () => ({ sessionService: { get: vi.fn(async (id: string) => ({ id })) } }));
 
 import { inboxService, totalOf } from './service.js';
@@ -14,9 +14,10 @@ describe('file « À traiter »', () => {
   beforeEach(() => query.mockReset());
 
   it('additionne les demandes, sessions, tâches à l’agent arrêté et PR ouvertes (les PR en préparation ne comptent pas)', async () => {
-    query.mockResolvedValueOnce({ rows: [{ requests: '3', failed: '2', interrupted: '1', stalled: '2' }] });
+    query.mockResolvedValueOnce({ rows: [{ requests: '3', failed: '2', interrupted: '1', stalled: '2', waiting: '4' }] });
     const counts = await inboxService.counts(['p1']);
-    expect(counts).toEqual({ requests: 3, failedSessions: 2, interruptedSessions: 1, stalledTasks: 2, pullRequests: 2, total: 10 });
+    // Les tâches en attente sont comptées à part, hors du total.
+    expect(counts).toEqual({ requests: 3, failedSessions: 2, interruptedSessions: 1, stalledTasks: 2, pullRequests: 2, total: 10, waitingTasks: 4 });
   });
 
   it('ne compte ni ne liste les sessions qui attendent simplement des instructions', async () => {
@@ -48,5 +49,24 @@ describe('file « À traiter »', () => {
     const inbox = await inboxService.build(['p1']);
     expect(listTasks).toHaveBeenCalledWith(expect.objectContaining({ projectIds: ['p1'], status: ['in_progress'], stalled: true }));
     expect(inbox.tasks.map((t) => t.id)).toEqual(['t1', 't2']);
+  });
+
+  it('liste à part les tâches en attente, le réveil le plus proche d’abord, puis celles sans date', async () => {
+    query.mockResolvedValue({ rows: [{ requests: '0', failed: '0', interrupted: '0', stalled: '0', waiting: '3' }] });
+    listTasks.mockImplementation(async (f: { waiting?: boolean }) =>
+      f.waiting
+        ? [
+            { id: 'sans-date', wakeAt: null, waitingSince: new Date('2026-11-01T10:00:00Z') },
+            { id: 'tard', wakeAt: new Date('2026-11-20T08:00:00Z'), waitingSince: new Date('2026-11-01T10:00:00Z') },
+            { id: 'tot', wakeAt: new Date('2026-11-14T08:00:00Z'), waitingSince: new Date('2026-11-02T10:00:00Z') },
+          ]
+        : [],
+    );
+    const inbox = await inboxService.build(['p1']);
+    expect(inbox.waitingTasks.map((t) => t.id)).toEqual(['tot', 'tard', 'sans-date']);
+    expect(inbox.tasks).toEqual([]);
+    expect(inbox.counts.total).toBe(2); // les 2 PR ouvertes du simulacre, pas les 3 tâches en attente
+    listTasks.mockReset();
+    listTasks.mockResolvedValue([]);
   });
 });

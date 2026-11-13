@@ -273,6 +273,8 @@ interface GqlTaskInput {
   removeAttachmentIds?: string[] | null;
   dependsOnIds?: string[] | null;
   autoStartWhenUnblocked?: boolean | null;
+  wakeAt?: string | null;
+  wakeNote?: string | null;
 }
 const toTaskInput = (i: GqlTaskInput) => ({
   title: i.title ?? undefined,
@@ -291,6 +293,8 @@ const toTaskInput = (i: GqlTaskInput) => ({
   removeAttachmentIds: i.removeAttachmentIds ?? null,
   dependsOn: i.dependsOnIds ?? undefined,
   autoStartWhenUnblocked: i.autoStartWhenUnblocked ?? undefined,
+  wakeAt: i.wakeAt,
+  wakeNote: i.wakeNote,
 });
 /** Tâches d'identifiants donnés, dans leur ordre (chargeur groupé de la requête). */
 const tasksByIds = async (ctx: Ctx, ids: string[]) => (await Promise.all(ids.map((id) => loadersOf(ctx).task(id)))).filter((t): t is Task => Boolean(t));
