@@ -17,6 +17,14 @@ import PublishPageModal from './pages/PublishPageModal';
 
 const fmtDate = (iso: string) => new Date(iso).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
 const isHtml = (name: string) => /\.html?$/i.test(name);
+const isSvg = (name: string) => /\.svg$/i.test(name);
+/** Fichiers binaires que le navigateur sait afficher (servis avec leur type par /api/files/view). */
+function mediaKind(name: string): 'image' | 'video' | 'audio' | null {
+  if (/\.(png|jpe?g|gif|webp|avif|ico|bmp)$/i.test(name)) return 'image';
+  if (/\.(mp4|webm|mov)$/i.test(name)) return 'video';
+  if (/\.(mp3|wav|ogg|m4a)$/i.test(name)) return 'audio';
+  return null;
+}
 
 interface Props {
   wsRef: WorkspaceRef;
@@ -41,7 +49,7 @@ export default function FileEditor({ wsRef, path, onDirty, refreshKey = 0 }: Pro
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
   const [language, setLanguage] = useState<Extension | null>(null);
-  const [preview, setPreview] = useState(() => isHtml(name));
+  const [preview, setPreview] = useState(() => isHtml(name) || isSvg(name));
   const [previewKey, setPreviewKey] = useState(0);
   const [publishing, setPublishing] = useState(false);
   const dirty = doc !== saved;
@@ -141,7 +149,11 @@ export default function FileEditor({ wsRef, path, onDirty, refreshKey = 0 }: Pro
   if (error) return <Alert variant="danger" className="m-3">{error.message}</Alert>;
   if (!file) return null;
   const html = isHtml(file.name);
+  const svg = isSvg(file.name);
+  const media = file.binary ? mediaKind(file.name) : null;
   const viewUrl = fileViewUrl(wsRef.projectId, wsRef.worksessionId, path);
+  // Le paramètre v force le rechargement de l'image après Actualiser ou Enregistrer (la route l'ignore).
+  const mediaUrl = `${viewUrl}?v=${previewKey}`;
   return (
     <div className="fe-page">
       <div className="fe-header">
@@ -161,9 +173,9 @@ export default function FileEditor({ wsRef, path, onDirty, refreshKey = 0 }: Pro
               Enregistré
             </span>
           )}
-          {html && (
+          {(html || svg) && (
             <div className="btn-group btn-group-sm" role="group">
-              <Button size="sm" variant={preview ? 'secondary' : 'outline-secondary'} onClick={() => setPreview(true)} title="Aperçu rendu (bac à sable)">
+              <Button size="sm" variant={preview ? 'secondary' : 'outline-secondary'} onClick={() => setPreview(true)} title={html ? 'Aperçu rendu (bac à sable)' : 'Aperçu de l’image'}>
                 Aperçu
               </Button>
               <Button size="sm" variant={!preview ? 'secondary' : 'outline-secondary'} onClick={() => setPreview(false)}>
@@ -182,15 +194,17 @@ export default function FileEditor({ wsRef, path, onDirty, refreshKey = 0 }: Pro
           <Button size="sm" variant="outline-secondary" onClick={() => void refetch().then(() => setPreviewKey((k) => k + 1))} disabled={loading} title="Recharger depuis le serveur">
             <i className="bi bi-arrow-clockwise" />
           </Button>
-          <Button size="sm" onClick={() => save()} disabled={!dirty || saving || file.binary} title="Enregistrer (Ctrl/Cmd + S)">
-            {saving ? (
-              <Spinner size="sm" />
-            ) : (
-              <>
-                <i className="bi bi-save me-1" /> Enregistrer
-              </>
-            )}
-          </Button>
+          {!file.binary && (
+            <Button size="sm" onClick={() => save()} disabled={!dirty || saving} title="Enregistrer (Ctrl/Cmd + S)">
+              {saving ? (
+                <Spinner size="sm" />
+              ) : (
+                <>
+                  <i className="bi bi-save me-1" /> Enregistrer
+                </>
+              )}
+            </Button>
+          )}
         </div>
       </div>
       {conflict && (
@@ -209,7 +223,11 @@ export default function FileEditor({ wsRef, path, onDirty, refreshKey = 0 }: Pro
           {saveError}
         </Alert>
       )}
-      {file.binary ? (
+      {media ? (
+        <MediaView kind={media} src={mediaUrl} name={file.name} />
+      ) : svg && preview ? (
+        <MediaView kind="image" src={mediaUrl} name={file.name} />
+      ) : file.binary ? (
         <div className="p-3 fx-muted">
           Fichier binaire ({formatSize(file.size)}) : pas d'aperçu.{' '}
           <a href={fileViewUrl(wsRef.projectId, wsRef.worksessionId, path, true)}>Télécharger</a>
@@ -229,6 +247,51 @@ export default function FileEditor({ wsRef, path, onDirty, refreshKey = 0 }: Pro
         </div>
       )}
       {publishing && <PublishPageModal projectId={wsRef.projectId} worksessionId={wsRef.worksessionId} path={path} html={saved} onClose={() => setPublishing(false)} />}
+    </div>
+  );
+}
+
+/**
+ * Aperçu d'une image, d'une vidéo ou d'un son du dossier de travail. L'image tient dans la zone (clic : taille
+ * réelle, et inversement) sur un damier qui laisse voir la transparence ; ses dimensions s'affichent dessous.
+ * Une image SVG passe par <img> : ses scripts ne s'exécutent pas.
+ */
+function MediaView({ kind, src, name }: { kind: 'image' | 'video' | 'audio'; src: string; name: string }) {
+  const [actual, setActual] = useState(false);
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  if (failed) return <div className="p-3 fx-muted">Le navigateur ne sait pas afficher ce fichier.</div>;
+  if (kind === 'video')
+    return (
+      <div className="fe-media">
+        <video src={src} controls className="fe-media-fit" onError={() => setFailed(true)} />
+      </div>
+    );
+  if (kind === 'audio')
+    return (
+      <div className="fe-media">
+        <audio src={src} controls onError={() => setFailed(true)} />
+      </div>
+    );
+  return (
+    <div className="fe-media-wrap">
+      <div className={`fe-media fe-media-checker${actual ? ' actual' : ''}`}>
+        <img
+          src={src}
+          alt={name}
+          className={actual ? undefined : 'fe-media-fit'}
+          onClick={() => setActual((a) => !a)}
+          title={actual ? 'Ajuster à la zone' : 'Taille réelle'}
+          onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+          onError={() => setFailed(true)}
+        />
+      </div>
+      {dims && (
+        <div className="fe-media-dims">
+          {dims.w} × {dims.h} px · {actual ? 'taille réelle' : 'ajustée'} (clic pour basculer)
+        </div>
+      )}
     </div>
   );
 }
