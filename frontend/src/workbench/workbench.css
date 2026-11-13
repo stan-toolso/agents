@@ -1156,6 +1156,27 @@ a.task-mention:hover { background: rgba(var(--cc-accent-rgb), 0.24); color: var(
   .project-tabs .nav-link { padding: 6px 10px; }
 }
 
+/* ---- Espace Configuration d'un projet (components/ProjectConfigShell.tsx) : menu par groupes à gauche ---------- */
+.project-config-head { margin-bottom: 14px; }
+.project-config-body { display: flex; align-items: flex-start; gap: 28px; }
+.project-config-nav { flex: 0 0 210px; position: sticky; top: 0; display: flex; flex-direction: column; gap: 14px; }
+.project-config-group { display: flex; flex-direction: column; gap: 1px; }
+.project-config-group-label { font-family: var(--cc-font-mono, monospace); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--cc-dim); padding: 0 10px 4px; }
+.project-config-link { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: var(--cc-radius); color: var(--cc-dim); text-decoration: none; font-size: 0.9rem; white-space: nowrap; }
+.project-config-link:hover { color: var(--cc-fg); background: var(--cc-bg-elevated); }
+.project-config-link.active { color: var(--cc-fg); font-weight: 500; background: var(--cc-bg-elevated); box-shadow: inset 2px 0 0 var(--cc-accent); }
+.project-config-main { flex: 1 1 auto; min-width: 0; }
+@media (max-width: 767.98px) {
+  /* Sur mobile : une bande d'entrées qui défile horizontalement, sans les titres de groupe. */
+  .project-config-body { flex-direction: column; gap: 12px; }
+  .project-config-nav { position: static; flex: none; width: auto; flex-direction: row; gap: 0; overflow-x: auto; scrollbar-width: none; margin-left: -12px; margin-right: -12px; padding: 0 12px; border-bottom: 1px solid var(--cc-border); }
+  .project-config-nav::-webkit-scrollbar { display: none; }
+  .project-config-group { flex-direction: row; }
+  .project-config-group-label { display: none; }
+  .project-config-link { border-radius: 0; padding: 6px 10px; }
+  .project-config-link.active { box-shadow: inset 0 -2px 0 var(--cc-accent); background: none; }
+}
+
 /* ---- Vue liste des tâches (components/TaskGrid.tsx) : une tâche par ligne, colonnes réglables ----------------- */
 .task-grid-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
 .task-grid { overflow: auto; max-height: calc(100vh - 230px); border: 1px solid var(--cc-border); border-radius: var(--cc-radius); background: var(--cc-bg-elevated); box-shadow: var(--cc-card-shadow); }

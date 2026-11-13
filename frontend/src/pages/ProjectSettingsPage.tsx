@@ -6,7 +6,6 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTabTitle } from '../workbench/TabsContext';
 import { useGitTarget } from '../workbench/GitTargetContext';
 import ProjectHeader from '../components/ProjectHeader';
-import ProjectTabsCard from '../cockpit/ProjectTabsCard';
 import WorksessionDiskCard from '../components/WorksessionDiskCard';
 import BrowserCheckCard from '../components/BrowserCheckCard';
 import NotificationChannelsCard from '../components/settings/NotificationChannelsCard';
@@ -534,45 +533,29 @@ export default function ProjectSettingsPage() {
   const canWrite = isAdmin || project.myRole === 'MEMBER';
   // Espace personnel : ni membres, ni clés d'API, ni suppression (il n'appartient qu'à la personne).
   const personal = project.isPersonal;
+  const onDelete = async () => {
+    const message = `Supprimer le projet « ${project.name} » ? Ses sessions (arrêtées), terminaux, work sessions, son conteneur et son dossier de travail seront supprimés. Irréversible.`;
+    if (project.gitHosted) {
+      // Dépôt hébergé dans Forgejo : conservé (archivé) par défaut, supprimé sur demande.
+      const answer = await confirm({
+        title: 'Supprimer le projet',
+        message: `${message} Sans la case ci-dessous, son dépôt git reste dans Forgejo, archivé (lecture seule) et renommé ; ses sauvegardes en base sont supprimées.`,
+        confirmLabel: 'Supprimer définitivement',
+        danger: true,
+        checkbox: { label: 'Supprimer aussi le dépôt git dans Forgejo (branches, pull requests, issues)', defaultChecked: false },
+      });
+      if (answer) deleteProject({ variables: { id, deleteHostedRepo: answer.checked } });
+    } else if (await confirm({ title: 'Supprimer le projet', message, confirmLabel: 'Supprimer définitivement', danger: true })) {
+      deleteProject({ variables: { id } });
+    }
+  };
 
   return (
     <>
-      <ProjectHeader
-        project={project}
-        active="settings"
-        actions={
-          <>
-            {isAdmin && !personal && (
-              <Button
-                size="sm"
-                variant="outline-danger"
-                onClick={async () => {
-                  const message = `Supprimer le projet « ${project.name} » ? Ses sessions (arrêtées), terminaux, work sessions, son conteneur et son dossier de travail seront supprimés. Irréversible.`;
-                  if (project.gitHosted) {
-                    // Dépôt hébergé dans Forgejo : conservé (archivé) par défaut, supprimé sur demande.
-                    const answer = await confirm({
-                      title: 'Supprimer le projet',
-                      message: `${message} Sans la case ci-dessous, son dépôt git reste dans Forgejo, archivé (lecture seule) et renommé ; ses sauvegardes en base sont supprimées.`,
-                      confirmLabel: 'Supprimer définitivement',
-                      danger: true,
-                      checkbox: { label: 'Supprimer aussi le dépôt git dans Forgejo (branches, pull requests, issues)', defaultChecked: false },
-                    });
-                    if (answer) deleteProject({ variables: { id, deleteHostedRepo: answer.checked } });
-                  } else if (await confirm({ title: 'Supprimer le projet', message, confirmLabel: 'Supprimer définitivement', danger: true })) {
-                    deleteProject({ variables: { id } });
-                  }
-                }}
-              >
-                Supprimer
-              </Button>
-            )}
-          </>
-        }
-      />
+      <ProjectHeader project={project} active="settings" />
 
       {actionError && <Alert variant="danger">{actionError.message}</Alert>}
 
-      {!personal && <ProjectTabsCard projectId={project.id} canManage={isAdmin} />}
       <Row className="g-3 mb-4">
         <Col md={5}>
           <Card className="h-100">
@@ -649,7 +632,7 @@ export default function ProjectSettingsPage() {
             <Card.Header>Instructions permanentes pour les agents</Card.Header>
             <Card.Body>
               <div className="small" style={{ whiteSpace: 'pre-wrap', maxHeight: '30vh', overflow: 'auto' }}>
-                {project.systemPrompt || <span className="text-secondary">Aucune instruction permanente. Ajoutez-en via « Modifier » : conventions, contexte métier, ce qu'il ne faut pas faire…</span>}
+                {project.systemPrompt || <span className="text-secondary">Aucune instruction permanente. Ajoutez-en dans « Informations » : conventions, contexte métier, ce qu'il ne faut pas faire…</span>}
               </div>
             </Card.Body>
           </Card>
@@ -699,6 +682,18 @@ export default function ProjectSettingsPage() {
           ))}
         </tbody>
       </Table>
+
+      {isAdmin && !personal && (
+        <Card border="danger" className="mt-4">
+          <Card.Header className="text-danger">Zone dangereuse</Card.Header>
+          <Card.Body className="small d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div>Supprimer le projet : ses sessions, terminaux, work sessions, son conteneur et son dossier de travail. Irréversible.</div>
+            <Button size="sm" variant="outline-danger" onClick={() => void onDelete()}>
+              Supprimer le projet
+            </Button>
+          </Card.Body>
+        </Card>
+      )}
     </>
   );
 }

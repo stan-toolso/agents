@@ -11,14 +11,14 @@ export interface ProjectTabDef {
 
 /**
  * Onglets effectifs d'un projet : les natifs moins ceux masqués, plus les pages personnalisées (`page:<slug>`), dans
- * l'ordre réglé (`projects.tabs.order`), les absents à leur place habituelle. Pur (testé dans projectTabs.test.ts).
+ * l'ordre réglé (`projects.tabs.order`), les absents à leur place habituelle : le tableau de bord, puis les pages
+ * ajoutées par l'équipe, puis les autres natifs. Pur (testé dans projectTabs.test.ts).
  */
 export function effectiveTabs<T extends ProjectTabDef>(base: T[], setting: ProjectTabsSetting | null | undefined, pages: ProjectPageInfo[]): T[] {
   const hidden = new Set(setting?.hidden ?? []);
-  const all: T[] = [
-    ...base.filter((t) => !hidden.has(t.key)),
-    ...[...pages].sort((a, b) => a.position - b.position).map((p) => ({ key: `page:${p.slug}`, label: p.title, path: `/p/${p.slug}`, icon: p.icon ?? 'bi-layout-text-window', title: 'Page personnalisée du projet' }) as T),
-  ];
+  const custom = [...pages].sort((a, b) => a.position - b.position).map((p) => ({ key: `page:${p.slug}`, label: p.title, path: `/p/${p.slug}`, icon: p.icon ?? 'bi-layout-text-window', title: 'Page personnalisée du projet' }) as T);
+  const natives = base.filter((t) => !hidden.has(t.key));
+  const all: T[] = [...natives.filter((t) => t.key === 'overview'), ...custom, ...natives.filter((t) => t.key !== 'overview')];
   const order = setting?.order ?? [];
   const rank = new Map(order.map((k, i) => [k, i]));
   return [...all].sort((a, b) => {
