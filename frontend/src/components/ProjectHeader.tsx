@@ -9,7 +9,7 @@ import { usePollingQuery } from '../lib/usePollingQuery';
 import { useSessionLauncher } from './SessionLauncher';
 import { openProjectWindow, projectWindowId } from '../lib/projectWindow';
 
-export type ProjectTab = 'overview' | 'conversations' | 'chats' | 'repo' | 'files' | 'tasks' | 'artifacts' | 'agents' | 'pullRequests' | 'deliveries' | 'context' | 'vault' | 'env' | 'schedules' | 'workflows' | 'history' | 'audit' | 'usage' | 'settings' | `page:${string}`;
+export type ProjectTab = 'overview' | 'conversations' | 'chats' | 'repo' | 'files' | 'tasks' | 'artifacts' | 'agents' | 'pullRequests' | 'deliveries' | 'context' | 'vault' | 'env' | 'schedules' | 'workflows' | 'history' | 'audit' | 'usage' | 'members' | 'settings' | `page:${string}`;
 
 export const TABS: { key: ProjectTab; label: string; path: string; icon: string; title?: string; absolute?: boolean }[] = [
   { key: 'overview', label: 'Tableau de bord', path: '', icon: 'bi-speedometer2', title: 'Ce qui attend une réponse, l’équipe au travail, le flux des tâches et la consommation du projet' },
@@ -29,7 +29,8 @@ export const TABS: { key: ProjectTab; label: string; path: string; icon: string;
   { key: 'history', label: 'Historique', path: '/history', icon: 'bi-clock-history', title: 'Sessions et work sessions archivées' },
   { key: 'usage', label: 'Consommation', path: '/usage', icon: 'bi-bar-chart-line', title: 'Coût du projet par jour, semaine, modèle et session ; budget mensuel' },
   { key: 'audit', label: 'Journal', path: '/audit', icon: 'bi-list-check', title: 'Journal d’audit : qui a fait quoi, personnes et agents (sessions, demandes, tâches, membres, coffre, git…), avec filtres et export CSV' },
-  { key: 'settings', label: 'Réglages', path: '/settings', icon: 'bi-gear', title: 'Dossier de travail, instructions permanentes, membres, autorisations mémorisées, conteneur, clés d’API' },
+  { key: 'members', label: 'Membres', path: '/members', icon: 'bi-people', title: 'Personnes et agents du projet : rôles, invitations par e-mail, retraits' },
+  { key: 'settings', label: 'Réglages', path: '/settings', icon: 'bi-gear', title: 'Dossier de travail, instructions permanentes, autorisations mémorisées, conteneur, clés d’API' },
 ];
 
 /** Non-lus des canaux du projet, sur l'onglet Conversations (relevé toutes les 30 s). */
