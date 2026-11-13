@@ -233,6 +233,26 @@ export function describeTool(rawName: string, input: Record<string, unknown> = {
         const [label, detail, action] = verbs[op] ?? [`Cockpit : ${op}`, undefined, `utiliser le cockpit (${op})`];
         return { label, detail, action };
       }
+      if (name.startsWith('mcp__schedules__')) {
+        const op = name.slice('mcp__schedules__'.length);
+        const title = str(input, 'name');
+        const cron = str(input, 'cron');
+        const which = title ? ` « ${title} »` : '';
+        const verbs: Record<string, [string, string | undefined, string]> = {
+          list: ['Liste des planifications du projet', undefined, 'lister les planifications du projet'],
+          get: ["Lecture d'une planification", undefined, 'lire une planification'],
+          runs: ["Historique d'une planification", undefined, "lire l'historique d'une planification"],
+          preview: [`Prochaines échéances de ${cron ?? 'une expression cron'}`, undefined, "calculer les prochaines échéances d'une expression cron"],
+          create: [`Création de la planification${which}${cron ? ` (${cron})` : ''}`, str(input, 'prompt'), `créer la planification${which}${cron ? ` (${cron})` : ''}`],
+          update: [`Modification d'une planification${which}`, str(input, 'prompt'), `modifier une planification${which}`],
+          pause: ['Mise en pause d’une planification', undefined, 'mettre une planification en pause'],
+          resume: ['Reprise d’une planification', undefined, 'reprendre une planification'],
+          run_now: ["Exécution immédiate d'une planification (nouvelle session)", undefined, 'exécuter une planification maintenant'],
+          delete: ["Suppression d'une planification et de son historique", undefined, 'supprimer une planification'],
+        };
+        const [label, detail, action] = verbs[op] ?? [`Planifications : ${op}`, undefined, `utiliser les planifications (${op})`];
+        return { label, detail, action };
+      }
       if (name.startsWith('mcp__connections__') || name.startsWith('mcp__vault__')) {
         const op = name.replace(/^mcp__(connections|vault)__/, '');
         const conn = str(input, 'connection') ?? str(input, 'item') ?? '';

@@ -208,6 +208,7 @@ backend/
       outcome.ts               # issue d'une exécution (terminée, bloquée, en erreur…) lue dans le transcript
       permissions.ts           # outils pré-autorisés d'une planification : validation, couverture d'un appel, suggestions
       activeRules.ts           # règles applicables pendant une exécution planifiée en cours (lues par les providers)
+      mcp.ts                   # serveur MCP `schedules` des agents : lister, créer, modifier, suspendre, exécuter, supprimer
     settings/
       userStore.ts             # réglages par personne (table user_settings)
       claude.ts                # réglages Claude d'une personne : mode, jetons du coffre, modèles, budgets, vérification
@@ -1714,6 +1715,17 @@ La fin d'une exécution produit une notification `schedule.run`, `schedule.block
 le transcript avec le nom de la planification et l'issue. Le compte rendu texte `last_result` reste tenu à jour
 pour compatibilité. Le coût est exprimé dans l'unité d'affichage (`ScheduleRun.costUsd` dans `COST_FIELDS`,
 champ `cost` des événements `schedule` converti, `describeCost` dans les messages).
+
+**Depuis un agent** (serveur MCP `schedules`, `backend/src/schedules/mcp.ts`, tâche edf79449) : une session
+d'agent gère les planifications de son projet sans passer par l'interface. Outils libres (lecture) : `list`,
+`get` (réglages, prochaines échéances, instruction), `runs` (historique : issue, coût, session), `preview`
+(échéances d'une expression cron). Outils soumis à l'autorisation de la personne : `create` (nom, cron, instruction,
+fuseau, modèle, mode d'autorisation, archivage, outils pré-autorisés, `run_now`), `update` (seuls les champs donnés
+changent), `pause`, `resume`, `run_now`, `delete`. Mêmes droits que l'interface (lecteur pour lire, membre pour
+écrire), évalués pour la personne qui pilote la session (celle qui a pris la main, sinon le propriétaire) ; la
+planification créée appartient au propriétaire de la session (personne ou agent ; pour un agent, la personne qui
+l'a convoqué en est le demandeur). Les écritures sont inscrites au journal d'audit (`schedule.*`, acteur = la
+session). Pas de serveur `schedules` dans l'espace personnel.
 
 **Plusieurs instances** : la réservation d'une échéance est atomique en base (`session_schedules.next_run_at` avancé
 sous condition), donc une seule instance l'exécute. Le suivi d'une exécution vit dans le processus qui l'a lancée ;
