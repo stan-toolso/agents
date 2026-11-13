@@ -71,7 +71,6 @@ export default function ProjectTabsCard({ projectId, canManage }: { projectId: s
 
   return (
     <Card className="mb-3">
-      <Card.Header>Onglets et pages</Card.Header>
       <Card.Body className="small">
         {loading && !data && <Spinner animation="border" size="sm" />}
         <p className="text-secondary">
