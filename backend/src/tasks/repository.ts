@@ -278,6 +278,7 @@ export const taskRepository = {
    * Tâche de chaque branche demandée (clé : projet et branche, voir `branchKey` dans graphql/loaders.ts), avec la
    * règle de `taskService.forBranch` : la première non annulée dans l'ordre habituel, sinon la première.
    */
+  /** Tâche d'une branche par (projet, branche) : voir pickTaskPerBranch. */
   async findForBranches(keys: { projectId: string; branch: string }[]): Promise<Map<string, Task>> {
     const found = new Map<string, Task>();
     if (!keys.length) return found;
@@ -285,13 +286,7 @@ export const taskRepository = {
       [...new Set(keys.map((k) => k.projectId))],
       [...new Set(keys.map((k) => k.branch))],
     ]);
-    for (const task of rows.map(toTask)) {
-      if (!task.branch) continue;
-      const key = `${task.projectId}\u0000${task.branch}`;
-      const current = found.get(key);
-      if (!current || (current.status === 'cancelled' && task.status !== 'cancelled')) found.set(key, task);
-    }
-    return found;
+    return pickTaskPerBranch(rows.map(toTask));
   },
 
   async list(filter: TaskFilter = {}): Promise<Task[]> {
@@ -567,3 +562,24 @@ export const taskRepository = {
     return { users: users.rows, sessions: sessions.rows };
   },
 };
+
+/**
+ * Une tâche par (projet, branche) quand plusieurs portent la même branche : une tâche non annulée plutôt
+ * qu'une annulée, puis la plus récente. Un nom de branche se réutilise une fois l'ancienne branche fusionnée
+ * et supprimée (dossier de travail nommé d'après le même lien collé, par exemple) : la tâche d'avant, déjà
+ * livrée, ne doit pas masquer celle du travail en cours (PR #253 affichée « livrée » à cause de la #150).
+ */
+export function pickTaskPerBranch(tasks: Task[]): Map<string, Task> {
+  const found = new Map<string, Task>();
+  for (const task of tasks) {
+    if (!task.branch) continue;
+    const key = `${task.projectId}\u0000${task.branch}`;
+    const current = found.get(key);
+    const better =
+      !current ||
+      (current.status === 'cancelled' && task.status !== 'cancelled') ||
+      ((current.status === 'cancelled') === (task.status === 'cancelled') && new Date(task.createdAt).getTime() > new Date(current.createdAt).getTime());
+    if (better) found.set(key, task);
+  }
+  return found;
+}
