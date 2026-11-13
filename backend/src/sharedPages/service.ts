@@ -153,10 +153,12 @@ export const sharedPageService = {
     if (input.pageId) {
       const page = await this.get(input.pageId);
       if (page.ownerId !== input.ownerId) throw new AppError("Seul le propriétaire d'une page en publie de nouvelles versions", 'FORBIDDEN');
+      if (input.projectAccess && !(input.projectId ?? page.projectId)) throw new AppError("Cet artefact n'est rattaché à aucun projet");
       const updated = await sharedPageRepository.addVersion(page.id, {
         title,
         description,
         linkAccess: input.linkAccess ?? null,
+        projectAccess: input.projectAccess ?? null,
         projectId: input.projectId ?? null,
         sessionId: input.sessionId ?? null,
         sourcePath: input.sourcePath ?? null,
@@ -169,11 +171,13 @@ export const sharedPageService = {
       await sharedPageRepository.snapshotLatest(updated.id);
       return updated;
     }
+    if (input.projectAccess && !input.projectId) throw new AppError("Cet artefact n'est rattaché à aucun projet");
     const created = await sharedPageRepository.create({
       ownerId: input.ownerId,
       title,
       description: description ?? null,
       linkAccess: input.linkAccess ?? false,
+      projectAccess: input.projectAccess ?? false,
       projectId: input.projectId ?? null,
       sessionId: input.sessionId ?? null,
       sourcePath: input.sourcePath ?? null,

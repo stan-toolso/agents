@@ -10,6 +10,7 @@ import ProjectDetailPage from './pages/ProjectDetailPage';
 const ProjectSettingsPage = lazy(() => import('./pages/ProjectSettingsPage'));
 const ProjectMembersPage = lazy(() => import('./pages/ProjectMembersPage'));
 const ProjectCustomPage = lazy(() => import('./pages/ProjectCustomPage'));
+const ProjectTabsPage = lazy(() => import('./pages/ProjectTabsPage'));
 import LoginPage from './pages/LoginPage';
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'));
 import SessionsPage from './pages/SessionsPage';
@@ -26,6 +27,7 @@ import ProjectWindowNotice from './components/ProjectWindowNotice';
 import { projectWindowId, projectWindowRoute } from './lib/projectWindow';
 import { useTabs } from './workbench/TabsContext';
 import { ProjectRoleGate, RestrictedHome } from './components/GuestGate';
+import ProjectConfigShell from './components/ProjectConfigShell';
 
 // Pages chargées à la demande (découpage du bundle) : éditeurs CodeMirror (fichiers, contexte), terminal xterm,
 // graphe des workflows (xyflow, dagre) et pages rarement ouvertes restent hors du bundle principal, que
@@ -81,35 +83,36 @@ function PageRoutes({ location, isAdmin, restricted }: { location: Location; isA
       <Route path="/projects/new" element={restricted ? <Navigate to="/" replace /> : <ProjectFormPage />} />
       {/* Les pages d'un projet passent par la garde des invités : un invité du projet n'y voit que ses conversations. */}
       <Route path="/projects/:id" element={<ProjectRoleGate><ProjectDetailPage /></ProjectRoleGate>} />
-      <Route path="/projects/:id/edit" element={<ProjectRoleGate><ProjectFormPage /></ProjectRoleGate>} />
-      <Route path="/projects/:id/settings" element={<ProjectRoleGate><ProjectSettingsPage /></ProjectRoleGate>} />
-      <Route path="/projects/:id/members" element={<ProjectRoleGate><ProjectMembersPage /></ProjectRoleGate>} />
+      <Route path="/projects/:id/edit" element={<ProjectRoleGate><ProjectConfigShell><ProjectFormPage /></ProjectConfigShell></ProjectRoleGate>} />
+      <Route path="/projects/:id/settings" element={<ProjectRoleGate><ProjectConfigShell><ProjectSettingsPage /></ProjectConfigShell></ProjectRoleGate>} />
+      <Route path="/projects/:id/tabs" element={<ProjectRoleGate><ProjectConfigShell><ProjectTabsPage /></ProjectConfigShell></ProjectRoleGate>} />
+      <Route path="/projects/:id/members" element={<ProjectRoleGate><ProjectConfigShell><ProjectMembersPage /></ProjectConfigShell></ProjectRoleGate>} />
       <Route path="/projects/:id/p/:slug" element={<ProjectRoleGate><ProjectCustomPage /></ProjectRoleGate>} />
-      <Route path="/projects/:id/context" element={<ProjectRoleGate><ContextPage /></ProjectRoleGate>} />
+      <Route path="/projects/:id/context" element={<ProjectRoleGate><ProjectConfigShell><ContextPage /></ProjectConfigShell></ProjectRoleGate>} />
       <Route path="/projects/:id/tasks" element={<ProjectRoleGate><TasksPage /></ProjectRoleGate>} />
       <Route path="/projects/:id/artifacts" element={<ProjectRoleGate><SharedPagesPage /></ProjectRoleGate>} />
       <Route path="/projects/:id/conversations" element={<ConversationsPage />} />
       <Route path="/projects/:id/conversations/:slug" element={<ConversationsPage />} />
-      <Route path="/projects/:id/agents" element={<ProjectRoleGate><ProjectAgentsPage /></ProjectRoleGate>} />
-      <Route path="/projects/:id/agents/:agentId" element={<ProjectRoleGate><AgentPage /></ProjectRoleGate>} />
+      <Route path="/projects/:id/agents" element={<ProjectRoleGate><ProjectConfigShell><ProjectAgentsPage /></ProjectConfigShell></ProjectRoleGate>} />
+      <Route path="/projects/:id/agents/:agentId" element={<ProjectRoleGate><ProjectConfigShell><AgentPage /></ProjectConfigShell></ProjectRoleGate>} />
       <Route path="/projects/:id/pull-requests" element={<ProjectRoleGate><ProjectPullRequestsPage /></ProjectRoleGate>} />
       <Route path="/projects/:id/deliveries" element={<ProjectRoleGate><ProjectDeliveriesPage /></ProjectRoleGate>} />
-      <Route path="/projects/:id/usage" element={<ProjectRoleGate><ProjectUsagePage /></ProjectRoleGate>} />
+      <Route path="/projects/:id/usage" element={<ProjectRoleGate><ProjectConfigShell><ProjectUsagePage /></ProjectConfigShell></ProjectRoleGate>} />
       <Route path="/projects/:id/repo" element={<ProjectRoleGate><RepoPage /></ProjectRoleGate>} />
-      <Route path="/projects/:id/vault" element={<ProjectRoleGate><ProjectVaultPage /></ProjectRoleGate>} />
-      <Route path="/projects/:id/env" element={<ProjectRoleGate><ProjectEnvPage /></ProjectRoleGate>} />
-      <Route path="/projects/:id/history" element={<ProjectRoleGate><SessionHistoryPage /></ProjectRoleGate>} />
-      <Route path="/projects/:id/audit" element={<ProjectRoleGate><AuditPage /></ProjectRoleGate>} />
+      <Route path="/projects/:id/vault" element={<ProjectRoleGate><ProjectConfigShell><ProjectVaultPage /></ProjectConfigShell></ProjectRoleGate>} />
+      <Route path="/projects/:id/env" element={<ProjectRoleGate><ProjectConfigShell><ProjectEnvPage /></ProjectConfigShell></ProjectRoleGate>} />
+      <Route path="/projects/:id/history" element={<ProjectRoleGate><ProjectConfigShell><SessionHistoryPage /></ProjectConfigShell></ProjectRoleGate>} />
+      <Route path="/projects/:id/audit" element={<ProjectRoleGate><ProjectConfigShell><AuditPage /></ProjectConfigShell></ProjectRoleGate>} />
       <Route path="/projects/:id/connections" element={<RedirectToVault />} />
       <Route path="/tasks" element={<TasksPage />} />
       <Route path="/tasks/:id" element={<TaskPage />} />
       <Route path="/vault" element={<VaultPage />} />
       <Route path="/schedules" element={<SchedulesPage />} />
-      <Route path="/projects/:id/schedules" element={<ProjectRoleGate><SchedulesPage /></ProjectRoleGate>} />
+      <Route path="/projects/:id/schedules" element={<ProjectRoleGate><ProjectConfigShell><SchedulesPage /></ProjectConfigShell></ProjectRoleGate>} />
       <Route path="/workflows" element={<WorkflowsPage />} />
       <Route path="/workflows/:id" element={<WorkflowPage />} />
       <Route path="/workflows/:id/runs/:runId" element={<WorkflowRunPage />} />
-      <Route path="/projects/:id/workflows" element={<ProjectRoleGate><WorkflowsPage /></ProjectRoleGate>} />
+      <Route path="/projects/:id/workflows" element={<ProjectRoleGate><ProjectConfigShell><WorkflowsPage /></ProjectConfigShell></ProjectRoleGate>} />
       <Route path="/shared" element={<SharedPagesPage />} />
       <Route path="/shared/:id" element={<SharedPagePage />} />
       <Route path="/sessions" element={<SessionsPage />} />

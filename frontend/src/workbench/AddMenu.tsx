@@ -137,6 +137,11 @@ export default function AddMenu({ projectId, project, session, onClose }: { proj
       <Link to={`/projects/${projectId}/files`} className="wb-pop-item" onClick={onClose}>
         <i className="bi bi-folder2-open wb-icon" /> Fichiers
       </Link>
+      {project && !project.isPersonal && (
+        <Link to={`/projects/${projectId}/settings`} className="wb-pop-item" onClick={onClose}>
+          <i className="bi bi-gear wb-icon" /> Configuration
+        </Link>
+      )}
       <div className="wb-pop-sep" />
       <button
         type="button"

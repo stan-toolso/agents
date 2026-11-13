@@ -71,4 +71,11 @@ describe('serveurs MCP in-process des sessions', () => {
     expect(tools.length).toBeGreaterThan(0);
     for (const t of tools) expect(t.inputSchema.type, `${name}.${t.name}`).toBe('object');
   });
+
+  it('pages : publish accepte project_access et share est listé', async () => {
+    const tools = await listTools(servers.pages());
+    expect(tools.map((t) => t.name)).toContain('share');
+    const publish = tools.find((t) => t.name === 'publish');
+    expect(Object.keys((publish?.inputSchema.properties ?? {}) as object)).toContain('project_access');
+  });
 });
