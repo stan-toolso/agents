@@ -523,6 +523,15 @@
 .wb-burger:hover, .wb-burger.open { color: var(--cc-fg); background: var(--cc-bg-hover); }
 .wb-backdrop { display: none; }
 
+/* ---- Flèches d'historique de l'application installée (HistoryNav) ------------------------------ */
+.wb-history-nav { flex: 0 0 auto; display: flex; align-items: stretch; border-right: 1px solid var(--cc-border); }
+.wb-history-btn {
+  display: flex; align-items: center; justify-content: center; width: 34px;
+  background: none; border: 0; color: var(--cc-dim); font-size: 16px; cursor: pointer;
+}
+.wb-history-btn:hover:not(:disabled) { color: var(--cc-fg); background: var(--cc-bg-hover); }
+.wb-history-btn:disabled { opacity: .35; cursor: default; }
+
 /* ---- Écrans tactiles : cibles plus grandes, actions toujours visibles ------------------------- */
 @media (hover: none) {
   .wb-menu-item { padding: 9px 14px; }
@@ -545,6 +554,9 @@
   .wb-resizer { display: none; }
   .wb-backdrop { display: block; position: fixed; inset: 0; z-index: 45; background: var(--cc-shadow); }
   .wb-burger { display: flex; }
+  /* Sur téléphone, la place manque : la flèche Retour seule (le geste du système fait le reste). */
+  .wb-history-btn { width: 40px; font-size: 18px; }
+  .wb-history-forward { display: none; }
   .wb-main { width: 100%; }
   .wb-topbar { height: 44px; }
   .wb-tab { max-width: 170px; padding-left: 10px; }

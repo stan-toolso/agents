@@ -7,6 +7,7 @@ import { useSearchPalette } from '../components/SearchPalette';
 import { useShortcut } from '../lib/useShortcut';
 import MessagesButton from './MessagesPanel';
 import NotificationBell from './NotificationBell';
+import HistoryNav from './HistoryNav';
 import { useTabs, type Tab, type TabKind } from './TabsContext';
 import { useGitPanel } from './GitTargetContext';
 import { useRenameSession, type RenamableSession } from './RenameSession';
@@ -224,6 +225,7 @@ export default function TabBar({ onToggleSidebar, sidebarOpen = false, sidebarCo
           {inboxTotal > 0 && !sidebarOpen && <span className="wb-badge wb-burger-badge" title="Éléments à traiter">{inboxTotal}</span>}
         </button>
       )}
+      <HistoryNav />
       <div className={`wb-tabbar-wrap${overflow.left ? ' can-left' : ''}${overflow.right ? ' can-right' : ''}`}>
         <div
           className="wb-tabbar"
